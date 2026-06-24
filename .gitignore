@@ -1,0 +1,13 @@
+# Python
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Env / secrets (keep .env.example tracked)
+.env
+
+# OS
+.DS_Store

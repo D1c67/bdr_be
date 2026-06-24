@@ -1,0 +1,47 @@
+# Render blueprint for the BDR FastAPI backend.
+# Deploy: push to GitHub, then "New + → Blueprint" in Render and point at this repo.
+# Set the secret env vars (marked sync:false) in the Render dashboard.
+services:
+  - type: web
+    name: bdr-api
+    runtime: docker
+    rootDir: bdr_be
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    plan: starter
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: SUPABASE_URL
+        value: https://bpidntbyvoooqvaispup.supabase.co
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: MS_TENANT_ID
+        sync: false
+      - key: MS_CLIENT_ID
+        sync: false
+      - key: MS_CLIENT_SECRET
+        sync: false
+      - key: MS_SENDER
+        value: bids@g3electrical.com
+      - key: CORS_ORIGINS
+        sync: false   # set to your Vercel URL, e.g. https://bdr.vercel.app
+      - key: PREVIEW_ENGINE
+        value: gotenberg
+      - key: GOTENBERG_URL
+        fromService:
+          type: pserv
+          name: bdr-gotenberg
+          property: hostport   # bare host:port — the app adds http://
+
+  # Office → PDF preview conversion (LibreOffice). Private service: no public URL.
+  - type: pserv
+    name: bdr-gotenberg
+    runtime: image
+    image:
+      url: docker.io/gotenberg/gotenberg:8
+    plan: starter
