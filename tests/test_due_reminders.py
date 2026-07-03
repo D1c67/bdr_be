@@ -117,17 +117,17 @@ def _eff(role: Role, stored=None) -> NotificationPrefsDoc:
 
 
 def test_recipients_role_defaults():
-    profiles = [{"id": "pe1", "role": "pe"}, {"id": "acct1", "role": "accountant"}]
+    profiles = [{"id": "pe1", "role": "estimating_engineer"}, {"id": "acct1", "role": "accountant"}]
     eff = {p["id"]: _eff(Role(p["role"])) for p in profiles}
     got = dr._internal_recipients(dr.KINDS["due_from_vendors"], "1h", profiles, eff)
     assert got == {"pe1"}
 
 
 def test_recipients_stored_offsets_respected():
-    profiles = [{"id": "pm1", "role": "pm"}, {"id": "pa1", "role": "pa"}]
+    profiles = [{"id": "pm1", "role": "estimating_engineer"}, {"id": "pa1", "role": "estimating_admin"}]
     eff = {
-        "pm1": _eff(Role.PM, {"internal_bid": {"enabled": True, "offsets": ["1h"]}}),
-        "pa1": _eff(Role.PA),
+        "pm1": _eff(Role.ESTIMATING_ENGINEER, {"internal_bid": {"enabled": True, "offsets": ["1h"]}}),
+        "pa1": _eff(Role.ESTIMATING_ADMIN),
     }
     got = dr._internal_recipients(dr.KINDS["internal_bid"], "2d", profiles, eff)
     assert got == {"pa1"}
@@ -153,8 +153,8 @@ def test_recipients_actual_bid_hard_role_filter():
         due_from_vendors=TaskKindPref(enabled=False, offsets=[]),
         actual_bid=ActualBidPref(offsets=["8h"]),
     )
-    profiles = [{"id": "ex1", "role": "executive"}, {"id": "pa1", "role": "pa"}]
-    eff = {"ex1": doc, "pa1": _eff(Role.PA)}
+    profiles = [{"id": "ex1", "role": "executive"}, {"id": "pa1", "role": "estimating_admin"}]
+    eff = {"ex1": doc, "pa1": _eff(Role.ESTIMATING_ADMIN)}
     got = dr._internal_recipients(dr.KINDS["actual_bid"], "8h", profiles, eff)
     assert got == {"pa1"}
 
@@ -303,7 +303,7 @@ def test_poll_once_vendor_event_end_to_end(monkeypatch):
     fake = _setup(monkeypatch, {
         ("projects", "select"): [project],
         ("rfqs", "select"): [{"project_id": "p1", "status": "sent"}],
-        ("profiles", "select"): [{"id": "pe1", "role": "pe"}, {"id": "pm1", "role": "pm"}],
+        ("profiles", "select"): [{"id": "pe1", "role": "estimating_engineer"}, {"id": "pm1", "role": "estimating_admin"}],
         ("notification_prefs", "select"): [],
         ("due_reminder_log", "upsert"): _echo_ledger,
         ("notifications", "insert"): [],
@@ -332,7 +332,7 @@ def test_poll_once_duplicate_tick_inserts_nothing(monkeypatch):
     }
     fake = _setup(monkeypatch, {
         ("projects", "select"): [project],
-        ("profiles", "select"): [{"id": "pe1", "role": "pe"}],
+        ("profiles", "select"): [{"id": "pe1", "role": "estimating_engineer"}],
         ("due_reminder_log", "upsert"): [],  # all duplicates
     }, NOW)
 
@@ -355,7 +355,7 @@ def test_poll_once_notification_failure_rolls_ledger_back(monkeypatch):
 
     fake = _setup(monkeypatch, {
         ("projects", "select"): [project],
-        ("profiles", "select"): [{"id": "pe1", "role": "pe"}],
+        ("profiles", "select"): [{"id": "pe1", "role": "estimating_engineer"}],
         ("due_reminder_log", "upsert"): _echo_ledger,
         ("notifications", "insert"): _boom,
     }, NOW)
@@ -396,7 +396,7 @@ def test_poll_once_estimator_added_via_assignment(monkeypatch):
         ("projects", "select"): [project],
         ("project_files", "select"): [],
         ("profiles", "select"): [
-            {"id": "pa1", "role": "pa"},
+            {"id": "pa1", "role": "estimating_admin"},
             {"id": "acct1", "role": "accountant"},
             {"id": "est1", "role": "estimator"},
         ],
@@ -426,7 +426,7 @@ def test_poll_once_actual_bid_goes_only_to_pa(monkeypatch):
     fake = _setup(monkeypatch, {
         ("projects", "select"): [project],
         ("profiles", "select"): [
-            {"id": "pa1", "role": "pa"}, {"id": "ex1", "role": "executive"},
+            {"id": "pa1", "role": "estimating_admin"}, {"id": "ex1", "role": "executive"},
         ],
         # The executive somehow stored actual_bid prefs — must still be excluded.
         ("notification_prefs", "select"): [

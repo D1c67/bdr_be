@@ -65,9 +65,19 @@ def get_message(message_id: str) -> dict:
     ).json()
 
 
-def list_attachments(message_id: str) -> list[dict]:
+def list_attachments(
+    message_id: str,
+    *,
+    max_count: int | None = None,
+    max_bytes: int | None = None,
+) -> list[dict]:
     """Return file attachments with their content bytes (base64 in `contentBytes`).
-    Item/reference attachments (attached emails, links) are skipped."""
+    Item/reference attachments (attached emails, links) are skipped.
+
+    `max_bytes` skips oversized attachments using the `size` field from the cheap
+    listing BEFORE the per-attachment content GET, and `max_count` caps how many
+    file attachments are pulled — so a hostile inbound message can't force an
+    unbounded number of large downloads."""
     sender = get_settings().ms_sender
     listing = graph_request(
         "GET",
@@ -76,6 +86,10 @@ def list_attachments(message_id: str) -> list[dict]:
     ).json()
     out = []
     for att in listing.get("value", []):
+        if max_count is not None and len(out) >= max_count:
+            break
+        if max_bytes is not None and (att.get("size") or 0) > max_bytes:
+            continue  # skip oversized before fetching its content
         full = graph_request(
             "GET",
             f"/users/{sender}/messages/{message_id}/attachments/{att['id']}",

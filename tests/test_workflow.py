@@ -13,7 +13,8 @@ from app.services.workflow import (
 def test_linear_pipeline_transitions_are_legal():
     chain = [
         "intake", "go_no_go", "to_estimator", "estimate_received", "rfqs",
-        "receive_quotes", "labor_numbers", "markup", "verify", "send_out", "submitted",
+        "receive_quotes", "labor_numbers", "markup", "gc_pricing", "verify",
+        "send_out", "submitted",
     ]
     for a, b in zip(chain, chain[1:]):
         assert can_transition(a, b), f"{a} → {b} should be legal"
@@ -31,20 +32,20 @@ def test_illegal_transitions_rejected():
 
 
 def test_owner_roles():
-    assert owner_role_for("intake") == Role.PA
-    assert owner_role_for("rfqs") == Role.PE
+    assert owner_role_for("intake") == Role.ESTIMATING_ADMIN
+    assert owner_role_for("rfqs") == Role.ESTIMATING_ENGINEER
     assert owner_role_for("verify") == Role.EXECUTIVE
-    # submitted is now PA-owned (the PA records the Win/Loss outcome); declined
-    # is the only ownerless terminal.
-    assert owner_role_for("submitted") == Role.PA
+    # submitted is now Estimating-Admin-owned (records the Win/Loss outcome);
+    # declined is the only ownerless terminal.
+    assert owner_role_for("submitted") == Role.ESTIMATING_ADMIN
     assert owner_role_for("declined") is None  # terminal, no owner
 
 
 def test_internal_owner_skips_estimator_for_handoff():
-    # estimate_received is co-owned by (ESTIMATOR, PE); a stage handoff must
-    # address the internal PE, never broadcast to every external estimator.
+    # estimate_received is co-owned by (ESTIMATOR, ESTIMATING_ENGINEER); a stage
+    # handoff must address the internal engineer, never broadcast to estimators.
     assert owner_role_for("estimate_received") == Role.ESTIMATOR  # access owner
-    assert internal_owner_role_for("estimate_received") == Role.PE  # notify target
+    assert internal_owner_role_for("estimate_received") == Role.ESTIMATING_ENGINEER
     # For every other stage the first owner is already internal, so the two agree.
     for stage in STAGES:
         internal = internal_owner_role_for(stage)

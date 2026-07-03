@@ -170,8 +170,8 @@ def _internal_recipients(
         eff = eff_by_user[profile["id"]]
         if kind_def.key == "actual_bid":
             # Hard rule, fire-time layer: effective_prefs already strips
-            # actual_bid for non-PA; the role check is defense-in-depth.
-            if profile["role"] != Role.PA.value or eff.actual_bid is None:
+            # actual_bid for non-Estimating-Admin; the role check is defense-in-depth.
+            if profile["role"] != Role.ESTIMATING_ADMIN.value or eff.actual_bid is None:
                 continue
             if offset_key in eff.actual_bid.offsets:
                 out.add(profile["id"])
@@ -265,11 +265,17 @@ def poll_once() -> None:
     )
     deliverable_pids: set[str] = set()
     if estimator_pids:
+        from app.services.estimator_rounds import exclude_unsent
+
+        # An uploaded-but-never-submitted draft doesn't count as "returned" —
+        # it must not silence the estimator-due reminder.
         rows = _page_all(
-            lambda lo, hi: sb.table("project_files")
-            .select("project_id")
-            .in_("project_id", estimator_pids)
-            .in_("category", list(ESTIMATOR_DELIVERABLE_CATEGORIES))
+            lambda lo, hi: exclude_unsent(
+                sb.table("project_files")
+                .select("project_id")
+                .in_("project_id", estimator_pids)
+                .in_("category", list(ESTIMATOR_DELIVERABLE_CATEGORIES))
+            )
             .order("id")
             .range(lo, hi)
         )

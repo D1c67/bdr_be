@@ -108,7 +108,7 @@ def _send_out_window():
 
 def test_send_out_internal_benchmark_classifies():
     w = _send_out_window()
-    out = m.send_out(w, "month", "internal_bid_at", Role.PM)
+    out = m.send_out(w, "month", "internal_bid_at", Role.ESTIMATING_ENGINEER)
     assert out["total"] == 3
     assert out["on_time"] == 1  # p1
     assert out["late"] == 1  # p2
@@ -119,7 +119,7 @@ def test_send_out_internal_benchmark_classifies():
 
 def test_send_out_redacts_actual_for_non_viewer():
     w = _send_out_window()
-    out = m.send_out(w, "month", "actual_bid_at", Role.PM)  # PM cannot see actual
+    out = m.send_out(w, "month", "actual_bid_at", Role.ESTIMATING_ENGINEER)  # engineer cannot see actual
     assert out["benchmark"] == "internal_bid_at"
     assert out["benchmark_redacted"] is True
     # Falls back to internal classification (p1 on time), and never leaks an actual date.
@@ -141,5 +141,77 @@ def test_send_out_actual_benchmark_for_viewer():
 def test_send_out_excludes_projects_submitted_outside_window():
     w = _send_out_window()
     w.submitted_at["p2"] = _dt(2026, 5, 1, 12)  # before window start
-    out = m.send_out(w, "month", "internal_bid_at", Role.PM)
+    out = m.send_out(w, "month", "internal_bid_at", Role.ESTIMATING_ENGINEER)
     assert {r["project_id"] for r in out["projects"]} == {"p1", "p3"}
+
+
+# ── GC pricing spread (pure _gc_spread_compute) ────────────────────────────
+
+
+def test_gc_spread_single_gc_job_counts_in_totals_not_spread():
+    out = m._gc_spread_compute({"p1": [("g1", "Acme", 100.0)]})
+    assert out["gc_send_count"] == 1
+    assert out["jobs_with_sends"] == 1
+    assert out["multi_gc_jobs"] == 0
+    assert out["total_bid_amount"] == 100.0
+    assert out["avg_abs_spread_pct"] is None
+    g = out["by_gc"][0]
+    assert g["times_bid"] == 1 and g["avg_signed_pct"] is None and g["multi_gc_jobs"] == 0
+
+
+def test_gc_spread_baseline_is_mean_of_other_gcs():
+    # p1: g1=110, g2=90, g3=100. For g1, baseline = mean(90, 100) = 95 → +15.79%.
+    out = m._gc_spread_compute(
+        {"p1": [("g1", "A", 110.0), ("g2", "B", 90.0), ("g3", "C", 100.0)]}
+    )
+    assert out["multi_gc_jobs"] == 1
+    by = {g["gc_id"]: g for g in out["by_gc"]}
+    assert by["g1"]["avg_signed_pct"] == round((110 - 95) / 95, 4)  # +0.1579
+    assert by["g1"]["times_higher"] == 1 and by["g1"]["times_lower"] == 0
+    # g2=90 vs mean(110, 100)=105 → lower.
+    assert by["g2"]["times_lower"] == 1 and by["g2"]["times_higher"] == 0
+
+
+def test_gc_spread_drops_none_zero_and_negative_amounts():
+    # g2 None, g3 zero, g4 negative → all excluded; p1 collapses to one valid GC.
+    out = m._gc_spread_compute(
+        {"p1": [("g1", "A", 100.0), ("g2", "B", None), ("g3", "C", 0.0), ("g4", "D", -5.0)]}
+    )
+    assert out["gc_send_count"] == 1 and out["multi_gc_jobs"] == 0
+    assert out["total_bid_amount"] == 100.0
+
+
+def test_gc_spread_avg_abs_is_pooled_over_entries():
+    # Two multi-GC jobs of different sizes — the headline pools every entry, not
+    # an average of per-GC averages.
+    out = m._gc_spread_compute(
+        {
+            "p1": [("g1", "A", 110.0), ("g2", "B", 90.0)],  # ±10% vs the other
+            "p2": [("g1", "A", 120.0), ("g2", "B", 100.0), ("g3", "C", 80.0)],
+        }
+    )
+    assert out["multi_gc_jobs"] == 2
+    # Every per-(job, GC) |pct| entry is averaged once.
+    assert out["avg_abs_spread_pct"] is not None and out["avg_abs_spread_pct"] > 0
+
+
+def test_gc_spread_avg_signed_pct_averages_per_gc_across_shared_jobs():
+    # Same GC bid +10% on one job and -4% on another → signed avg +3%.
+    out = m._gc_spread_compute(
+        {
+            "p1": [("g1", "A", 110.0), ("g2", "B", 100.0)],  # g1 = +10% vs g2
+            "p2": [("g1", "A", 96.0), ("g3", "C", 100.0)],   # g1 = -4% vs g3
+        }
+    )
+    by = {g["gc_id"]: g for g in out["by_gc"]}
+    assert by["g1"]["multi_gc_jobs"] == 2
+    assert by["g1"]["avg_signed_pct"] == round((0.10 + -0.04) / 2, 4)  # +0.03
+    assert by["g1"]["times_higher"] == 1 and by["g1"]["times_lower"] == 1
+
+
+def test_gc_spread_empty_input():
+    out = m._gc_spread_compute({})
+    assert out["gc_send_count"] == 0
+    assert out["total_bid_amount"] is None
+    assert out["avg_abs_spread_pct"] is None
+    assert out["by_gc"] == []

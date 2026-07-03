@@ -120,7 +120,13 @@ def render_vendor_email(body_text: str, subtitle: str = "REQUEST FOR QUOTE") -> 
     `subtitle` is the small label under the "G3 ELECTRICAL" header band — it
     names the email type (e.g. "REQUEST FOR QUOTE" for RFQs, "PROPOSAL" for the
     proposal cover email)."""
-    body_html = _paragraphs(_strip_signoff(body_text))
+    return render_branded_html(_paragraphs(_strip_signoff(body_text)), subtitle)
+
+
+def render_branded_html(body_html: str, subtitle: str) -> str:
+    """The branded shell around an already-built HTML body — for callers whose
+    content is structured (file lists, per-file notes) rather than escaped
+    paragraphs. The caller is responsible for escaping its own content."""
     return f"""\
 <!DOCTYPE html>
 <html>

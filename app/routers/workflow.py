@@ -1,18 +1,25 @@
 """Workflow transitions and stage-event history.
 
-The generic `/advance` endpoint moves a project forward one legal step and is
-guarded so only a role that OWNS the current stage (or IT Admin) may advance it.
-Go/No-Go entry/exit is handled by the dedicated voting router, so this endpoint
-refuses to leave the `go_no_go` stage.
+The generic `/advance` endpoint moves a project forward one legal step. Any
+writer role (every internal role except the read-only accountant) may advance any
+stage — the per-stage owner is only a "whose task" hint. The sole exception is
+`verify`, which is restricted to the Executive (with IT Admin as override).
+
+Advancing into `go_no_go` runs the score gate (services/gono): score >= 30 goes
+straight through to To Estimator, below 20 is declined, 20-29 parks in review —
+unless the sender pushes review/go/no_go explicitly (TransitionIn.gono_action).
+Leaving `go_no_go` is refused here: a project leaves it only through a decision
+(the gate or the gono decide endpoint).
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.deps import CurrentUser, get_current_user
-from app.core.roles import INTERNAL_ROLES, Role
+from app.core.roles import INTERNAL_ROLES, VERIFY_ROLES, WRITER_ROLES
 from app.core.supabase_client import get_supabase
 from app.models.schemas import TransitionIn
-from app.services import workflow
+from app.routers.projects import redact_for_role
+from app.services import gono, workflow
 from app.services.notifications import notify_role
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["workflow"])
@@ -46,7 +53,7 @@ async def advance(
     current = proj["current_stage"]
 
     if current == "go_no_go":
-        raise HTTPException(status.HTTP_409_CONFLICT, "Use the Go/No-Go vote/override endpoints")
+        raise HTTPException(status.HTTP_409_CONFLICT, "Use the Go/No-Go decide endpoint")
 
     # To Estimator can't be left until an electrical drawing exists — a hard rule
     # mirrored in the UI (the Continue button is disabled). Specs are optional.
@@ -93,14 +100,34 @@ async def advance(
                 f"Confirm the quotes are complete for every category before advancing: {names}",
             )
 
-    owners = workflow.STAGES[current].owner_roles
-    if user.role != Role.IT_ADMIN and user.role not in owners:
+    # Verify is restricted to the Executive (IT Admin override); every other stage
+    # may be advanced by any writer role. The accountant (read-only) and estimator
+    # are never writers and are rejected here.
+    if current == "verify":
+        if user.role not in VERIFY_ROLES:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Only the executive (or it_admin) may advance the 'verify' stage",
+            )
+    elif user.role not in WRITER_ROLES:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            f"Only {[r.value for r in owners]} or it_admin may advance the '{current}' stage",
+            "Read-only or insufficient role to advance this stage",
         )
 
     updated = workflow.transition_project(project_id, body.to_stage, user.id, body.note)
+
+    # Entering Go/No-Go runs the score gate: the project may pass straight
+    # through (>= 30), be declined (< 20), or park in review — or the sender may
+    # have pushed an outcome explicitly. When the gate moves the project on, its
+    # own notifications/audit cover the handoff, so skip the generic one below.
+    if body.to_stage == "go_no_go":
+        outcome, moved = gono.apply_entry_action(project_id, user.id, body.gono_action)
+        if outcome is not None:
+            # Redact like every other project-row response — the raw update row
+            # carries the confidential actual_bid_at, which non-viewer writers
+            # (e.g. estimating_engineer) must not receive.
+            return {**redact_for_role(moved or updated, user.role), "gono_outcome": outcome}
 
     # Notify the internal team that now owns the project. We use the internal
     # owner (never the estimator) so a stage like estimate_received — co-owned by
@@ -113,4 +140,4 @@ async def advance(
             new_owner, project_id, "stage_handoff",
             f"Project advanced to {workflow.STAGES[body.to_stage].label}",
         )
-    return updated
+    return redact_for_role(updated, user.role)

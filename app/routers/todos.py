@@ -12,7 +12,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
-from app.core.deps import CurrentUser, require_internal
+from app.core.deps import CurrentUser, require_internal, require_writer
 from app.core.roles import INTERNAL_ROLES
 from app.core.supabase_client import get_supabase
 from app.services.notifications import notify_user
@@ -126,7 +126,7 @@ async def list_todos(
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_todo(
-    payload: TodoIn, user: CurrentUser = Depends(require_internal)
+    payload: TodoIn, user: CurrentUser = Depends(require_writer)
 ):
     return (
         get_supabase()
@@ -146,7 +146,7 @@ async def create_todo(
 async def update_todo(
     todo_id: UUID,
     payload: TodoPatch,
-    user: CurrentUser = Depends(require_internal),
+    user: CurrentUser = Depends(require_writer),
 ):
     _own_todo(todo_id, user)
     return (
@@ -160,7 +160,7 @@ async def update_todo(
 
 @router.delete("/{todo_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_todo(
-    todo_id: UUID, user: CurrentUser = Depends(require_internal)
+    todo_id: UUID, user: CurrentUser = Depends(require_writer)
 ):
     _own_todo(todo_id, user)
     get_supabase().table("todos").delete().eq("id", str(todo_id)).execute()
@@ -168,7 +168,7 @@ async def delete_todo(
 
 @router.post("/{todo_id}/nudge")
 async def nudge_todo(
-    todo_id: UUID, user: CurrentUser = Depends(require_internal)
+    todo_id: UUID, user: CurrentUser = Depends(require_writer)
 ):
     """Poke the owner of an open to-do. `notify_user` creates the bell row and
     fires the branded email; `last_nudged_at` throttles repeat pokes."""

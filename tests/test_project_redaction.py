@@ -1,7 +1,7 @@
-"""The actual (to-GC) bid date is confidential to the PA, Executive, and IT
-Admin. Every project row that leaves the API passes through redact_for_role,
-which nulls the field for everyone else; the internal bid date stays visible
-to the whole team."""
+"""The actual (to-GC) bid date is confidential to the Estimating Admin, Executive,
+IT Admin, and the read-only Accountant. Every project row that leaves the API
+passes through redact_for_role, which nulls the field for everyone else; the
+internal bid date stays visible to the whole team."""
 
 from app.core.roles import ACTUAL_BID_VIEWER_ROLES, Role
 from app.routers.projects import redact_for_role
@@ -14,8 +14,13 @@ PROJECT = {
 }
 
 
-def test_viewer_set_is_exactly_pa_executive_it_admin():
-    assert ACTUAL_BID_VIEWER_ROLES == {Role.PA, Role.EXECUTIVE, Role.IT_ADMIN}
+def test_viewer_set_is_admin_executive_it_admin_accountant():
+    assert ACTUAL_BID_VIEWER_ROLES == {
+        Role.ESTIMATING_ADMIN,
+        Role.EXECUTIVE,
+        Role.IT_ADMIN,
+        Role.ACCOUNTANT,
+    }
 
 
 def test_viewer_roles_see_the_actual_bid_date():
@@ -34,5 +39,5 @@ def test_internal_bid_date_is_never_redacted():
 
 
 def test_redaction_copies_rather_than_mutates():
-    redact_for_role(PROJECT, Role.PM)
+    redact_for_role(PROJECT, Role.ESTIMATING_ENGINEER)
     assert PROJECT["actual_bid_at"] == "2026-06-24T18:00:00+00:00"

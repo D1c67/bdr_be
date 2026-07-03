@@ -34,22 +34,34 @@ def upload_file(path: str, content: bytes, content_type: str, *, upsert: bool = 
     )
 
 
-def signed_url(path: str, ttl_seconds: int | None = None, *, use_cache: bool = True) -> str:
+def signed_url(
+    path: str,
+    ttl_seconds: int | None = None,
+    *,
+    use_cache: bool = True,
+    download: str | bool | None = None,
+) -> str:
     """Mint (or reuse) a signed URL for `path`.
 
     Only the default-TTL flow is memoized; explicit TTLs and `use_cache=False`
     always mint fresh (e.g. links embedded in emails must carry the full TTL).
+
+    `download` (a filename, or True) makes the object serve with
+    `Content-Disposition: attachment`, so a top-level navigation downloads it
+    instead of rendering it inline — defusing a stored HTML/SVG masquerading as
+    another type. Download URLs are never cached (they differ from inline URLs).
     """
     ttl = ttl_seconds or get_settings().signed_url_ttl_seconds
     now = time.time()
 
-    cacheable = use_cache and ttl_seconds is None
+    cacheable = use_cache and ttl_seconds is None and download is None
     if cacheable:
         cached = _signed_url_cache.get(path)
         if cached and now < cached[1] - _REFRESH_MARGIN_S:
             return cached[0]
 
-    res = get_supabase().storage.from_(BUCKET).create_signed_url(path, ttl)
+    options = {"download": download} if download else None
+    res = get_supabase().storage.from_(BUCKET).create_signed_url(path, ttl, options)
     url = res["signedURL"]
 
     if cacheable:

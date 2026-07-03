@@ -43,7 +43,7 @@ def _patch_frontend(monkeypatch):
 
 def test_deep_link_internal_project(monkeypatch):
     _patch_frontend(monkeypatch)
-    assert ne._deep_link("p1", Role.PM.value) == f"{FRONTEND}/projects/p1"
+    assert ne._deep_link("p1", Role.ESTIMATING_ENGINEER.value) == f"{FRONTEND}/projects/p1"
 
 
 def test_deep_link_estimator_project(monkeypatch):
@@ -53,7 +53,7 @@ def test_deep_link_estimator_project(monkeypatch):
 
 def test_deep_link_no_project_falls_back_to_home(monkeypatch):
     _patch_frontend(monkeypatch)
-    assert ne._deep_link(None, Role.PA.value) == f"{FRONTEND}/dashboard"
+    assert ne._deep_link(None, Role.ESTIMATING_ADMIN.value) == f"{FRONTEND}/dashboard"
     assert ne._deep_link(None, Role.ESTIMATOR.value) == f"{FRONTEND}/estimator"
 
 
@@ -63,7 +63,7 @@ def test_meta_nudge():
 
 def test_deep_link_nudge_goes_to_todos(monkeypatch):
     _patch_frontend(monkeypatch)
-    assert ne._deep_link(None, Role.PM.value, "nudge") == f"{FRONTEND}/todos"
+    assert ne._deep_link(None, Role.ESTIMATING_ENGINEER.value, "nudge") == f"{FRONTEND}/todos"
 
 
 # ── labels & subjects ───────────────────────────────────────────────────────
@@ -192,11 +192,11 @@ def test_queue_sends_one_email_per_recipient(monkeypatch):
     monkeypatch.setattr(ne, "get_supabase", lambda: _FakeSupabase({
         "profiles": [
             {"id": "pe1", "full_name": "Pat E", "email": "pat@g3.com",
-             "role": "pe", "is_active": True},
+             "role": "estimating_engineer", "is_active": True},
             {"id": "off1", "full_name": "No Mail", "email": None,
-             "role": "pm", "is_active": True},
+             "role": "estimating_engineer", "is_active": True},
             {"id": "gone", "full_name": "Inactive", "email": "x@g3.com",
-             "role": "pm", "is_active": False},
+             "role": "estimating_engineer", "is_active": False},
         ],
         "projects": [{"id": "p1", "name": "Tower", "number": "42"}],
     }))
@@ -235,8 +235,8 @@ def test_send_failure_is_isolated(monkeypatch):
     monkeypatch.setattr(ne.threading, "Thread", _SyncThread)
     monkeypatch.setattr(ne, "get_supabase", lambda: _FakeSupabase({
         "profiles": [
-            {"id": "a", "full_name": "A", "email": "a@g3.com", "role": "pm", "is_active": True},
-            {"id": "b", "full_name": "B", "email": "b@g3.com", "role": "pm", "is_active": True},
+            {"id": "a", "full_name": "A", "email": "a@g3.com", "role": "estimating_engineer", "is_active": True},
+            {"id": "b", "full_name": "B", "email": "b@g3.com", "role": "estimating_engineer", "is_active": True},
         ],
         "projects": [],
     }))

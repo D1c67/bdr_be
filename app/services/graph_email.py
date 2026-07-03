@@ -206,12 +206,23 @@ def drive_get_item_id(path: str) -> str:
 
 def drive_create_link(item_id: str) -> str:
     """Anonymous view link (vendors are external). Requires 'Anyone' sharing links
-    to be enabled in the SharePoint admin center."""
-    sender = get_settings().ms_sender
+    to be enabled in the SharePoint admin center.
+
+    The link is given an expiry (settings.rfq_drawings_link_ttl_days) so a
+    confidential drawing isn't reachable forever by anyone who ever held the URL.
+    Graph clamps this to the tenant's anonymous-link max-expiry policy; if the
+    tenant rejects the parameter the call raises rather than silently minting a
+    permanent link."""
+    from datetime import datetime, timedelta, timezone
+
+    settings = get_settings()
+    expiry = (
+        datetime.now(timezone.utc) + timedelta(days=settings.rfq_drawings_link_ttl_days)
+    ).isoformat()
     resp = graph_request(
         "POST",
-        f"/users/{sender}/drive/items/{item_id}/createLink",
-        json={"type": "view", "scope": "anonymous"},
+        f"/users/{settings.ms_sender}/drive/items/{item_id}/createLink",
+        json={"type": "view", "scope": "anonymous", "expirationDateTime": expiry},
     )
     return resp.json()["link"]["webUrl"]
 
@@ -226,12 +237,15 @@ def send_mail(
     project_id: str | None = None,
     rfq_id: str | None = None,
     sent_by: str | None = None,
+    importance: str | None = None,
 ) -> dict:
     """Send an email from the shared mailbox and record it in email_log.
 
     `attachments` is a list of (filename, content_bytes). `inline_images` is a
     list of (content_id, filename, content_bytes, content_type) for images the
     HTML body references via `<img src="cid:content_id">` (e.g. the G3 logo).
+    `importance` maps to Graph's message importance ("low"/"normal"/"high") —
+    omit for normal mail; "high" shows the red "!" marker in Outlook.
     Returns the email_log row.
     """
     settings = get_settings()
@@ -258,6 +272,8 @@ def send_mail(
         "body": {"contentType": "HTML", "content": body_html},
         "toRecipients": [{"emailAddress": {"address": a}} for a in to],
     }
+    if importance:
+        message["importance"] = importance
     msg_attachments: list[dict] = []
     if attachments:
         msg_attachments += [

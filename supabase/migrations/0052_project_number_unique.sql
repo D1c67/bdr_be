@@ -1,0 +1,13 @@
+-- Project numbers must be unique and can never be re-used.
+--
+-- The number is a manually-entered job identifier (see 0002_core_tables). It had
+-- only a non-unique lookup index, so nothing stopped two projects from sharing a
+-- number — or a new project from re-claiming the number of an abandoned one.
+-- Projects are never hard-deleted (abandon is a soft marker, and there is no
+-- DELETE endpoint), so a plain UNIQUE constraint permanently retires every number
+-- that has ever been used, which is exactly the "cannot be re-used" requirement.
+--
+-- Enforced on lower(btrim(number)) so trivial variants ("123", "123 ", "abc"/"ABC")
+-- can't sneak past as a "different" number. The existing projects_number_idx is
+-- kept for exact-match lookups. `if not exists` makes a re-run a no-op.
+create unique index if not exists projects_number_unique_idx on projects (lower(btrim(number)));

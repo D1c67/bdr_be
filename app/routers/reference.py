@@ -1,15 +1,16 @@
 """Reference data: general contractors (+ their contacts) and material categories.
 
 GCs are needed by the intake form's multi-select; material categories drive RFQ
-splitting. Any internal user can read and add GCs and GC contacts (the Contacts
-page); material category writes stay restricted to IT Admin. GC contacts mirror
+splitting. Any internal user can read GCs and GC contacts; writer roles can add
+them (the Contacts page); material category writes stay restricted to IT Admin.
+GC contacts mirror
 vendor_contacts: many named people per company; proposal sends pick recipients
 from them per send.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.deps import CurrentUser, require_internal, require_role
+from app.core.deps import CurrentUser, require_internal, require_role, require_writer
 from app.core.roles import Role
 from app.core.supabase_client import get_supabase
 from app.models.schemas import GCContactIn, GCContactOut, GCIn, GCOut, MaterialCategoryUpdate
@@ -26,7 +27,7 @@ async def list_gcs(_: CurrentUser = Depends(require_internal)):
 
 
 @router.post("/gcs", response_model=GCOut, status_code=status.HTTP_201_CREATED)
-async def create_gc(body: GCIn, _: CurrentUser = Depends(require_internal)):
+async def create_gc(body: GCIn, _: CurrentUser = Depends(require_writer)):
     return (
         get_supabase()
         .table("general_contractors")
@@ -47,7 +48,7 @@ async def list_gc_contacts(
 
 
 @router.post("/gc-contacts", response_model=GCContactOut, status_code=status.HTTP_201_CREATED)
-async def create_gc_contact(body: GCContactIn, _: CurrentUser = Depends(require_internal)):
+async def create_gc_contact(body: GCContactIn, _: CurrentUser = Depends(require_writer)):
     return (
         get_supabase().table("gc_contacts").insert(body.model_dump(mode="json")).execute()
     ).data[0]

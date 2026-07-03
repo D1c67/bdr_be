@@ -22,6 +22,7 @@ def notify_role(
     type_: str,
     message: str,
     rfq_id: str | None = None,
+    mirror_email: bool = True,
 ) -> None:
     """Create a notification for every active user holding `role`.
 
@@ -32,7 +33,9 @@ def notify_role(
     through assignment-scoped `notify_user` calls (see files.py / notes.py).
 
     `rfq_id` ties the notification to a specific RFQ so it can be auto-dismissed
-    when that category is priced (see `dismiss_notifications`).
+    when that category is priced (see `dismiss_notifications`). Pass
+    `mirror_email=False` when the caller sends its own richer email for the
+    same event — bell row only, no generic mirror duplicating it.
     """
     if role == Role.ESTIMATOR:
         logger.warning(
@@ -62,7 +65,8 @@ def notify_role(
         for u in users
     ]
     sb.table("notifications").insert(rows).execute()
-    notification_email.queue(rows)
+    if mirror_email:
+        notification_email.queue(rows)
 
 
 def notify_user(
@@ -71,6 +75,7 @@ def notify_user(
     type_: str,
     message: str,
     rfq_id: str | None = None,
+    mirror_email: bool = True,
 ) -> None:
     row = {
         "user_id": user_id,
@@ -80,7 +85,8 @@ def notify_user(
         "rfq_id": rfq_id,
     }
     get_supabase().table("notifications").insert(row).execute()
-    notification_email.queue([row])
+    if mirror_email:
+        notification_email.queue([row])
 
 
 def dismiss_notifications(

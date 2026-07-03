@@ -31,6 +31,11 @@ class ProfileOut(BaseModel):
     role: Role
     is_active: bool
     is_dev: bool = False
+    # Cached "user has a verified TOTP factor" flag (migration 0045). Defaults
+    # false so reads degrade gracefully before the column is deployed. The
+    # backend self-stamps it true on the user's first AAL2 request; the 2FA-reset
+    # endpoints clear it. Surfaces a "2FA on/off" indicator in the admin list.
+    mfa_enrolled: bool = False
     invite_accepted_at: datetime | None = None
     # Defaults to English so reads degrade gracefully if migration 0040 hasn't
     # been applied yet.
@@ -117,13 +122,16 @@ class GCContactOut(GCContactIn):
 
 # ── Projects ────────────────────────────────────────────────────────────--
 
-LaborTime = Literal["day_work", "night_work"]
-WageType = Literal["prevailing_wage", "non_prevailing_wage"]
+# Free text (migration 0049). The old enum values ('day_work' / 'night_work' and
+# 'prevailing_wage' / 'non_prevailing_wage') are still the picker's suggested
+# options, but estimators may store any custom string a project calls for.
+LaborTime = str
+WageType = str
 
-# Go/No-Go scoring answers (reference only). The rubric — labels, points,
-# thresholds — lives in the frontend (bdr_fe/lib/gonoScoring.ts); these
-# Literals are its value lists verbatim and must stay in sync with it. The
-# backend stores the answers but never scores or acts on them.
+# Go/No-Go scoring answers. The rubric labels live in the frontend
+# (bdr_fe/lib/gonoScoring.ts); the points are mirrored by the backend scorer
+# (app/services/gono.py), which decides the Go/No-Go outcome from the total.
+# These Literals are the value lists verbatim and must stay in sync with both.
 ProjectType = Literal[
     "new_construction",
     "ti",
@@ -133,6 +141,8 @@ ProjectType = Literal[
     "lighting",
     "roadway",
     "generator",
+    "other",
+    "unknown",
 ]
 OwnerType = Literal[
     "rtc",
@@ -144,16 +154,18 @@ OwnerType = Literal[
     "private_commercial",
     "private_residential",
     "other",
+    "unknown",
 ]
-LaborNeeded = Literal["union", "ce_cw", "non_union"]
-BidMethod = Literal["hard_bid", "cmar", "single_gc_hard_bid"]
-CompetitorKnown = Literal["yes_1_2", "yes_3_plus", "no_unknown", "only_ec_bidding"]
+LaborNeeded = Literal["union", "ce_cw", "ce", "cw", "non_union", "other", "unknown"]
+BidMethod = Literal["hard_bid", "cmar", "single_gc_hard_bid", "other", "unknown"]
+CompetitorKnown = Literal["yes_1_2", "yes_3_plus", "no_unknown", "only_ec_bidding", "other"]
 GCKnown = Literal[
     "yes_1_2",
     "yes_3_plus",
     "no_unknown",
     "only_gc_bidding",
     "no_gc_needed",
+    "other",
 ]
 SubsNeeded = Literal[
     "no",
@@ -162,9 +174,13 @@ SubsNeeded = Literal[
     "yes_fire_alarm",
     "two_subs",
     "three_plus_subs",
+    "other",
+    "unknown",
 ]
-EstValueBand = Literal["under_50k", "50k_150k", "150k_500k", "500k_1m", "1m_3m", "over_3m"]
-ScopeFit = Literal["yes", "no", "maybe"]
+EstValueBand = Literal[
+    "under_50k", "50k_150k", "150k_500k", "500k_1m", "1m_3m", "over_3m", "other", "unknown"
+]
+ScopeFit = Literal["yes", "no", "maybe", "other", "unknown"]
 
 
 # Membership is just the link — any GC on a project is a bid candidate; who
@@ -189,6 +205,8 @@ class ProjectCreate(BaseModel):
     due_from_vendors_at: datetime
     notes: str | None = None
     address: str | None = None
+    # True when the project came to us from NGEM (checkbox on the intake form).
+    is_ngem: bool = False
     # Go/No-Go scoring answers (reference only for scoring, but required at intake)
     project_type: ProjectType
     owner_type: OwnerType
@@ -217,6 +235,7 @@ class ProjectUpdate(BaseModel):
     due_from_vendors_at: datetime | None = None
     notes: str | None = None
     address: str | None = None
+    is_ngem: bool | None = None
     # Go/No-Go scoring answers (reference only)
     project_type: ProjectType | None = None
     owner_type: OwnerType | None = None
@@ -245,6 +264,9 @@ class ProjectOut(BaseModel):
     due_from_vendors_at: datetime | None = None
     notes: str | None
     address: str | None = None
+    # True when the project originated from NGEM. Default lets reads degrade
+    # gracefully before migration 0046 is applied.
+    is_ngem: bool = False
     # Go/No-Go scoring answers (reference only); defaults so reads degrade
     # gracefully if the 0027 migration hasn't been applied yet.
     project_type: ProjectType | None = None
@@ -264,10 +286,38 @@ class ProjectOut(BaseModel):
     # degrade gracefully before migration 0039 is applied.
     abandoned_at: datetime | None = None
     abandoned_by: str | None = None
+    # Set when a post-verify pricing edit bounced the project back to `verify`;
+    # holds the stage it will resume at after the Executive re-commits. NULL =
+    # not currently in re-verification (see migration 0043 / workflow.reopen_verify).
+    reverify_return_stage: str | None = None
     status: ProjectStatus = "active"
+    # Last successful files export (drives the post-send-out export banner).
+    # Default lets reads degrade gracefully before migration 0041 is applied.
+    files_exported_at: datetime | None = None
     created_by: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class FilesExportIn(BaseModel):
+    """Subset selector for the project-files ZIP export.
+
+    Omit `file_ids` (or send `{}`) to export every file the caller may read;
+    `[]` is rejected so "export all" is always explicit, not an accident.
+    """
+
+    file_ids: list[str] | None = None
+
+    @field_validator("file_ids")
+    @classmethod
+    def _sane(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        if len(v) == 0:
+            raise ValueError("file_ids cannot be empty; omit it to export all files")
+        if len(v) > 1000:
+            raise ValueError("Too many files requested in one export")
+        return list(dict.fromkeys(v))  # de-dupe, preserve order
 
 
 # ── Workflow ────────────────────────────────────────────────────────────--
@@ -276,6 +326,10 @@ class ProjectOut(BaseModel):
 class TransitionIn(BaseModel):
     to_stage: str
     note: str | None = None
+    # Only honored when advancing into go_no_go: 'score' (default) lets the
+    # thresholds decide, 'review' holds the project for a manual decision, and
+    # 'go'/'no_go' push the outcome regardless of the score.
+    gono_action: Literal["score", "review", "go", "no_go"] = "score"
 
 
 class AbandonIn(BaseModel):
@@ -295,12 +349,7 @@ class AbandonIn(BaseModel):
 # ── Go / No-Go ──────────────────────────────────────────────────────────--
 
 
-class VoteIn(BaseModel):
-    vote: Literal["go", "no_go"]
-    comment: str | None = None
-
-
-class OverrideIn(BaseModel):
+class GonoDecisionIn(BaseModel):
     outcome: Literal["go", "no_go"]
     note: str | None = None
 
@@ -332,16 +381,18 @@ class RFQCreate(BaseModel):
 
 class RFQBulkSendGroup(BaseModel):
     rfq_id: str
-    vendor_contact_ids: list[str]
+    # One email is sent per contact per group; cap the fan-out so a single
+    # request can't be turned into a mass-mail amplifier.
+    vendor_contact_ids: list[str] = Field(..., min_length=1, max_length=100)
     # None = the default set (BOM split + drawings + Trenching markup). An
     # explicit list (possibly empty) is exactly what the PE left in the confirm
     # modal after adding/removing files — what they saw is what gets sent.
-    attachment_file_ids: list[str] | None = None
+    attachment_file_ids: list[str] | None = Field(default=None, max_length=50)
 
 
 class RFQBulkSendIn(BaseModel):
     # One email per contact per group — recipients are never CC'd together.
-    groups: list[RFQBulkSendGroup]
+    groups: list[RFQBulkSendGroup] = Field(..., min_length=1, max_length=100)
     # PE-edited body template: "<Contact Name>" is replaced per recipient and
     # the text is sent verbatim (no AI variation). None = generated default.
     email_body: str | None = Field(None, max_length=20_000)
@@ -386,6 +437,18 @@ class RfqQuotesConfirmIn(BaseModel):
     confirmed: bool
 
 
+class TaxIn(BaseModel):
+    """Tax attestation for a priced figure on the receive-quotes step — a vendor
+    quote or the General Material estimate: does the number already include
+    sales tax? When not, tax_rate (a percent, default the Clark County 8.375%)
+    is applied on top, and pricing compares/carries the tax-inclusive figure so
+    the materials cost is the true cost incurred. tax_rate is ignored when
+    tax_included."""
+
+    tax_included: bool
+    tax_rate: Decimal = Field(Decimal("8.375"), ge=0, le=Decimal("100"), decimal_places=3)
+
+
 # ── BOQ → RFQ extraction ──────────────────────────────────────────────────
 
 
@@ -396,11 +459,6 @@ class BoqAnalysisStart(BaseModel):
 
 class BoqRefineIn(BaseModel):
     message: str
-
-
-class BoqResultIn(BaseModel):
-    # The PE's directly-edited extraction payload ({sites:[...], ...}).
-    result_json: dict
 
 
 class RFQLineItemIn(BaseModel):
@@ -414,13 +472,16 @@ class RFQLineItemIn(BaseModel):
 
 class RFQGroupIn(BaseModel):
     material_category_id: str
-    items: list[RFQLineItemIn]
+    # Comfortably above any real BOQ category, but bounds the rfq_line_items bulk
+    # insert (and the generated workbook size) against a runaway request.
+    items: list[RFQLineItemIn] = Field(default_factory=list, max_length=2000)
 
 
 class BoqConfirmIn(BaseModel):
     # One group per material category; sites already merged client-side, invented
-    # categories already mapped to a material_category_id.
-    groups: list[RFQGroupIn]
+    # categories already mapped to a material_category_id. Material categories are
+    # a small fixed table, so a modest cap can't reject legitimate input.
+    groups: list[RFQGroupIn] = Field(..., min_length=1, max_length=50)
 
 
 # ── Material categories ────────────────────────────────────────────────────
@@ -501,9 +562,9 @@ class ProposalLinesIn(BaseModel):
 
 
 class ProposalAmountsIn(BaseModel):
-    # One GC's proposal figures (Send Out numbers editor). None clears the
-    # override back to the committed pricing default; the total is never
-    # stored — it is always material + labor.
+    # One GC's proposal figures (GC Pricing step editor). None clears the
+    # override back to the pricing base; the total is never stored — it is
+    # always material + labor.
     material_amount: Decimal | None = Field(None, **_AMOUNT_BOUNDS)
     labor_amount: Decimal | None = Field(None, **_AMOUNT_BOUNDS)
 

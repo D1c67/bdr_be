@@ -57,7 +57,7 @@ def test_notify_role_refuses_estimator_broadcast(monkeypatch):
 
 def test_notify_role_internal_inserts_and_queues_email(monkeypatch):
     rec, queued = _patch(monkeypatch, [{"id": "pe1"}, {"id": "pe2"}])
-    n.notify_role(Role.PE, "p1", "stage_handoff", "Project advanced")
+    n.notify_role(Role.ESTIMATING_ENGINEER, "p1", "stage_handoff", "Project advanced")
     assert rec.inserted and len(rec.inserted[0]) == 2
     assert [r["user_id"] for r in rec.inserted[0]] == ["pe1", "pe2"]
     assert queued == [rec.inserted[0]]  # the same rows are mirrored to email
@@ -74,7 +74,7 @@ def test_notify_user_inserts_and_queues_email(monkeypatch):
 
 def test_notify_role_carries_rfq_id(monkeypatch):
     rec, queued = _patch(monkeypatch, [{"id": "pe1"}])
-    n.notify_role(Role.PE, "p1", "quote.received", "Quote in", rfq_id="r1")
+    n.notify_role(Role.ESTIMATING_ENGINEER, "p1", "quote.received", "Quote in", rfq_id="r1")
     assert rec.inserted[0][0]["rfq_id"] == "r1"
 
 

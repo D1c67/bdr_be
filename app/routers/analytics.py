@@ -196,6 +196,45 @@ async def win_loss(
     return metrics.win_loss(_load(range_, date_from, date_to, project_id, status_), range_)
 
 
+@router.get("/gc-spread")
+async def gc_spread(
+    range_: str = RangeParam,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    project_id: str | None = None,
+    status_: str | None = StatusParam,
+    user: CurrentUser = Depends(get_current_user),
+):
+    _gate(user)
+    return metrics.gc_spread(_load(range_, date_from, date_to, project_id, status_), range_)
+
+
+@router.get("/activity")
+async def activity(
+    range_: str = RangeParam,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    actor_id: str | None = None,
+    action: str | None = None,
+    project_id: str | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Audit trail (who did what / who inputted what) for the Activity sub-page.
+
+    Merges audit_log writes with stage transitions, filterable by person, action
+    and project. Read-only and gated to internal roles (the accountant included).
+    """
+    _gate(user)
+    try:
+        return metrics.activity_log(
+            range_, date_from, date_to, actor_id, action, project_id, limit, offset
+        )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+
 @router.get("/projects/{project_id}")
 async def project_detail(
     project_id: str,

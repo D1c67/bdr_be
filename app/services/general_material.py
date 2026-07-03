@@ -28,10 +28,13 @@ _SCHEMA = """{
 }"""
 
 
-def _bid_recap_text(xlsx_bytes: bytes) -> str:
+def _bid_recap_text(xlsx_bytes: bytes, max_chars: int | None = None) -> str:
     """Render the 'Bid Recap and summary' worksheet to labelled, tab-separated
     rows. Falls back to the whole workbook when no recap sheet is present, so an
-    unexpected sheet name still gives the model something to work with."""
+    unexpected sheet name still gives the model something to work with.
+
+    `max_chars` bounds the rendered text while accumulating, so an inflated
+    workbook can't spike memory or model spend (mirrors worksheets_to_text)."""
     import openpyxl
 
     wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), data_only=True, read_only=True)
@@ -41,16 +44,26 @@ def _bid_recap_text(xlsx_bytes: bytes) -> str:
         )
         if target is None:
             wb.close()
-            return boq_extraction.worksheets_to_text(xlsx_bytes)
+            return boq_extraction.worksheets_to_text(xlsx_bytes, max_chars)
         lines: list[str] = []
+        total = 0
+        truncated = False
         for row in target.iter_rows(values_only=True):
             vals = list(row)
             while vals and (vals[-1] is None or vals[-1] == ""):
                 vals.pop()
             if not vals:
                 continue
-            lines.append("\t".join("" if v is None else str(v) for v in vals))
-        return f"--- WORKSHEET: {target.title} ---\n" + "\n".join(lines)
+            line = "\t".join("" if v is None else str(v) for v in vals)
+            lines.append(line)
+            total += len(line) + 1
+            if max_chars is not None and total > max_chars:
+                truncated = True
+                break
+        text = f"--- WORKSHEET: {target.title} ---\n" + "\n".join(lines)
+        if truncated:
+            text += "\n[TRUNCATED — estimate exceeded the analysis size limit]"
+        return text
     finally:
         wb.close()
 
@@ -121,16 +134,18 @@ def _call_claude(system_prompt: str, user_prompt: str) -> dict[str, Any]:
 
 
 def _latest_estimate_file(project_id: str) -> dict[str, Any] | None:
-    rows = (
+    from app.services.estimator_rounds import exclude_unsent
+
+    # Never consume an unsent estimator draft — only files actually sent to
+    # the team (or internal uploads) may drive the wiring figure.
+    q = (
         get_supabase()
         .table("project_files")
-        .select("id, storage_path")
+        .select("id, storage_path, size_bytes")
         .eq("project_id", project_id)
         .eq("category", "estimate")
-        .order("created_at", desc=True)
-        .limit(1)
-        .execute()
-    ).data
+    )
+    rows = exclude_unsent(q).order("created_at", desc=True).limit(1).execute().data
     return rows[0] if rows else None
 
 
@@ -141,10 +156,64 @@ def _save(project_id: str, **fields: Any) -> None:
     ).execute()
 
 
+def _current_row(project_id: str) -> dict[str, Any] | None:
+    rows = (
+        get_supabase()
+        .table("general_material_estimates")
+        .select("amount, estimate_file_id, tax_included")
+        .eq("project_id", project_id)
+        .execute()
+    ).data or []
+    return rows[0] if rows else None
+
+
+def _amount_changed(prior: Any, new: Any) -> bool:
+    """True if the wiring figure moved (numeric-aware so "100" == 100 == 100.00)."""
+    from decimal import Decimal, InvalidOperation
+
+    def norm(v: Any):
+        if v is None:
+            return None
+        try:
+            return Decimal(str(v))
+        except (InvalidOperation, ValueError):
+            return None
+
+    return norm(prior) != norm(new)
+
+
+def _tax_reset(prior: dict[str, Any] | None, new_file_id: Any, new_amount: Any) -> dict[str, Any]:
+    """An extraction that re-anchors the figure (a different estimate file, or a
+    changed amount) invalidates the sales-tax attestation — the recorded answer
+    described the old figure. Clearing tax_included re-arms the receive-quotes
+    gate so the question must be answered again before the project can advance.
+    tax_rate is left alone as a prefill for the re-ask."""
+    if prior is None or prior.get("tax_included") is None:
+        return {}
+    if new_file_id is not None and prior.get("estimate_file_id") != new_file_id:
+        return {"tax_included": None}
+    if _amount_changed(prior.get("amount"), new_amount):
+        return {"tax_included": None}
+    return {}
+
+
+def _maybe_bounce(project_id: str, prior: Any, new: Any) -> None:
+    """If a re-extraction actually changed the figure, re-verify a project that has
+    already passed Verify. Local import avoids any import-time cycle; the bounce is
+    best-effort (background task, no actor)."""
+    if not _amount_changed(prior, new):
+        return
+    from app.services import workflow
+
+    workflow.maybe_reopen_verify_after_edit(project_id, None, "General material re-extracted")
+
+
 def run_extraction(project_id: str) -> None:
     """Extract the wiring material cost from the project's latest estimate file.
     Background-task safe — failures are recorded on the row, never raised."""
     settings = get_settings()
+    prior = _current_row(project_id)
+    prior_amount = prior["amount"] if prior else None
     _save(project_id, status="running", error=None, model=settings.claude_estimate_model)
     try:
         est = _latest_estimate_file(project_id)
@@ -154,9 +223,25 @@ def run_extraction(project_id: str) -> None:
                 status="not_found",
                 amount=None,
                 error="No estimate file is uploaded for this project.",
+                **_tax_reset(prior, None, None),
+            )
+            _maybe_bounce(project_id, prior_amount, None)
+            return
+        size = est.get("size_bytes") or 0
+        if size > settings.boq_max_bytes:
+            _save(
+                project_id,
+                status="failed",
+                amount=None,
+                error=(
+                    f"Estimate file is too large to analyze ({size // (1024 * 1024)}MB; "
+                    f"limit {settings.boq_max_bytes // (1024 * 1024)}MB)."
+                ),
             )
             return
-        doc_text = _bid_recap_text(storage.download_file(est["storage_path"]))
+        doc_text = _bid_recap_text(
+            storage.download_file(est["storage_path"]), settings.boq_max_text_chars
+        )
         result = _call_claude(build_system_prompt(), build_user_prompt(doc_text))
         cost = result.get("wiring_material_cost")
         if result.get("found") and cost is not None:
@@ -168,7 +253,9 @@ def run_extraction(project_id: str) -> None:
                 estimate_file_id=est["id"],
                 raw_extraction=result,
                 error=None,
+                **_tax_reset(prior, est["id"], cost),
             )
+            _maybe_bounce(project_id, prior_amount, cost)
         else:
             _save(
                 project_id,
@@ -177,6 +264,8 @@ def run_extraction(project_id: str) -> None:
                 estimate_file_id=est["id"],
                 raw_extraction=result,
                 error=result.get("notes"),
+                **_tax_reset(prior, est["id"], None),
             )
+            _maybe_bounce(project_id, prior_amount, None)
     except Exception as exc:  # surface to the poller / UI
         _save(project_id, status="failed", error=str(exc))

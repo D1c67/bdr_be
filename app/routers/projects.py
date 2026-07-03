@@ -4,8 +4,14 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.deps import CurrentUser, get_current_user, require_internal, require_role
-from app.core.roles import ACTUAL_BID_VIEWER_ROLES, INTERNAL_ROLES, Role
+from app.core.deps import CurrentUser, get_current_user, require_internal, require_writer
+from app.core.roles import (
+    ACTUAL_BID_EDITOR_ROLES,
+    ACTUAL_BID_VIEWER_ROLES,
+    INTERNAL_ROLES,
+    WRITER_ROLES,
+    Role,
+)
 from app.core.supabase_client import get_supabase
 from app.models.schemas import (
     AbandonIn,
@@ -18,11 +24,19 @@ from app.services import proposal_send, workflow
 from app.services.notifications import audit, notify_role
 from app.services.project_status import derive_status
 
-# Roles allowed to abandon / reactivate a project (same set that may see the
-# confidential actual bid date).
-STATUS_CHANGE_ROLES = (Role.EXECUTIVE, Role.PA, Role.IT_ADMIN)
-
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+# The projects.number unique index (migration 0052) retires every number ever
+# used — they can't be re-used, even by an abandoned project. A collision surfaces
+# from PostgREST as a 23505; translate it into a clean 409 instead of a raw 500.
+_NUMBER_TAKEN = "That project number is already in use — numbers can't be re-used."
+
+
+def _is_duplicate_number(exc: Exception) -> bool:
+    msg = str(exc)
+    return "projects_number_unique_idx" in msg or (
+        "23505" in msg and "number" in msg
+    )
 
 
 def redact_for_role(project: dict, role: Role) -> dict:
@@ -90,15 +104,20 @@ async def list_projects(
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
 async def create_project(
     body: ProjectCreate,
-    user: CurrentUser = Depends(require_role(Role.PA, Role.PM, Role.IT_ADMIN)),
+    user: CurrentUser = Depends(require_writer),
 ):
-    """Create a project (typically the PA). Starts in the `intake` stage."""
+    """Create a project (typically the Estimating Admin). Starts in `intake`."""
     sb = get_supabase()
     payload = body.model_dump(exclude={"gcs"}, mode="json")
     payload["created_by"] = user.id
     payload["current_stage"] = "intake"
-    payload["current_owner_role"] = Role.PA.value
-    created = sb.table("projects").insert(payload).execute().data[0]
+    payload["current_owner_role"] = Role.ESTIMATING_ADMIN.value
+    try:
+        created = sb.table("projects").insert(payload).execute().data[0]
+    except Exception as exc:  # noqa: BLE001 — unique violation → number re-use
+        if _is_duplicate_number(exc):
+            raise HTTPException(status.HTTP_409_CONFLICT, _NUMBER_TAKEN) from exc
+        raise
 
     if body.gcs:
         sb.table("project_gcs").insert(
@@ -120,35 +139,39 @@ async def get_project(project_id: str, user: CurrentUser = Depends(get_current_u
     return _present(_fetch_project_with_outcome(project_id), user.role)
 
 
-# Who may edit each intake field via PATCH. Bid dates are the PA's alone;
-# deadlines, schedule, and labor fields are open to every internal role; the
-# identity fields keep their original PA/PM ownership. Pricing is never
-# patchable here — it lives in the quote/labor/markup steps.
+# Who may edit each intake field via PATCH. Any writer role can edit any field
+# (the read-only accountant and the estimator are already rejected by the route
+# guard), with one exception: the confidential ACTUAL bid date may only be edited
+# by roles allowed to see it (the accountant can view it but not write it).
+# Pricing is never patchable here — it lives in the quote/labor/markup steps.
+_OPEN = WRITER_ROLES
 _FIELD_EDITORS: dict[str, frozenset[Role]] = {
-    "internal_bid_at": frozenset({Role.PA}),
-    "actual_bid_at": frozenset({Role.PA}),
-    "due_from_estimator_at": INTERNAL_ROLES,
-    "due_from_vendors_at": INTERNAL_ROLES,
-    "est_start_date": INTERNAL_ROLES,
-    "est_finish_date": INTERNAL_ROLES,
-    "labor_time": INTERNAL_ROLES,
-    "wage_type": INTERNAL_ROLES,
-    "labor_note": INTERNAL_ROLES,
-    "address": INTERNAL_ROLES,
-    "name": frozenset({Role.PA, Role.PM, Role.IT_ADMIN}),
-    "number": frozenset({Role.PA, Role.PM, Role.IT_ADMIN}),
-    "invitation_at": frozenset({Role.PA, Role.PM, Role.IT_ADMIN}),
-    "notes": frozenset({Role.PA, Role.PM, Role.IT_ADMIN}),
-    # Go/No-Go scoring answers (reference only) — open like the labor fields.
-    "project_type": INTERNAL_ROLES,
-    "owner_type": INTERNAL_ROLES,
-    "labor_needed": INTERNAL_ROLES,
-    "bid_method": INTERNAL_ROLES,
-    "competitor_known": INTERNAL_ROLES,
-    "gc_known": INTERNAL_ROLES,
-    "subs_needed": INTERNAL_ROLES,
-    "est_value_band": INTERNAL_ROLES,
-    "scope_fit": INTERNAL_ROLES,
+    "internal_bid_at": _OPEN,
+    "actual_bid_at": ACTUAL_BID_EDITOR_ROLES,
+    "due_from_estimator_at": _OPEN,
+    "due_from_vendors_at": _OPEN,
+    "est_start_date": _OPEN,
+    "est_finish_date": _OPEN,
+    "labor_time": _OPEN,
+    "wage_type": _OPEN,
+    "labor_note": _OPEN,
+    "address": _OPEN,
+    "name": _OPEN,
+    "number": _OPEN,
+    "invitation_at": _OPEN,
+    "notes": _OPEN,
+    "is_ngem": _OPEN,
+    # Go/No-Go scoring answers (scored by services/gono at the go_no_go gate;
+    # editing them later only changes the displayed score, decisions stand).
+    "project_type": _OPEN,
+    "owner_type": _OPEN,
+    "labor_needed": _OPEN,
+    "bid_method": _OPEN,
+    "competitor_known": _OPEN,
+    "gc_known": _OPEN,
+    "subs_needed": _OPEN,
+    "est_value_band": _OPEN,
+    "scope_fit": _OPEN,
 }
 
 
@@ -156,7 +179,7 @@ _FIELD_EDITORS: dict[str, frozenset[Role]] = {
 async def update_project(
     project_id: str,
     body: ProjectUpdate,
-    user: CurrentUser = Depends(require_role(*INTERNAL_ROLES)),
+    user: CurrentUser = Depends(require_writer),
 ):
     # exclude_unset (not exclude_none) so an explicit null clears a field.
     patch = body.model_dump(exclude_unset=True, mode="json")
@@ -170,9 +193,14 @@ async def update_project(
             status.HTTP_403_FORBIDDEN,
             f"Your role may not edit: {', '.join(denied)}",
         )
-    updated = (
-        get_supabase().table("projects").update(patch).eq("id", project_id).execute()
-    ).data
+    try:
+        updated = (
+            get_supabase().table("projects").update(patch).eq("id", project_id).execute()
+        ).data
+    except Exception as exc:  # noqa: BLE001 — unique violation → number re-use
+        if _is_duplicate_number(exc):
+            raise HTTPException(status.HTTP_409_CONFLICT, _NUMBER_TAKEN) from exc
+        raise
     if not updated:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
     audit(user.id, "project.update", "project", project_id, patch)
@@ -184,8 +212,8 @@ async def update_project(
 # untouched (so we know where the bid died) and only flips the abandon marker,
 # so it does a direct projects.update rather than going through
 # workflow.transition_project (which would validate against TRANSITIONS and
-# overwrite the stage). Reversible via /reactivate. Both are restricted to the
-# Executive / PA / IT admin set.
+# overwrite the stage). Reversible via /reactivate. Both are open to any writer
+# role (the read-only accountant and the estimator are rejected).
 
 
 def _project_status_row(project_id: str) -> dict:
@@ -205,7 +233,7 @@ def _project_status_row(project_id: str) -> dict:
 async def abandon_project(
     project_id: str,
     body: AbandonIn | None = None,
-    user: CurrentUser = Depends(require_role(*STATUS_CHANGE_ROLES)),
+    user: CurrentUser = Depends(require_writer),
 ):
     """Abandon a bid at its current stage. `current_stage` is preserved; the
     derived status becomes `abandoned`. Reversible via /reactivate."""
@@ -232,7 +260,7 @@ async def abandon_project(
 @router.post("/{project_id}/reactivate", response_model=ProjectOut)
 async def reactivate_project(
     project_id: str,
-    user: CurrentUser = Depends(require_role(*STATUS_CHANGE_ROLES)),
+    user: CurrentUser = Depends(require_writer),
 ):
     """Reactivate an abandoned project, returning it to its stage-derived status."""
     existing = _project_status_row(project_id)
@@ -255,7 +283,8 @@ async def reactivate_project(
 
 
 # ── project ↔ GC membership ────────────────────────────────────────────────
-# Editable at ANY stage by any internal role (the estimator is rejected): GCs
+# Editable at ANY stage by any writer role (the read-only accountant and the
+# estimator are rejected): GCs
 # join and drop out of bids mid-pipeline, so membership can't be frozen at
 # intake. Membership is the whole story — any GC on the project is a bid
 # candidate; who we actually bid to is recorded by which proposals were sent.
@@ -326,7 +355,7 @@ async def list_project_gcs(project_id: str, _: CurrentUser = Depends(require_int
 async def add_project_gc(
     project_id: str,
     body: ProjectGCIn,
-    user: CurrentUser = Depends(require_internal),
+    user: CurrentUser = Depends(require_writer),
 ):
     sb = get_supabase()
     _project_or_404(project_id)
@@ -359,7 +388,7 @@ async def add_project_gc(
 async def remove_project_gc(
     project_id: str,
     gc_id: str,
-    user: CurrentUser = Depends(require_internal),
+    user: CurrentUser = Depends(require_writer),
 ):
     sb = get_supabase()
     _project_or_404(project_id)

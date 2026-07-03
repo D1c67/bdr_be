@@ -1,12 +1,12 @@
 """Pricing pipeline: labor review (7), markup (8), executive verify/commit (9).
 Send-out (10) lives in routers/proposals.py — per-GC proposal generation+email."""
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.deps import CurrentUser, get_current_user, require_role
-from app.core.roles import INTERNAL_ROLES, Role
+from app.core.deps import CurrentUser, get_current_user, require_role, require_writer
+from app.core.roles import INTERNAL_ROLES, VERIFY_ROLES, Role
 from app.core.supabase_client import get_supabase
 from app.models.schemas import LaborReviewIn, MarkupIn, VerifyOverrideIn
 from app.services import workflow
@@ -26,11 +26,12 @@ def _get_one(table: str, project_id: str):
 
 
 def _general_estimate(project_id: str) -> dict | None:
-    """The per-project general-material (wiring) figure pulled from the estimate."""
+    """The per-project general-material (wiring) figure pulled from the estimate,
+    with its tax attestation (it carries the same tax question as vendor quotes)."""
     rows = (
         get_supabase()
         .table("general_material_estimates")
-        .select("amount, source, status")
+        .select("amount, source, status, tax_included, tax_rate")
         .eq("project_id", project_id)
         .execute()
     ).data or []
@@ -51,6 +52,51 @@ def pick_material_amount(
     return None, "none"
 
 
+# Clark County (Las Vegas) sales tax — the default rate applied when a vendor's
+# quote did not already include it.
+DEFAULT_TAX_RATE = Decimal("8.375")
+
+
+def apply_tax(
+    amount: Decimal | None, tax_included: bool | None, tax_rate: Decimal | None
+) -> tuple[Decimal | None, Decimal]:
+    """Pure: the tax-inclusive cost of one vendor quote and the tax added.
+    When the vendor already priced tax in (or there's no amount) the quote
+    stands and the tax added is 0; otherwise the rate (a percent) is applied
+    and rounded to cents — the real cost G3 incurs on the materials. A NULL
+    tax_included (unanswered) is treated as "not yet included" so the figure is
+    never understated before the estimator answers."""
+    if amount is None:
+        return None, Decimal("0.00")
+    if tax_included:  # vendor already included tax in the quote
+        return amount, Decimal("0.00")
+    rate = tax_rate if tax_rate is not None else DEFAULT_TAX_RATE
+    tax = (amount * rate / Decimal(100)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return amount + tax, tax
+
+
+def tax_info(row: dict) -> dict:
+    """Pure: the tax breakdown of one priced row (a vendor quote or the General
+    Material estimate — anything with amount/tax_included/tax_rate) — pre-tax
+    amount, tax added at its rate, and the tax-inclusive total that pricing
+    compares and carries."""
+    pre = Decimal(str(row["amount"]))
+    rate = Decimal(str(row["tax_rate"])) if row.get("tax_rate") is not None else DEFAULT_TAX_RATE
+    total, tax = apply_tax(pre, row.get("tax_included"), rate)
+    return {
+        "pre_tax": pre,
+        "total": total,
+        "tax": tax,
+        "rate": rate,
+        "included": row.get("tax_included"),
+    }
+
+
+def taxed_amount(row: dict) -> Decimal:
+    """Pure: the tax-inclusive amount of one priced row — the comparison basis."""
+    return tax_info(row)["total"]
+
+
 def _materials_rows(project_id: str) -> list[dict]:
     """Per-RFQ materials price for the project. For every category the price is
     the PE's custom price (else the selected quote, else the lowest received).
@@ -65,20 +111,25 @@ def _materials_rows(project_id: str) -> list[dict]:
     ).data or []
     rfq_ids = [r["id"] for r in rfqs]
     quotes = (
-        sb.table("quotes").select("rfq_id, amount, is_selected").in_("rfq_id", rfq_ids).execute()
+        sb.table("quotes")
+        .select("rfq_id, amount, is_selected, tax_included, tax_rate")
+        .in_("rfq_id", rfq_ids)
+        .execute()
     ).data if rfq_ids else []
     quotes = quotes or []
 
-    # Lowest received and explicitly-selected amount per RFQ; selection wins.
-    lowest: dict[str, Decimal] = {}
-    selected: dict[str, Decimal] = {}
+    # Lowest received and explicitly-selected quote per RFQ — compared by their
+    # tax-INCLUSIVE totals (each quote carries its own tax answer); selection
+    # wins. The winning quote's tax breakdown is kept for the row detail.
+    lowest: dict[str, dict] = {}
+    selected: dict[str, dict] = {}
     for q in quotes:
-        amt = Decimal(str(q["amount"]))
+        info = tax_info(q)
         rid = q["rfq_id"]
-        if amt < lowest.get(rid, amt + 1):
-            lowest[rid] = amt
+        if rid not in lowest or info["total"] < lowest[rid]["total"]:
+            lowest[rid] = info
         if q.get("is_selected"):
-            selected[rid] = amt
+            selected[rid] = info
 
     gen = _general_estimate(project_id)
     gen_amount = Decimal(str(gen["amount"])) if gen and gen.get("amount") is not None else None
@@ -89,24 +140,45 @@ def _materials_rows(project_id: str) -> list[dict]:
     for r in rfqs:
         cat = r.get("material_categories") or {}
         is_general = bool(cat.get("is_general"))
+        info = None  # the winning figure's tax breakdown, when something priced the row
         if is_general:
             saw_general = True
-            amount = gen_amount
-            source = gen_source if amount is not None else "none"
+            # The estimate figure carries its own tax answer (0053) — taxed
+            # exactly like a vendor quote so the total is the true cost.
+            if gen_amount is not None:
+                info = tax_info(gen)
+                amount = info["total"]
+                source = gen_source
+            else:
+                amount = None
+                source = "none"
         else:
             rid = r["id"]
             custom = r.get("custom_amount")
+            sel, low = selected.get(rid), lowest.get(rid)
+            # Precedence over tax-INCLUSIVE figures; a custom price is the PE's
+            # hand-entered true cost and is carried as-is (no tax added on top).
             amount, source = pick_material_amount(
                 Decimal(str(custom)) if custom is not None else None,
-                selected.get(rid),
-                lowest.get(rid),
+                sel["total"] if sel else None,
+                low["total"] if low else None,
             )
+            if source == "quote":
+                info = sel or low
         rows.append(
             {
                 "material_category_id": r["material_category_id"],
                 "category_name": cat.get("name"),
                 "is_general": is_general,
+                # amount is tax-inclusive — the true cost that feeds the total,
+                # markup, verify and the bid.
                 "amount": str(amount) if amount is not None else None,
+                "pre_tax_amount": str(info["pre_tax"]) if info else (
+                    str(amount) if amount is not None else None
+                ),
+                "tax_included": info["included"] if info else None,
+                "tax_rate": str(info["rate"]) if info else str(DEFAULT_TAX_RATE),
+                "tax_amount": str(info["tax"]) if info else "0.00",
                 "source": source,
             }
         )
@@ -121,12 +193,17 @@ def _materials_rows(project_id: str) -> list[dict]:
             .limit(1)
             .execute()
         ).data or []
+        info = tax_info(gen)
         rows.append(
             {
                 "material_category_id": general_cat[0]["id"] if general_cat else None,
                 "category_name": general_cat[0]["name"] if general_cat else "General Material",
                 "is_general": True,
-                "amount": str(gen_amount),
+                "amount": str(info["total"]),
+                "pre_tax_amount": str(info["pre_tax"]),
+                "tax_included": info["included"],
+                "tax_rate": str(info["rate"]),
+                "tax_amount": str(info["tax"]),
                 "source": gen_source or "manual",
             }
         )
@@ -242,7 +319,7 @@ async def get_materials_breakdown(project_id: str, user: CurrentUser = Depends(g
     }
 
 
-# ── Labor review (step 7, PM) ─────────────────────────────────────────────
+# ── Labor review (step 7) ─────────────────────────────────────────────────
 
 
 @router.get("/labor")
@@ -253,7 +330,7 @@ async def get_labor(project_id: str, user: CurrentUser = Depends(get_current_use
 
 @router.put("/labor")
 async def set_labor(
-    project_id: str, body: LaborReviewIn, user: CurrentUser = Depends(require_role(Role.PM, Role.IT_ADMIN))
+    project_id: str, body: LaborReviewIn, user: CurrentUser = Depends(require_writer)
 ):
     row = (
         get_supabase()
@@ -265,10 +342,11 @@ async def set_labor(
         .execute()
     ).data[0]
     audit(user.id, "labor.review", "project", project_id, {"verified": body.verified})
+    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "Labor numbers edited")
     return row
 
 
-# ── Markup (step 8, PM) ───────────────────────────────────────────────────
+# ── Markup (step 8) ───────────────────────────────────────────────────────
 
 
 @router.get("/markup")
@@ -279,7 +357,7 @@ async def get_markup(project_id: str, user: CurrentUser = Depends(get_current_us
 
 @router.put("/markup")
 async def set_markup(
-    project_id: str, body: MarkupIn, user: CurrentUser = Depends(require_role(Role.PM, Role.IT_ADMIN))
+    project_id: str, body: MarkupIn, user: CurrentUser = Depends(require_writer)
 ):
     row = (
         get_supabase()
@@ -291,6 +369,7 @@ async def set_markup(
         .execute()
     ).data[0]
     audit(user.id, "markup.set", "project", project_id, None)
+    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "Markup edited")
     return row
 
 
@@ -327,10 +406,10 @@ def _deltas(body: VerifyOverrideIn, project_id: str) -> dict:
 async def edit_verify(
     project_id: str,
     body: VerifyOverrideIn,
-    user: CurrentUser = Depends(require_role(Role.EXECUTIVE, Role.PM, Role.IT_ADMIN)),
+    user: CurrentUser = Depends(require_role(*VERIFY_ROLES)),
 ):
-    """Save the (uncommitted) verify-step numbers. Exec/PM may adjust the final
-    figures before the Executive commits; the snapshot becomes immutable once
+    """Save the (uncommitted) verify-step numbers. Only the Executive (or IT Admin
+    override) may touch the verify figures; the snapshot becomes immutable once
     committed."""
     existing = _get_one("verifications", project_id)
     if existing and existing.get("committed_at"):
@@ -352,7 +431,7 @@ async def edit_verify(
 async def commit_verify(
     project_id: str,
     body: VerifyOverrideIn | None = None,
-    user: CurrentUser = Depends(require_role(Role.EXECUTIVE)),
+    user: CurrentUser = Depends(require_role(*VERIFY_ROLES)),
 ):
     """The Executive finalizes and commits pricing — required before send-out.
     The committed snapshot stores the final figures; the original→final delta is
@@ -374,11 +453,27 @@ async def commit_verify(
         .execute()
     ).data[0]
     audit(user.id, "pricing.commit", "project", project_id, _deltas(body, project_id))
-    # Auto-advance verify → send_out so the PA/PM can dispatch the bid.
-    proj = get_supabase().table("projects").select("current_stage").eq("id", project_id).single().execute().data
+    # Advance off Verify. Normally verify → send_out so the team can dispatch the
+    # bid; but if a post-verify pricing edit bounced the project back here, resume
+    # at the stage it was on before the edit (send_out / submitted / bid_outcome).
+    proj = (
+        get_supabase()
+        .table("projects")
+        .select("current_stage, reverify_return_stage")
+        .eq("id", project_id)
+        .single()
+        .execute()
+    ).data
+    # Only advance + notify when the commit actually moved the project off Verify;
+    # a redundant re-commit (already advanced) just re-stamps the snapshot silently.
     if proj and proj["current_stage"] == "verify":
-        workflow.transition_project(project_id, "send_out", user.id, "Pricing committed")
-    notify_role(Role.PA, project_id, "verified", "Pricing committed by Executive — ready to send out")
+        return_stage = proj.get("reverify_return_stage")
+        if return_stage:
+            workflow.return_from_reverify(project_id, return_stage, user.id)
+            notify_role(Role.ESTIMATING_ADMIN, project_id, "verified", "Pricing re-committed by Executive")
+        else:
+            workflow.transition_project(project_id, "send_out", user.id, "Pricing committed")
+            notify_role(Role.ESTIMATING_ADMIN, project_id, "verified", "Pricing committed by Executive — ready to send out")
     return row
 
 

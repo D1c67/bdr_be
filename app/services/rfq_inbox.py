@@ -10,6 +10,7 @@ quoted price — which auto-creates a `quotes` row the PE can override.
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 
 from app.core.config import get_settings
 from app.core.roles import Role
@@ -21,6 +22,36 @@ from app.services.openai_text import extract_quote_from_pdf
 logger = logging.getLogger(__name__)
 
 _LEASE_KEY = "inbox"  # row id prefix in graph_sync_state
+
+# Only these extensions are ingested as quote files from an inbound reply — an
+# allowlist so a hostile reply can't drop arbitrary content into project storage.
+_QUOTE_ATTACHMENT_EXTS = {
+    "pdf", "xlsx", "xls", "xlsm", "csv", "docx", "doc", "png", "jpg", "jpeg",
+}
+# Extracted-quote sanity band. A vendor-controlled PDF is fed to an LLM, so a
+# prompt-injected or garbled amount must not silently become the winning quote
+# (pricing selects the lowest — a negative/zero value would always "win").
+_QUOTE_MAX_AMOUNT = Decimal("100000000")   # $100M ceiling
+_QUOTE_MIN_CONFIDENCE = 0.5
+
+
+def _valid_extracted_amount(result: dict) -> bool:
+    """A quote may auto-create only if the extracted amount is a finite, positive,
+    in-band number and the model's confidence (when reported) clears the bar."""
+    try:
+        amount = Decimal(str(result.get("total_amount")))
+    except (InvalidOperation, TypeError, ValueError):
+        return False
+    if not amount.is_finite() or amount <= 0 or amount > _QUOTE_MAX_AMOUNT:
+        return False
+    conf = result.get("confidence")
+    if conf is not None:
+        try:
+            if float(conf) < _QUOTE_MIN_CONFIDENCE:
+                return False
+        except (TypeError, ValueError):
+            return False
+    return True
 
 
 async def polling_loop() -> None:
@@ -164,7 +195,7 @@ def _ingest_message(sb, msg: dict, by_conversation: dict[str, dict]) -> None:
 
     rfq = send["rfqs"]
     notify_role(
-        Role.PE,
+        Role.ESTIMATING_ENGINEER,
         rfq["project_id"],
         "rfq.reply_received",
         f"{contact['name']} replied on the {rfq['material_categories']['name']} RFQ "
@@ -176,13 +207,27 @@ def _ingest_message(sb, msg: dict, by_conversation: dict[str, dict]) -> None:
 def _ingest_attachments(sb, send: dict, message_row: dict) -> None:
     import base64
 
+    settings = get_settings()
     rfq = send["rfqs"]
     project = rfq["projects"]
     contact = send["vendor_contacts"]
 
-    attachments = graph_inbox.list_attachments(message_row["graph_message_id"])
+    # Cap count + skip oversized attachments before their bytes are fetched.
+    attachments = graph_inbox.list_attachments(
+        message_row["graph_message_id"],
+        max_count=settings.inbound_attachment_max_count,
+        max_bytes=settings.inbound_attachment_max_bytes,
+    )
     pdf_files: list[tuple[dict, bytes]] = []  # (project_files row, content)
     for att in attachments:
+        name = att.get("name") or "attachment"
+        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+        if ext not in _QUOTE_ATTACHMENT_EXTS:
+            # A reply may carry signatures/logos/etc.; only ingest quote-shaped
+            # files, and leave an audit trace for anything skipped.
+            audit(None, "rfq.attachment_skipped", "rfq_send", send["id"],
+                  {"name": name, "reason": "disallowed_type"})
+            continue
         content = base64.b64decode(att["contentBytes"])
         path = storage.build_object_path(project["id"], "quote", att["name"])
         storage.upload_file(path, content, att.get("contentType") or "application/octet-stream")
@@ -229,7 +274,11 @@ def _ingest_attachments(sb, send: dict, message_row: dict) -> None:
         "vendor_name": (contact.get("vendors") or {}).get("name"),
     }
     extraction_status = "no_amount"
+    attempts = 0
     for file_row, content in pdf_files:
+        if attempts >= settings.inbound_pdf_extract_max:
+            break  # cap paid extraction calls per inbound message
+        attempts += 1
         try:
             result = extract_quote_from_pdf(content, file_row["filename"], context)
         except Exception:  # noqa: BLE001
@@ -239,6 +288,18 @@ def _ingest_attachments(sb, send: dict, message_row: dict) -> None:
             extraction_status = "failed"
             continue
         if result.get("total_amount") is None:
+            continue
+        if not _valid_extracted_amount(result):
+            # Out-of-band or low-confidence amount from a vendor-controlled PDF —
+            # do NOT auto-create a quote or stop polling on it. Keep the file and
+            # message so the PE enters the amount manually via the quote UI.
+            extraction_status = "needs_review"
+            logger.warning(
+                "Rejected implausible extracted quote for %s (amount=%r conf=%r)",
+                file_row["filename"],
+                result.get("total_amount"),
+                result.get("confidence"),
+            )
             continue
         sb.table("quotes").insert(
             {
@@ -259,7 +320,7 @@ def _ingest_attachments(sb, send: dict, message_row: dict) -> None:
         ).eq("id", send["id"]).execute()
         extraction_status = "done"
         notify_role(
-            Role.PE,
+            Role.ESTIMATING_ENGINEER,
             rfq["project_id"],
             "quote.received",
             f"Quote received from {contact['name']} for "
@@ -269,9 +330,13 @@ def _ingest_attachments(sb, send: dict, message_row: dict) -> None:
         )
         break  # one quote per reply; remaining PDFs are still saved as files
 
+    _extraction_error = {
+        "failed": "Price extraction failed",
+        "needs_review": "Extracted amount needs manual review",
+    }.get(extraction_status)
     sb.table("rfq_messages").update(
         {
             "extraction_status": extraction_status,
-            "extraction_error": "Price extraction failed" if extraction_status == "failed" else None,
+            "extraction_error": _extraction_error,
         }
     ).eq("id", message_row["id"]).execute()

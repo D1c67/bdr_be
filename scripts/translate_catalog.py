@@ -80,7 +80,10 @@ def _parse_json(text: str) -> dict[str, str]:
             t = t[:-3]
         if t.lstrip().startswith("json"):
             t = t.lstrip()[4:]
-    data = json.loads(t)
+    # strict=False: the model occasionally emits a literal control character
+    # (e.g. a raw newline) inside a string value; accept it rather than crash —
+    # json.dumps re-escapes it correctly on write.
+    data = json.loads(t, strict=False)
     if not isinstance(data, dict):
         raise ValueError("Model response was not a JSON object")
     return data

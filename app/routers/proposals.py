@@ -1,19 +1,20 @@
 """Send Out (step 10): BOQ → LLM scope lines → reviewed/approved → per-GC
-proposal .docx → individually emailed to the GCs the PA chooses. Skipping a
+proposal .docx → individually emailed to the GCs the user chooses. Skipping a
 GC (never sending to them) is how "decided not to bid to them" is recorded;
 the stage ends only via the explicit complete-send-out call ("Done sending").
 
-Replaces the old one-email-no-attachment send-out stub. Writes are PA/PM
-(+ IT admin per convention); reads are any internal role. The estimator never
-reaches these routes (_internal) and never sees 'proposal' files (files.py
-whitelists)."""
+Replaces the old one-email-no-attachment send-out stub. Writes are any writer
+role; reads are any internal role (incl. the read-only accountant). The
+estimator never reaches these routes (_internal) and never sees 'proposal' files
+(files.py whitelists)."""
 
 import asyncio
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
-from app.core.deps import CurrentUser, get_current_user, require_role
-from app.core.roles import INTERNAL_ROLES, Role
+from app.core.deps import CurrentUser, get_current_user, require_writer
+from app.core.ratelimit import ai_rate_limit, outbound_email_rate_limit
+from app.core.roles import INTERNAL_ROLES
 from app.core.supabase_client import get_supabase
 from app.models.schemas import (
     ProposalAmountsIn,
@@ -21,12 +22,15 @@ from app.models.schemas import (
     ProposalLinesIn,
     ProposalSendIn,
 )
-from app.services import office_preview, proposal_scope, proposal_send
+from app.services import estimator_rounds, office_preview, proposal_scope, proposal_send
 from app.services.notifications import audit
 from app.services.proposal_send import ProposalSendError
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["proposals"])
-_PA_PM = require_role(Role.PA, Role.PM, Role.IT_ADMIN)
+# Send Out logistics and the per-GC bid numbers (GC Pricing step) are both open
+# to any writer role now — kept as named aliases so the call sites read clearly.
+_PA_PM = require_writer
+_PM_EXEC = require_writer
 
 
 def _internal(user: CurrentUser) -> None:
@@ -59,7 +63,11 @@ def _wire_shape(draft: dict | None) -> dict | None:
 # ── scope lines (LLM job, boq_analyses pattern) ───────────────────────────
 
 
-@router.post("/proposal-lines", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/proposal-lines",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(ai_rate_limit)],
+)
 async def start_lines_generation(
     project_id: str,
     body: ProposalGenerateIn,
@@ -67,22 +75,26 @@ async def start_lines_generation(
     user: CurrentUser = Depends(_PA_PM),
 ):
     sb = get_supabase()
-    boq_file_id = body.boq_file_id
-    if not boq_file_id:
-        latest = (
-            sb.table("project_files")
-            .select("id")
-            .eq("project_id", project_id)
-            .eq("category", "boq")
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
-        ).data
-        if not latest:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST, "No BOQ file uploaded for this project"
-            )
-        boq_file_id = latest[0]["id"]
+    # One paid generation at a time per project (each fires a paid OpenAI call).
+    # A row stranded by a restart is released via fail_if_stale on poll, and
+    # is_stale_running lets us ignore such rows here so they can't block forever.
+    active = (
+        sb.table("proposal_drafts")
+        .select("*")
+        .eq("project_id", project_id)
+        .in_("status", ["pending", "running"])
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    ).data or []
+    if active and not proposal_scope.is_stale_running(active[0]):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Proposal-line generation is already in progress for this project.",
+        )
+    # Explicit or latest, the chosen BOQ must be one the estimator actually
+    # sent (or an internal upload) — never an unsent draft of the open round.
+    boq_file_id = estimator_rounds.resolve_boq_file_id(project_id, body.boq_file_id)
 
     row = (
         sb.table("proposal_drafts")
@@ -238,7 +250,7 @@ async def list_proposals(project_id: str, user: CurrentUser = Depends(get_curren
     return _proposal_rows(project_id)
 
 
-# ── per-GC amounts (numbers editor, before documents are generated) ───────
+# ── per-GC amounts (numbers editor — set on the GC Pricing step) ──────────
 
 
 @router.get("/proposals/amounts")
@@ -254,7 +266,7 @@ async def set_proposal_amounts(
     project_id: str,
     gc_id: str,
     body: ProposalAmountsIn,
-    user: CurrentUser = Depends(_PA_PM),
+    user: CurrentUser = Depends(_PM_EXEC),
 ):
     try:
         return await asyncio.to_thread(
@@ -312,7 +324,7 @@ async def email_preview(project_id: str, user: CurrentUser = Depends(get_current
     return {"subject": subject, "body": body, "gc_name_token": proposal_send.GC_NAME_TOKEN}
 
 
-@router.post("/proposals/send")
+@router.post("/proposals/send", dependencies=[Depends(outbound_email_rate_limit)])
 async def send_proposals(
     project_id: str,
     body: ProposalSendIn,

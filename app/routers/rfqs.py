@@ -1,18 +1,21 @@
 """RFQs and vendor quotes (steps 5-6).
 
-The PE creates one RFQ per material category and bulk-sends it — one individual
-email per selected vendor contact (never CC'd), each tracked by its Graph
-conversationId so inbound replies and quote PDFs can be matched automatically.
-Quotes arrive via the inbox poller (AI-extracted from PDFs) or manual entry on
-the receive-quotes step; every manual change to an amount is recorded.
+The Estimating Engineer creates one RFQ per material category and bulk-sends it —
+one individual email per selected vendor contact (never CC'd), each tracked by
+its Graph conversationId so inbound replies and quote PDFs can be matched
+automatically. Quotes arrive via the inbox poller (AI-extracted from PDFs) or
+manual entry on the receive-quotes step; every manual change to an amount is
+recorded.
 """
 
 import asyncio
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.deps import CurrentUser, get_current_user, require_role
-from app.core.roles import INTERNAL_ROLES, Role
+from app.core.deps import CurrentUser, get_current_user, require_writer
+from app.core.ratelimit import bulk_send_rate_limit
+from app.core.roles import INTERNAL_ROLES
 from app.core.supabase_client import get_supabase
 from app.models.schemas import (
     QuoteIn,
@@ -21,18 +24,21 @@ from app.models.schemas import (
     RFQCreate,
     RfqCustomPriceIn,
     RfqQuotesConfirmIn,
+    TaxIn,
 )
-from app.services import rfq_sending
+from app.routers.pricing import taxed_amount
+from app.services import rfq_sending, workflow
 from app.services.notifications import audit, dismiss_notifications
 
-# Quote/reply notifications for an RFQ are stale once the PE makes that
+# Quote/reply notifications for an RFQ are stale once the engineer makes that
 # category's pricing decision — selecting a quote, setting a custom price, or
 # correcting an amount. Dismissed per-RFQ (not by stage) so late vendor quotes
 # arriving after the project advances still produce fresh notifications.
 _QUOTE_NOTIF_TYPES = ["quote.received", "rfq.reply_received"]
 
 router = APIRouter(prefix="/projects/{project_id}/rfqs", tags=["rfqs"])
-_PE = require_role(Role.PE, Role.IT_ADMIN)
+# RFQ/quote writes are open to any writer role (was PE-only).
+_PE = require_writer
 
 
 def _internal(user: CurrentUser) -> None:
@@ -43,10 +49,12 @@ def _internal(user: CurrentUser) -> None:
 @router.get("")
 async def list_rfqs(project_id: str, user: CurrentUser = Depends(get_current_user)):
     _internal(user)
+    # quotes(id, tax_included) rides along so the frontend's advance gate can
+    # see unanswered per-quote tax attestations without an N+1 fetch.
     return (
         get_supabase()
         .table("rfqs")
-        .select("*, material_categories(name, kind, is_general)")
+        .select("*, material_categories(name, kind, is_general), quotes(id, tax_included)")
         .eq("project_id", project_id)
         .order("created_at")
         .execute()
@@ -60,7 +68,16 @@ async def create_rfq(project_id: str, body: RFQCreate, user: CurrentUser = Depen
     try:
         row = get_supabase().table("rfqs").insert(payload).execute().data[0]
     except Exception as exc:  # unique(project_id, material_category_id)
-        raise HTTPException(status.HTTP_409_CONFLICT, f"RFQ already exists for this category: {exc}")
+        # Only a unique violation is a client-fixable 409; never echo the raw DB
+        # error back (it can leak schema/internals). Anything else is a logged 500.
+        if "23505" in str(getattr(exc, "code", "")) or "23505" in str(exc):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, "An RFQ already exists for this category."
+            ) from exc
+        logging.getLogger("bdr.rfqs").exception("RFQ insert failed")
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, "Could not create the RFQ."
+        ) from exc
     audit(user.id, "rfq.create", "rfq", row["id"], {"category": body.material_category_id})
     return row
 
@@ -87,7 +104,7 @@ async def email_preview(project_id: str, user: CurrentUser = Depends(get_current
     }
 
 
-@router.post("/bulk-send")
+@router.post("/bulk-send", dependencies=[Depends(bulk_send_rate_limit)])
 async def bulk_send(project_id: str, body: RFQBulkSendIn, user: CurrentUser = Depends(_PE)):
     """Send each group's RFQ to its selected contacts — one email per contact.
     Per-contact failures are reported in `results`, not raised."""
@@ -194,10 +211,12 @@ async def list_quotes(project_id: str, rfq_id: str, user: CurrentUser = Depends(
         .order("amount")
         .execute()
     ).data or []
-    lowest = min((q["amount"] for q in quotes), default=None)
+    # Lowest by tax-INCLUSIVE amount — comparing raw quotes would flatter a
+    # vendor whose price doesn't yet carry sales tax.
+    lowest = min((taxed_amount(q) for q in quotes), default=None)
     return {
         "quotes": quotes,
-        "lowest_amount": lowest,
+        "lowest_amount": str(lowest) if lowest is not None else None,
         "custom_amount": rfq["custom_amount"],
     }
 
@@ -259,6 +278,7 @@ async def override_quote(
         {"previous_amount": str(quote["amount"]), "new_amount": str(body.amount)},
     )
     dismiss_notifications(rfq_id=rfq_id, types=_QUOTE_NOTIF_TYPES)
+    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "Vendor quote amount changed")
     return updated
 
 
@@ -286,6 +306,7 @@ async def select_quote(
     ).eq("id", rfq_id).execute()
     audit(user.id, "quote.select", "quote", quote_id, None)
     dismiss_notifications(rfq_id=rfq_id, types=_QUOTE_NOTIF_TYPES)
+    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "Quote selection changed")
     return updated[0]
 
 
@@ -327,6 +348,9 @@ async def set_custom_price(
     # Only a real price (not clearing it back to null) counts as handling the RFQ.
     if body.amount is not None:
         dismiss_notifications(rfq_id=rfq_id, types=_QUOTE_NOTIF_TYPES)
+    # Both setting and clearing a custom price change the category's effective
+    # amount, so either way re-verify if the project already passed Verify.
+    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "Custom material price changed")
     return updated
 
 
@@ -354,4 +378,45 @@ async def set_quotes_confirmed(
         .execute()
     ).data[0]
     audit(user.id, "rfq.quotes_confirmed", "rfq", rfq_id, {"confirmed": body.confirmed})
+    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "Quotes-confirmed flag changed")
     return updated
+
+
+@router.put("/{rfq_id}/quotes/{quote_id}/tax")
+async def set_quote_tax(
+    project_id: str,
+    rfq_id: str,
+    quote_id: str,
+    body: TaxIn,
+    user: CurrentUser = Depends(_PE),
+):
+    """Record whether THIS vendor's quote already included sales tax, and the
+    rate to apply when it did not. Quotes are compared and carried by their
+    tax-inclusive amount, so the materials figure reflects the true cost
+    incurred; the receive-quotes step can't be left until every quote in a
+    non-General category is answered (frontend gate). General Material's tax
+    question lives on its estimate figure (see routers/general_material), not
+    on its informational quotes."""
+    sb = get_supabase()
+    rfq = _rfq_in_project(sb, project_id, rfq_id)
+    _not_general(rfq)  # General Material is priced from the estimate, not quotes
+    updated = (
+        sb.table("quotes")
+        .update({"tax_included": body.tax_included, "tax_rate": str(body.tax_rate)})
+        .eq("id", quote_id)
+        .eq("rfq_id", rfq_id)
+        .execute()
+    ).data
+    if not updated:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Quote not found")
+    audit(
+        user.id,
+        "quote.tax",
+        "quote",
+        quote_id,
+        {"tax_included": body.tax_included, "tax_rate": str(body.tax_rate)},
+    )
+    # The tax-inclusive amount changes the materials price basis, so re-verify
+    # if the project already passed Verify (mirrors custom-price / selection).
+    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "Quote tax setting changed")
+    return updated[0]

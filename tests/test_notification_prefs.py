@@ -45,29 +45,29 @@ def test_palettes_are_pinned():
 
 
 def test_defaults_internal_bid_audience():
-    for role in (Role.PM, Role.PE, Role.PA):
+    for role in (Role.ESTIMATING_ENGINEER, Role.ESTIMATING_ADMIN):
         assert default_prefs(role).internal_bid.enabled
     for role in (Role.EXECUTIVE, Role.ACCOUNTANT, Role.IT_ADMIN, Role.ESTIMATOR):
         assert not default_prefs(role).internal_bid.enabled
 
 
 def test_defaults_due_from_estimator_audience():
-    for role in (Role.PM, Role.PE, Role.PA):
+    for role in (Role.ESTIMATING_ENGINEER, Role.ESTIMATING_ADMIN):
         assert default_prefs(role).due_from_estimator.enabled
     assert not default_prefs(Role.EXECUTIVE).due_from_estimator.enabled
 
 
-def test_defaults_due_from_vendors_only_pe():
-    assert default_prefs(Role.PE).due_from_vendors.enabled
-    for role in (Role.PM, Role.PA, Role.EXECUTIVE, Role.ACCOUNTANT, Role.IT_ADMIN):
+def test_defaults_due_from_vendors_only_engineer():
+    assert default_prefs(Role.ESTIMATING_ENGINEER).due_from_vendors.enabled
+    for role in (Role.ESTIMATING_ADMIN, Role.EXECUTIVE, Role.ACCOUNTANT, Role.IT_ADMIN):
         assert not default_prefs(role).due_from_vendors.enabled
 
 
-def test_defaults_actual_bid_present_only_for_pa():
-    pa = default_prefs(Role.PA).actual_bid
-    assert pa is not None and pa.offsets == list(ACTUAL_BID_OFFSETS)
+def test_defaults_actual_bid_present_only_for_estimating_admin():
+    admin = default_prefs(Role.ESTIMATING_ADMIN).actual_bid
+    assert admin is not None and admin.offsets == list(ACTUAL_BID_OFFSETS)
     for role in Role:
-        if role != Role.PA:
+        if role != Role.ESTIMATING_ADMIN:
             assert default_prefs(role).actual_bid is None
 
 
@@ -132,9 +132,9 @@ def test_effective_none_stored_equals_defaults():
 
 def test_effective_missing_kind_falls_back_to_default_for_that_kind_only():
     stored = {"due_from_vendors": {"enabled": True, "offsets": ["1d"]}}
-    eff = effective_prefs(Role.PM, stored)
+    eff = effective_prefs(Role.ESTIMATING_ENGINEER, stored)
     assert eff.due_from_vendors.enabled and eff.due_from_vendors.offsets == ["1d"]
-    assert eff.internal_bid == default_prefs(Role.PM).internal_bid
+    assert eff.internal_bid == default_prefs(Role.ESTIMATING_ENGINEER).internal_bid
 
 
 def test_effective_corrupt_kind_falls_back_others_preserved():
@@ -142,14 +142,14 @@ def test_effective_corrupt_kind_falls_back_others_preserved():
         "internal_bid": {"enabled": "banana", "offsets": 7},
         "due_from_vendors": {"enabled": True, "offsets": ["2d"]},
     }
-    eff = effective_prefs(Role.PM, stored)
-    assert eff.internal_bid == default_prefs(Role.PM).internal_bid
+    eff = effective_prefs(Role.ESTIMATING_ENGINEER, stored)
+    assert eff.internal_bid == default_prefs(Role.ESTIMATING_ENGINEER).internal_bid
     assert eff.due_from_vendors.offsets == ["2d"]
 
 
 def test_effective_non_dict_stored_falls_back_entirely():
-    eff = effective_prefs(Role.PE, ["not", "a", "dict"])
-    assert eff == default_prefs(Role.PE)
+    eff = effective_prefs(Role.ESTIMATING_ENGINEER, ["not", "a", "dict"])
+    assert eff == default_prefs(Role.ESTIMATING_ENGINEER)
 
 
 def test_effective_strips_actual_bid_for_non_pa_even_if_stored():
@@ -160,12 +160,12 @@ def test_effective_strips_actual_bid_for_non_pa_even_if_stored():
 
 def test_effective_preserves_stored_actual_bid_for_pa():
     stored = {"actual_bid": {"offsets": ["8h"]}}
-    assert effective_prefs(Role.PA, stored).actual_bid.offsets == ["8h"]
+    assert effective_prefs(Role.ESTIMATING_ADMIN, stored).actual_bid.offsets == ["8h"]
 
 
 def test_effective_pa_corrupt_actual_bid_falls_back_to_all_offsets():
     stored = {"actual_bid": {"offsets": []}}  # min-1 violation
-    assert effective_prefs(Role.PA, stored).actual_bid.offsets == list(ACTUAL_BID_OFFSETS)
+    assert effective_prefs(Role.ESTIMATING_ADMIN, stored).actual_bid.offsets == list(ACTUAL_BID_OFFSETS)
 
 
 # ── Endpoint handlers (fake Supabase; deps.require_internal guards roles) ──
@@ -226,7 +226,7 @@ def test_put_strips_actual_bid_for_non_pa(monkeypatch):
     body = NotificationPrefsDoc.model_validate(
         _doc(actual_bid={"offsets": ["8h"]})
     )
-    out = asyncio.run(users.update_notification_prefs(body, _user(Role.PM)))
+    out = asyncio.run(users.update_notification_prefs(body, _user(Role.ESTIMATING_ENGINEER)))
     (_, op, (payload, kwargs)) = fake.calls[0]
     assert op == "upsert" and kwargs == {"on_conflict": "user_id"}
     assert "actual_bid" not in payload["prefs"]
@@ -240,7 +240,7 @@ def test_put_preserves_actual_bid_for_pa(monkeypatch):
     body = NotificationPrefsDoc.model_validate(
         _doc(actual_bid={"offsets": ["24h", "1h"]})
     )
-    out = asyncio.run(users.update_notification_prefs(body, _user(Role.PA)))
+    out = asyncio.run(users.update_notification_prefs(body, _user(Role.ESTIMATING_ADMIN)))
     (_, _, (payload, _)) = fake.calls[0]
     assert payload["prefs"]["actual_bid"] == {"offsets": ["24h", "1h"]}
     assert out.prefs.actual_bid.offsets == ["24h", "1h"]
@@ -249,16 +249,16 @@ def test_put_preserves_actual_bid_for_pa(monkeypatch):
 def test_get_without_row_returns_defaults_not_customized(monkeypatch):
     fake = _FakeSupabase({("notification_prefs", "select"): []})
     monkeypatch.setattr(users, "get_supabase", lambda: fake)
-    out = asyncio.run(users.get_notification_prefs(_user(Role.PE)))
+    out = asyncio.run(users.get_notification_prefs(_user(Role.ESTIMATING_ENGINEER)))
     assert out.is_customized is False
-    assert out.prefs == default_prefs(Role.PE)
+    assert out.prefs == default_prefs(Role.ESTIMATING_ENGINEER)
 
 
 def test_get_with_row_merges_stored(monkeypatch):
     stored = {"due_from_vendors": {"enabled": False, "offsets": ["1h"]}}
     fake = _FakeSupabase({("notification_prefs", "select"): [{"prefs": stored}]})
     monkeypatch.setattr(users, "get_supabase", lambda: fake)
-    out = asyncio.run(users.get_notification_prefs(_user(Role.PE)))
+    out = asyncio.run(users.get_notification_prefs(_user(Role.ESTIMATING_ENGINEER)))
     assert out.is_customized is True
     assert out.prefs.due_from_vendors.enabled is False
     assert out.prefs.due_from_vendors.offsets == ["1h"]
@@ -268,7 +268,7 @@ def test_delete_removes_row_and_returns_defaults(monkeypatch):
     fake = _FakeSupabase()
     monkeypatch.setattr(users, "get_supabase", lambda: fake)
     monkeypatch.setattr(users, "audit", lambda *a, **k: None)
-    out = asyncio.run(users.reset_notification_prefs(_user(Role.PA)))
+    out = asyncio.run(users.reset_notification_prefs(_user(Role.ESTIMATING_ADMIN)))
     assert fake.calls[0][:2] == ("notification_prefs", "delete")
     assert out.is_customized is False
-    assert out.prefs == default_prefs(Role.PA)
+    assert out.prefs == default_prefs(Role.ESTIMATING_ADMIN)

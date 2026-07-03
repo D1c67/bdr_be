@@ -201,7 +201,7 @@ def record_outcome(project_id: str, user_id: str, body: BidOutcomeIn) -> dict:
             note += f" — won by {sent_by_id[body.winning_gc_id]['gc_name']}"
         workflow.transition_project(project_id, "bid_outcome", user_id, note)
 
-    for role in (Role.PM, Role.EXECUTIVE):
+    for role in (Role.ESTIMATING_ENGINEER, Role.EXECUTIVE):
         notify_role(
             role, project_id, "bid_outcome",
             f"Bid outcome recorded ({body.result}) for {project['name']}",

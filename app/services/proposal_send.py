@@ -210,16 +210,18 @@ def resolve_recipients(live_gc: dict, chosen_ids: list[str] | None) -> list[str]
 
 
 def amounts_overview(project_id: str) -> dict:
-    """The Send Out numbers editor's data: the committed-pricing default plus
+    """The GC Pricing numbers editor's data: the pricing-base default plus
     each GC's override and resolved Material/Labor/TOTAL. Decimals go over the
     wire as strings (pricing_summary convention)."""
     from app.routers.pricing import _get_one, _verify_originals
 
     verification = _get_one("verifications", project_id)
     committed = bool(verification and verification.get("committed_at"))
-    defaults = (
-        proposal_amounts(_verify_originals(project_id), verification) if committed else None
-    )
+    # The per-GC base: committed overrides win per key, else the upstream Markup
+    # figure. Computed even before the Verify commit so the GC Pricing step (which
+    # runs *before* Verify) always has a base for each GC to override against; the
+    # `committed` flag below still tells the UI whether pricing is locked.
+    defaults = proposal_amounts(_verify_originals(project_id), verification or {})
 
     locked = {
         r["gc_id"]
@@ -239,30 +241,26 @@ def amounts_overview(project_id: str) -> dict:
 
     gcs = []
     for gc in sorted(_project_gcs(project_id), key=lambda g: g["name"].lower()):
-        resolved = resolve_gc_amounts(defaults, gc) if defaults is not None else None
+        resolved = resolve_gc_amounts(defaults, gc)
         gcs.append(
             {
                 "gc_id": gc["id"],
                 "gc_name": gc["name"],
                 "material_override": _s(gc["material_override"]),
                 "labor_override": _s(gc["labor_override"]),
-                "material": _s(resolved["material"]) if resolved else None,
-                "labor": _s(resolved["labor"]) if resolved else None,
-                "total": _s(resolved["total"]) if resolved else None,
+                "material": _s(resolved["material"]),
+                "labor": _s(resolved["labor"]),
+                "total": _s(resolved["total"]),
                 "locked": gc["id"] in locked,
             }
         )
     return {
         "committed": committed,
-        "default": (
-            {
-                "material": str(defaults["material"]),
-                "labor": str(defaults["labor"]),
-                "total": str(defaults["total"]),
-            }
-            if defaults is not None
-            else None
-        ),
+        "default": {
+            "material": str(defaults["material"]),
+            "labor": str(defaults["labor"]),
+            "total": str(defaults["total"]),
+        },
         "gcs": gcs,
     }
 
@@ -284,8 +282,8 @@ def set_gc_amounts(
     ).data
     if not project:
         raise ProposalSendError("Project not found", status_code=404)
-    if project["current_stage"] != "send_out":
-        raise ProposalSendError("Project is not at the Send Out stage.")
+    if project["current_stage"] != "gc_pricing":
+        raise ProposalSendError("Project is not at the GC Pricing stage.")
     membership = (
         sb.table("project_gcs").select("id").eq("project_id", project_id)
         .eq("gc_id", gc_id).limit(1).execute()
@@ -376,7 +374,7 @@ def complete_send_out(project_id: str, user_id: str) -> dict:
     if skipped:
         note += "; skipped (no bid): " + ", ".join(skipped)
     workflow.transition_project(project_id, "submitted", user_id, note)
-    for role in (Role.PM, Role.EXECUTIVE):
+    for role in (Role.ESTIMATING_ENGINEER, Role.EXECUTIVE):
         notify_role(
             role, project_id, "submitted",
             f"Bid submitted — proposals sent for {project['name']}",
@@ -441,8 +439,9 @@ def build_base_context(project: dict, draft: dict, amounts: dict[str, Decimal]) 
         address=project["address"],
         gc_name="",  # per-GC via dataclasses.replace
         date_str=datetime.now(tz).strftime("%m/%d/%Y"),
-        labor_time=LABOR_TIME_TEXT[project["labor_time"]],
-        wage_text=WAGE_TEXT[project["wage_type"]],
+        # Presets map to their proposal wording; a custom value prints as typed.
+        labor_time=LABOR_TIME_TEXT.get(project["labor_time"], project["labor_time"]),
+        wage_text=WAGE_TEXT.get(project["wage_type"], project["wage_type"]),
         material_amount=format_money(amounts["material"]),
         labor_amount=format_money(amounts["labor"]),
         total_amount=format_money(amounts["total"]),
@@ -976,7 +975,7 @@ def send_proposals(
     if failed:
         from app.core.roles import Role
 
-        notify_role(Role.PA, project_id, "proposal_send_failed",
+        notify_role(Role.ESTIMATING_ADMIN, project_id, "proposal_send_failed",
                     f"{len(failed)} proposal send(s) failed — retry from the Send Out panel")
 
     audit(user_id, "project.send_out", "project", project_id,

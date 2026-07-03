@@ -113,14 +113,18 @@ def _safe_component(name: str) -> str:
 
 
 def _load_files(sb, project_id: str, category: str) -> list[dict]:
-    """[{filename, content}] for all project files in a storage category."""
-    rows = (
+    """[{filename, content}] for all project files in a storage category.
+    Unsent estimator drafts are excluded — a vendor email must never carry a
+    markup the estimator hasn't actually sent to the team yet."""
+    from app.services.estimator_rounds import exclude_unsent
+
+    q = (
         sb.table("project_files")
         .select("filename, storage_path")
         .eq("project_id", project_id)
         .eq("category", category)
-        .execute()
-    ).data or []
+    )
+    rows = exclude_unsent(q).execute().data or []
     return [
         {"filename": r["filename"], "content": storage.download_file(r["storage_path"])}
         for r in rows
@@ -202,17 +206,24 @@ def _prepare_explicit_attachments(sb, project: dict, groups: list[dict]) -> _Exp
     )
     if not ids:
         return _ExplicitAttachments({}, project)
-    rows = (
+    from app.services.estimator_rounds import exclude_unsent
+
+    # An unsent estimator draft can't be attached even explicitly — it drops
+    # out here and surfaces as "not found" before anything is sent.
+    q = (
         sb.table("project_files")
         .select("id, filename, storage_path, category")
         .eq("project_id", project["id"])
         .in_("id", ids)
-        .execute()
-    ).data or []
+    )
+    rows = exclude_unsent(q).execute().data or []
     found = {r["id"]: r for r in rows}
     missing = [i for i in ids if i not in found]
     if missing:
-        raise ValueError(f"Attachment not found in this project: {missing[0]}")
+        raise ValueError(
+            "Attachment not available in this project (an estimator file must "
+            f"be sent to the team before it can be attached): {missing[0]}"
+        )
     files = {
         r["id"]: {
             "filename": r["filename"],

@@ -6,11 +6,20 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from app.models.schemas import QuoteIn, QuoteOverrideIn, RfqCustomPriceIn, VerifyOverrideIn
+from app.models.schemas import (
+    QuoteIn,
+    QuoteOverrideIn,
+    TaxIn,
+    RfqCustomPriceIn,
+    VerifyOverrideIn,
+)
 from app.routers.pricing import (
+    DEFAULT_TAX_RATE,
     VERIFY_NUMBERS,
+    apply_tax,
     pick_material_amount,
     pricing_summary_numbers,
+    taxed_amount,
     verify_delta_pairs,
 )
 
@@ -41,6 +50,87 @@ def test_zero_amounts_are_real_values_not_missing():
     # Decimal("0") must not be treated as falsy/absent at any precedence level.
     assert pick_material_amount(Decimal("0"), Decimal("5"), Decimal("3")) == (Decimal("0"), "manual")
     assert pick_material_amount(None, Decimal("0"), Decimal("3")) == (Decimal("0"), "quote")
+
+
+# ── apply_tax: tax-inclusive quote cost (the true cost incurred) ──────────
+
+
+def test_tax_included_leaves_amount_unchanged():
+    # Vendor already priced tax in — no tax added, tax amount is 0.
+    assert apply_tax(Decimal("1000"), True, Decimal("8.375")) == (Decimal("1000"), Decimal("0.00"))
+
+
+def test_tax_not_included_applies_rate_rounded_to_cents():
+    # 1000 * 8.375% = 83.75 → total 1083.75.
+    total, tax = apply_tax(Decimal("1000"), False, Decimal("8.375"))
+    assert (total, tax) == (Decimal("1083.75"), Decimal("83.75"))
+
+
+def test_tax_rounds_half_up_to_cents():
+    # 12.34 * 8.375% = 1.033475 → rounds to 1.03; total 13.37.
+    total, tax = apply_tax(Decimal("12.34"), False, Decimal("8.375"))
+    assert (total, tax) == (Decimal("13.37"), Decimal("1.03"))
+
+
+def test_null_tax_included_is_treated_as_not_yet_included():
+    # Unanswered must not understate the cost — tax is applied at the given rate.
+    total, tax = apply_tax(Decimal("200"), None, Decimal("10"))
+    assert (total, tax) == (Decimal("220.00"), Decimal("20.00"))
+
+
+def test_missing_rate_falls_back_to_default():
+    total, tax = apply_tax(Decimal("100"), False, None)
+    expected = (Decimal("100") * DEFAULT_TAX_RATE / Decimal(100)).quantize(Decimal("0.01"))
+    assert tax == expected
+    assert total == Decimal("100") + expected
+
+
+def test_no_price_means_no_amount_and_no_tax():
+    assert apply_tax(None, False, Decimal("8.375")) == (None, Decimal("0.00"))
+
+
+# ── taxed_amount: the per-quote comparison basis ────────────────────
+
+
+def test_taxed_amount_adds_tax_when_not_included():
+    q = {"amount": "1000", "tax_included": False, "tax_rate": "8.375"}
+    assert taxed_amount(q) == Decimal("1083.75")
+
+
+def test_taxed_amount_unanswered_assumes_tax_not_included():
+    # NULL (unanswered) must never understate the cost.
+    q = {"amount": "1000", "tax_included": None, "tax_rate": "8.375"}
+    assert taxed_amount(q) == Decimal("1083.75")
+
+
+def test_taxed_amount_included_is_amount_as_is():
+    q = {"amount": "1000", "tax_included": True, "tax_rate": "8.375"}
+    assert taxed_amount(q) == Decimal("1000")
+
+
+def test_taxed_comparison_can_reorder_vendors():
+    # A, cheaper pre-tax without tax, is truly pricier than B with tax included.
+    a = {"amount": "1000", "tax_included": False, "tax_rate": "8.375"}
+    b = {"amount": "1050", "tax_included": True, "tax_rate": "8.375"}
+    assert taxed_amount(a) > taxed_amount(b)
+
+
+# ── TaxIn: tax attestation bounds ────────────────────────────────────
+
+
+def test_tax_rate_defaults_to_clark_county():
+    body = TaxIn(tax_included=False)
+    assert body.tax_rate == Decimal("8.375")
+
+
+def test_tax_rate_rejects_over_100_percent():
+    with pytest.raises(ValidationError):
+        TaxIn(tax_included=False, tax_rate=Decimal("101"))
+
+
+def test_tax_rate_rejects_negative():
+    with pytest.raises(ValidationError):
+        TaxIn(tax_included=False, tax_rate=Decimal("-1"))
 
 
 # ── Hand-entered amounts: no negatives, no numeric(14,2) overflow ──────────

@@ -37,9 +37,9 @@ TASK_KINDS: tuple[str, ...] = ("internal_bid", "due_from_estimator", "due_from_v
 # Default internal audiences (decided with G3). The estimator's inclusion for
 # due_from_estimator is handled by the poller's assignment path, not prefs.
 _DEFAULT_AUDIENCE: dict[str, frozenset[Role]] = {
-    "internal_bid":       frozenset({Role.PM, Role.PE, Role.PA}),
-    "due_from_estimator": frozenset({Role.PM, Role.PE, Role.PA}),
-    "due_from_vendors":   frozenset({Role.PE}),
+    "internal_bid":       frozenset({Role.ESTIMATING_ENGINEER, Role.ESTIMATING_ADMIN}),
+    "due_from_estimator": frozenset({Role.ESTIMATING_ENGINEER, Role.ESTIMATING_ADMIN}),
+    "due_from_vendors":   frozenset({Role.ESTIMATING_ENGINEER}),
 }
 
 
@@ -100,7 +100,9 @@ def default_prefs(role: Role) -> NotificationPrefsDoc:
             for kind in TASK_KINDS
         },
         actual_bid=(
-            ActualBidPref(offsets=list(ACTUAL_BID_OFFSETS)) if role == Role.PA else None
+            ActualBidPref(offsets=list(ACTUAL_BID_OFFSETS))
+            if role == Role.ESTIMATING_ADMIN
+            else None
         ),
     )
 
@@ -110,8 +112,8 @@ def effective_prefs(role: Role, stored: dict | None) -> NotificationPrefsDoc:
 
     Per-kind lenient: each kind is validated independently and falls back to
     its default on any error, so one corrupt/missing kind never discards the
-    rest. actual_bid is forced off for non-PA regardless of stored content
-    (covers dev role switches and PA reassignment after a row was saved).
+    rest. actual_bid is forced off for non-Estimating-Admin regardless of stored
+    content (covers dev role switches and reassignment after a row was saved).
     """
     defaults = default_prefs(role)
     stored = stored or {}
@@ -123,7 +125,7 @@ def effective_prefs(role: Role, stored: dict | None) -> NotificationPrefsDoc:
         except (KeyError, TypeError, ValidationError):
             kinds[kind] = getattr(defaults, kind)
 
-    if role != Role.PA:
+    if role != Role.ESTIMATING_ADMIN:
         kinds["actual_bid"] = None
     else:
         try:

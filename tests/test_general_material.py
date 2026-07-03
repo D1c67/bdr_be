@@ -67,3 +67,33 @@ def test_parse_json_strips_fences_and_validates():
 def test_parse_json_rejects_off_schema():
     with pytest.raises(ValueError):
         gm._parse_json('{"unexpected": 1}')
+
+
+# ── _tax_reset: reprocessing invalidates the sales-tax attestation ──────────
+
+
+def test_tax_reset_clears_on_new_estimate_file():
+    prior = {"amount": "100", "estimate_file_id": "file-1", "tax_included": True}
+    assert gm._tax_reset(prior, "file-2", 100) == {"tax_included": None}
+
+
+def test_tax_reset_clears_on_changed_amount():
+    prior = {"amount": "100", "estimate_file_id": "file-1", "tax_included": False}
+    assert gm._tax_reset(prior, "file-1", 250) == {"tax_included": None}
+
+
+def test_tax_reset_clears_when_figure_disappears():
+    prior = {"amount": "100", "estimate_file_id": "file-1", "tax_included": True}
+    assert gm._tax_reset(prior, "file-1", None) == {"tax_included": None}
+
+
+def test_tax_reset_keeps_attestation_when_nothing_moved():
+    prior = {"amount": "100", "estimate_file_id": "file-1", "tax_included": True}
+    # Same file, numerically-equal amount ("100" == 100.00) — the answer stands.
+    assert gm._tax_reset(prior, "file-1", 100.00) == {}
+
+
+def test_tax_reset_noop_without_prior_attestation():
+    assert gm._tax_reset(None, "file-1", 100) == {}
+    prior = {"amount": "100", "estimate_file_id": "file-1", "tax_included": None}
+    assert gm._tax_reset(prior, "file-2", 250) == {}

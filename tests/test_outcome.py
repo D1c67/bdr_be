@@ -104,10 +104,11 @@ def test_submitted_advances_to_bid_outcome():
 
 def test_bid_outcome_is_terminal():
     assert can_transition("bid_outcome", "submitted") is False
-    assert STAGES["bid_outcome"].owner_roles  # PA owns it (can correct)
+    assert STAGES["bid_outcome"].owner_roles  # Estimating Admin owns it (can correct)
 
 
-def test_submitted_now_owned_by_pa():
-    # The outstanding task at Submitted is recording the outcome — the PA's job.
-    assert owner_role_for("submitted").value == "pa"
-    assert owner_role_for("bid_outcome").value == "pa"
+def test_submitted_now_owned_by_estimating_admin():
+    # The outstanding task at Submitted is recording the outcome — the Estimating
+    # Admin's job.
+    assert owner_role_for("submitted").value == "estimating_admin"
+    assert owner_role_for("bid_outcome").value == "estimating_admin"

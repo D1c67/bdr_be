@@ -38,12 +38,40 @@ async def lifespan(_: FastAPI):
                 await task
 
 
+_is_prod = settings.environment == "production"
+
 app = FastAPI(
     title="BDR API",
     description="Bidding-process automation for G3 Electrical",
     version="0.1.0",
     lifespan=lifespan,
+    # Interactive docs + OpenAPI schema are dev conveniences; disable them in
+    # production so the full API surface isn't published to anonymous callers.
+    docs_url=None if _is_prod else "/docs",
+    redoc_url=None if _is_prod else "/redoc",
+    openapi_url=None if _is_prod else "/openapi.json",
 )
+
+# Middleware is applied bottom-up: the LAST added wraps the others, so CORS is
+# added last to stay outermost — every response, including a 413 from the body
+# limit or an error, then carries CORS headers (browsers otherwise report a bare
+# "Failed to fetch").
+from app.core.middleware import (  # noqa: E402
+    MaxBodySizeMiddleware,
+    SecurityHeadersMiddleware,
+)
+
+app.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_request_body_bytes)
+
+_security_headers = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+}
+if _is_prod:
+    # Render terminates TLS in front of us; only assert HSTS where traffic is https.
+    _security_headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+app.add_middleware(SecurityHeadersMiddleware, headers=_security_headers)
 
 app.add_middleware(
     CORSMiddleware,
@@ -51,6 +79,16 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Let the browser read the export download's filename + file count, and the
+    # rate-limit signals (so a throttled client can show "retry in Ns" and the
+    # scope code). allow_headers only governs *request* headers; response headers
+    # must be explicitly exposed.
+    expose_headers=[
+        "Content-Disposition",
+        "X-Export-File-Count",
+        "Retry-After",
+        "X-RateLimit-Scope",
+    ],
 )
 
 
@@ -63,6 +101,7 @@ async def health() -> dict[str, str]:
 from app.routers import (  # noqa: E402
     analytics,
     boq_analysis,
+    change_review,
     estimator,
     files,
     general_material,
@@ -99,3 +138,4 @@ app.include_router(notifications.router)
 app.include_router(notes.router)
 app.include_router(todos.router)
 app.include_router(files.router)
+app.include_router(change_review.router)

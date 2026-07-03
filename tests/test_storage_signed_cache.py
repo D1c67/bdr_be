@@ -12,9 +12,10 @@ class _CountingStorage:
     def from_(self, bucket):
         return self
 
-    def create_signed_url(self, path, ttl):
+    def create_signed_url(self, path, ttl, options=None):
         self.mints += 1
-        return {"signedURL": f"https://x/{path}?token=t{self.mints}"}
+        suffix = "&download=1" if options and options.get("download") else ""
+        return {"signedURL": f"https://x/{path}?token=t{self.mints}{suffix}"}
 
 
 @pytest.fixture

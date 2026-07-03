@@ -32,9 +32,10 @@ logger = logging.getLogger(__name__)
 
 MAX_LINE_CHARS = 500
 MAX_LINES = 200
-# Mirrors office_preview's conversion cap: a BOQ bigger than this is not a
-# spreadsheet a human sent in good faith.
-MAX_BOQ_BYTES = 50 * 1024 * 1024
+# BOQ size guard now lives in config (settings.boq_max_bytes), shared with
+# boq_extraction and general_material so all three enforce one number. Kept as a
+# module alias for readability / back-compat.
+MAX_BOQ_BYTES = get_settings().boq_max_bytes
 
 PROPOSAL_LINES_SCHEMA = {
     "type": "object",
@@ -230,11 +231,10 @@ def _load_boq_text(draft: dict[str, Any]) -> str:
             f"BOQ file is too large to analyze ({size // (1024 * 1024)}MB; "
             f"limit {MAX_BOQ_BYTES // (1024 * 1024)}MB)."
         )
-    text = worksheets_to_text(storage.download_file(rec["storage_path"]))
+    # Cap is enforced inside the renderer so an inflated workbook can't spike
+    # memory before we'd have truncated it.
     cap = get_settings().openai_proposal_max_input_chars
-    if len(text) > cap:
-        text = text[:cap] + "\n[TRUNCATED — BOQ exceeded the analysis size limit]"
-    return text
+    return worksheets_to_text(storage.download_file(rec["storage_path"]), cap)
 
 
 def _call_openai(doc_text: str) -> dict[str, Any]:

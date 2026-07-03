@@ -25,8 +25,9 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from app.core.roles import ACTUAL_BID_VIEWER_ROLES, Role
-from app.routers.pricing import pick_material_amount, pricing_summary_numbers
+from app.routers.pricing import pick_material_amount, pricing_summary_numbers, taxed_amount
 from app.core.supabase_client import get_supabase
+from app.services.outcome import our_amount_of
 from app.services.project_status import derive_status
 from app.services.workflow import STAGES
 
@@ -48,6 +49,15 @@ GROUP_LABELS = {
     "labor_time": LABOR_TIME_LABELS,
     "est_value_band": VALUE_BAND_LABELS,
 }
+
+
+def _group_label(labels: dict[str, str], key: str) -> str:
+    """Display label for a breakdown key. Presets use their mapped label; a custom
+    labor_time / wage_type value shows as typed; the missing-value sentinel is
+    'Unknown'."""
+    if key == "unknown":
+        return "Unknown"
+    return labels.get(key, key)
 
 _PROJECT_COLS = (
     "id, name, number, current_stage, abandoned_at, created_at, "
@@ -102,6 +112,12 @@ def _rate(numer: int, denom: int) -> float | None:
 
 def _mean(values: list[float]) -> float | None:
     return round(sum(values) / len(values), 2) if values else None
+
+
+def _mean_signed(values: list[float]) -> float | None:
+    """Mean that keeps its sign, at fraction precision (like _rate) — for signed
+    percentages such as how much higher/lower we bid a GC vs. the other GCs."""
+    return round(sum(values) / len(values), 4) if values else None
 
 
 def resolve_range(
@@ -282,6 +298,11 @@ def load_window(
             continue
         if pid not in w.first_event_at:
             w.first_event_at[pid] = at
+        # First-submitted-wins. This guard is also what makes re-verification safe:
+        # a post-verify pricing edit can bounce a `submitted` project back to verify
+        # and re-commit it back to `submitted`, writing a second `to_stage=submitted`
+        # event — but the bid date / end-to-end time stays pinned to the ORIGINAL
+        # submission, not the re-commit (see workflow.reopen_verify / return_from_reverify).
         if e["to_stage"] == "submitted" and pid not in w.submitted_at:
             w.submitted_at[pid] = at
     return w
@@ -311,7 +332,8 @@ def _materials_amounts(
     estimate. Returns one amount per category (None where unpriced)."""
     amounts: list[Decimal | None] = []
     gen = gen_by_proj.get(pid)
-    gen_amount = Decimal(str(gen["amount"])) if gen and gen.get("amount") is not None else None
+    # The general figure carries its own tax answer — taxed like a quote.
+    gen_amount = taxed_amount(gen) if gen and gen.get("amount") is not None else None
     saw_general = False
     for r in rfqs_by_proj.get(pid, []):
         cat = r.get("material_categories") or {}
@@ -322,7 +344,9 @@ def _materials_amounts(
         lowest: Decimal | None = None
         selected: Decimal | None = None
         for q in quotes_by_rfq.get(r["id"], []):
-            amt = Decimal(str(q["amount"]))
+            # Tax-inclusive, like pricing — raw amounts would flatter vendors
+            # whose quotes don't yet carry sales tax.
+            amt = taxed_amount(q)
             if lowest is None or amt < lowest:
                 lowest = amt
             if q.get("is_selected"):
@@ -354,7 +378,12 @@ def _load_pricing(pids: list[str]) -> dict[str, dict]:
         rfqs_by_proj[r["project_id"]].append(r)
         rfq_ids.append(r["id"])
     quotes = (
-        (sb.table("quotes").select("rfq_id, amount, is_selected").in_("rfq_id", rfq_ids).execute()).data
+        (
+            sb.table("quotes")
+            .select("rfq_id, amount, is_selected, tax_included, tax_rate")
+            .in_("rfq_id", rfq_ids)
+            .execute()
+        ).data
         if rfq_ids
         else []
     ) or []
@@ -365,7 +394,7 @@ def _load_pricing(pids: list[str]) -> dict[str, dict]:
         g["project_id"]: g
         for g in (
             sb.table("general_material_estimates")
-            .select("project_id, amount, source")
+            .select("project_id, amount, source, tax_included, tax_rate")
             .in_("project_id", pids)
             .execute()
         ).data
@@ -554,7 +583,8 @@ def _quotes_data(w: WindowData) -> dict:
     quotes = (
         (
             sb.table("quotes")
-            .select("rfq_id, amount, is_selected, received_at, source")
+            # tax fields so _materials_amounts prices by tax-inclusive totals.
+            .select("rfq_id, amount, is_selected, received_at, source, tax_included, tax_rate")
             .in_("rfq_id", rfq_ids)
             .execute()
         ).data
@@ -594,7 +624,7 @@ def _quotes_data(w: WindowData) -> dict:
         g["project_id"]: g
         for g in (
             sb.table("general_material_estimates")
-            .select("project_id, amount, source")
+            .select("project_id, amount, source, tax_included, tax_rate")
             .in_("project_id", pids)
             .execute()
         ).data
@@ -715,7 +745,7 @@ def cycle_time(w: WindowData, range_: str) -> dict:
             groups[key].append((sub - first).total_seconds() / 3600)
         labels = GROUP_LABELS[dim]
         breakdowns[dim] = [
-            {"key": k, "label": labels.get(k, "Unknown"), "avg_hours": _mean(v), "samples": len(v)}
+            {"key": k, "label": _group_label(labels, k), "avg_hours": _mean(v), "samples": len(v)}
             for k, v in sorted(groups.items())
         ]
     return {
@@ -825,7 +855,7 @@ def _overview_core(w: WindowData) -> dict:
         for pid in cohort
         if w.submitted_at.get(pid) and w.first_event_at.get(pid)
     ]
-    send = send_out(w, "", "internal_bid_at", Role.PA)
+    send = send_out(w, "", "internal_bid_at", Role.ESTIMATING_ADMIN)
     classifiable = send["on_time"] + send["late"]
     return {
         "cohort": cohort,
@@ -871,7 +901,7 @@ def overview(w: WindowData, range_: str) -> dict:
         breakdowns[dim] = [
             {
                 "key": k,
-                "label": labels.get(k, "Unknown"),
+                "label": _group_label(labels, k),
                 "count": g["count"],
                 "total_bid_amount": round(sum(g["values"]), 2) if g["values"] else None,
                 "avg_time_to_bid_hours": _mean(g["times"]),
@@ -948,6 +978,172 @@ def win_loss(w: WindowData, range_: str) -> dict:
     }
 
 
+# ── GC pricing spread ──────────────────────────────────────────────────────
+
+
+def _gc_spread_compute(
+    sends_by_project: dict[str, list[tuple[str, str, float]]],
+) -> dict:
+    """Pure per-job pricing-spread math (no DB), so it unit-tests like
+    outcome.merge_gc_outcomes. Input: per project, a list of (gc_id, gc_name,
+    total) where total = material + labor for one status='sent' proposal_send.
+
+    On every job we bid to ≥2 GCs, each GC's number is compared to the *mean of
+    the OTHER GCs on that same job* (leave-one-out): a positive delta means we bid
+    that GC higher than its peers. Single-GC jobs still count toward the totals and
+    the per-GC leaderboard, but carry no spread (no peers to compare against).
+
+    Aggregation rules:
+      * `avg_abs_spread_pct` pools |pct| over every per-(job, GC) entry — NOT an
+        average of per-GC averages — so a GC seen on one wild job can't skew it.
+      * each GC's `avg_signed_pct` is the simple mean of that GC's per-job signed
+        pcts (one entry per shared job), keeping sign for higher/lower direction.
+    """
+    by_gc: dict[str, dict] = defaultdict(
+        lambda: {
+            "gc_name": "",
+            "times_bid": 0,
+            "total_amount": 0.0,
+            "signed_pcts": [],  # one signed pct per shared (multi-GC) job
+            "times_higher": 0,
+            "times_lower": 0,
+        }
+    )
+    abs_entries: list[float] = []  # pooled |pct| over every multi-GC (job, GC) entry
+    spread_by_project: dict[str, dict] = {}
+    gc_send_count = 0
+    jobs_with_sends = 0
+    multi_gc_jobs = 0
+    total_bid_amount = 0.0
+
+    for pid, sends in sends_by_project.items():
+        # One valid, positive number per GC. proposal_sends is unique per
+        # (project, gc), so dupes shouldn't occur — guard by keeping the max.
+        valid: dict[str, tuple[str, float]] = {}
+        for gc_id, gc_name, total in sends:
+            if total is None or total <= 0:
+                continue
+            prev = valid.get(gc_id)
+            if prev is None or total > prev[1]:
+                valid[gc_id] = (gc_name, total)
+        if not valid:
+            continue
+        jobs_with_sends += 1
+        gc_send_count += len(valid)
+
+        # Leaderboard + grand total count every valid send (incl. single-GC jobs).
+        for gc_id, (gc_name, total) in valid.items():
+            agg = by_gc[gc_id]
+            agg["gc_name"] = gc_name
+            agg["times_bid"] += 1
+            agg["total_amount"] += total
+            total_bid_amount += total
+
+        n = len(valid)
+        if n < 2:
+            continue  # no peers → no spread
+        multi_gc_jobs += 1
+        sum_all = sum(t for _, t in valid.values())
+        job_abs: list[float] = []
+        for gc_id, (gc_name, total) in valid.items():
+            mean_others = (sum_all - total) / (n - 1)
+            if mean_others <= 0:
+                continue  # all peers filtered out — can't form a baseline
+            delta = total - mean_others
+            pct = delta / mean_others
+            agg = by_gc[gc_id]
+            agg["signed_pcts"].append(pct)
+            if delta > 0:
+                agg["times_higher"] += 1
+            elif delta < 0:
+                agg["times_lower"] += 1
+            abs_entries.append(abs(pct))
+            job_abs.append(abs(pct))
+        spread_by_project[pid] = {
+            "n": n,
+            "total": sum_all,
+            "avg_pct": round(sum(job_abs) / len(job_abs), 4) if job_abs else None,
+            "max_abs_pct": round(max(job_abs), 4) if job_abs else None,
+        }
+
+    leaderboard = [
+        {
+            "gc_id": gc_id,
+            "gc_name": agg["gc_name"],
+            "times_bid": agg["times_bid"],
+            "total_amount": round(agg["total_amount"], 2),
+            "avg_signed_pct": _mean_signed(agg["signed_pcts"]),
+            "times_higher": agg["times_higher"],
+            "times_lower": agg["times_lower"],
+            "multi_gc_jobs": len(agg["signed_pcts"]),
+        }
+        for gc_id, agg in by_gc.items()
+    ]
+    leaderboard.sort(key=lambda r: r["total_amount"], reverse=True)
+
+    return {
+        "gc_send_count": gc_send_count,
+        "jobs_with_sends": jobs_with_sends,
+        "multi_gc_jobs": multi_gc_jobs,
+        "total_bid_amount": round(total_bid_amount, 2) if gc_send_count else None,
+        "avg_abs_spread_pct": (
+            round(sum(abs_entries) / len(abs_entries), 4) if abs_entries else None
+        ),
+        "by_gc": leaderboard,
+        "_spread_by_project": spread_by_project,
+    }
+
+
+def gc_spread(w: WindowData, range_: str) -> dict:
+    """GC pricing spread: on jobs we bid to multiple GCs, how much higher/lower we
+    bid each GC vs. the others on that same job. Cohort + every filter come from
+    the standard send-out machinery; the per-GC numbers from sent proposal_sends."""
+    cohort = _send_out_cohort(w)
+    rows: list[dict] = []
+    if cohort:
+        rows = (
+            get_supabase()
+            .table("proposal_sends")
+            .select("project_id, gc_id, gc_name, material_amount, labor_amount")
+            .in_("project_id", cohort)
+            .eq("status", "sent")
+            .execute()
+        ).data or []
+
+    sends_by_project: dict[str, list[tuple[str, str, float]]] = defaultdict(list)
+    for r in rows:
+        amt = our_amount_of(r.get("material_amount"), r.get("labor_amount"))
+        if amt is None:
+            continue
+        sends_by_project[r["project_id"]].append((r["gc_id"], r["gc_name"], float(amt)))
+
+    res = _gc_spread_compute(sends_by_project)
+    spread_by_project = res.pop("_spread_by_project")
+
+    projects = [
+        {
+            **w.ref(pid),
+            "gc_count": sp["n"],
+            "avg_spread_pct": sp["avg_pct"],
+            "max_abs_spread_pct": sp["max_abs_pct"],
+            "total_amount": round(sp["total"], 2),
+        }
+        for pid, sp in spread_by_project.items()
+    ]
+    projects.sort(key=lambda r: r["max_abs_spread_pct"] or 0.0, reverse=True)
+
+    return {
+        "meta": meta(w, range_, "submitted_at"),
+        "gc_send_count": res["gc_send_count"],
+        "jobs_with_sends": res["jobs_with_sends"],
+        "multi_gc_jobs": res["multi_gc_jobs"],
+        "total_bid_amount": res["total_bid_amount"],
+        "avg_abs_spread_pct": res["avg_abs_spread_pct"],
+        "by_gc": res["by_gc"],
+        "projects": projects,
+    }
+
+
 def project_detail(w: WindowData, range_: str, viewer_role: Role) -> dict:
     """All sections for a single project (drives the drill-down modal)."""
     pid = w.project_id
@@ -1003,4 +1199,202 @@ def project_detail(w: WindowData, range_: str, viewer_role: Role) -> dict:
         }
         if out
         else None,
+    }
+
+
+# ── Activity log (who did what) ────────────────────────────────────────────
+# The Analytics → Activity sub-page is the first read surface for the audit_log
+# table (every recorded write: project edits, pricing, verify commits, file
+# uploads, votes, user management …). We merge it with stage_events (who advanced
+# each pipeline step) into one chronological "who did what / who inputted what"
+# feed. Read-only; the route gates it to internal roles (the accountant included).
+
+# Friendly labels for the audit `action` taxonomy. Unknown actions fall back to
+# the raw key so newly-added audit actions still render.
+ACTIVITY_ACTION_LABELS: dict[str, str] = {
+    "stage.advance": "Advanced stage",
+    "project.create": "Created project",
+    "project.update": "Edited project details",
+    "project.abandon": "Abandoned project",
+    "project.reactivate": "Reactivated project",
+    "project.gc_add": "Added a GC",
+    "project.gc_remove": "Removed a GC",
+    "project.send_out": "Sent proposals",
+    "project.bid_outcome": "Recorded win/loss",
+    "estimator.assign": "Assigned estimator",
+    "estimator.revoke": "Revoked estimator",
+    "estimator.email_sent": "Emailed estimator",
+    "estimator.submit": "Estimator submitted estimate",
+    "gono.go": "Go/No-Go: Go",
+    "gono.no_go": "Go/No-Go: No-Go",
+    "gono.vote": "Go/No-Go vote",
+    "labor.review": "Set labor numbers",
+    "markup.set": "Set markup",
+    "pricing.verify_edit": "Edited verify numbers",
+    "pricing.commit": "Committed pricing (verify)",
+    "boq.analyze": "Ran BOQ analysis",
+    "boq.refine": "Refined BOQ analysis",
+    "boq.edit": "Edited BOQ analysis",
+    "boq.confirm": "Confirmed BOQ → RFQs",
+    "general_material.extract": "Extracted general material",
+    "rfq.create": "Created RFQ",
+    "rfq.bulk_send": "Sent RFQs",
+    "rfq.send_one": "Sent an RFQ",
+    "rfq.quotes_confirmed": "Confirmed quotes complete",
+    "quote.add": "Added a quote",
+    "quote.select": "Selected a quote",
+    "note.create": "Posted a note",
+    "proposal.lines_generate": "Generated proposal scope",
+    "proposal.lines_save": "Saved proposal scope",
+    "proposal.approve": "Approved proposal scope",
+    "proposal.amounts_set": "Set per-GC amounts",
+    "proposal.generate": "Generated proposal",
+    "proposal.generate_docs": "Generated proposal docs",
+    "proposal.send": "Sent a proposal",
+    "file.upload": "Uploaded a file",
+    "file.download": "Downloaded a file",
+    "file.preview": "Previewed a file",
+    "file.delete": "Deleted a file",
+    "access.denied": "Access denied",
+    "user.invite": "Invited a user",
+    "user.reinvite": "Re-invited a user",
+    "user.update": "Updated a user",
+    "user.update_self": "Updated own profile",
+    "user.dev_role_switch": "Switched own role (dev)",
+    "user.notification_prefs.update": "Updated notification prefs",
+    "user.notification_prefs.reset": "Reset notification prefs",
+}
+
+
+def _activity_project_label(proj: dict | None) -> str | None:
+    if not proj:
+        return None
+    number = (proj.get("number") or "").strip()
+    name = (proj.get("name") or "").strip()
+    return " — ".join(p for p in (number, name) if p) or None
+
+
+def activity_log(
+    range_: str,
+    date_from: str | None,
+    date_to: str | None,
+    actor_id: str | None,
+    action: str | None,
+    project_id: str | None,
+    limit: int,
+    offset: int,
+) -> dict:
+    """One chronological feed of audit_log + stage_events within the window.
+
+    Filterable by actor, action and project; paginated in Python over the merged
+    list. Each source is capped (so a runaway window can't OOM) — `truncated` flags
+    when a cap was hit so the UI can tell the user to narrow the range.
+    """
+    df, dt = resolve_range(range_, date_from, date_to)  # raises ValueError on bad input
+    sb = get_supabase()
+    df_iso, dt_iso = df.isoformat(), dt.isoformat()
+    CAP = 1000
+
+    # audit_log — skip entirely when filtering for the synthetic stage.advance.
+    audit_rows: list[dict] = []
+    if not action or action != "stage.advance":
+        aq = (
+            sb.table("audit_log")
+            .select("id, actor_id, action, entity, entity_id, payload, created_at")
+            .gte("created_at", df_iso)
+            .lte("created_at", dt_iso)
+        )
+        if actor_id:
+            aq = aq.eq("actor_id", actor_id)
+        if action:
+            aq = aq.eq("action", action)
+        if project_id:
+            # Most pipeline actions audit entity='project', entity_id=<project>.
+            aq = aq.eq("entity", "project").eq("entity_id", project_id)
+        audit_rows = aq.order("created_at", desc=True).limit(CAP).execute().data or []
+
+    # stage_events — synthesized as stage.advance.
+    events: list[dict] = []
+    if not action or action == "stage.advance":
+        eq = (
+            sb.table("stage_events")
+            .select("id, project_id, from_stage, to_stage, note, actor_id, entered_at")
+            .gte("entered_at", df_iso)
+            .lte("entered_at", dt_iso)
+        )
+        if actor_id:
+            eq = eq.eq("actor_id", actor_id)
+        if project_id:
+            eq = eq.eq("project_id", project_id)
+        events = eq.order("entered_at", desc=True).limit(CAP).execute().data or []
+
+    # Resolve actor names/roles and project labels in batch.
+    actor_ids = {r["actor_id"] for r in audit_rows if r.get("actor_id")}
+    actor_ids |= {e["actor_id"] for e in events if e.get("actor_id")}
+    actors: dict[str, dict] = {}
+    if actor_ids:
+        prof = (
+            sb.table("profiles").select("id, full_name, role").in_("id", list(actor_ids)).execute()
+        ).data or []
+        actors = {p["id"]: p for p in prof}
+
+    proj_ids = {e["project_id"] for e in events if e.get("project_id")}
+    proj_ids |= {r["entity_id"] for r in audit_rows if r.get("entity") == "project" and r.get("entity_id")}
+    projects: dict[str, dict] = {}
+    if proj_ids:
+        prows = (
+            sb.table("projects").select("id, number, name").in_("id", list(proj_ids)).execute()
+        ).data or []
+        projects = {p["id"]: p for p in prows}
+
+    def _row(rid, at, aid, act, entity, pid, detail) -> dict:
+        prof = actors.get(aid) if aid else None
+        return {
+            "id": rid,
+            "at": at,
+            "actor_id": aid,
+            "actor_name": (prof or {}).get("full_name"),
+            "actor_role": (prof or {}).get("role"),
+            "action": act,
+            "action_label": ACTIVITY_ACTION_LABELS.get(act, act),
+            "entity": entity,
+            "project_id": pid,
+            "project_label": _activity_project_label(projects.get(pid)) if pid else None,
+            "detail": detail,
+        }
+
+    rows: list[dict] = []
+    for r in audit_rows:
+        pid = r["entity_id"] if r.get("entity") == "project" else None
+        rows.append(
+            _row(r["id"], r["created_at"], r.get("actor_id"), r["action"], r.get("entity"), pid, r.get("payload"))
+        )
+    for e in events:
+        rows.append(
+            _row(
+                f"stage:{e['id']}",
+                e["entered_at"],
+                e.get("actor_id"),
+                "stage.advance",
+                "project",
+                e.get("project_id"),
+                {"from": e.get("from_stage"), "to": e.get("to_stage"), "note": e.get("note")},
+            )
+        )
+
+    rows.sort(key=lambda x: _parse(x["at"]) or utcnow(), reverse=True)
+    total = len(rows)
+    truncated = len(audit_rows) >= CAP or len(events) >= CAP
+    page = rows[offset : offset + limit]
+    actions_present = sorted({r["action"] for r in rows})
+
+    return {
+        "rows": page,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "truncated": truncated,
+        "available_actions": [
+            {"value": a, "label": ACTIVITY_ACTION_LABELS.get(a, a)} for a in actions_present
+        ],
     }

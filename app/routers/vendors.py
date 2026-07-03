@@ -7,7 +7,7 @@ the external estimator has no access to the vendor directory.
 
 from fastapi import APIRouter, Depends
 
-from app.core.deps import CurrentUser, require_internal
+from app.core.deps import CurrentUser, require_internal, require_writer
 from app.core.supabase_client import get_supabase
 from app.models.schemas import VendorContactIn, VendorIn
 
@@ -20,7 +20,7 @@ async def list_vendors(_: CurrentUser = Depends(require_internal)):
 
 
 @router.post("/vendors", status_code=201)
-async def create_vendor(body: VendorIn, _: CurrentUser = Depends(require_internal)):
+async def create_vendor(body: VendorIn, _: CurrentUser = Depends(require_writer)):
     return get_supabase().table("vendors").insert(body.model_dump()).execute().data[0]
 
 
@@ -36,7 +36,7 @@ async def list_contacts(
 
 
 @router.post("/vendor-contacts", status_code=201)
-async def create_contact(body: VendorContactIn, _: CurrentUser = Depends(require_internal)):
+async def create_contact(body: VendorContactIn, _: CurrentUser = Depends(require_writer)):
     return (
         get_supabase().table("vendor_contacts").insert(body.model_dump(mode="json")).execute()
     ).data[0]

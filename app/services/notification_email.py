@@ -46,7 +46,12 @@ _TYPE_META: dict[str, tuple[str, str]] = {
     "drawing_changed": ("Project drawings changed", "Review drawings"),
     "gono_go": ("Project accepted — send to estimator", "Open project"),
     "assigned": ("You were assigned to a project", "Open your assignment"),
+    "files_updated": ("Project files updated", "View the files"),
     "estimate_submitted": ("Estimate submitted", "Review the estimate"),
+    # Revision rounds send their own high-importance email (revision_email.py);
+    # the bell rows are created with mirror_email=False, so this entry only
+    # matters if a future caller re-enables the mirror for this type.
+    "estimate_revised": ("Estimator sent changes/revisions", "Review changes"),
     "rfq.reply_received": ("A vendor replied to an RFQ", "View quotes"),
     "quote.received": ("A vendor quote came in", "View quotes"),
     "bid_outcome": ("Bid outcome recorded", "Open project"),

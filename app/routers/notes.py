@@ -8,6 +8,7 @@ the other side through the in-app notification bell:
   estimator author → PA/PM plus any other internal user already in the thread
 """
 
+import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -15,7 +16,7 @@ from pydantic import AwareDatetime, BaseModel, Field, field_validator
 
 from app.core.deps import CurrentUser, require_project_assignment
 from app.core.ratelimit import estimator_rate_limit
-from app.core.roles import INTERNAL_ROLES, Role
+from app.core.roles import INTERNAL_ROLES, WRITER_ROLES, Role
 from app.core.supabase_client import get_supabase
 from app.services import notification_email
 from app.services.notifications import audit, dismiss_notifications
@@ -112,8 +113,10 @@ def _unread_count(sb, project_id: str, user_id: str, last_read_iso: str | None) 
         .select("id", count="exact")
         .eq("project_id", project_id)
         # Your own notes are never "unread"; authorless notes (deleted user)
-        # still count — someone else wrote them.
-        .or_(f"author_id.neq.{user_id},author_id.is.null")
+        # still count — someone else wrote them. Validate user_id as a UUID
+        # before interpolating it into the PostgREST or-filter so a non-UUID can
+        # never smuggle extra filter clauses into the string.
+        .or_(f"author_id.neq.{uuid.UUID(user_id)},author_id.is.null")
     )
     if last_read_iso is not None:
         q = q.gt("created_at", last_read_iso)
@@ -159,6 +162,12 @@ async def create_note(
     payload: NoteIn,
     user: CurrentUser = Depends(require_project_assignment),
 ):
+    # Writers or the (assigned) estimator may post; the read-only accountant may
+    # read the thread but not write into it. require_project_assignment only
+    # gates the estimator, so the accountant is otherwise let through to here.
+    if user.role not in WRITER_ROLES and user.role != Role.ESTIMATOR:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
+
     sb = get_supabase()
     proj = (
         sb.table("projects").select("name, number").eq("id", project_id).single().execute()
@@ -186,7 +195,7 @@ async def create_note(
         owners = (
             sb.table("profiles")
             .select("id")
-            .in_("role", [Role.PA.value, Role.PM.value])
+            .in_("role", [Role.ESTIMATING_ADMIN.value, Role.ESTIMATING_ENGINEER.value])
             .eq("is_active", True)
             .execute()
         ).data or []

@@ -46,28 +46,47 @@ _SCHEMA = """{
 }"""
 
 
-def worksheets_to_text(xlsx_bytes: bytes) -> str:
+def worksheets_to_text(xlsx_bytes: bytes, max_chars: int | None = None) -> str:
     """Render every non-empty worksheet as labelled, tab-separated rows.
 
     Produces the exact body that goes inside the user prompt's <document> tags.
+
+    `max_chars` bounds the accumulated text WHILE rendering (not after), so a
+    zip-amplified workbook — a small .xlsx that inflates to gigabytes of cells —
+    can't spike memory or run up the model bill: rendering stops the moment the
+    cap is crossed. Callers that hand this to an LLM should always pass a cap.
     """
     import openpyxl
 
     wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), data_only=True, read_only=True)
     sections: list[str] = []
-    for ws in wb.worksheets:
-        lines: list[str] = []
-        for row in ws.iter_rows(values_only=True):
-            vals = list(row)
-            while vals and (vals[-1] is None or vals[-1] == ""):
-                vals.pop()
-            if not vals:
-                continue
-            lines.append("\t".join("" if v is None else str(v) for v in vals))
-        if lines:
-            sections.append(f"--- WORKSHEET: {ws.title} ---\n" + "\n".join(lines))
-    wb.close()
-    return "\n\n".join(sections)
+    total = 0
+    truncated = False
+    try:
+        for ws in wb.worksheets:
+            lines: list[str] = []
+            for row in ws.iter_rows(values_only=True):
+                vals = list(row)
+                while vals and (vals[-1] is None or vals[-1] == ""):
+                    vals.pop()
+                if not vals:
+                    continue
+                line = "\t".join("" if v is None else str(v) for v in vals)
+                lines.append(line)
+                total += len(line) + 1
+                if max_chars is not None and total > max_chars:
+                    truncated = True
+                    break
+            if lines:
+                sections.append(f"--- WORKSHEET: {ws.title} ---\n" + "\n".join(lines))
+            if truncated:
+                break
+    finally:
+        wb.close()
+    text = "\n\n".join(sections)
+    if truncated:
+        text += "\n[TRUNCATED — BOQ exceeded the analysis size limit]"
+    return text
 
 
 def build_system_prompt(categories: list[str]) -> str:
@@ -164,10 +183,26 @@ def _load_boq_text(analysis: dict[str, Any]) -> str:
     file_id = analysis.get("boq_file_id")
     if not file_id:
         raise ValueError("No BOQ file is attached to this analysis.")
-    rec = sb.table("project_files").select("storage_path").eq("id", file_id).single().execute().data
+    rec = (
+        sb.table("project_files")
+        .select("storage_path, size_bytes")
+        .eq("id", file_id)
+        .single()
+        .execute()
+        .data
+    )
     if not rec:
         raise ValueError("BOQ file not found in storage.")
-    return worksheets_to_text(storage.download_file(rec["storage_path"]))
+    settings = get_settings()
+    size = rec.get("size_bytes") or 0
+    if size > settings.boq_max_bytes:
+        raise ValueError(
+            f"BOQ file is too large to analyze ({size // (1024 * 1024)}MB; "
+            f"limit {settings.boq_max_bytes // (1024 * 1024)}MB)."
+        )
+    return worksheets_to_text(
+        storage.download_file(rec["storage_path"]), settings.boq_max_text_chars
+    )
 
 
 def _mark(analysis_id: str, **fields: Any) -> None:

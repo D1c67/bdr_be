@@ -12,6 +12,10 @@ services:
     envVars:
       - key: ENVIRONMENT
         value: production
+      # Re-pin the 2FA requirement on every blueprint sync so it can't be
+      # silently disabled by dashboard drift. Flip only for break-glass.
+      - key: MFA_REQUIRED
+        value: "true"
       - key: SUPABASE_URL
         value: https://bpidntbyvoooqvaispup.supabase.co
       - key: SUPABASE_ANON_KEY
@@ -43,5 +47,15 @@ services:
     name: bdr-gotenberg
     runtime: image
     image:
-      url: docker.io/gotenberg/gotenberg:8
+      # SECURITY: this container parses UNTRUSTED vendor email attachments
+      # (see app/services/rfq_inbox.py), so version bumps are security-relevant.
+      # Pinned to a specific minor version instead of the floating `:8` major
+      # tag so deploys don't silently pick up a new LibreOffice build.
+      # A digest pin (@sha256:...) is stronger — obtain it with:
+      #   docker buildx imagetools inspect gotenberg/gotenberg:8.21.1
+      # BUT a digest pin MUST be paired with an update cadence (Renovate/
+      # Dependabot or a monthly bump task), or it freezes on a CVE-laden
+      # LibreOffice build.
+      # TODO(owner): append the real @sha256:<digest> using the command above.
+      url: docker.io/gotenberg/gotenberg:8.21.1
     plan: starter
