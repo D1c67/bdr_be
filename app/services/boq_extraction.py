@@ -18,7 +18,7 @@ from typing import Any
 
 from app.core.config import get_settings
 from app.core.supabase_client import get_supabase
-from app.services import storage
+from app.services import llm_errors, storage
 
 # The JSON schema Claude must emit (kept verbatim — the anti-injection guard
 # below tells the model never to deviate from it).
@@ -229,7 +229,11 @@ def run_extraction(analysis_id: str) -> None:
         )
         _mark(analysis_id, status="done", result_json=result)
     except Exception as exc:  # surface the failure to the poller
-        _mark(analysis_id, status="failed", error=str(exc))
+        _mark(
+            analysis_id,
+            status="failed",
+            error=llm_errors.user_message(exc, settings.claude_boq_model),
+        )
 
 
 def refine_extraction(analysis_id: str, user_message: str) -> None:
@@ -262,4 +266,8 @@ def refine_extraction(analysis_id: str, user_message: str) -> None:
         result = _call_claude(system_prompt, messages)
         _mark(analysis_id, status="done", result_json=result)
     except Exception as exc:
-        _mark(analysis_id, status="failed", error=str(exc))
+        _mark(
+            analysis_id,
+            status="failed",
+            error=llm_errors.user_message(exc, settings.claude_boq_model),
+        )

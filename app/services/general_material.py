@@ -17,7 +17,7 @@ from typing import Any
 
 from app.core.config import get_settings
 from app.core.supabase_client import get_supabase
-from app.services import boq_extraction, storage
+from app.services import boq_extraction, llm_errors, storage
 
 # The JSON the model must emit. `found` is the explicit signal — a null cost with
 # found=false maps to status `not_found`.
@@ -268,4 +268,8 @@ def run_extraction(project_id: str) -> None:
             )
             _maybe_bounce(project_id, prior_amount, None)
     except Exception as exc:  # surface to the poller / UI
-        _save(project_id, status="failed", error=str(exc))
+        _save(
+            project_id,
+            status="failed",
+            error=llm_errors.user_message(exc, settings.claude_estimate_model),
+        )

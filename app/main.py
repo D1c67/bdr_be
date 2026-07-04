@@ -3,7 +3,7 @@
 import asyncio
 import contextlib
 
-from fastapi import FastAPI
+from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
@@ -90,6 +90,45 @@ app.add_middleware(
         "X-RateLimit-Scope",
     ],
 )
+
+
+# ── Storage failures → clean, CORS-safe responses ─────────────────────────────
+# A Supabase Storage error — most commonly a 413 when an object exceeds the
+# bucket/global size limit — is raised deep in the upload path as a
+# StorageApiError. With no handler it escapes as an unhandled 500 synthesized by
+# Starlette's OUTERMOST ServerErrorMiddleware, which sits above the CORS
+# middleware, so that 500 never gets an Access-Control-Allow-Origin header and
+# the browser reports a misleading "Failed to fetch"/CORS error instead of the
+# real cause. A *registered* handler, by contrast, runs in the innermost
+# ExceptionMiddleware (below CORS): its response flows back out through CORS and
+# is both actionable and CORS-safe.
+from starlette.requests import Request  # noqa: E402
+from starlette.responses import JSONResponse  # noqa: E402
+from storage3.utils import StorageException  # noqa: E402
+
+
+@app.exception_handler(StorageException)
+async def _storage_exception_handler(_: Request, exc: StorageException) -> JSONResponse:
+    raw_status = getattr(exc, "status", None)  # set on StorageApiError; else None
+    try:
+        code = int(raw_status)
+    except (TypeError, ValueError):
+        code = None
+
+    if code == status.HTTP_413_REQUEST_ENTITY_TOO_LARGE:
+        # The per-route streaming caps (files: upload_max_bytes; BOQ:
+        # boq_max_bytes) normally reject first; reaching here means storage is
+        # configured below the app cap, so keep the message limit-agnostic.
+        return JSONResponse(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            content={"detail": "This file is too large to store and was not uploaded."},
+        )
+    # Any other storage failure is an upstream dependency problem, not the
+    # client's fault → 502 (still CORS-safe) rather than a bare 500.
+    return JSONResponse(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        content={"detail": "File storage is temporarily unavailable. Please try again."},
+    )
 
 
 @app.get("/health", tags=["meta"])

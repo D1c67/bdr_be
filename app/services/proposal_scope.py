@@ -25,7 +25,7 @@ from typing import Any
 
 from app.core.config import get_settings
 from app.core.supabase_client import get_supabase
-from app.services import storage
+from app.services import llm_errors, storage
 from app.services.boq_extraction import worksheets_to_text
 
 logger = logging.getLogger(__name__)
@@ -301,4 +301,8 @@ def run_generation(draft_id: str) -> None:
         _mark(draft_id, status="done", result_json=result, lines_json=lines)
     except Exception as exc:  # surface the failure to the poller
         logger.exception("proposal line generation failed for draft %s", draft_id)
-        _mark(draft_id, status="failed", error=str(exc)[:500])
+        _mark(
+            draft_id,
+            status="failed",
+            error=llm_errors.user_message(exc, settings.openai_proposal_model)[:500],
+        )
