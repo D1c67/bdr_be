@@ -32,7 +32,7 @@ class ReviewedIn(BaseModel):
 
 
 @router.get("/file-freshness")
-async def file_freshness(
+def file_freshness(
     project_id: str, user: CurrentUser = Depends(require_internal)
 ):
     data = estimator_rounds.freshness(project_id)
@@ -41,7 +41,7 @@ async def file_freshness(
 
 
 @router.post("/changes/reviewed")
-async def mark_changes_reviewed(
+def mark_changes_reviewed(
     project_id: str,
     body: ReviewedIn | None = Body(default=None),
     user: CurrentUser = Depends(require_internal),

@@ -17,7 +17,7 @@ router = APIRouter(prefix="/projects/{project_id}/gono", tags=["go-no-go"])
 
 
 @router.get("")
-async def gono_status(project_id: str, user: CurrentUser = Depends(get_current_user)):
+def gono_status(project_id: str, user: CurrentUser = Depends(get_current_user)):
     if user.role not in INTERNAL_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
     sb = get_supabase()
@@ -42,7 +42,7 @@ async def gono_status(project_id: str, user: CurrentUser = Depends(get_current_u
 
 
 @router.post("/decide")
-async def decide(
+def decide(
     project_id: str,
     body: GonoDecisionIn,
     user: CurrentUser = Depends(require_role(*WRITER_ROLES)),

@@ -26,7 +26,7 @@ router = APIRouter(prefix="/projects/{project_id}", tags=["workflow"])
 
 
 @router.get("/stage-events")
-async def stage_events(project_id: str, user: CurrentUser = Depends(get_current_user)):
+def stage_events(project_id: str, user: CurrentUser = Depends(get_current_user)):
     if user.role not in INTERNAL_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
     return (
@@ -40,7 +40,7 @@ async def stage_events(project_id: str, user: CurrentUser = Depends(get_current_
 
 
 @router.post("/advance")
-async def advance(
+def advance(
     project_id: str,
     body: TransitionIn,
     user: CurrentUser = Depends(get_current_user),

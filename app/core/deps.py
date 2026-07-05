@@ -37,10 +37,15 @@ class CurrentUser:
     mfa_enrolled: bool = False  # cached: user has a verified TOTP factor (profiles.mfa_enrolled)
 
 
-async def get_current_user(
+def get_current_user(
     request: Request, authorization: str = Header(default="")
 ) -> CurrentUser:
     """Verify the bearer token, load the caller's profile (role), and enforce 2FA.
+
+    Deliberately sync (`def`): the Supabase SDK calls below block, so FastAPI must
+    run this in its threadpool. As `async def` they would run on the event loop and
+    every request would stall the whole (single-worker) server for its DB round
+    trips — the production-wide hang. The same rule applies to the routers.
 
     2FA is required for every user. The real enforcement boundary lives here (the
     service-role client bypasses RLS, so this is the choke point): any request
@@ -156,7 +161,7 @@ async def require_writer(
     return user
 
 
-async def require_project_assignment(
+def require_project_assignment(
     project_id: str, user: CurrentUser = Depends(get_current_user)
 ) -> CurrentUser:
     """Gate estimator access to a project via an active assignment.

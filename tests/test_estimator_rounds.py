@@ -2,7 +2,6 @@
 per-type staleness, per-user review acks, and the high-importance revision
 alert plumbing."""
 
-import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -427,7 +426,7 @@ def test_mark_reviewed_stores_the_rounds_timestamp(monkeypatch):
     db.queue("change_review_acks", "upsert", [{}])
     _ack_env(monkeypatch, db, _latest(2))
 
-    out = asyncio.run(change_review.mark_changes_reviewed("p1", None, _user()))
+    out = change_review.mark_changes_reviewed("p1", None, _user())
     assert out == {"needs_review": False}
     up = db.ops("change_review_acks", "upsert")[0]
     # The mark is the round's submitted_at (server data), never client "now".
@@ -442,7 +441,7 @@ def test_mark_reviewed_never_moves_backwards(monkeypatch):
     db.queue("change_review_acks", "upsert", [{}])
     _ack_env(monkeypatch, db, _latest(2))
 
-    asyncio.run(change_review.mark_changes_reviewed("p1", None, _user()))
+    change_review.mark_changes_reviewed("p1", None, _user())
     up = db.ops("change_review_acks", "upsert")[0]
     assert up.payload["last_reviewed_at"] == newer
 
@@ -450,7 +449,7 @@ def test_mark_reviewed_never_moves_backwards(monkeypatch):
 def test_mark_reviewed_noop_without_revision_round(monkeypatch):
     db = _FakeDB()
     _ack_env(monkeypatch, db, _latest(1))
-    out = asyncio.run(change_review.mark_changes_reviewed("p1", None, _user()))
+    out = change_review.mark_changes_reviewed("p1", None, _user())
     assert out == {"needs_review": False}
     assert db.ops("change_review_acks", "upsert") == []
 
@@ -458,9 +457,7 @@ def test_mark_reviewed_noop_without_revision_round(monkeypatch):
 def test_mark_reviewed_noop_for_roles_outside_the_set(monkeypatch):
     db = _FakeDB()
     _ack_env(monkeypatch, db, _latest(2))
-    out = asyncio.run(
-        change_review.mark_changes_reviewed("p1", None, _user(Role.ACCOUNTANT))
-    )
+    out = change_review.mark_changes_reviewed("p1", None, _user(Role.ACCOUNTANT))
     assert out == {"needs_review": False}
     assert db.ops("change_review_acks", "upsert") == []
 
@@ -475,10 +472,8 @@ def test_mark_reviewed_acks_only_the_round_the_user_saw(monkeypatch):
     db.queue("change_review_acks", "upsert", [{}])
     _ack_env(monkeypatch, db, _latest(3, "2026-07-02T07:00:00+00:00"), needs_after=True)
 
-    out = asyncio.run(
-        change_review.mark_changes_reviewed(
-            "p1", change_review.ReviewedIn(round=2), _user()
-        )
+    out = change_review.mark_changes_reviewed(
+        "p1", change_review.ReviewedIn(round=2), _user()
     )
     assert out == {"needs_review": True}
     up = db.ops("change_review_acks", "upsert")[0]

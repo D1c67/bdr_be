@@ -22,12 +22,12 @@ router = APIRouter(tags=["reference"])
 
 
 @router.get("/gcs", response_model=list[GCOut])
-async def list_gcs(_: CurrentUser = Depends(require_internal)):
+def list_gcs(_: CurrentUser = Depends(require_internal)):
     return get_supabase().table("general_contractors").select("*").order("name").execute().data or []
 
 
 @router.post("/gcs", response_model=GCOut, status_code=status.HTTP_201_CREATED)
-async def create_gc(body: GCIn, _: CurrentUser = Depends(require_writer)):
+def create_gc(body: GCIn, _: CurrentUser = Depends(require_writer)):
     return (
         get_supabase()
         .table("general_contractors")
@@ -37,7 +37,7 @@ async def create_gc(body: GCIn, _: CurrentUser = Depends(require_writer)):
 
 
 @router.get("/gc-contacts", response_model=list[GCContactOut])
-async def list_gc_contacts(
+def list_gc_contacts(
     gc_id: str | None = None,
     _: CurrentUser = Depends(require_internal),
 ):
@@ -48,7 +48,7 @@ async def list_gc_contacts(
 
 
 @router.post("/gc-contacts", response_model=GCContactOut, status_code=status.HTTP_201_CREATED)
-async def create_gc_contact(body: GCContactIn, _: CurrentUser = Depends(require_writer)):
+def create_gc_contact(body: GCContactIn, _: CurrentUser = Depends(require_writer)):
     return (
         get_supabase().table("gc_contacts").insert(body.model_dump(mode="json")).execute()
     ).data[0]
@@ -58,7 +58,7 @@ async def create_gc_contact(body: GCContactIn, _: CurrentUser = Depends(require_
 
 
 @router.get("/material-categories")
-async def list_material_categories(_: CurrentUser = Depends(require_internal)):
+def list_material_categories(_: CurrentUser = Depends(require_internal)):
     return (
         get_supabase()
         .table("material_categories")
@@ -70,7 +70,7 @@ async def list_material_categories(_: CurrentUser = Depends(require_internal)):
 
 
 @router.post("/material-categories", status_code=status.HTTP_201_CREATED)
-async def create_material_category(
+def create_material_category(
     name: str,
     kind: str = "material",
     sort_order: int = 0,
@@ -87,7 +87,7 @@ async def create_material_category(
 
 
 @router.patch("/material-categories/{category_id}")
-async def update_material_category(
+def update_material_category(
     category_id: str,
     body: MaterialCategoryUpdate,
     _: CurrentUser = Depends(require_role(Role.IT_ADMIN)),

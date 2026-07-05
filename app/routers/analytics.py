@@ -49,7 +49,7 @@ def _load(
 
 
 @router.get("/summary")
-async def summary(user: CurrentUser = Depends(get_current_user)):
+def summary(user: CurrentUser = Depends(get_current_user)):
     if user.role not in INTERNAL_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
     sb = get_supabase()
@@ -117,7 +117,7 @@ async def summary(user: CurrentUser = Depends(get_current_user)):
 
 
 @router.get("/overview")
-async def overview(
+def overview(
     range_: str = RangeParam,
     date_from: str | None = None,
     date_to: str | None = None,
@@ -130,7 +130,7 @@ async def overview(
 
 
 @router.get("/send-out")
-async def send_out(
+def send_out(
     range_: str = RangeParam,
     date_from: str | None = None,
     date_to: str | None = None,
@@ -145,7 +145,7 @@ async def send_out(
 
 
 @router.get("/estimator")
-async def estimator(
+def estimator(
     range_: str = RangeParam,
     date_from: str | None = None,
     date_to: str | None = None,
@@ -158,7 +158,7 @@ async def estimator(
 
 
 @router.get("/quotes")
-async def quotes(
+def quotes(
     range_: str = RangeParam,
     date_from: str | None = None,
     date_to: str | None = None,
@@ -171,7 +171,7 @@ async def quotes(
 
 
 @router.get("/cycle-time")
-async def cycle_time(
+def cycle_time(
     range_: str = RangeParam,
     date_from: str | None = None,
     date_to: str | None = None,
@@ -184,7 +184,7 @@ async def cycle_time(
 
 
 @router.get("/win-loss")
-async def win_loss(
+def win_loss(
     range_: str = RangeParam,
     date_from: str | None = None,
     date_to: str | None = None,
@@ -197,7 +197,7 @@ async def win_loss(
 
 
 @router.get("/gc-spread")
-async def gc_spread(
+def gc_spread(
     range_: str = RangeParam,
     date_from: str | None = None,
     date_to: str | None = None,
@@ -210,7 +210,7 @@ async def gc_spread(
 
 
 @router.get("/activity")
-async def activity(
+def activity(
     range_: str = RangeParam,
     date_from: str | None = None,
     date_to: str | None = None,
@@ -236,7 +236,7 @@ async def activity(
 
 
 @router.get("/projects/{project_id}")
-async def project_detail(
+def project_detail(
     project_id: str,
     range_: str = RangeParam,
     date_from: str | None = None,

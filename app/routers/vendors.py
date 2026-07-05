@@ -15,17 +15,17 @@ router = APIRouter(tags=["vendors"])
 
 
 @router.get("/vendors")
-async def list_vendors(_: CurrentUser = Depends(require_internal)):
+def list_vendors(_: CurrentUser = Depends(require_internal)):
     return get_supabase().table("vendors").select("*").order("name").execute().data or []
 
 
 @router.post("/vendors", status_code=201)
-async def create_vendor(body: VendorIn, _: CurrentUser = Depends(require_writer)):
+def create_vendor(body: VendorIn, _: CurrentUser = Depends(require_writer)):
     return get_supabase().table("vendors").insert(body.model_dump()).execute().data[0]
 
 
 @router.get("/vendor-contacts")
-async def list_contacts(
+def list_contacts(
     material_category_id: str | None = None,
     _: CurrentUser = Depends(require_internal),
 ):
@@ -36,7 +36,7 @@ async def list_contacts(
 
 
 @router.post("/vendor-contacts", status_code=201)
-async def create_contact(body: VendorContactIn, _: CurrentUser = Depends(require_writer)):
+def create_contact(body: VendorContactIn, _: CurrentUser = Depends(require_writer)):
     return (
         get_supabase().table("vendor_contacts").insert(body.model_dump(mode="json")).execute()
     ).data[0]

@@ -96,7 +96,7 @@ def _own_todo(todo_id: UUID, user: CurrentUser) -> None:
 
 
 @router.get("")
-async def list_todos(
+def list_todos(
     user_id: UUID | None = None, user: CurrentUser = Depends(require_internal)
 ):
     """The caller's to-dos, or — read-only by design — a teammate's."""
@@ -125,7 +125,7 @@ async def list_todos(
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def create_todo(
+def create_todo(
     payload: TodoIn, user: CurrentUser = Depends(require_writer)
 ):
     return (
@@ -143,7 +143,7 @@ async def create_todo(
 
 
 @router.patch("/{todo_id}")
-async def update_todo(
+def update_todo(
     todo_id: UUID,
     payload: TodoPatch,
     user: CurrentUser = Depends(require_writer),
@@ -159,7 +159,7 @@ async def update_todo(
 
 
 @router.delete("/{todo_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_todo(
+def delete_todo(
     todo_id: UUID, user: CurrentUser = Depends(require_writer)
 ):
     _own_todo(todo_id, user)
@@ -167,7 +167,7 @@ async def delete_todo(
 
 
 @router.post("/{todo_id}/nudge")
-async def nudge_todo(
+def nudge_todo(
     todo_id: UUID, user: CurrentUser = Depends(require_writer)
 ):
     """Poke the owner of an open to-do. `notify_user` creates the bell row and

@@ -215,7 +215,7 @@ def _get_file_checked(project_id: str, file_id: str, user: CurrentUser) -> dict:
 
 
 @router.get("")
-async def list_files(
+def list_files(
     project_id: str, user: CurrentUser = Depends(require_project_assignment)
 ):
     q = get_supabase().table("project_files").select("*").eq("project_id", project_id)
@@ -228,7 +228,7 @@ async def list_files(
 
 
 @router.get("/lock")
-async def lock_state(
+def lock_state(
     project_id: str, _: CurrentUser = Depends(require_project_assignment)
 ):
     """Whether the initial drawing/spec blocks are locked (hand-off begun) —
@@ -265,7 +265,7 @@ async def upload_file(
     if user.role == Role.ESTIMATOR and category == "estimator_additional":
         # Additional files only make sense as part of a revision round — the
         # original hand-off is estimate/boq/markup.
-        if estimator_rounds.latest_submission(project_id) is None:
+        if await run_in_threadpool(estimator_rounds.latest_submission, project_id) is None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, ADDITIONAL_TOO_EARLY_MESSAGE)
 
     note = (note or "").strip() or None
@@ -276,9 +276,9 @@ async def upload_file(
         # is — the note travels with the file to the estimators.
         if not note:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, NOTE_REQUIRED_MESSAGE)
-        if not handoff_locked(project_id):
+        if not await run_in_threadpool(handoff_locked, project_id):
             raise HTTPException(status.HTTP_409_CONFLICT, NOT_LOCKED_MESSAGE)
-    elif category in INITIAL_CATEGORIES and handoff_locked(project_id):
+    elif category in INITIAL_CATEGORIES and await run_in_threadpool(handoff_locked, project_id):
         raise HTTPException(status.HTTP_409_CONFLICT, LOCKED_MESSAGE)
 
     content = await _read_capped(file, get_settings().upload_max_bytes)
@@ -286,10 +286,10 @@ async def upload_file(
     # from the extension so a stored file can't later be served as active HTML.
     stored_mime = _safe_content_type(file.filename)
     path = storage.build_object_path(project_id, category, file.filename or "upload")
-    storage.upload_file(path, content, stored_mime)
+    await run_in_threadpool(storage.upload_file, path, content, stored_mime)
 
     convertible = office_preview.is_convertible(file.filename, category)
-    row = (
+    insert = (
         get_supabase()
         .table("project_files")
         .insert(
@@ -310,9 +310,11 @@ async def upload_file(
                 and category in ESTIMATOR_WRITE,
             }
         )
-        .execute()
-    ).data[0]
-    audit(user.id, "file.upload", "project_file", row["id"], {"category": category})
+    )
+    row = (await run_in_threadpool(insert.execute)).data[0]
+    await run_in_threadpool(
+        audit, user.id, "file.upload", "project_file", row["id"], {"category": category}
+    )
     if convertible:
         # Sync task → runs in the threadpool after the response; never blocks.
         background.add_task(office_preview.generate_preview, row["id"])
@@ -320,7 +322,7 @@ async def upload_file(
     # Adding a drawing after intake means whoever prices off the drawings should
     # re-check their work. (Multiple drawings per project are legitimate.)
     if category == "drawing":
-        _notify_drawing_changed(project_id, user, "added")
+        await run_in_threadpool(_notify_drawing_changed, project_id, user, "added")
 
     return row
 
@@ -376,7 +378,7 @@ class FileNoteIn(BaseModel):
 
 
 @router.patch("/{file_id}/note")
-async def update_note(
+def update_note(
     project_id: str,
     file_id: str,
     body: FileNoteIn,
@@ -417,7 +419,7 @@ async def update_note(
 
 
 @router.get("/{file_id}/download")
-async def download_url(
+def download_url(
     project_id: str,
     file_id: str,
     user: CurrentUser = Depends(require_project_assignment),
@@ -462,7 +464,7 @@ async def export_files(
             q = estimator_rounds.exclude_unsent(q)
         if body and body.file_ids is not None:
             q = q.in_("id", body.file_ids)
-        rows = q.execute().data or []
+        rows = (await run_in_threadpool(q.execute)).data or []
         if user.role == Role.ESTIMATOR:
             rows = [r for r in rows if _estimator_visible(r)]
         if not rows:
@@ -503,17 +505,18 @@ async def export_files(
             spool.close()
             raise HTTPException(status.HTTP_404_NOT_FOUND, "No files to export")
 
-        proj = (
-            sb.table("projects").select("number, name").eq("id", project_id).single().execute()
-        ).data or {}
+        proj_q = sb.table("projects").select("number, name").eq("id", project_id).single()
+        proj = (await run_in_threadpool(proj_q.execute)).data or {}
         # files_exported_at drives the internal "export your files" banner —
         # only an internal export may clear it, never the external estimator
         # downloading their own package.
         if user.role != Role.ESTIMATOR:
-            sb.table("projects").update(
+            stamp = sb.table("projects").update(
                 {"files_exported_at": datetime.now(timezone.utc).isoformat()}
-            ).eq("id", project_id).execute()
-        audit(
+            ).eq("id", project_id)
+            await run_in_threadpool(stamp.execute)
+        await run_in_threadpool(
+            audit,
             user.id,
             "file.export",
             "project",
@@ -552,7 +555,7 @@ async def export_files(
 
 
 @router.get("/{file_id}/preview-url")
-async def preview_url(
+def preview_url(
     project_id: str,
     file_id: str,
     user: CurrentUser = Depends(require_project_assignment),
@@ -579,7 +582,7 @@ async def preview_url(
 
 
 @router.get("/{file_id}/preview")
-async def preview_file(
+def preview_file(
     project_id: str,
     file_id: str,
     user: CurrentUser = Depends(require_project_assignment),
@@ -597,7 +600,7 @@ async def preview_file(
 
 
 @router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_file(
+def delete_file(
     project_id: str,
     file_id: str,
     user: CurrentUser = Depends(require_project_assignment),

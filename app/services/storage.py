@@ -16,7 +16,8 @@ BUCKET = "project-files"
 # Signed-URL memoization: a fresh token per request defeats every cache layer
 # (browser and Supabase Smart CDN key on the token), so repeat previews would
 # re-download the bytes. Reuse the same URL until shortly before it expires.
-# Single process + GIL → no locking; a lost race just re-mints.
+# GIL-atomic dict ops → no locking (callers now run in the threadpool); a lost
+# race just re-mints, and each worker process keeps its own cache.
 _REFRESH_MARGIN_S = 60
 _CACHE_SWEEP_SIZE = 500
 # path -> (url, expires_at_epoch)

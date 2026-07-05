@@ -8,8 +8,6 @@ role; reads are any internal role (incl. the read-only accountant). The
 estimator never reaches these routes (_internal) and never sees 'proposal' files
 (files.py whitelists)."""
 
-import asyncio
-
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from app.core.deps import CurrentUser, get_current_user, require_writer
@@ -68,7 +66,7 @@ def _wire_shape(draft: dict | None) -> dict | None:
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(ai_rate_limit)],
 )
-async def start_lines_generation(
+def start_lines_generation(
     project_id: str,
     body: ProposalGenerateIn,
     background: BackgroundTasks,
@@ -115,7 +113,7 @@ async def start_lines_generation(
 
 
 @router.get("/proposal-lines/latest")
-async def latest_draft(project_id: str, user: CurrentUser = Depends(get_current_user)):
+def latest_draft(project_id: str, user: CurrentUser = Depends(get_current_user)):
     _internal(user)
     rows = (
         get_supabase()
@@ -134,7 +132,7 @@ async def latest_draft(project_id: str, user: CurrentUser = Depends(get_current_
 
 
 @router.put("/proposal-lines/{draft_id}/lines")
-async def save_lines(
+def save_lines(
     project_id: str,
     draft_id: str,
     body: ProposalLinesIn,
@@ -167,7 +165,7 @@ async def save_lines(
 
 
 @router.post("/proposal-lines/{draft_id}/approve")
-async def approve_lines(
+def approve_lines(
     project_id: str, draft_id: str, user: CurrentUser = Depends(_PA_PM)
 ):
     from datetime import datetime, timezone
@@ -245,7 +243,7 @@ def _proposal_rows(project_id: str) -> list[dict]:
 
 
 @router.get("/proposals")
-async def list_proposals(project_id: str, user: CurrentUser = Depends(get_current_user)):
+def list_proposals(project_id: str, user: CurrentUser = Depends(get_current_user)):
     _internal(user)
     return _proposal_rows(project_id)
 
@@ -254,35 +252,30 @@ async def list_proposals(project_id: str, user: CurrentUser = Depends(get_curren
 
 
 @router.get("/proposals/amounts")
-async def get_proposal_amounts(
+def get_proposal_amounts(
     project_id: str, user: CurrentUser = Depends(get_current_user)
 ):
     _internal(user)
-    return await asyncio.to_thread(proposal_send.amounts_overview, project_id)
+    return proposal_send.amounts_overview(project_id)
 
 
 @router.put("/proposals/amounts/{gc_id}")
-async def set_proposal_amounts(
+def set_proposal_amounts(
     project_id: str,
     gc_id: str,
     body: ProposalAmountsIn,
     user: CurrentUser = Depends(_PM_EXEC),
 ):
     try:
-        return await asyncio.to_thread(
-            proposal_send.set_gc_amounts,
-            project_id,
-            gc_id,
-            body.material_amount,
-            body.labor_amount,
-            user.id,
+        return proposal_send.set_gc_amounts(
+            project_id, gc_id, body.material_amount, body.labor_amount, user.id
         )
     except ProposalSendError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
 
 
 @router.post("/proposals/generate")
-async def generate_proposals(
+def generate_proposals(
     project_id: str,
     background: BackgroundTasks,
     user: CurrentUser = Depends(_PA_PM),
@@ -299,9 +292,7 @@ async def generate_proposals(
     if not drafts or not drafts[0].get("approved_at"):
         raise HTTPException(status.HTTP_409_CONFLICT, "Proposal lines must be approved first")
     try:
-        created = await asyncio.to_thread(
-            proposal_send.generate_documents, project_id, drafts[0]["id"], user.id
-        )
+        created = proposal_send.generate_documents(project_id, drafts[0]["id"], user.id)
     except ProposalSendError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
     for row in created:
@@ -312,7 +303,7 @@ async def generate_proposals(
 
 
 @router.get("/proposals/email-preview")
-async def email_preview(project_id: str, user: CurrentUser = Depends(get_current_user)):
+def email_preview(project_id: str, user: CurrentUser = Depends(get_current_user)):
     _internal(user)
     project = (
         get_supabase().table("projects").select("name, number").eq("id", project_id)
@@ -325,14 +316,13 @@ async def email_preview(project_id: str, user: CurrentUser = Depends(get_current
 
 
 @router.post("/proposals/send", dependencies=[Depends(outbound_email_rate_limit)])
-async def send_proposals(
+def send_proposals(
     project_id: str,
     body: ProposalSendIn,
     user: CurrentUser = Depends(_PA_PM),
 ):
     try:
-        return await asyncio.to_thread(
-            proposal_send.send_proposals,
+        return proposal_send.send_proposals(
             project_id,
             user.id,
             body.proposal_ids,
@@ -345,11 +335,11 @@ async def send_proposals(
 
 
 @router.post("/proposals/complete-send-out")
-async def complete_send_out(project_id: str, user: CurrentUser = Depends(_PA_PM)):
+def complete_send_out(project_id: str, user: CurrentUser = Depends(_PA_PM)):
     """The PA's explicit "Done sending": flips the project to Submitted.
     Requires at least one sent proposal; GCs never sent are recorded in the
     stage-event note as skipped (= decided not to bid to them)."""
     try:
-        return await asyncio.to_thread(proposal_send.complete_send_out, project_id, user.id)
+        return proposal_send.complete_send_out(project_id, user.id)
     except ProposalSendError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc

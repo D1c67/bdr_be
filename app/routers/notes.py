@@ -82,7 +82,7 @@ def recipient_ids(author_id: str, *groups: list[str]) -> list[str]:
 
 
 @router.get("")
-async def list_notes(
+def list_notes(
     project_id: str, user: CurrentUser = Depends(require_project_assignment)
 ):
     return (
@@ -124,7 +124,7 @@ def _unread_count(sb, project_id: str, user_id: str, last_read_iso: str | None) 
 
 
 @router.get("/unread")
-async def unread_count(
+def unread_count(
     project_id: str, user: CurrentUser = Depends(require_project_assignment)
 ):
     """How many notes the caller hasn't read yet — drives the side-menu badge."""
@@ -133,7 +133,7 @@ async def unread_count(
 
 
 @router.post("/read")
-async def mark_read(
+def mark_read(
     project_id: str,
     payload: ReadIn,
     user: CurrentUser = Depends(require_project_assignment),
@@ -157,7 +157,7 @@ async def mark_read(
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def create_note(
+def create_note(
     project_id: str,
     payload: NoteIn,
     user: CurrentUser = Depends(require_project_assignment),

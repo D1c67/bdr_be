@@ -12,7 +12,6 @@ The Supabase client is faked with a tiny in-memory store supporting the chained
 builder the code uses (select/insert/update/upsert + eq/single/order).
 """
 
-import asyncio
 from types import SimpleNamespace
 
 from app.core.roles import Role
@@ -305,7 +304,7 @@ def _patch_commit(monkeypatch, db):
 def test_commit_returns_to_stored_stage(monkeypatch):
     pricing, calls = _patch_commit(monkeypatch, _commit_db(return_stage="submitted"))
     user = SimpleNamespace(id="exec1", role=Role.EXECUTIVE)
-    asyncio.run(pricing.commit_verify("p1", None, user))
+    pricing.commit_verify("p1", None, user)
     assert ("return", "p1", "submitted") in calls
     assert not any(c[0] == "transition" for c in calls)
 
@@ -313,7 +312,7 @@ def test_commit_returns_to_stored_stage(monkeypatch):
 def test_commit_without_return_stage_advances_to_send_out(monkeypatch):
     pricing, calls = _patch_commit(monkeypatch, _commit_db(return_stage=None))
     user = SimpleNamespace(id="exec1", role=Role.EXECUTIVE)
-    asyncio.run(pricing.commit_verify("p1", None, user))
+    pricing.commit_verify("p1", None, user)
     assert ("transition", "p1", "send_out") in calls
     assert not any(c[0] == "return" for c in calls)
 
@@ -323,7 +322,7 @@ def test_redundant_commit_off_verify_is_silent(monkeypatch):
     # snapshot — no transition, no return, and no spurious "verified" notification.
     pricing, calls = _patch_commit(monkeypatch, _commit_db(stage="send_out", return_stage=None))
     user = SimpleNamespace(id="exec1", role=Role.EXECUTIVE)
-    asyncio.run(pricing.commit_verify("p1", None, user))
+    pricing.commit_verify("p1", None, user)
     assert calls == []
 
 

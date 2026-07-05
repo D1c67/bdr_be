@@ -85,7 +85,7 @@ def _fetch_project_with_outcome(project_id: str) -> dict:
 
 
 @router.get("", response_model=list[ProjectOut])
-async def list_projects(
+def list_projects(
     stage: str | None = None,
     user: CurrentUser = Depends(get_current_user),
 ):
@@ -102,7 +102,7 @@ async def list_projects(
 
 
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
-async def create_project(
+def create_project(
     body: ProjectCreate,
     user: CurrentUser = Depends(require_writer),
 ):
@@ -133,7 +133,7 @@ async def create_project(
 
 
 @router.get("/{project_id}", response_model=ProjectOut)
-async def get_project(project_id: str, user: CurrentUser = Depends(get_current_user)):
+def get_project(project_id: str, user: CurrentUser = Depends(get_current_user)):
     if user.role not in INTERNAL_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
     return _present(_fetch_project_with_outcome(project_id), user.role)
@@ -176,7 +176,7 @@ _FIELD_EDITORS: dict[str, frozenset[Role]] = {
 
 
 @router.patch("/{project_id}", response_model=ProjectOut)
-async def update_project(
+def update_project(
     project_id: str,
     body: ProjectUpdate,
     user: CurrentUser = Depends(require_writer),
@@ -230,7 +230,7 @@ def _project_status_row(project_id: str) -> dict:
 
 
 @router.post("/{project_id}/abandon", response_model=ProjectOut)
-async def abandon_project(
+def abandon_project(
     project_id: str,
     body: AbandonIn | None = None,
     user: CurrentUser = Depends(require_writer),
@@ -258,7 +258,7 @@ async def abandon_project(
 
 
 @router.post("/{project_id}/reactivate", response_model=ProjectOut)
-async def reactivate_project(
+def reactivate_project(
     project_id: str,
     user: CurrentUser = Depends(require_writer),
 ):
@@ -346,13 +346,13 @@ def _block_if_sending(project_id: str, gc_id: str) -> None:
 
 
 @router.get("/{project_id}/gcs")
-async def list_project_gcs(project_id: str, _: CurrentUser = Depends(require_internal)):
+def list_project_gcs(project_id: str, _: CurrentUser = Depends(require_internal)):
     _project_or_404(project_id)
     return _project_gc_rows(project_id)
 
 
 @router.post("/{project_id}/gcs", status_code=status.HTTP_201_CREATED)
-async def add_project_gc(
+def add_project_gc(
     project_id: str,
     body: ProjectGCIn,
     user: CurrentUser = Depends(require_writer),
@@ -385,7 +385,7 @@ async def add_project_gc(
 
 
 @router.delete("/{project_id}/gcs/{gc_id}")
-async def remove_project_gc(
+def remove_project_gc(
     project_id: str,
     gc_id: str,
     user: CurrentUser = Depends(require_writer),

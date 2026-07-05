@@ -24,8 +24,12 @@ from app.routers import users
 from app.services import invite_email
 
 
-def _run(coro):
-    return asyncio.run(coro)
+def _run(value):
+    # The deps/handlers under test are now sync (FastAPI threadpools them); run
+    # any that are still coroutines, pass plain results through.
+    if asyncio.iscoroutine(value):
+        return asyncio.run(value)
+    return value
 
 
 def _request(method: str, path: str) -> Request:

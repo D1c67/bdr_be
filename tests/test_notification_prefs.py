@@ -4,7 +4,6 @@ Pure-logic tests against app.services.due_reminder_prefs plus the
 /users/me/notification-prefs handlers with a fake Supabase client.
 """
 
-import asyncio
 
 import pytest
 from pydantic import ValidationError
@@ -226,7 +225,7 @@ def test_put_strips_actual_bid_for_non_pa(monkeypatch):
     body = NotificationPrefsDoc.model_validate(
         _doc(actual_bid={"offsets": ["8h"]})
     )
-    out = asyncio.run(users.update_notification_prefs(body, _user(Role.ESTIMATING_ENGINEER)))
+    out = users.update_notification_prefs(body, _user(Role.ESTIMATING_ENGINEER))
     (_, op, (payload, kwargs)) = fake.calls[0]
     assert op == "upsert" and kwargs == {"on_conflict": "user_id"}
     assert "actual_bid" not in payload["prefs"]
@@ -240,7 +239,7 @@ def test_put_preserves_actual_bid_for_pa(monkeypatch):
     body = NotificationPrefsDoc.model_validate(
         _doc(actual_bid={"offsets": ["24h", "1h"]})
     )
-    out = asyncio.run(users.update_notification_prefs(body, _user(Role.ESTIMATING_ADMIN)))
+    out = users.update_notification_prefs(body, _user(Role.ESTIMATING_ADMIN))
     (_, _, (payload, _)) = fake.calls[0]
     assert payload["prefs"]["actual_bid"] == {"offsets": ["24h", "1h"]}
     assert out.prefs.actual_bid.offsets == ["24h", "1h"]
@@ -249,7 +248,7 @@ def test_put_preserves_actual_bid_for_pa(monkeypatch):
 def test_get_without_row_returns_defaults_not_customized(monkeypatch):
     fake = _FakeSupabase({("notification_prefs", "select"): []})
     monkeypatch.setattr(users, "get_supabase", lambda: fake)
-    out = asyncio.run(users.get_notification_prefs(_user(Role.ESTIMATING_ENGINEER)))
+    out = users.get_notification_prefs(_user(Role.ESTIMATING_ENGINEER))
     assert out.is_customized is False
     assert out.prefs == default_prefs(Role.ESTIMATING_ENGINEER)
 
@@ -258,7 +257,7 @@ def test_get_with_row_merges_stored(monkeypatch):
     stored = {"due_from_vendors": {"enabled": False, "offsets": ["1h"]}}
     fake = _FakeSupabase({("notification_prefs", "select"): [{"prefs": stored}]})
     monkeypatch.setattr(users, "get_supabase", lambda: fake)
-    out = asyncio.run(users.get_notification_prefs(_user(Role.ESTIMATING_ENGINEER)))
+    out = users.get_notification_prefs(_user(Role.ESTIMATING_ENGINEER))
     assert out.is_customized is True
     assert out.prefs.due_from_vendors.enabled is False
     assert out.prefs.due_from_vendors.offsets == ["1h"]
@@ -268,7 +267,7 @@ def test_delete_removes_row_and_returns_defaults(monkeypatch):
     fake = _FakeSupabase()
     monkeypatch.setattr(users, "get_supabase", lambda: fake)
     monkeypatch.setattr(users, "audit", lambda *a, **k: None)
-    out = asyncio.run(users.reset_notification_prefs(_user(Role.ESTIMATING_ADMIN)))
+    out = users.reset_notification_prefs(_user(Role.ESTIMATING_ADMIN))
     assert fake.calls[0][:2] == ("notification_prefs", "delete")
     assert out.is_customized is False
     assert out.prefs == default_prefs(Role.ESTIMATING_ADMIN)

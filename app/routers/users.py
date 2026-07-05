@@ -66,14 +66,14 @@ def _confirm_url(props) -> str:
 
 
 @router.get("/me", response_model=ProfileOut)
-async def me(user: CurrentUser = Depends(get_current_user)):
+def me(user: CurrentUser = Depends(get_current_user)):
     return (
         get_supabase().table("profiles").select("*").eq("id", user.id).single().execute()
     ).data
 
 
 @router.patch("/me", response_model=ProfileOut)
-async def update_me(body: UpdateMeIn, user: CurrentUser = Depends(get_current_user)):
+def update_me(body: UpdateMeIn, user: CurrentUser = Depends(get_current_user)):
     """Any signed-in user (estimator included) may edit their own display name and
     UI language.
 
@@ -93,7 +93,7 @@ async def update_me(body: UpdateMeIn, user: CurrentUser = Depends(get_current_us
 
 
 @router.delete("/me/mfa", response_model=ProfileOut)
-async def reset_my_mfa(user: CurrentUser = Depends(get_current_user)):
+def reset_my_mfa(user: CurrentUser = Depends(get_current_user)):
     """Remove the caller's own TOTP factor(s) so they can set up a new
     authenticator (e.g. a new phone). Requires a fully-authenticated (aal2)
     session — reaching Settings already implies it. The frontend then routes the
@@ -107,7 +107,7 @@ async def reset_my_mfa(user: CurrentUser = Depends(get_current_user)):
 
 
 @router.get("/me/notification-prefs", response_model=NotificationPrefsOut)
-async def get_notification_prefs(user: CurrentUser = Depends(require_internal)):
+def get_notification_prefs(user: CurrentUser = Depends(require_internal)):
     """The caller's effective due-date reminder prefs (stored row ?? role defaults).
 
     Internal users only — the external estimator gets fixed presets via the
@@ -128,7 +128,7 @@ async def get_notification_prefs(user: CurrentUser = Depends(require_internal)):
 
 
 @router.put("/me/notification-prefs", response_model=NotificationPrefsOut)
-async def update_notification_prefs(
+def update_notification_prefs(
     body: NotificationPrefsDoc, user: CurrentUser = Depends(require_internal)
 ):
     """Replace the caller's reminder prefs (full document).
@@ -150,7 +150,7 @@ async def update_notification_prefs(
 
 
 @router.delete("/me/notification-prefs", response_model=NotificationPrefsOut)
-async def reset_notification_prefs(user: CurrentUser = Depends(require_internal)):
+def reset_notification_prefs(user: CurrentUser = Depends(require_internal)):
     """Reset to role defaults — deletes the stored row and returns the presets."""
     get_supabase().table("notification_prefs").delete().eq(
         "user_id", user.id
@@ -160,12 +160,12 @@ async def reset_notification_prefs(user: CurrentUser = Depends(require_internal)
 
 
 @router.get("", response_model=list[ProfileOut])
-async def list_users(_: CurrentUser = Depends(_MANAGE_USERS)):
+def list_users(_: CurrentUser = Depends(_MANAGE_USERS)):
     return get_supabase().table("profiles").select("*").order("created_at").execute().data or []
 
 
 @router.get("/teammates", response_model=list[TeammateOut])
-async def list_teammates(_: CurrentUser = Depends(require_internal)):
+def list_teammates(_: CurrentUser = Depends(require_internal)):
     """Active internal users — the To-Dos teammate picker.
 
     Unlike the admin list above, any internal user may call this; it returns
@@ -189,7 +189,7 @@ async def list_teammates(_: CurrentUser = Depends(require_internal)):
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(outbound_email_rate_limit)],
 )
-async def invite_user(
+def invite_user(
     body: InviteUserIn, admin: CurrentUser = Depends(_MANAGE_USERS)
 ):
     sb = get_supabase()
@@ -277,7 +277,7 @@ async def invite_user(
     response_model=ProfileOut,
     dependencies=[Depends(outbound_email_rate_limit)],
 )
-async def reinvite_user(
+def reinvite_user(
     user_id: str, admin: CurrentUser = Depends(_MANAGE_USERS)
 ):
     """Resend the invite email to a user who hasn't accepted yet."""
@@ -340,7 +340,7 @@ async def reinvite_user(
 
 
 @router.post("/{user_id}/reset-mfa", response_model=ProfileOut)
-async def reset_user_mfa(
+def reset_user_mfa(
     user_id: str, admin: CurrentUser = Depends(_MANAGE_USERS)
 ):
     """IT Admin / Executive removes a user's TOTP factor(s) — the recovery path
@@ -363,7 +363,7 @@ async def reset_user_mfa(
 
 
 @router.patch("/me/role", response_model=ProfileOut)
-async def switch_own_role(
+def switch_own_role(
     body: RoleSwitchIn, user: CurrentUser = Depends(get_current_user)
 ):
     """Dev accounts may change their own role to experience the app as any role.
@@ -379,7 +379,7 @@ async def switch_own_role(
 
 
 @router.patch("/{user_id}", response_model=ProfileOut)
-async def update_user(
+def update_user(
     user_id: str,
     role: Role | None = None,
     is_active: bool | None = None,

@@ -272,7 +272,7 @@ def pricing_summary_numbers(originals: dict, verification: dict | None) -> dict:
 
 
 @router.get("/pricing-summary")
-async def get_pricing_summary(project_id: str, user: CurrentUser = Depends(get_current_user)):
+def get_pricing_summary(project_id: str, user: CurrentUser = Depends(get_current_user)):
     """The headline pricing figures for the always-visible project summary box."""
     _internal(user)
     materials = [
@@ -295,7 +295,7 @@ async def get_pricing_summary(project_id: str, user: CurrentUser = Depends(get_c
 
 
 @router.get("/price-basis")
-async def get_price_basis(project_id: str, user: CurrentUser = Depends(get_current_user)):
+def get_price_basis(project_id: str, user: CurrentUser = Depends(get_current_user)):
     """The prices assigned upstream: labor (step 7) and materials (selected quotes)."""
     _internal(user)
     labor = _get_one("labor_reviews", project_id)
@@ -306,7 +306,7 @@ async def get_price_basis(project_id: str, user: CurrentUser = Depends(get_curre
 
 
 @router.get("/materials-breakdown")
-async def get_materials_breakdown(project_id: str, user: CurrentUser = Depends(get_current_user)):
+def get_materials_breakdown(project_id: str, user: CurrentUser = Depends(get_current_user)):
     """Per-category materials prices feeding the total, so the PM can see every
     number (vendor quotes vs the estimate-derived general-material figure)."""
     _internal(user)
@@ -323,13 +323,13 @@ async def get_materials_breakdown(project_id: str, user: CurrentUser = Depends(g
 
 
 @router.get("/labor")
-async def get_labor(project_id: str, user: CurrentUser = Depends(get_current_user)):
+def get_labor(project_id: str, user: CurrentUser = Depends(get_current_user)):
     _internal(user)
     return _get_one("labor_reviews", project_id)
 
 
 @router.put("/labor")
-async def set_labor(
+def set_labor(
     project_id: str, body: LaborReviewIn, user: CurrentUser = Depends(require_writer)
 ):
     row = (
@@ -350,13 +350,13 @@ async def set_labor(
 
 
 @router.get("/markup")
-async def get_markup(project_id: str, user: CurrentUser = Depends(get_current_user)):
+def get_markup(project_id: str, user: CurrentUser = Depends(get_current_user)):
     _internal(user)
     return _get_one("markups", project_id)
 
 
 @router.put("/markup")
-async def set_markup(
+def set_markup(
     project_id: str, body: MarkupIn, user: CurrentUser = Depends(require_writer)
 ):
     row = (
@@ -377,7 +377,7 @@ async def set_markup(
 
 
 @router.get("/verify")
-async def get_verify(project_id: str, user: CurrentUser = Depends(get_current_user)):
+def get_verify(project_id: str, user: CurrentUser = Depends(get_current_user)):
     _internal(user)
     return _get_one("verifications", project_id)
 
@@ -403,7 +403,7 @@ def _deltas(body: VerifyOverrideIn, project_id: str) -> dict:
 
 
 @router.put("/verify")
-async def edit_verify(
+def edit_verify(
     project_id: str,
     body: VerifyOverrideIn,
     user: CurrentUser = Depends(require_role(*VERIFY_ROLES)),
@@ -428,7 +428,7 @@ async def edit_verify(
 
 
 @router.post("/verify")
-async def commit_verify(
+def commit_verify(
     project_id: str,
     body: VerifyOverrideIn | None = None,
     user: CurrentUser = Depends(require_role(*VERIFY_ROLES)),

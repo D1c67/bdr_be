@@ -28,4 +28,6 @@ EXPOSE 3000
 # Honor the platform-provided $PORT (Render/Railway/Fly set this).
 # Exec the venv binary directly (not `uv run`) so the dependency resolver can
 # never run — or mutate the environment — at container startup.
-CMD ["sh", "-c", ".venv/bin/uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]
+# 2 workers so one worker wedged on a slow call can't stall every request
+# (the background pollers are multi-worker safe: DB lease + dedup index).
+CMD ["sh", "-c", ".venv/bin/uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --workers 2"]

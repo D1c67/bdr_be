@@ -58,7 +58,7 @@ def _active_job_exists(sb, project_id: str) -> bool:
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, dependencies=[Depends(ai_rate_limit)])
-async def start_analysis(
+def start_analysis(
     project_id: str,
     body: BoqAnalysisStart,
     background: BackgroundTasks,
@@ -94,7 +94,7 @@ async def start_analysis(
 
 
 @router.get("/latest")
-async def latest_analysis(project_id: str, user: CurrentUser = Depends(_PE)):
+def latest_analysis(project_id: str, user: CurrentUser = Depends(_PE)):
     rows = (
         get_supabase()
         .table("boq_analyses")
@@ -108,7 +108,7 @@ async def latest_analysis(project_id: str, user: CurrentUser = Depends(_PE)):
 
 
 @router.post("/{analysis_id}/refine", dependencies=[Depends(ai_rate_limit)])
-async def refine_analysis(
+def refine_analysis(
     project_id: str,
     analysis_id: str,
     body: BoqRefineIn,
@@ -125,7 +125,7 @@ async def refine_analysis(
 
 
 @router.post("/{analysis_id}/confirm")
-async def confirm_analysis(
+def confirm_analysis(
     project_id: str,
     analysis_id: str,
     body: BoqConfirmIn,

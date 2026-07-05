@@ -9,7 +9,7 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
 
 
 @router.get("")
-async def my_notifications(user: CurrentUser = Depends(get_current_user)):
+def my_notifications(user: CurrentUser = Depends(get_current_user)):
     return (
         get_supabase()
         .table("notifications")
@@ -25,7 +25,7 @@ async def my_notifications(user: CurrentUser = Depends(get_current_user)):
 
 
 @router.post("/{notification_id}/read")
-async def mark_read(notification_id: str, user: CurrentUser = Depends(get_current_user)):
+def mark_read(notification_id: str, user: CurrentUser = Depends(get_current_user)):
     get_supabase().table("notifications").update({"read_at": "now()"}).eq(
         "id", notification_id
     ).eq("user_id", user.id).execute()
@@ -33,7 +33,7 @@ async def mark_read(notification_id: str, user: CurrentUser = Depends(get_curren
 
 
 @router.post("/read-all")
-async def mark_all_read(user: CurrentUser = Depends(get_current_user)):
+def mark_all_read(user: CurrentUser = Depends(get_current_user)):
     get_supabase().table("notifications").update({"read_at": "now()"}).eq(
         "user_id", user.id
     ).is_("read_at", "null").execute()

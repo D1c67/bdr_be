@@ -2,9 +2,10 @@
 
 A small abuse/DoS backstop applied to estimator-scoped routes and to the
 expensive/abusable internal routes (AI jobs, outbound email, uploads, exports).
-State is per-process, which suits the single-worker deployment (see the Dockerfile
-CMD and render.yaml `numInstances: 1`); for a multi-instance deployment back the
-counter with Redis or a Supabase table keyed on (scope, user_id, window).
+State is per-process: with N uvicorn workers (see the Dockerfile CMD) the
+effective cap is up to N× the configured limit — fine for a backstop. For a
+multi-instance deployment back the counter with Redis or a Supabase table keyed
+on (scope, user_id, window).
 
 Every limit raises HTTP 429 with a stable ``rate_limited`` code (see
 app/core/error_codes.py) plus:

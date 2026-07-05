@@ -32,14 +32,14 @@ def _get(project_id: str):
 
 
 @router.get("")
-async def get_general_material(project_id: str, user: CurrentUser = Depends(get_current_user)):
+def get_general_material(project_id: str, user: CurrentUser = Depends(get_current_user)):
     if user.role not in INTERNAL_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
     return _get(project_id)
 
 
 @router.post("/extract")
-async def rerun_extraction(
+def rerun_extraction(
     project_id: str, background: BackgroundTasks, user: CurrentUser = Depends(_EDITOR)
 ):
     """Re-run the estimate extraction in the background.
@@ -65,7 +65,7 @@ async def rerun_extraction(
 
 
 @router.put("")
-async def set_general_material(
+def set_general_material(
     project_id: str, body: GeneralMaterialIn, user: CurrentUser = Depends(_EDITOR)
 ):
     """Manually set / override the general-material price."""
@@ -98,7 +98,7 @@ async def set_general_material(
 
 
 @router.put("/tax")
-async def set_general_material_tax(
+def set_general_material_tax(
     project_id: str, body: TaxIn, user: CurrentUser = Depends(_EDITOR)
 ):
     """Record whether the general-material figure already includes sales tax,

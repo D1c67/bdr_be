@@ -114,7 +114,7 @@ class AssignIn(BaseModel):
 
 
 @router.get("/estimators")
-async def list_estimators(_: CurrentUser = Depends(require_writer)):
+def list_estimators(_: CurrentUser = Depends(require_writer)):
     # Estimator-role profiles plus dev accounts (is_dev). Dev accounts can switch
     # their own role and bypass the estimator assignment gates (see deps.py), so
     # they're selectable here to test/run the estimator flow themselves.
@@ -137,7 +137,7 @@ async def list_estimators(_: CurrentUser = Depends(require_writer)):
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(outbound_email_rate_limit)],
 )
-async def assign_estimator(
+def assign_estimator(
     project_id: str,
     body: AssignIn,
     user: CurrentUser = Depends(require_writer),
@@ -273,7 +273,7 @@ async def assign_estimator(
 
 
 @router.get("/projects/{project_id}/assignments")
-async def list_assignments(
+def list_assignments(
     project_id: str, _: CurrentUser = Depends(require_writer)
 ):
     return (
@@ -286,7 +286,7 @@ async def list_assignments(
 
 
 @router.post("/projects/{project_id}/assignments/{assignment_id}/revoke")
-async def revoke_assignment(
+def revoke_assignment(
     project_id: str,
     assignment_id: str,
     user: CurrentUser = Depends(require_writer),
@@ -314,7 +314,7 @@ async def revoke_assignment(
     "/projects/{project_id}/send-to-estimator",
     dependencies=[Depends(outbound_email_rate_limit)],
 )
-async def send_to_estimator(
+def send_to_estimator(
     project_id: str,
     user: CurrentUser = Depends(require_writer),
 ):
@@ -364,7 +364,7 @@ class UpdatesIn(BaseModel):
     "/projects/{project_id}/send-file-updates",
     dependencies=[Depends(outbound_email_rate_limit)],
 )
-async def send_file_updates(
+def send_file_updates(
     project_id: str,
     body: UpdatesIn | None = None,
     user: CurrentUser = Depends(require_writer),
@@ -435,7 +435,7 @@ async def send_file_updates(
 
 
 @router.get("/estimator/projects", dependencies=[Depends(estimator_rate_limit)])
-async def my_assigned_projects(user: CurrentUser = Depends(get_current_user)):
+def my_assigned_projects(user: CurrentUser = Depends(get_current_user)):
     """An estimator's assigned projects — minimal fields only."""
     if user.role != Role.ESTIMATOR:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Estimators only")
@@ -469,7 +469,7 @@ def _before_receive_quotes(stage: str) -> bool:
 
 
 @router.post("/estimator/projects/{project_id}/submit", dependencies=[Depends(estimator_rate_limit)])
-async def submit_deliverables(
+def submit_deliverables(
     project_id: str,
     background: BackgroundTasks,
     user: CurrentUser = Depends(require_project_assignment),
@@ -551,7 +551,7 @@ async def submit_deliverables(
 @router.get(
     "/estimator/projects/{project_id}", dependencies=[Depends(estimator_rate_limit)]
 )
-async def estimator_project_detail(
+def estimator_project_detail(
     project_id: str, user: CurrentUser = Depends(require_project_assignment)
 ):
     if user.role != Role.ESTIMATOR:

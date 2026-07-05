@@ -8,7 +8,6 @@ manual entry on the receive-quotes step; every manual change to an amount is
 recorded.
 """
 
-import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -47,7 +46,7 @@ def _internal(user: CurrentUser) -> None:
 
 
 @router.get("")
-async def list_rfqs(project_id: str, user: CurrentUser = Depends(get_current_user)):
+def list_rfqs(project_id: str, user: CurrentUser = Depends(get_current_user)):
     _internal(user)
     # quotes(id, tax_included) rides along so the frontend's advance gate can
     # see unanswered per-quote tax attestations without an N+1 fetch.
@@ -62,7 +61,7 @@ async def list_rfqs(project_id: str, user: CurrentUser = Depends(get_current_use
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def create_rfq(project_id: str, body: RFQCreate, user: CurrentUser = Depends(_PE)):
+def create_rfq(project_id: str, body: RFQCreate, user: CurrentUser = Depends(_PE)):
     payload = body.model_dump(mode="json")
     payload.update({"project_id": project_id, "created_by": user.id})
     try:
@@ -86,7 +85,7 @@ async def create_rfq(project_id: str, body: RFQCreate, user: CurrentUser = Depen
 
 
 @router.get("/email-preview")
-async def email_preview(project_id: str, user: CurrentUser = Depends(get_current_user)):
+def email_preview(project_id: str, user: CurrentUser = Depends(get_current_user)):
     """Representative subject/body so the PE can see what vendors will receive.
     The actual body is lightly varied per email by AI; this is the base template."""
     _internal(user)
@@ -105,14 +104,13 @@ async def email_preview(project_id: str, user: CurrentUser = Depends(get_current
 
 
 @router.post("/bulk-send", dependencies=[Depends(bulk_send_rate_limit)])
-async def bulk_send(project_id: str, body: RFQBulkSendIn, user: CurrentUser = Depends(_PE)):
+def bulk_send(project_id: str, body: RFQBulkSendIn, user: CurrentUser = Depends(_PE)):
     """Send each group's RFQ to its selected contacts — one email per contact.
     Per-contact failures are reported in `results`, not raised."""
     if not body.groups or not any(g.vendor_contact_ids for g in body.groups):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No contacts selected")
     try:
-        result = await asyncio.to_thread(
-            rfq_sending.bulk_send,
+        result = rfq_sending.bulk_send(
             project_id,
             [g.model_dump() for g in body.groups],
             user.id,
@@ -136,7 +134,7 @@ async def bulk_send(project_id: str, body: RFQBulkSendIn, user: CurrentUser = De
 
 
 @router.get("/sends")
-async def list_sends(project_id: str, user: CurrentUser = Depends(get_current_user)):
+def list_sends(project_id: str, user: CurrentUser = Depends(get_current_user)):
     """Every individual RFQ email for the project, incl. its Graph conversation id."""
     _internal(user)
     return (
@@ -154,7 +152,7 @@ async def list_sends(project_id: str, user: CurrentUser = Depends(get_current_us
 
 
 @router.get("/messages")
-async def list_messages(project_id: str, user: CurrentUser = Depends(get_current_user)):
+def list_messages(project_id: str, user: CurrentUser = Depends(get_current_user)):
     """Inbound vendor replies matched by conversation id, newest first."""
     _internal(user)
     return (
@@ -200,7 +198,7 @@ def _not_general(rfq: dict) -> None:
 
 
 @router.get("/{rfq_id}/quotes")
-async def list_quotes(project_id: str, rfq_id: str, user: CurrentUser = Depends(get_current_user)):
+def list_quotes(project_id: str, rfq_id: str, user: CurrentUser = Depends(get_current_user)):
     _internal(user)
     sb = get_supabase()
     rfq = _rfq_in_project(sb, project_id, rfq_id)
@@ -222,7 +220,7 @@ async def list_quotes(project_id: str, rfq_id: str, user: CurrentUser = Depends(
 
 
 @router.post("/{rfq_id}/quotes", status_code=status.HTTP_201_CREATED)
-async def add_quote(project_id: str, rfq_id: str, body: QuoteIn, user: CurrentUser = Depends(_PE)):
+def add_quote(project_id: str, rfq_id: str, body: QuoteIn, user: CurrentUser = Depends(_PE)):
     sb = get_supabase()
     _rfq_in_project(sb, project_id, rfq_id)
     payload = body.model_dump(mode="json")
@@ -235,7 +233,7 @@ async def add_quote(project_id: str, rfq_id: str, body: QuoteIn, user: CurrentUs
 
 
 @router.patch("/{rfq_id}/quotes/{quote_id}")
-async def override_quote(
+def override_quote(
     project_id: str,
     rfq_id: str,
     quote_id: str,
@@ -283,7 +281,7 @@ async def override_quote(
 
 
 @router.post("/{rfq_id}/quotes/{quote_id}/select")
-async def select_quote(
+def select_quote(
     project_id: str, rfq_id: str, quote_id: str, user: CurrentUser = Depends(_PE)
 ):
     """Mark the chosen quote as the category price (clears any prior selection
@@ -311,7 +309,7 @@ async def select_quote(
 
 
 @router.put("/{rfq_id}/custom-price")
-async def set_custom_price(
+def set_custom_price(
     project_id: str, rfq_id: str, body: RfqCustomPriceIn, user: CurrentUser = Depends(_PE)
 ):
     """Price the category with a custom number instead of any vendor quote
@@ -355,7 +353,7 @@ async def set_custom_price(
 
 
 @router.put("/{rfq_id}/quotes-confirmed")
-async def set_quotes_confirmed(
+def set_quotes_confirmed(
     project_id: str, rfq_id: str, body: RfqQuotesConfirmIn, user: CurrentUser = Depends(_PE)
 ):
     """Record the PE's "it's complete" check on the receive-quotes step — an
@@ -383,7 +381,7 @@ async def set_quotes_confirmed(
 
 
 @router.put("/{rfq_id}/quotes/{quote_id}/tax")
-async def set_quote_tax(
+def set_quote_tax(
     project_id: str,
     rfq_id: str,
     quote_id: str,
