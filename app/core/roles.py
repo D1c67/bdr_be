@@ -36,6 +36,13 @@ CHANGE_REVIEW_ROLES = frozenset(
     {Role.ESTIMATING_ADMIN, Role.ESTIMATING_ENGINEER, Role.EXECUTIVE}
 )
 
+# Project Management (PM) module access. Today these are identical to the bidding
+# sets — the accountant reads everything, writers write, and the external
+# estimator has ZERO PM access (never in INTERNAL_ROLES). Kept as distinct names
+# so future PM-specific roles are added by editing these two lines only.
+PM_READ_ROLES = INTERNAL_ROLES
+PM_WRITE_ROLES = WRITER_ROLES
+
 # The actual (to-GC) bid date/amount is confidential: only these roles may see it.
 # Project API responses null the field for everyone else (the rest of the team
 # works against the internal bid date). The accountant is read-only but may view

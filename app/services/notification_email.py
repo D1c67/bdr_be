@@ -61,6 +61,10 @@ _TYPE_META: dict[str, tuple[str, str]] = {
     "estimator_note": ("New note on a project", "Open the conversation"),
     "nudge": ("You've been nudged about a to-do", "Open your to-dos"),
     "due": ("Deadline approaching", "Open project"),
+    # Project Management. pm_* types deep-link to the PM view (see _deep_link).
+    "pm_activated": ("Project won — entered Preconstruction", "Open project"),
+    "pm_stage_change": ("Project moved PM stages", "Open project"),
+    "pm_outcome_conflict": ("Outcome change attempted on an active PM project", "Review project"),
 }
 
 _DEFAULT_META = ("BDR notification", "Open BDR")
@@ -79,6 +83,11 @@ def _deep_link(project_id: str | None, role: str | None, type_: str | None = Non
     base = get_settings().frontend_url.rstrip("/")
     is_estimator = role == Role.ESTIMATOR.value
     if project_id:
+        # PM notifications land on the PM view of the project. Estimators never
+        # receive pm_* types (notify_role refuses estimator broadcasts), but the
+        # estimator check stays first as a defense-in-depth link floor.
+        if not is_estimator and type_ and type_.startswith("pm_"):
+            return f"{base}/pm/projects/{project_id}"
         prefix = "/estimator/projects" if is_estimator else "/projects"
         return f"{base}{prefix}/{project_id}"
     # A nudge isn't tied to a project — send the recipient straight to their list.

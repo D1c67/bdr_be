@@ -128,6 +128,12 @@ class GCContactOut(GCContactIn):
 LaborTime = str
 WageType = str
 
+# Project Management lifecycle (migration 0057). A SEPARATE axis from the bidding
+# pipeline's current_stage: a won project keeps current_stage='bid_outcome' forever
+# while pm_stage tracks its construction life. NULL pm_stage = not in PM.
+PMStage = Literal["precon", "active_construction", "closeout"]
+PMOrigin = Literal["bid", "direct"]
+
 # Go/No-Go scoring answers. The rubric labels live in the frontend
 # (bdr_fe/lib/gonoScoring.ts); the points are mirrored by the backend scorer
 # (app/services/gono.py), which decides the Go/No-Go outcome from the total.
@@ -291,6 +297,13 @@ class ProjectOut(BaseModel):
     # not currently in re-verification (see migration 0043 / workflow.reopen_verify).
     reverify_return_stage: str | None = None
     status: ProjectStatus = "active"
+    # Project Management lifecycle (migration 0057): pm_stage/pm_origin are set
+    # when a won bid enters Precon (or a project is created directly in PM);
+    # pm_completed_at mirrors the abandon pattern (preserves pm_stage='closeout').
+    # Defaults let reads degrade gracefully before the migration is applied.
+    pm_stage: PMStage | None = None
+    pm_origin: PMOrigin | None = None
+    pm_completed_at: datetime | None = None
     # Last successful files export (drives the post-send-out export banner).
     # Default lets reads degrade gracefully before migration 0041 is applied.
     files_exported_at: datetime | None = None
@@ -621,3 +634,245 @@ class BidOutcomeIn(BaseModel):
         if v is not None and len(v) > 4000:
             raise ValueError("Notes must be 4,000 characters or fewer")
         return v
+
+
+# ── Project Management ──────────────────────────────────────────────────────
+# The PM module (migrations 0057-0060). Money follows the house convention:
+# Decimal in, string out (routers serialize via str()). Signed bounds where
+# deductive amounts are legitimate (change orders, SOV lines from them).
+
+_SIGNED_AMOUNT_BOUNDS = {
+    "ge": Decimal("-999999999999.99"),
+    "le": Decimal("999999999999.99"),
+    "decimal_places": 2,
+}
+
+
+def _max_len(field: str, limit: int):
+    """Shared length validator factory for PM free-text fields."""
+
+    @field_validator(field)
+    @classmethod
+    def _check(cls, v: str | None) -> str | None:  # noqa: N805
+        if v is not None and len(v) > limit:
+            raise ValueError(f"{field} must be {limit:,} characters or fewer")
+        return v
+
+    return _check
+
+
+class PMProjectCreate(BaseModel):
+    """Direct creation in Project Management — a project awarded without a bid,
+    or an already-live job being onboarded (initial_stage picks where it enters).
+    Deliberately NOT ProjectCreate: the bidding intake's required fields (bid
+    dates, go/no-go answers) don't exist for a never-bid project."""
+
+    name: str = Field(min_length=1, max_length=300)
+    number: str = Field(min_length=1, max_length=100)
+    initial_stage: PMStage = "precon"
+    customer_gc_id: str | None = None
+    customer_name: str | None = Field(None, max_length=300)
+    original_contract_value: Decimal | None = Field(None, **_SIGNED_AMOUNT_BOUNDS)
+    awarded_at: date | None = None
+    ntp_date: date | None = None
+    address: str | None = Field(None, max_length=500)
+    planned_start_date: date | None = None
+    planned_finish_date: date | None = None
+    actual_start_date: date | None = None
+    superintendent_name: str | None = Field(None, max_length=200)
+    contract_number: str | None = Field(None, max_length=100)
+    notes: str | None = Field(None, max_length=4000)
+
+
+class PMDetailsUpdate(BaseModel):
+    """PATCH for pm_details (+ the shared projects.notes is bidding-owned; PM
+    notes live on pm_details). exclude_unset semantics: explicit null clears."""
+
+    customer_gc_id: str | None = None
+    customer_name: str | None = Field(None, max_length=300)
+    original_contract_value: Decimal | None = Field(None, **_SIGNED_AMOUNT_BOUNDS)
+    awarded_at: date | None = None
+    ntp_date: date | None = None
+    planned_start_date: date | None = None
+    planned_finish_date: date | None = None
+    actual_start_date: date | None = None
+    actual_finish_date: date | None = None
+    superintendent_name: str | None = Field(None, max_length=200)
+    contract_number: str | None = Field(None, max_length=100)
+    retainage_percent: Decimal | None = Field(None, ge=0, le=Decimal("100"), decimal_places=2)
+    notes: str | None = Field(None, max_length=4000)
+
+
+class PMStageTransitionIn(BaseModel):
+    to_stage: PMStage
+    # Required (validated in the service) when moving BACKWARD a stage.
+    note: str | None = Field(None, max_length=2000)
+
+
+class ChangeOrderIn(BaseModel):
+    co_number: str = Field(min_length=1, max_length=50)
+    title: str = Field(min_length=1, max_length=300)
+    description: str | None = Field(None, max_length=4000)
+    status: Literal["draft", "submitted", "approved", "rejected"] = "draft"
+    amount: Decimal = Field(Decimal(0), **_SIGNED_AMOUNT_BOUNDS)  # deductive COs are negative
+    days_added: int | None = Field(None, ge=-3650, le=3650)
+    customer_reference: str | None = Field(None, max_length=100)
+    submitted_at: date | None = None
+    approved_at: date | None = None
+
+
+class ChangeOrderUpdate(BaseModel):
+    co_number: str | None = Field(None, min_length=1, max_length=50)
+    title: str | None = Field(None, min_length=1, max_length=300)
+    description: str | None = Field(None, max_length=4000)
+    status: Literal["draft", "submitted", "approved", "rejected"] | None = None
+    amount: Decimal | None = Field(None, **_SIGNED_AMOUNT_BOUNDS)
+    days_added: int | None = Field(None, ge=-3650, le=3650)
+    customer_reference: str | None = Field(None, max_length=100)
+    submitted_at: date | None = None
+    approved_at: date | None = None
+
+
+class SovLineIn(BaseModel):
+    line_number: str = Field(min_length=1, max_length=50)
+    description: str = Field(min_length=1, max_length=500)
+    scheduled_value: Decimal = Field(**_SIGNED_AMOUNT_BOUNDS)  # CO lines may be deductive
+    change_order_id: str | None = None
+    sort_order: int = 0
+
+
+class SovLineUpdate(BaseModel):
+    line_number: str | None = Field(None, min_length=1, max_length=50)
+    description: str | None = Field(None, min_length=1, max_length=500)
+    scheduled_value: Decimal | None = Field(None, **_SIGNED_AMOUNT_BOUNDS)
+    change_order_id: str | None = None
+    sort_order: int | None = None
+
+
+class PayAppCreate(BaseModel):
+    """Creating a pay app auto-populates one line per current SOV line, with
+    previous_completed snapshotted from all prior apps server-side."""
+
+    period_start: date | None = None
+    period_end: date
+    retainage_percent: Decimal | None = Field(None, ge=0, le=Decimal("100"), decimal_places=2)
+    notes: str | None = Field(None, max_length=4000)
+
+
+class PayAppUpdate(BaseModel):
+    period_start: date | None = None
+    period_end: date | None = None
+    status: Literal["draft", "submitted", "approved", "paid", "rejected"] | None = None
+    retainage_percent: Decimal | None = Field(None, ge=0, le=Decimal("100"), decimal_places=2)
+    submitted_at: date | None = None
+    approved_at: date | None = None
+    paid_at: date | None = None
+    notes: str | None = Field(None, max_length=4000)
+
+
+class PayAppLineUpdate(BaseModel):
+    """The two user-entered G703 columns; previous_completed is server-owned."""
+
+    this_period: Decimal | None = Field(None, **_SIGNED_AMOUNT_BOUNDS)  # corrections may be negative
+    stored_materials: Decimal | None = Field(None, ge=0, le=Decimal("999999999999.99"), decimal_places=2)
+
+
+class MilestoneIn(BaseModel):
+    name: str = Field(min_length=1, max_length=300)
+    planned_date: date | None = None
+    actual_date: date | None = None
+    sort_order: int = 0
+    notes: str | None = Field(None, max_length=2000)
+
+
+class MilestoneUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=300)
+    planned_date: date | None = None
+    actual_date: date | None = None
+    sort_order: int | None = None
+    notes: str | None = Field(None, max_length=2000)
+
+
+class DailyLogIn(BaseModel):
+    log_date: date
+    weather: str | None = Field(None, max_length=200)
+    manpower_count: int | None = Field(None, ge=0, le=10000)
+    work_performed: str = Field(min_length=1, max_length=8000)
+    delays: str | None = Field(None, max_length=4000)
+    safety_notes: str | None = Field(None, max_length=4000)
+
+
+class DailyLogUpdate(BaseModel):
+    log_date: date | None = None
+    weather: str | None = Field(None, max_length=200)
+    manpower_count: int | None = Field(None, ge=0, le=10000)
+    work_performed: str | None = Field(None, min_length=1, max_length=8000)
+    delays: str | None = Field(None, max_length=4000)
+    safety_notes: str | None = Field(None, max_length=4000)
+
+
+class RFIIn(BaseModel):
+    subject: str = Field(min_length=1, max_length=300)
+    question: str = Field(min_length=1, max_length=8000)
+    asked_of: str | None = Field(None, max_length=200)
+    sent_at: date | None = None
+    due_at: date | None = None
+
+
+class RFIUpdate(BaseModel):
+    subject: str | None = Field(None, min_length=1, max_length=300)
+    question: str | None = Field(None, min_length=1, max_length=8000)
+    answer: str | None = Field(None, max_length=8000)
+    status: Literal["open", "answered", "closed"] | None = None
+    asked_of: str | None = Field(None, max_length=200)
+    sent_at: date | None = None
+    due_at: date | None = None
+    answered_at: date | None = None
+
+
+class ManpowerIn(BaseModel):
+    work_date: date
+    classification: str = Field(min_length=1, max_length=200)
+    workers: int = Field(ge=0, le=10000)
+    hours: Decimal | None = Field(None, ge=0, le=Decimal("9999.99"), decimal_places=2)
+    daily_log_id: str | None = None
+    notes: str | None = Field(None, max_length=2000)
+
+
+class ManpowerUpdate(BaseModel):
+    work_date: date | None = None
+    classification: str | None = Field(None, min_length=1, max_length=200)
+    workers: int | None = Field(None, ge=0, le=10000)
+    hours: Decimal | None = Field(None, ge=0, le=Decimal("9999.99"), decimal_places=2)
+    daily_log_id: str | None = None
+    notes: str | None = Field(None, max_length=2000)
+
+
+class PmMaterialIn(BaseModel):
+    """A PM material line — the same shape a BOQ extraction item carries
+    (no pricing). material_category_id None = uncategorized."""
+
+    material_category_id: str | None = None
+    description: str = Field(min_length=1, max_length=2000)
+    quantity: Decimal | None = Field(None, ge=0, le=Decimal("999999999"))
+    unit: str | None = Field(None, max_length=100)
+    notes: str | None = Field(None, max_length=2000)
+    site_name: str | None = Field(None, max_length=300)
+
+
+class PmMaterialUpdate(BaseModel):
+    material_category_id: str | None = None
+    description: str | None = Field(None, min_length=1, max_length=2000)
+    quantity: Decimal | None = Field(None, ge=0, le=Decimal("999999999"))
+    unit: str | None = Field(None, max_length=100)
+    notes: str | None = Field(None, max_length=2000)
+    site_name: str | None = Field(None, max_length=300)
+
+
+# ── Email ingestion ──────────────────────────────────────────────────────────
+
+
+class EmailAssignIn(BaseModel):
+    """Manual assignment of an ingested email to a project."""
+
+    project_id: str = Field(min_length=1, max_length=100)

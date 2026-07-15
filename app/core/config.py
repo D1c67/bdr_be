@@ -125,6 +125,27 @@ class Settings(BaseSettings):
     inbound_attachment_max_count: int = 10                 # per inbound message
     inbound_pdf_extract_max: int = 3                       # paid OpenAI calls per message
 
+    # ── PM mailbox email ingestion (services/email_ingest) ────────────────────
+    # Poll a mailbox (Inbox + Sent Items) and assign every email to a project.
+    # The app's Mail.ReadWrite permission is tenant-wide (no Exchange
+    # ApplicationAccessPolicy is configured), so any mailbox works without
+    # Exchange-side changes. Attachment caps reuse the inbound_* limits above.
+    email_ingest_enabled: bool = False
+    email_ingest_mailbox: str = ""              # e.g. t.moorejr@g3electrical.com; empty = poller never runs
+    email_ingest_poll_interval_seconds: int = 120
+    email_ingest_lookback_days: int = 1         # initial-sync window (deployment-forward, no backfill)
+    email_ingest_reset_lookback_days: int = 7   # window after a DeltaExpired (410) reset
+    email_body_max_chars: int = 100_000         # stored plain-text body cap
+    # Identification round 3 (LLM subject-only match).
+    openai_email_match_model: str = "gpt-5.4-mini"
+    email_match_confidence_threshold: float = 0.85   # assign at/above; below → Unknown + suggestion
+    email_match_max_attempts: int = 5                # transient-failure retries before 'failed'
+    email_match_llm_max_candidates: int = 300        # prefilter cap bounding the R3 prompt
+    email_llm_outage_retry_seconds: int = 3600       # wait when the provider is out of credits
+    # New-project rescan of the Unknown pool (learn-back on project creation).
+    email_rescan_llm_days: int = 14             # only LLM-confirm unknowns this recent
+    email_rescan_llm_max: int = 50              # LLM call cap per project creation
+
     # Anonymous OneDrive "Anyone with the link" URLs for RFQ drawings expire after
     # this many days (Graph honors the tenant anonymous-link max-expiry policy).
     rfq_drawings_link_ttl_days: int = 30

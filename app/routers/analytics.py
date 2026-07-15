@@ -54,7 +54,14 @@ def summary(user: CurrentUser = Depends(get_current_user)):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
     sb = get_supabase()
 
-    projects = sb.table("projects").select("id, current_stage").execute().data or []
+    # pm_only = created directly in Project Management, never a bid — excluded so
+    # the by-stage counts reflect the bidding pipeline only.
+    projects = (
+        sb.table("projects")
+        .select("id, current_stage")
+        .neq("current_stage", "pm_only")
+        .execute()
+    ).data or []
     by_stage: dict[str, int] = defaultdict(int)
     for p in projects:
         by_stage[p["current_stage"]] += 1
@@ -79,6 +86,8 @@ def summary(user: CurrentUser = Depends(get_current_user)):
 
     time_in_stage = []
     for key, defn in sorted(STAGES.items(), key=lambda kv: kv[1].order):
+        if key == "pm_only":
+            continue  # never receives stage_events — a permanent zero row otherwise
         samples = durations.get(key, [])
         avg_hours = round(sum(samples) / len(samples) / 3600, 2) if samples else None
         time_in_stage.append(

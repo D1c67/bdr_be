@@ -30,8 +30,20 @@ async def lifespan(_: FastAPI):
         from app.services import due_reminders
 
         reminder_task = asyncio.create_task(due_reminders.polling_loop())
+    # PM mailbox email ingestion — polls the configured mailbox (Inbox + Sent
+    # Items) and runs the project-identification pipeline. Multi-worker safe
+    # via the graph_sync_state lease.
+    email_task: asyncio.Task | None = None
+    if (
+        settings.email_ingest_enabled
+        and settings.email_ingest_mailbox
+        and settings.ms_client_id
+    ):
+        from app.services import email_ingest
+
+        email_task = asyncio.create_task(email_ingest.polling_loop())
     yield
-    for task in (poll_task, reminder_task):
+    for task in (poll_task, reminder_task, email_task):
         if task:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -141,6 +153,7 @@ from app.routers import (  # noqa: E402
     analytics,
     boq_analysis,
     change_review,
+    emails,
     estimator,
     files,
     general_material,
@@ -148,6 +161,11 @@ from app.routers import (  # noqa: E402
     notes,
     notifications,
     outcome,
+    pm,
+    pm_documents,
+    pm_field,
+    pm_financials,
+    pm_materials,
     pricing,
     projects,
     proposals,
@@ -172,9 +190,15 @@ app.include_router(general_material.router)
 app.include_router(pricing.router)
 app.include_router(proposals.router)
 app.include_router(outcome.router)
+app.include_router(pm.router)
+app.include_router(pm_financials.router)
+app.include_router(pm_field.router)
+app.include_router(pm_documents.router)
+app.include_router(pm_materials.router)
 app.include_router(analytics.router)
 app.include_router(notifications.router)
 app.include_router(notes.router)
 app.include_router(todos.router)
 app.include_router(files.router)
 app.include_router(change_review.router)
+app.include_router(emails.router)

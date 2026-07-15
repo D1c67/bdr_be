@@ -251,7 +251,10 @@ def load_window(
     status: str | None = None,
 ) -> WindowData:
     sb = get_supabase()
-    pq = sb.table("projects").select(_PROJECT_COLS)
+    # Direct-created PM projects (current_stage='pm_only') never entered the
+    # bidding pipeline — exclude them here, the single choke point every windowed
+    # section's cohort is built from, so they can't pollute any bidding metric.
+    pq = sb.table("projects").select(_PROJECT_COLS).neq("current_stage", "pm_only")
     if project_id:
         pq = pq.eq("id", project_id)
     projects = {p["id"]: p for p in (pq.execute().data or [])}
@@ -722,6 +725,8 @@ def _stage_durations(w: WindowData, cohort: set[str]) -> tuple[list[dict], list[
             end_to_end.append((sub - first).total_seconds() / 3600)
     time_in_stage = []
     for key, defn in sorted(STAGES.items(), key=lambda kv: kv[1].order):
+        if key == "pm_only":
+            continue  # never receives stage_events — a permanent zero row otherwise
         samples = durations.get(key, [])
         time_in_stage.append(
             {"stage": key, "label": defn.label, "avg_hours": _mean(samples), "samples": len(samples)}
@@ -1263,6 +1268,37 @@ ACTIVITY_ACTION_LABELS: dict[str, str] = {
     "user.dev_role_switch": "Switched own role (dev)",
     "user.notification_prefs.update": "Updated notification prefs",
     "user.notification_prefs.reset": "Reset notification prefs",
+    # Project Management
+    "pm.activate": "Won bid — entered PM",
+    "pm.retract": "Retracted PM entry (outcome corrected)",
+    "pm.project_create": "Created PM project",
+    "pm.details_update": "Edited PM details",
+    "pm.stage_change": "Moved PM stage",
+    "pm.complete": "Marked PM project complete",
+    "co.create": "Added a change order",
+    "co.update": "Updated a change order",
+    "co.delete": "Deleted a change order",
+    "sov.create": "Added a schedule-of-values line",
+    "sov.update": "Updated a schedule-of-values line",
+    "sov.delete": "Deleted a schedule-of-values line",
+    "payapp.create": "Created a pay application",
+    "payapp.update": "Updated a pay application",
+    "payapp.delete": "Deleted a pay application",
+    "milestone.create": "Added a milestone",
+    "milestone.update": "Updated a milestone",
+    "milestone.delete": "Deleted a milestone",
+    "dailylog.create": "Added a daily log",
+    "dailylog.update": "Updated a daily log",
+    "dailylog.delete": "Deleted a daily log",
+    "rfi.create": "Created an RFI",
+    "rfi.update": "Updated an RFI",
+    "rfi.delete": "Deleted an RFI",
+    "manpower.create": "Added a manpower entry",
+    "manpower.update": "Updated a manpower entry",
+    "manpower.delete": "Deleted a manpower entry",
+    "pm_doc.upload": "Uploaded a PM document",
+    "pm_doc.download": "Downloaded a PM document",
+    "pm_doc.delete": "Deleted a PM document",
 }
 
 

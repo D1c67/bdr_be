@@ -213,7 +213,7 @@ def _ingest_attachments(sb, send: dict, message_row: dict) -> None:
     contact = send["vendor_contacts"]
 
     # Cap count + skip oversized attachments before their bytes are fetched.
-    attachments = graph_inbox.list_attachments(
+    attachments, _ = graph_inbox.list_attachments(
         message_row["graph_message_id"],
         max_count=settings.inbound_attachment_max_count,
         max_bytes=settings.inbound_attachment_max_bytes,

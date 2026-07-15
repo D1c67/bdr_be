@@ -54,6 +54,12 @@ STAGES: dict[str, StageDef] = {
     "submitted":         StageDef("submitted",         12, (Role.ESTIMATING_ADMIN,), "Submitted"),
     "bid_outcome":       StageDef("bid_outcome",       13, (Role.ESTIMATING_ADMIN,), "Win / Loss"),
     "declined":          StageDef("declined",          99, (), "Declined"),
+    # Placeholder for projects created directly in Project Management (never bid).
+    # Terminal by construction: no TRANSITIONS edge leads into or out of it, so
+    # transition_project can never move a project onto/off this stage — it exists
+    # only so STAGES[...] lookups on such rows never KeyError. PM's own lifecycle
+    # lives in pm_stage / services/pm_workflow.py, not here.
+    "pm_only":           StageDef("pm_only",           98, (), "PM Only"),
 }
 
 # Allowed forward transitions. Linear pipeline; go_no_go can also decline.
@@ -72,6 +78,7 @@ TRANSITIONS: dict[str, set[str]] = {
     "submitted":         {"bid_outcome"},
     "bid_outcome":       set(),
     "declined":          set(),
+    "pm_only":           set(),
 }
 
 
@@ -346,7 +353,9 @@ def maybe_reopen_verify_after_edit(
         if not proj or proj.get("abandoned_at"):
             return False
         stage = proj["current_stage"]
-        if stage == "declined" or STAGES[stage].order <= _VERIFY_ORDER:
+        # pm_only guarded explicitly: its order (98) is past verify but it was
+        # never in the pipeline, so there is nothing to re-verify.
+        if stage in ("declined", "pm_only") or STAGES[stage].order <= _VERIFY_ORDER:
             return False  # not past verify (includes being at verify)
         _, moved = reopen_verify(project_id, actor_id, reason)
         if moved:

@@ -31,6 +31,7 @@ class _Query:
         self._payload = None
         self._conflict = None
         self._filters = []
+        self._neq_filters = []
         self._single = False
 
     # builders
@@ -54,6 +55,10 @@ class _Query:
         self._filters.append((col, val))
         return self
 
+    def neq(self, col, val):
+        self._neq_filters.append((col, val))
+        return self
+
     def in_(self, col, vals):
         self._filters.append((col, list(vals)))
         return self
@@ -70,7 +75,9 @@ class _Query:
 
     # execution
     def _matches(self, row):
-        return all(row.get(c) == v for c, v in self._filters)
+        return all(row.get(c) == v for c, v in self._filters) and all(
+            row.get(c) != v for c, v in self._neq_filters
+        )
 
     def execute(self):
         rows = self.db.tables.setdefault(self.table, [])

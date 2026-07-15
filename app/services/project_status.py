@@ -10,7 +10,7 @@ project resumes exactly where it left off.
 from typing import Literal
 
 ProjectStatus = Literal[
-    "active", "sent", "won", "lost", "no_award", "declined", "abandoned"
+    "active", "sent", "won", "lost", "no_award", "declined", "abandoned", "no_bid"
 ]
 
 
@@ -28,6 +28,10 @@ def derive_status(
     """
     if abandoned_at:
         return "abandoned"
+    # Created directly in Project Management — never entered the bidding pipeline,
+    # so no bid status applies (bidding surfaces exclude these rows entirely).
+    if current_stage == "pm_only":
+        return "no_bid"
     if current_stage == "declined":
         return "declined"
     if current_stage == "bid_outcome":

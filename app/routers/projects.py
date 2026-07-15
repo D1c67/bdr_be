@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from app.core.deps import CurrentUser, get_current_user, require_internal, require_writer
 from app.core.roles import (
@@ -20,7 +20,7 @@ from app.models.schemas import (
     ProjectOut,
     ProjectUpdate,
 )
-from app.services import proposal_send, workflow
+from app.services import email_ingest, pm, proposal_send, workflow
 from app.services.notifications import audit, notify_role
 from app.services.project_status import derive_status
 
@@ -97,6 +97,11 @@ def list_projects(
     query = get_supabase().table("projects").select("*, bid_outcomes(result)")
     if stage is not None:
         query = query.eq("current_stage", stage)
+    else:
+        # Projects created directly in Project Management were never bids — keep
+        # them off every bidding surface (dashboard, go/no-go). Explicitly asking
+        # for ?stage=pm_only still returns them.
+        query = query.neq("current_stage", "pm_only")
     resp = query.order("created_at", desc=True).execute()
     return [_present(p, user.role) for p in resp.data or []]
 
@@ -104,6 +109,7 @@ def list_projects(
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
 def create_project(
     body: ProjectCreate,
+    background: BackgroundTasks,
     user: CurrentUser = Depends(require_writer),
 ):
     """Create a project (typically the Estimating Admin). Starts in `intake`."""
@@ -129,6 +135,9 @@ def create_project(
         {"project_id": created["id"], "from_stage": None, "to_stage": "intake", "actor_id": user.id}
     ).execute()
     audit(user.id, "project.create", "project", created["id"], {"number": created["number"]})
+    # Learn-back: re-scan Unknown emails against the new project (bid invites
+    # often arrive before the project exists). Best-effort, never raises.
+    background.add_task(email_ingest.rescan_unknown_for_project, created["id"])
     return _present(created, user.role)
 
 
@@ -220,7 +229,7 @@ def _project_status_row(project_id: str) -> dict:
     row = (
         get_supabase()
         .table("projects")
-        .select("id, name, current_stage, abandoned_at")
+        .select("id, name, current_stage, abandoned_at, pm_stage")
         .eq("id", project_id)
         .execute()
     ).data
@@ -240,6 +249,14 @@ def abandon_project(
     existing = _project_status_row(project_id)
     if existing.get("abandoned_at"):
         raise HTTPException(status.HTTP_409_CONFLICT, "Project is already abandoned")
+    # Abandon is a BID lifecycle marker. A project that entered Project
+    # Management (won, or created there directly) is no longer just a bid —
+    # abandoning it would rewrite a won job's history to "abandoned".
+    if existing.get("pm_stage") or existing.get("current_stage") == "pm_only":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This project is in Project Management and can no longer be abandoned as a bid.",
+        )
     now = datetime.now(timezone.utc).isoformat()
     updated = (
         get_supabase()
@@ -277,6 +294,9 @@ def reactivate_project(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
     audit(user.id, "project.reactivate", "project", project_id,
           {"stage": existing["current_stage"]})
+    # A bid abandoned at `submitted` can still have its outcome recorded as won;
+    # PM entry is deferred until the project is revived — this is that moment.
+    pm.activate_pm_if_won(project_id, user.id)
     # Re-fetch with the outcome embedded so a reactivated win/loss bid reports its
     # true status (won/lost), not just the abandon-free fallback.
     return _present(_fetch_project_with_outcome(project_id), user.role)

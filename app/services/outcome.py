@@ -19,7 +19,7 @@ from decimal import Decimal
 from app.core.roles import Role
 from app.core.supabase_client import get_supabase
 from app.models.schemas import BidOutcomeIn
-from app.services import workflow
+from app.services import pm, workflow
 from app.services.notifications import audit, notify_role
 
 
@@ -146,8 +146,11 @@ def record_outcome(project_id: str, user_id: str, body: BidOutcomeIn) -> dict:
     updates in place so the PA can fix it as more feedback comes in."""
     sb = get_supabase()
     project = (
-        sb.table("projects").select("id, name, current_stage").eq("id", project_id)
-        .single().execute()
+        sb.table("projects")
+        .select("id, name, current_stage, pm_stage, pm_origin, pm_completed_at")
+        .eq("id", project_id)
+        .single()
+        .execute()
     ).data
     if not project:
         raise OutcomeError("Project not found", status_code=404)
@@ -155,6 +158,31 @@ def record_outcome(project_id: str, user_id: str, body: BidOutcomeIn) -> dict:
         raise OutcomeError(
             "Project is not awaiting an outcome — the bid must be Submitted first."
         )
+
+    # PM seam: a recorded WON activated Project Management. Correcting it away
+    # from won is fine while the PM record is an untouched Precon shell (it is
+    # auto-retracted below, the fat-finger case) — but once PM work exists the
+    # correction is refused rather than stranding change orders / daily logs.
+    retract_pm_after = False
+    if body.result != "won" and project.get("pm_stage") and project.get("pm_origin") == "bid":
+        prior = (
+            sb.table("bid_outcomes").select("result").eq("project_id", project_id).execute()
+        ).data or []
+        if prior and prior[0].get("result") == "won":
+            if pm.is_retractable(project):
+                retract_pm_after = True
+            else:
+                notify_role(
+                    Role.EXECUTIVE,
+                    project_id,
+                    "pm_outcome_conflict",
+                    f"An attempt was made to change the won outcome of {project['name']}, "
+                    "which is already active in Project Management.",
+                )
+                raise OutcomeError(
+                    "This project is already active in Project Management — its "
+                    "outcome can no longer be changed away from won."
+                )
 
     sent = _sent_gcs(project_id)
     sent_by_id = {g["gc_id"]: g for g in sent}
@@ -200,6 +228,18 @@ def record_outcome(project_id: str, user_id: str, body: BidOutcomeIn) -> dict:
         if body.winning_gc_id:
             note += f" — won by {sent_by_id[body.winning_gc_id]['gc_name']}"
         workflow.transition_project(project_id, "bid_outcome", user_id, note)
+
+    # Won → enter Project Management at Preconstruction (idempotent, so this
+    # also covers lost→won corrections and re-records). Not wrapped in a
+    # swallow-all: the upserts above are idempotent, so on failure the PA just
+    # re-submits — a won project must never silently miss PM.
+    if body.result == "won":
+        activated = pm.activate_pm_for_win(project_id, user_id, body.winning_gc_id)
+        if not activated and project.get("pm_stage") and project.get("pm_origin") == "bid":
+            # Already in PM: a corrected winner leaves the original seeds behind.
+            pm.flag_winner_change(project_id, project["name"], body.winning_gc_id)
+    elif retract_pm_after:
+        pm.retract_pm(project_id, user_id)
 
     for role in (Role.ESTIMATING_ENGINEER, Role.EXECUTIVE):
         notify_role(

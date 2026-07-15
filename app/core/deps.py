@@ -12,7 +12,13 @@ import jwt
 from fastapi import Depends, Header, HTTPException, Request, status
 
 from app.core.config import get_settings
-from app.core.roles import INTERNAL_ROLES, WRITER_ROLES, Role
+from app.core.roles import (
+    INTERNAL_ROLES,
+    PM_READ_ROLES,
+    PM_WRITE_ROLES,
+    WRITER_ROLES,
+    Role,
+)
 from app.core.security import decode_token
 from app.core.supabase_client import get_supabase
 
@@ -157,6 +163,30 @@ async def require_writer(
     teammate is allowed to perform on any stage.
     """
     if user.role not in WRITER_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Read-only or insufficient role")
+    return user
+
+
+async def require_pm_read(
+    user: CurrentUser = Depends(get_current_user),
+) -> CurrentUser:
+    """Allow any role with read access to the PM module.
+
+    Today identical to `require_internal` (accountant included, estimator never),
+    but PM routes must depend on THIS so future PM-specific roles are a
+    roles.py-only change.
+    """
+    if user.role not in PM_READ_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
+    return user
+
+
+async def require_pm_write(
+    user: CurrentUser = Depends(get_current_user),
+) -> CurrentUser:
+    """Allow any role that may write in the PM module (excludes the read-only
+    accountant and the external estimator). PM mirror of `require_writer`."""
+    if user.role not in PM_WRITE_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Read-only or insufficient role")
     return user
 

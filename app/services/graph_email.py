@@ -1,8 +1,11 @@
 """Microsoft Graph email — send-as the shared mailbox bids@g3electrical.com.
 
-Uses the MSAL client-credentials (application) flow. The Azure app must have the
-application permission `Mail.Send` (admin-consented) and an Exchange
-ApplicationAccessPolicy restricting that permission to ONLY the bids@ mailbox.
+Uses the MSAL client-credentials (application) flow with the admin-consented
+application permission `Mail.Send`. Application permissions are TENANT-WIDE:
+no Exchange ApplicationAccessPolicy is configured (verified 2026-07-12), so
+this app can act on any mailbox — adding one scoped to the mailboxes BDR
+actually uses (bids@ + the ingestion mailbox) would be a worthwhile
+least-privilege hardening if the client secret ever leaks.
 
 Every send is recorded in `email_log`. For large attachments, prefer including
 short-TTL signed download links in the body over inlining bytes.
@@ -51,6 +54,7 @@ def graph_request(
     params: dict | None = None,
     timeout: float = 30,
     follow_redirects: bool = False,
+    prefer: str | None = None,
 ) -> httpx.Response:
     """Authenticated Graph call. Always asks for immutable message ids so the
     ids we store at draft time survive the move to Sent Items after send.
@@ -58,13 +62,19 @@ def graph_request(
     `follow_redirects` is needed for endpoints that 302 to a pre-authenticated
     download URL (e.g. `/content?format=pdf`); httpx strips the Authorization
     header on cross-host redirects, so following is safe.
+
+    `prefer` appends an extra Prefer value (comma-joined is valid HTTP), e.g.
+    'outlook.body-content-type="text"' to get plain-text message bodies.
     """
+    prefer_header = 'IdType="ImmutableId"'
+    if prefer:
+        prefer_header += f", {prefer}"
     resp = httpx.request(
         method,
         f"{_GRAPH_BASE}{path}",
         headers={
             "Authorization": f"Bearer {_acquire_token()}",
-            "Prefer": 'IdType="ImmutableId"',
+            "Prefer": prefer_header,
         },
         json=json,
         params=params,
