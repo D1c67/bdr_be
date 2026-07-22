@@ -17,7 +17,6 @@ Two outputs live on the draft:
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -25,7 +24,7 @@ from typing import Any
 
 from app.core.config import get_settings
 from app.core.supabase_client import get_supabase
-from app.services import llm_errors, storage
+from app.services import llm, llm_errors, storage
 from app.services.boq_extraction import worksheets_to_text
 
 logger = logging.getLogger(__name__)
@@ -237,33 +236,17 @@ def _load_boq_text(draft: dict[str, Any]) -> str:
     return worksheets_to_text(storage.download_file(rec["storage_path"]), cap)
 
 
-def _call_openai(doc_text: str) -> dict[str, Any]:
-    from app.services.openai_text import _get_client
-
+def _call_llm(doc_text: str) -> dict[str, Any]:
     settings = get_settings()
-    if not settings.openai_api_key:
-        raise ValueError("OPENAI_API_KEY is not configured on the server.")
-    resp = _get_client().responses.create(
-        model=settings.openai_proposal_model,
-        max_output_tokens=settings.openai_proposal_max_output_tokens,
-        instructions=build_proposal_prompt(),
-        input=build_user_prompt(doc_text),
-        text={
-            "format": {
-                "type": "json_schema",
-                "name": "proposal_lines",
-                "schema": PROPOSAL_LINES_SCHEMA,
-                "strict": True,
-            }
-        },
+    result = llm.complete_json(
+        "proposal",
+        system=build_proposal_prompt(),
+        messages=[{"role": "user", "content": build_user_prompt(doc_text)}],
+        schema=PROPOSAL_LINES_SCHEMA,
+        schema_name="proposal_lines",
+        max_tokens=settings.openai_proposal_max_output_tokens,
+        settings=settings,
     )
-    if getattr(resp, "status", None) == "incomplete":
-        reason = getattr(getattr(resp, "incomplete_details", None), "reason", "unknown")
-        raise ValueError(f"Model response was cut off ({reason}) — retry generation.")
-    try:
-        result = json.loads(resp.output_text)
-    except (json.JSONDecodeError, TypeError) as exc:
-        raise ValueError("Model response was not valid JSON — retry generation.") from exc
     if not isinstance(result, dict) or "lines" not in result:
         raise ValueError("Model response did not match the expected schema.")
     return result
@@ -272,7 +255,7 @@ def _call_openai(doc_text: str) -> dict[str, Any]:
 def run_generation(draft_id: str) -> None:
     """Background entrypoint: generate scope lines for a draft."""
     settings = get_settings()
-    _mark(draft_id, status="running", error=None, model=settings.openai_proposal_model)
+    _mark(draft_id, status="running", error=None, model=llm.active_model("proposal", settings))
     try:
         draft = (
             get_supabase()
@@ -285,7 +268,7 @@ def run_generation(draft_id: str) -> None:
         if not draft:
             return
         doc_text = _load_boq_text(draft)
-        result = _call_openai(doc_text)
+        result = _call_llm(doc_text)
         lines = lines_from_result(result)
         if not lines:
             _mark(
@@ -304,5 +287,5 @@ def run_generation(draft_id: str) -> None:
         _mark(
             draft_id,
             status="failed",
-            error=llm_errors.user_message(exc, settings.openai_proposal_model)[:500],
+            error=llm_errors.user_message(exc, llm.active_model("proposal", settings))[:500],
         )

@@ -186,6 +186,16 @@ def record_outcome(project_id: str, user_id: str, body: BidOutcomeIn) -> dict:
 
     sent = _sent_gcs(project_id)
     sent_by_id = {g["gc_id"]: g for g in sent}
+    # A win must name its GC: the winner becomes the customer on the PM record
+    # (services/pm.activate_pm_for_win), so an unnamed one strands the project in
+    # Preconstruction with no GC over it. 'lost'/'no_award' stay optional — there
+    # the winner is someone else's business and often never reported back.
+    if body.result == "won" and body.winning_gc_id is None:
+        raise OutcomeError(
+            "Recording a win requires the GC we won it with — that GC carries over "
+            "as the customer on the Project Management record.",
+            status_code=400,
+        )
     if body.winning_gc_id is not None and body.winning_gc_id not in sent_by_id:
         raise OutcomeError("The winning GC must be one of the GCs we bid to.", status_code=400)
     for gc in body.gcs:
@@ -236,8 +246,9 @@ def record_outcome(project_id: str, user_id: str, body: BidOutcomeIn) -> dict:
     if body.result == "won":
         activated = pm.activate_pm_for_win(project_id, user_id, body.winning_gc_id)
         if not activated and project.get("pm_stage") and project.get("pm_origin") == "bid":
-            # Already in PM: a corrected winner leaves the original seeds behind.
-            pm.flag_winner_change(project_id, project["name"], body.winning_gc_id)
+            # Already in PM: adopt the winner if the record has no GC yet,
+            # otherwise flag a changed winner for a human to reconcile.
+            pm.reconcile_pm_customer(project_id, project["name"], body.winning_gc_id)
     elif retract_pm_after:
         pm.retract_pm(project_id, user_id)
 

@@ -205,8 +205,10 @@ def test_rewrite_accepted_when_faithful():
 
 def test_vary_email_body_falls_back_without_api_key(monkeypatch):
     # No OPENAI_API_KEY configured -> the base template is used untouched.
+    from app.core.config import Settings
+
     monkeypatch.setattr(
-        openai_text, "get_settings", lambda: type("S", (), {"openai_api_key": ""})()
+        openai_text, "get_settings", lambda: Settings(_env_file=None, openai_api_key="")
     )
     assert openai_text.vary_email_body(BASE, TOKENS) == BASE
 

@@ -161,16 +161,25 @@ from app.routers import (  # noqa: E402
     notes,
     notifications,
     outcome,
+    payroll_cpr,
+    payroll_employee_documents,
+    payroll_employees,
+    payroll_projects,
+    payroll_rates,
+    payroll_reports,
+    payroll_settings,
     pm,
     pm_documents,
     pm_field,
     pm_financials,
     pm_materials,
+    pm_submittals,
     pricing,
     projects,
     proposals,
     reference,
     rfqs,
+    submittals,
     todos,
     users,
     vendors,
@@ -195,6 +204,14 @@ app.include_router(pm_financials.router)
 app.include_router(pm_field.router)
 app.include_router(pm_documents.router)
 app.include_router(pm_materials.router)
+app.include_router(pm_submittals.router)
+app.include_router(payroll_projects.router)
+app.include_router(payroll_reports.router)
+app.include_router(payroll_cpr.router)
+app.include_router(payroll_employees.router)
+app.include_router(payroll_employee_documents.router)
+app.include_router(payroll_rates.router)
+app.include_router(payroll_settings.router)
 app.include_router(analytics.router)
 app.include_router(notifications.router)
 app.include_router(notes.router)
@@ -202,3 +219,4 @@ app.include_router(todos.router)
 app.include_router(files.router)
 app.include_router(change_review.router)
 app.include_router(emails.router)
+app.include_router(submittals.router)

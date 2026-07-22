@@ -43,6 +43,12 @@ CHANGE_REVIEW_ROLES = frozenset(
 PM_READ_ROLES = INTERNAL_ROLES
 PM_WRITE_ROLES = WRITER_ROLES
 
+# Certified Payroll (CP) module access. Same shape and rationale as the PM sets:
+# identical to the bidding sets today, distinct names so tightening CP access
+# (it holds employee SSN last-4 and pay data) is a two-line edit here.
+CP_READ_ROLES = INTERNAL_ROLES
+CP_WRITE_ROLES = WRITER_ROLES
+
 # The actual (to-GC) bid date/amount is confidential: only these roles may see it.
 # Project API responses null the field for everyone else (the rest of the team
 # works against the internal bid date). The accountant is read-only but may view

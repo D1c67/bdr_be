@@ -20,6 +20,16 @@ os.environ["EMAIL_INGEST_ENABLED"] = "false"
 # monkeypatch get_settings explicitly.
 os.environ["MFA_REQUIRED"] = "true"
 os.environ["ENVIRONMENT"] = "test"
+# Pin LLM routing to the 3rd-party pool so a local .env experimenting with
+# self-hosted models can never redirect (or break) the suite's LLM stubs, and
+# drop any shell-exported LLM knobs (.env.example documents them as the
+# experimentation surface) — the routing tests assert on the field defaults.
+os.environ["FULL_SELF_HOSTED_LLMS_ENABLED"] = "false"
+for _var in list(os.environ):
+    if _var.startswith("SELF_HOSTED_") or _var.startswith(("CLAUDE_", "OPENAI_")):
+        if _var.endswith("_API_KEY"):
+            continue  # key presence is orthogonal; tests always override keys
+        os.environ.pop(_var)
 
 # get_settings() is lru-cached; drop any value created before this flag was set.
 from app.core.config import get_settings  # noqa: E402

@@ -18,7 +18,7 @@ from typing import Any
 
 from app.core.config import get_settings
 from app.core.supabase_client import get_supabase
-from app.services import llm_errors, storage
+from app.services import llm, llm_errors, storage
 
 # The JSON schema Claude must emit (kept verbatim — the anti-injection guard
 # below tells the model never to deviate from it).
@@ -146,35 +146,28 @@ def _active_material_category_names() -> list[str]:
     return [r["name"] for r in rows]
 
 
-def _parse_json(text: str) -> dict[str, Any]:
-    """Tolerantly parse the model's JSON (strip ``` fences if present)."""
-    t = text.strip()
-    if t.startswith("```"):
-        t = t.split("\n", 1)[1] if "\n" in t else t
-        if t.endswith("```"):
-            t = t[: -3]
-        if t.lstrip().startswith("json"):
-            t = t.lstrip()[4:]
-    data = json.loads(t)
+def _validate(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict) or "sites" not in data:
         raise ValueError("Model response did not match the expected schema (missing 'sites').")
     return data
 
 
-def _call_claude(system_prompt: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
-    from anthropic import Anthropic
+def _parse_json(text: str) -> dict[str, Any]:
+    """Tolerantly parse the model's JSON (strip ``` fences if present)."""
+    return _validate(llm.parse_json_loose(text))
 
+
+def _call_llm(system_prompt: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
     settings = get_settings()
-    client = Anthropic(api_key=settings.anthropic_api_key)
-    resp = client.messages.create(
-        model=settings.claude_boq_model,
-        max_tokens=settings.claude_boq_max_tokens,
-        # Cache the (large, category-driven) system prompt across re-runs / refines.
-        system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
-        messages=messages,
+    return _validate(
+        llm.complete_json(
+            "boq",
+            system=system_prompt,
+            messages=messages,
+            max_tokens=settings.claude_boq_max_tokens,
+            settings=settings,
+        )
     )
-    text = "".join(b.text for b in resp.content if b.type == "text")
-    return _parse_json(text)
 
 
 def _load_boq_text(analysis: dict[str, Any]) -> str:
@@ -215,7 +208,7 @@ def _mark(analysis_id: str, **fields: Any) -> None:
 def run_extraction(analysis_id: str) -> None:
     """Fresh extraction of a BOQ into categorized JSON. Background-task safe."""
     settings = get_settings()
-    _mark(analysis_id, status="running", error=None, model=settings.claude_boq_model)
+    _mark(analysis_id, status="running", error=None, model=llm.active_model("boq", settings))
     try:
         analysis = (
             get_supabase().table("boq_analyses").select("*").eq("id", analysis_id).single().execute()
@@ -224,7 +217,7 @@ def run_extraction(analysis_id: str) -> None:
             return
         doc_text = _load_boq_text(analysis)
         system_prompt = build_system_prompt(_active_material_category_names())
-        result = _call_claude(
+        result = _call_llm(
             system_prompt, [{"role": "user", "content": build_user_prompt(doc_text)}]
         )
         _mark(analysis_id, status="done", result_json=result)
@@ -232,7 +225,7 @@ def run_extraction(analysis_id: str) -> None:
         _mark(
             analysis_id,
             status="failed",
-            error=llm_errors.user_message(exc, settings.claude_boq_model),
+            error=llm_errors.user_message(exc, llm.active_model("boq", settings)),
         )
 
 
@@ -246,7 +239,7 @@ def refine_extraction(analysis_id: str, user_message: str) -> None:
         if not analysis:
             return
         prior = analysis.get("result_json")
-        _mark(analysis_id, status="running", error=None, model=settings.claude_boq_model)
+        _mark(analysis_id, status="running", error=None, model=llm.active_model("boq", settings))
         doc_text = _load_boq_text(analysis)
         system_prompt = build_system_prompt(_active_material_category_names())
         messages: list[dict[str, Any]] = [
@@ -263,11 +256,11 @@ def refine_extraction(analysis_id: str, user_message: str) -> None:
                 ),
             }
         )
-        result = _call_claude(system_prompt, messages)
+        result = _call_llm(system_prompt, messages)
         _mark(analysis_id, status="done", result_json=result)
     except Exception as exc:
         _mark(
             analysis_id,
             status="failed",
-            error=llm_errors.user_message(exc, settings.claude_boq_model),
+            error=llm_errors.user_message(exc, llm.active_model("boq", settings)),
         )

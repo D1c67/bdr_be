@@ -54,12 +54,14 @@ def summary(user: CurrentUser = Depends(get_current_user)):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
     sb = get_supabase()
 
-    # pm_only = created directly in Project Management, never a bid — excluded so
-    # the by-stage counts reflect the bidding pipeline only.
+    # pm_only (direct PM creations) and cp_only (legacy Certified Payroll
+    # imports) were never bids — excluded so the by-stage counts reflect the
+    # bidding pipeline only.
     projects = (
         sb.table("projects")
         .select("id, current_stage")
         .neq("current_stage", "pm_only")
+        .neq("current_stage", "cp_only")
         .execute()
     ).data or []
     by_stage: dict[str, int] = defaultdict(int)
@@ -86,8 +88,8 @@ def summary(user: CurrentUser = Depends(get_current_user)):
 
     time_in_stage = []
     for key, defn in sorted(STAGES.items(), key=lambda kv: kv[1].order):
-        if key == "pm_only":
-            continue  # never receives stage_events — a permanent zero row otherwise
+        if key in ("pm_only", "cp_only"):
+            continue  # never receive stage_events — permanent zero rows otherwise
         samples = durations.get(key, [])
         avg_hours = round(sum(samples) / len(samples) / 3600, 2) if samples else None
         time_in_stage.append(

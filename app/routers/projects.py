@@ -98,10 +98,11 @@ def list_projects(
     if stage is not None:
         query = query.eq("current_stage", stage)
     else:
-        # Projects created directly in Project Management were never bids — keep
+        # Projects created directly in Project Management (pm_only) or imported
+        # from the legacy Certified Payroll app (cp_only) were never bids — keep
         # them off every bidding surface (dashboard, go/no-go). Explicitly asking
-        # for ?stage=pm_only still returns them.
-        query = query.neq("current_stage", "pm_only")
+        # for ?stage=pm_only / ?stage=cp_only still returns them.
+        query = query.neq("current_stage", "pm_only").neq("current_stage", "cp_only")
     resp = query.order("created_at", desc=True).execute()
     return [_present(p, user.role) for p in resp.data or []]
 
@@ -251,11 +252,12 @@ def abandon_project(
         raise HTTPException(status.HTTP_409_CONFLICT, "Project is already abandoned")
     # Abandon is a BID lifecycle marker. A project that entered Project
     # Management (won, or created there directly) is no longer just a bid —
-    # abandoning it would rewrite a won job's history to "abandoned".
-    if existing.get("pm_stage") or existing.get("current_stage") == "pm_only":
+    # abandoning it would rewrite a won job's history to "abandoned". cp_only
+    # rows (legacy Certified Payroll imports) were never bids at all.
+    if existing.get("pm_stage") or existing.get("current_stage") in ("pm_only", "cp_only"):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "This project is in Project Management and can no longer be abandoned as a bid.",
+            "This project is not an active bid and can no longer be abandoned as one.",
         )
     now = datetime.now(timezone.utc).isoformat()
     updated = (

@@ -18,6 +18,14 @@ dependencies = [
     "openai>=1.50",
     "python-docx>=1.2",
     "pypdf>=5.0",
+    # HTML sanitization for stored rich text (RFI questions). The frontend
+    # renders those with dangerouslySetInnerHTML and has no sanitizer of its
+    # own — see app/services/sanitize.py.
+    "nh3>=0.2.18",
+    # <3: the certified-payroll parsers were written against the pandas 2.x
+    # behaviors (object-dtype strings); hold the line until re-validated on 3.
+    "pandas>=2.2,<3",
+    "xlrd>=2.0.1",
 ]
 
 [dependency-groups]

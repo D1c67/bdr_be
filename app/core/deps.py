@@ -13,6 +13,8 @@ from fastapi import Depends, Header, HTTPException, Request, status
 
 from app.core.config import get_settings
 from app.core.roles import (
+    CP_READ_ROLES,
+    CP_WRITE_ROLES,
     INTERNAL_ROLES,
     PM_READ_ROLES,
     PM_WRITE_ROLES,
@@ -187,6 +189,31 @@ async def require_pm_write(
     """Allow any role that may write in the PM module (excludes the read-only
     accountant and the external estimator). PM mirror of `require_writer`."""
     if user.role not in PM_WRITE_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Read-only or insufficient role")
+    return user
+
+
+async def require_cp_read(
+    user: CurrentUser = Depends(get_current_user),
+) -> CurrentUser:
+    """Allow any role with read access to the Certified Payroll module.
+
+    Today identical to `require_internal` (accountant included, estimator never),
+    but CP routes must depend on THIS so future CP-specific roles are a
+    roles.py-only change.
+    """
+    if user.role not in CP_READ_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
+    return user
+
+
+async def require_cp_write(
+    user: CurrentUser = Depends(get_current_user),
+) -> CurrentUser:
+    """Allow any role that may write in the Certified Payroll module (excludes
+    the read-only accountant and the external estimator). CP mirror of
+    `require_writer`."""
+    if user.role not in CP_WRITE_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Read-only or insufficient role")
     return user
 

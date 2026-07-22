@@ -19,13 +19,22 @@ import pytest
 from fastapi import HTTPException
 from starlette.datastructures import UploadFile
 
+from pydantic import ValidationError
+
 from app.core.deps import CurrentUser
 from app.core.roles import Role
+from app.models.schemas import PmDocsExportIn
 from app.routers import pm_documents
 from app.services import pm as pm_service
+from app.services import pm_folders
 from app.services import storage
 
 MIGRATION = Path(__file__).resolve().parents[1] / "supabase/migrations/0058_pm_documents.sql"
+# pm_doc_category is created in 0058 and extended in 0065 (ALTER TYPE ADD VALUE)
+# so the unified-hub upload folders (specification/quote/estimate/billing) have a
+# home — the enum-parity test reads both.
+MIGRATION_FOLDERS = Path(__file__).resolve().parents[1] / "supabase/migrations/0065_pm_doc_folders.sql"
+MIGRATION_RFI = Path(__file__).resolve().parents[1] / "supabase/migrations/0067_pm_doc_rfi_category.sql"
 
 
 # ── Fake Supabase ─────────────────────────────────────────────────────────────
@@ -148,9 +157,23 @@ def _install(monkeypatch, db):
 
 
 def test_category_tuple_matches_migration_enum():
-    sql = MIGRATION.read_text()
-    enum_body = re.search(r"pm_doc_category as enum \(([^)]*)\)", sql).group(1)
-    assert tuple(re.findall(r"'(\w+)'", enum_body)) == pm_documents.PM_DOC_CATEGORIES
+    enum_body = re.search(
+        r"pm_doc_category as enum \(([^)]*)\)", MIGRATION.read_text()
+    ).group(1)
+    base = re.findall(r"'(\w+)'", enum_body)
+    # 0065 (folder categories) and 0067 ('rfi') append via ALTER TYPE ... ADD VALUE,
+    # each in its own migration because a new enum value can't be referenced in the
+    # transaction that adds it. Read them in application order — that order IS the
+    # assertion, since PM_DOC_CATEGORIES mirrors the enum.
+    added = [
+        value
+        for migration in (MIGRATION_FOLDERS, MIGRATION_RFI)
+        for value in re.findall(r"add value if not exists '(\w+)'", migration.read_text())
+    ]
+    # 'other' is the catch-all and stays last in PM_DOC_CATEGORIES; the added
+    # values slot in just before it.
+    expected = [c for c in base if c != "other"] + added + ["other"]
+    assert tuple(expected) == pm_documents.PM_DOC_CATEGORIES
 
 
 def test_object_path_lives_under_pm_namespace():
@@ -158,6 +181,43 @@ def test_object_path_lives_under_pm_namespace():
     project, pm, category, obj = path.split("/")
     assert (project, pm, category) == ("p1", "pm", "contract")
     assert obj.endswith("-site plan.pdf")
+
+
+# ── Unified hub: read shape + export selector ─────────────────────────────────
+
+
+def test_list_all_documents_strips_storage_path(monkeypatch):
+    _install(monkeypatch, FakeDB({"projects": [_pm_project()]}))
+    monkeypatch.setattr(
+        pm_folders,
+        "list_project_documents",
+        lambda pid: [
+            {
+                "key": "pm:1", "source": "pm", "id": "1", "folder": "contracts",
+                "category": "contract", "filename": "a.pdf", "size_bytes": 1,
+                "note": None, "created_at": "2026-07-01T00:00:00Z", "writable": True,
+                "storage_path": "p1/pm/contract/x-a.pdf",
+            }
+        ],
+    )
+    out = pm_documents.list_all_documents("p1", _user())
+    assert out[0]["key"] == "pm:1" and out[0]["folder"] == "contracts"
+    # The internal storage layout never reaches the client.
+    assert "storage_path" not in out[0]
+
+
+def test_list_all_documents_guards_missing_project(monkeypatch):
+    _install(monkeypatch, FakeDB({"projects": []}))
+    with pytest.raises(HTTPException) as ei:
+        pm_documents.list_all_documents("p1", _user())
+    assert ei.value.status_code == 404
+
+
+def test_export_selector_rejects_empty_and_dedupes():
+    assert PmDocsExportIn().keys is None
+    assert PmDocsExportIn(keys=["a", "a", "b"]).keys == ["a", "b"]
+    with pytest.raises(ValidationError):
+        PmDocsExportIn(keys=[])
 
 
 # ── require_pm_project guard ──────────────────────────────────────────────────

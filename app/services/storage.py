@@ -29,6 +29,15 @@ def build_object_path(project_id: str, category: str, filename: str) -> str:
     return f"{project_id}/{category}/{uuid.uuid4().hex}-{safe}"
 
 
+def build_submittal_object_path(filename: str) -> str:
+    """Object path for a Submittal Bank PDF. The bank is company-global (not
+    project-scoped), so these live under a reserved `submittal-bank/` prefix in
+    the same private bucket. A file may cover materials across categories, so the
+    path is not category-namespaced."""
+    safe = filename.replace("/", "_")
+    return f"submittal-bank/{uuid.uuid4().hex}-{safe}"
+
+
 def upload_file(path: str, content: bytes, content_type: str, *, upsert: bool = False) -> None:
     get_supabase().storage.from_(BUCKET).upload(
         path, content, {"content-type": content_type, "upsert": "true" if upsert else "false"}

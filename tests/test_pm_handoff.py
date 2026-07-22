@@ -231,6 +231,118 @@ def test_lost_correction_without_pm_life_is_plain(monkeypatch):
     assert "pm.retract" not in audit_actions(db)
 
 
+# ── a win must name its GC ─────────────────────────────────────────────────────
+
+
+def test_won_without_a_winning_gc_is_refused(monkeypatch):
+    # The winner becomes the GC over the project in PM, so it can't be "Unknown":
+    # an unnamed one used to strand the project in Precon with no customer.
+    db = install(monkeypatch, FakeDB({
+        "projects": [_bid_project(current_stage="submitted")],
+        "proposal_sends": [_sent()],
+    }))
+    with pytest.raises(OutcomeError) as ei:
+        record_outcome("p1", "u1", BidOutcomeIn(result="won"))
+    assert ei.value.status_code == 400
+
+    # Refused before any write: no outcome row, and PM was never activated.
+    assert db.tables.get("bid_outcomes", []) == []
+    assert db.tables["projects"][0]["pm_stage"] is None
+    assert db.tables.get("pm_details", []) == []
+
+
+@pytest.mark.parametrize("result", ["lost", "no_award"])
+def test_winner_stays_optional_when_we_did_not_win(monkeypatch, result):
+    # Who won someone else's award often never gets reported back to us.
+    db = install(monkeypatch, FakeDB({
+        "projects": [_bid_project(current_stage="submitted")],
+        "proposal_sends": [_sent()],
+    }))
+    record_outcome("p1", "u1", BidOutcomeIn(result=result))
+    assert db.tables["bid_outcomes"][0]["result"] == result
+    assert db.tables["bid_outcomes"][0]["winning_gc_id"] is None
+
+
+# ── reconcile_pm_customer: late-recorded winner heals a GC-less PM record ───────
+
+
+def _gc_less_pm_db(details_extra=None):
+    """PM activated from a win whose winner wasn't named — no GC over the project."""
+    details = {"project_id": "p1", "customer_gc_id": None, "customer_name": None,
+               "original_contract_value": None}
+    details.update(details_extra or {})
+    return FakeDB({
+        "projects": [_bid_project(pm_stage="precon", pm_origin="bid")],
+        "bid_outcomes": [{"project_id": "p1", "result": "won", "winning_gc_id": None}],
+        "bid_gc_outcomes": [{"project_id": "p1", "gc_id": "g1", "our_amount": "4711.50"}],
+        "general_contractors": [{"id": "g1", "name": "Acme Builders"}],
+        "pm_details": [details],
+        "pm_stage_events": [{"project_id": "p1", "from_stage": None, "to_stage": "precon"}],
+        "proposal_sends": [_sent()],
+    })
+
+
+def test_reconcile_fills_a_blank_customer_from_the_winner(monkeypatch):
+    db = install(monkeypatch, _gc_less_pm_db())
+    pm.reconcile_pm_customer("p1", "Job A", "g1")
+
+    [details] = db.tables["pm_details"]
+    assert details["customer_gc_id"] == "g1"
+    assert details["customer_name"] == "Acme Builders"
+    # The value seed needs the winner, so it was skipped at activation too.
+    assert details["original_contract_value"] == "4711.50"
+    assert db.tables.get("notifications", []) == []  # a fill is not a conflict
+
+
+def test_reconcile_keeps_a_hand_typed_customer_name(monkeypatch):
+    db = install(monkeypatch, _gc_less_pm_db({"customer_name": "Acme Builders (West)"}))
+    pm.reconcile_pm_customer("p1", "Job A", "g1")
+
+    [details] = db.tables["pm_details"]
+    assert details["customer_gc_id"] == "g1"  # link still established
+    assert details["customer_name"] == "Acme Builders (West)"  # edit survives
+
+
+def test_reconcile_keeps_an_edited_contract_value(monkeypatch):
+    db = install(monkeypatch, _gc_less_pm_db({"original_contract_value": "9000.00"}))
+    pm.reconcile_pm_customer("p1", "Job A", "g1")
+    assert db.tables["pm_details"][0]["original_contract_value"] == "9000.00"
+
+
+def test_reconcile_flags_a_changed_winner_instead_of_overwriting(monkeypatch):
+    db = install(monkeypatch, _gc_less_pm_db({"customer_gc_id": "g1"}))
+    db.tables["profiles"] = [{"id": "exec1", "role": "executive", "is_active": True}]
+    pm.reconcile_pm_customer("p1", "Job A", "g2")
+
+    assert db.tables["pm_details"][0]["customer_gc_id"] == "g1"  # untouched
+    assert any(n["type"] == "pm_outcome_conflict" for n in db.tables["notifications"])
+
+
+def test_reconcile_is_a_no_op_for_the_same_gc(monkeypatch):
+    db = install(monkeypatch, _gc_less_pm_db({"customer_gc_id": "g1", "customer_name": "Acme Builders"}))
+    pm.reconcile_pm_customer("p1", "Job A", "g1")
+    assert db.tables["pm_details"][0]["customer_gc_id"] == "g1"
+    assert db.tables.get("notifications", []) == []
+
+
+def test_reconcile_without_a_winner_does_nothing(monkeypatch):
+    db = install(monkeypatch, _gc_less_pm_db())
+    pm.reconcile_pm_customer("p1", "Job A", None)
+    assert db.tables["pm_details"][0]["customer_gc_id"] is None
+
+
+def test_recording_the_winner_later_heals_the_pm_record(monkeypatch):
+    # End to end: the project is already in PM with no GC (a legacy row). The PA
+    # records the winner; PM adopts it rather than staying blank forever.
+    db = install(monkeypatch, _gc_less_pm_db())
+    record_outcome("p1", "u1", BidOutcomeIn(result="won", winning_gc_id="g1"))
+
+    [details] = db.tables["pm_details"]
+    assert details["customer_gc_id"] == "g1"
+    assert details["customer_name"] == "Acme Builders"
+    assert len(db.tables["pm_stage_events"]) == 1  # not re-activated
+
+
 # ── is_retractable ─────────────────────────────────────────────────────────────
 
 

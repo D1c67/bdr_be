@@ -28,9 +28,11 @@ def derive_status(
     """
     if abandoned_at:
         return "abandoned"
-    # Created directly in Project Management — never entered the bidding pipeline,
-    # so no bid status applies (bidding surfaces exclude these rows entirely).
-    if current_stage == "pm_only":
+    # Created directly in Project Management (pm_only) or imported as a payroll-
+    # only job from the legacy Certified Payroll app (cp_only) — never entered
+    # the bidding pipeline, so no bid status applies (bidding surfaces exclude
+    # these rows entirely).
+    if current_stage in ("pm_only", "cp_only"):
         return "no_bid"
     if current_stage == "declined":
         return "declined"

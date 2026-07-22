@@ -251,10 +251,16 @@ def load_window(
     status: str | None = None,
 ) -> WindowData:
     sb = get_supabase()
-    # Direct-created PM projects (current_stage='pm_only') never entered the
-    # bidding pipeline — exclude them here, the single choke point every windowed
-    # section's cohort is built from, so they can't pollute any bidding metric.
-    pq = sb.table("projects").select(_PROJECT_COLS).neq("current_stage", "pm_only")
+    # Direct-created PM projects ('pm_only') and legacy Certified Payroll imports
+    # ('cp_only') never entered the bidding pipeline — exclude them here, the
+    # single choke point every windowed section's cohort is built from, so they
+    # can't pollute any bidding metric.
+    pq = (
+        sb.table("projects")
+        .select(_PROJECT_COLS)
+        .neq("current_stage", "pm_only")
+        .neq("current_stage", "cp_only")
+    )
     if project_id:
         pq = pq.eq("id", project_id)
     projects = {p["id"]: p for p in (pq.execute().data or [])}
@@ -725,8 +731,8 @@ def _stage_durations(w: WindowData, cohort: set[str]) -> tuple[list[dict], list[
             end_to_end.append((sub - first).total_seconds() / 3600)
     time_in_stage = []
     for key, defn in sorted(STAGES.items(), key=lambda kv: kv[1].order):
-        if key == "pm_only":
-            continue  # never receives stage_events — a permanent zero row otherwise
+        if key in ("pm_only", "cp_only"):
+            continue  # never receive stage_events — permanent zero rows otherwise
         samples = durations.get(key, [])
         time_in_stage.append(
             {"stage": key, "label": defn.label, "avg_hours": _mean(samples), "samples": len(samples)}
@@ -1292,6 +1298,7 @@ ACTIVITY_ACTION_LABELS: dict[str, str] = {
     "dailylog.delete": "Deleted a daily log",
     "rfi.create": "Created an RFI",
     "rfi.update": "Updated an RFI",
+    "rfi.close": "Closed an RFI",
     "rfi.delete": "Deleted an RFI",
     "manpower.create": "Added a manpower entry",
     "manpower.update": "Updated a manpower entry",

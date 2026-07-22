@@ -46,7 +46,7 @@ from datetime import datetime, timedelta, timezone
 from app.core.config import get_settings
 from app.core.roles import Role
 from app.core.supabase_client import get_supabase
-from app.services import email_match, graph_inbox, openai_text, storage
+from app.services import email_match, graph_inbox, llm, openai_text, storage
 from app.services.llm_errors import is_out_of_tokens, user_message
 from app.services.notifications import audit, notify_role
 
@@ -76,7 +76,7 @@ _FETCH_SELECT = "id,body,bodyPreview,hasAttachments"
 
 _SWEEP_SELECT = (
     "id, mailbox, folder, direction, graph_message_id, conversation_id, "
-    "subject, status, attempts, has_attachments, project_id"
+    "from_address, subject, status, attempts, has_attachments, project_id"
 )
 
 
@@ -508,9 +508,33 @@ def _ingest_attachments(sb, email: dict) -> None:
 
 
 def _step_r1(sb, email: dict) -> str | None:
-    """Conversation-map lookup — a free indexed read."""
+    """Conversation-map lookup — a free indexed read.
+
+    First, the submittal-response check: a vendor reply to a request we sent from
+    this mailbox threads on the same conversationId. Recognizing it here (before
+    the generic map) both flags the send as received and lets the normal _assign
+    path file the email to the request's project and teach the map. The outbound
+    Sent-Items copy shares the conversationId, so it too gets assigned — but the
+    inbound + sender guards keep it from being counted as a reply.
+    """
     conversation_id = email.get("conversation_id")
     if conversation_id:
+        from app.services import submittal_ingest
+
+        send = submittal_ingest.match_send(sb, conversation_id)
+        if send and send.get("project_id"):
+            if email.get("direction") == "inbound" and submittal_ingest.is_from_contact(email, send):
+                submittal_ingest.record_response(sb, send, email)
+            outcome = _assign(
+                sb,
+                email,
+                send["project_id"],
+                matched_by="conversation",
+                expected_status="id_r1",
+                update_map=True,
+            )
+            return "processed" if outcome else None
+
         hit = (
             sb.table("email_conversation_projects")
             .select("project_id")
@@ -546,9 +570,9 @@ def _step_r2(sb, email: dict) -> str | None:
 def _step_r3(sb, email: dict) -> tuple[str | None, bool]:
     """LLM subject-only match. Returns (next_status, llm_down)."""
     settings = get_settings()
-    if not settings.openai_api_key:
-        # R3 disabled without a key — finalize as Unknown; manual triage (and
-        # the R1 learn-back it feeds) still works.
+    if not llm.is_configured("email_match", settings):
+        # R3 disabled without a configured model — finalize as Unknown; manual
+        # triage (and the R1 learn-back it feeds) still works.
         return _finalize_r3(sb, email, {}), False
 
     projects = _all_projects(sb)
@@ -564,7 +588,7 @@ def _step_r3(sb, email: dict) -> tuple[str | None, bool]:
             # Don't burn attempts on a dead account: wait out the outage and
             # tell IT once (deduped). The row resumes when credits return.
             _cas(sb, email["id"], "id_r3", {
-                "error": user_message(exc, settings.openai_email_match_model),
+                "error": user_message(exc, llm.active_model("email_match", settings)),
                 "next_attempt_at": (
                     _now() + timedelta(seconds=settings.email_llm_outage_retry_seconds)
                 ).isoformat(),
@@ -572,7 +596,7 @@ def _step_r3(sb, email: dict) -> tuple[str | None, bool]:
             _notify_once(
                 sb,
                 "email_ingest.llm_outage",
-                user_message(exc, settings.openai_email_match_model),
+                user_message(exc, llm.active_model("email_match", settings)),
             )
             return None, True
         _retry_or_fail(sb, email, "id_r3", exc)
@@ -589,13 +613,13 @@ def _step_r3(sb, email: dict) -> tuple[str | None, bool]:
             matched_by="llm",
             expected_status="id_r3",
             confidence=confidence,
-            model=settings.openai_email_match_model,
+            model=llm.active_model("email_match", settings),
         )
         return ("processed" if outcome else None), False
 
     # No confident match → Unknown pool; keep the below-threshold guess so the
     # triage UI can offer a one-click accept.
-    fields: dict = {"match_model": settings.openai_email_match_model}
+    fields: dict = {"match_model": llm.active_model("email_match", settings)}
     if valid:
         fields["suggested_project_id"] = candidates[idx]["id"]
         fields["suggested_confidence"] = round(confidence, 3)
@@ -959,7 +983,7 @@ def _rescan_unknown_for_project(project_id: str) -> None:
         else:
             remainder.append(email)
 
-    if not settings.openai_api_key:
+    if not llm.is_configured("email_match", settings):
         return
     cutoff = _now() - timedelta(days=settings.email_rescan_llm_days)
     calls = 0
@@ -992,7 +1016,7 @@ def _rescan_unknown_for_project(project_id: str) -> None:
                 sb, email, project_id,
                 matched_by="llm",
                 confidence=_safe_float(result.get("confidence")),
-                model=settings.openai_email_match_model,
+                model=llm.active_model("email_match", settings),
             )
 
 

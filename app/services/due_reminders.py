@@ -33,8 +33,9 @@ from app.services.workflow import STAGES
 
 logger = logging.getLogger(__name__)
 
-# pm_only (direct-created PM projects) have no bid deadlines to remind about.
-TERMINAL_STAGES = ("submitted", "declined", "pm_only")
+# pm_only (direct-created PM projects) and cp_only (legacy Certified Payroll
+# imports) have no bid deadlines to remind about.
+TERMINAL_STAGES = ("submitted", "declined", "pm_only", "cp_only")
 ESTIMATOR_DELIVERABLE_CATEGORIES = ("estimate", "boq", "markup")
 
 # Descending durations; each offset's window ends where the next one starts.

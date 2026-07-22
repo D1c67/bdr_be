@@ -60,6 +60,9 @@ STAGES: dict[str, StageDef] = {
     # only so STAGES[...] lookups on such rows never KeyError. PM's own lifecycle
     # lives in pm_stage / services/pm_workflow.py, not here.
     "pm_only":           StageDef("pm_only",           98, (), "PM Only"),
+    # Same placeholder idea for payroll-only projects imported from the legacy
+    # Certified Payroll app (never bid, not in PM). Terminal by construction.
+    "cp_only":           StageDef("cp_only",           97, (), "CP Only"),
 }
 
 # Allowed forward transitions. Linear pipeline; go_no_go can also decline.
@@ -79,6 +82,7 @@ TRANSITIONS: dict[str, set[str]] = {
     "bid_outcome":       set(),
     "declined":          set(),
     "pm_only":           set(),
+    "cp_only":           set(),
 }
 
 
@@ -353,9 +357,9 @@ def maybe_reopen_verify_after_edit(
         if not proj or proj.get("abandoned_at"):
             return False
         stage = proj["current_stage"]
-        # pm_only guarded explicitly: its order (98) is past verify but it was
-        # never in the pipeline, so there is nothing to re-verify.
-        if stage in ("declined", "pm_only") or STAGES[stage].order <= _VERIFY_ORDER:
+        # pm_only/cp_only guarded explicitly: their orders (98/97) are past verify
+        # but they were never in the pipeline, so there is nothing to re-verify.
+        if stage in ("declined", "pm_only", "cp_only") or STAGES[stage].order <= _VERIFY_ORDER:
             return False  # not past verify (includes being at verify)
         _, moved = reopen_verify(project_id, actor_id, reason)
         if moved:

@@ -329,21 +329,35 @@ def require_pm_project(project_id: str) -> dict:
     return project
 
 
-def flag_winner_change(project_id: str, project_name: str, winning_gc_id: str | None) -> None:
-    """A won→won correction that CHANGES the winning GC after PM began: the PM
-    record keeps the seeds from the original winner (customer, contract value),
-    so a human must reconcile — activation is an idempotent no-op by design and
-    must not silently overwrite PM data that may already have been edited."""
+def reconcile_pm_customer(project_id: str, project_name: str, winning_gc_id: str | None) -> None:
+    """Re-record of a won outcome on a project already in PM. Two shapes:
+
+    FILL — the PM record has no GC (activated from a win whose winner wasn't
+    named yet). Nothing to overwrite, so adopt the now-known winner: the GC that
+    won the bid is the GC over the project. Only blank fields are touched, so a
+    hand-typed customer name and an edited contract value both survive.
+
+    CONFLICT — the PM record already names a DIFFERENT GC. Activation is an
+    idempotent no-op by design and must not silently overwrite PM data that may
+    already have been edited, so a human reconciles this one.
+    """
+    if not winning_gc_id:
+        return
+    sb = get_supabase()
     details = (
-        get_supabase()
-        .table("pm_details")
-        .select("customer_gc_id")
+        sb.table("pm_details")
+        .select("customer_gc_id, customer_name, original_contract_value")
         .eq("project_id", project_id)
         .execute()
     ).data or []
     if not details:
         return
-    if winning_gc_id and details[0].get("customer_gc_id") not in (None, winning_gc_id):
+    current = details[0]
+    existing_gc_id = current.get("customer_gc_id")
+
+    if existing_gc_id == winning_gc_id:
+        return  # already the GC over this project
+    if existing_gc_id is not None:
         notify_role(
             Role.EXECUTIVE,
             project_id,
@@ -351,6 +365,20 @@ def flag_winner_change(project_id: str, project_name: str, winning_gc_id: str | 
             f"The winning GC on {project_name} changed after it entered Project "
             "Management — review the PM customer and contract value.",
         )
+        return
+
+    patch: dict = {"customer_gc_id": winning_gc_id}
+    if not current.get("customer_name"):
+        patch["customer_name"] = _gc_name(winning_gc_id)
+    if current.get("original_contract_value") is None:
+        # Was unknowable at activation (the seed needs the winner to pick the
+        # amount we bid THEM); still may be, in which case leave it PATCHable.
+        value = _winning_bid_amount(project_id, winning_gc_id)
+        if value is not None:
+            patch["original_contract_value"] = str(value)
+    sb.table("pm_details").update(patch).eq("project_id", project_id).is_(
+        "customer_gc_id", "null"
+    ).execute()
 
 
 def pm_activity_exists(project_id: str) -> bool:

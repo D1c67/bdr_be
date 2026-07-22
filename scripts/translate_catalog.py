@@ -2,11 +2,13 @@
 """One-time (re-runnable) translator for the frontend i18n catalog.
 
 Reads the English source catalog (bdr_fe/locales/en/translation.json) and writes
-a translated catalog for each supported non-English locale, reusing the Anthropic
-client already configured for the app (no new dependency, no infra). Output is
+a translated catalog for each supported non-English locale, reusing the app's
+LLM routing (services/llm — Anthropic by default, or the self-hosted endpoint
+when FULL_SELF_HOSTED_LLMS_ENABLED=true; no new dependency, no infra). Output is
 committed to the repo — there is NO runtime translation.
 
-Usage (from bdr_be/, with ANTHROPIC_API_KEY in the environment / .env):
+Usage (from bdr_be/, with ANTHROPIC_API_KEY — or the self-hosted vars — in the
+environment / .env):
     python scripts/translate_catalog.py            # all target locales
     python scripts/translate_catalog.py hi ur      # only the given locales
 
@@ -28,6 +30,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.core.config import get_settings  # noqa: E402
+from app.services import llm  # noqa: E402
 
 # bdr_be/scripts/ -> repo root -> bdr_fe/locales
 LOCALES_DIR = Path(__file__).resolve().parent.parent.parent / "bdr_fe" / "locales"
@@ -71,19 +74,7 @@ def unflatten(flat: dict[str, str]) -> dict[str, Any]:
     return root
 
 
-def _parse_json(text: str) -> dict[str, str]:
-    """Tolerantly parse the model's JSON (strip ``` fences if present)."""
-    t = text.strip()
-    if t.startswith("```"):
-        t = t.split("\n", 1)[1] if "\n" in t else t
-        if t.endswith("```"):
-            t = t[:-3]
-        if t.lstrip().startswith("json"):
-            t = t.lstrip()[4:]
-    # strict=False: the model occasionally emits a literal control character
-    # (e.g. a raw newline) inside a string value; accept it rather than crash —
-    # json.dumps re-escapes it correctly on write.
-    data = json.loads(t, strict=False)
+def _validate(data: Any) -> dict[str, str]:
     if not isinstance(data, dict):
         raise ValueError("Model response was not a JSON object")
     return data
@@ -106,26 +97,28 @@ def _system_prompt(lang_name: str, code: str) -> str:
     )
 
 
-def translate_batch(client, model: str, lang_name: str, code: str, batch: dict[str, str]) -> dict[str, str]:
-    resp = client.messages.create(
-        model=model,
-        max_tokens=8000,
-        system=[{"type": "text", "text": _system_prompt(lang_name, code), "cache_control": {"type": "ephemeral"}}],
-        messages=[{"role": "user", "content": json.dumps(batch, ensure_ascii=False, indent=0)}],
+def translate_batch(lang_name: str, code: str, batch: dict[str, str]) -> dict[str, str]:
+    out = _validate(
+        llm.complete_json(
+            "translate",
+            system=_system_prompt(lang_name, code),
+            messages=[
+                {"role": "user", "content": json.dumps(batch, ensure_ascii=False, indent=0)}
+            ],
+            max_tokens=8000,
+        )
     )
-    text = "".join(b.text for b in resp.content if b.type == "text")
-    out = _parse_json(text)
     # Guard against dropped/renamed keys — fall back to English for any miss.
     return {k: out.get(k, batch[k]) for k in batch}
 
 
-def translate_locale(client, model: str, code: str, lang_name: str, flat_en: dict[str, str]) -> None:
+def translate_locale(code: str, lang_name: str, flat_en: dict[str, str]) -> None:
     keys = list(flat_en)
     translated: dict[str, str] = {}
     for start in range(0, len(keys), BATCH_SIZE):
         chunk = {k: flat_en[k] for k in keys[start : start + BATCH_SIZE]}
         print(f"  [{code}] {start + 1}-{start + len(chunk)} / {len(keys)} …", flush=True)
-        translated.update(translate_batch(client, model, lang_name, code, chunk))
+        translated.update(translate_batch(lang_name, code, chunk))
 
     dest = LOCALES_DIR / code / "translation.json"
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -134,22 +127,23 @@ def translate_locale(client, model: str, code: str, lang_name: str, flat_en: dic
 
 
 def main(argv: list[str]) -> int:
-    from anthropic import Anthropic
-
     settings = get_settings()
-    if not settings.anthropic_api_key:
-        print("ERROR: anthropic_api_key is not set (env / .env).", file=sys.stderr)
+    if not llm.is_configured("translate", settings):
+        print(
+            "ERROR: no model configured for translation — set ANTHROPIC_API_KEY, "
+            "or the SELF_HOSTED_* vars when FULL_SELF_HOSTED_LLMS_ENABLED=true.",
+            file=sys.stderr,
+        )
         return 1
 
     requested = [c for c in argv if c in TARGETS] or list(TARGETS)
     flat_en = flatten(json.loads(SOURCE_FILE.read_text(encoding="utf-8")))
     print(f"Source: {len(flat_en)} strings from {SOURCE_FILE.name}")
 
-    client = Anthropic(api_key=settings.anthropic_api_key)
-    model = settings.claude_boq_model  # strongest configured model (opus) — best for low-resource langs
+    model = llm.active_model("translate", settings)
     for code in requested:
         print(f"Translating → {code} ({TARGETS[code]}) with {model}")
-        translate_locale(client, model, code, TARGETS[code], flat_en)
+        translate_locale(code, TARGETS[code], flat_en)
 
     print("Done. Review ceb (and spot-check ur) with a native speaker before relying on them.")
     return 0

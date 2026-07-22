@@ -91,10 +91,16 @@ _INLINE_ATTACHMENT_LIMIT = 3 * 1024 * 1024  # Graph inline fileAttachment cap
 _UPLOAD_CHUNK = 10 * 320 * 1024             # upload-session chunks: 320 KiB multiples
 
 
-def create_draft(to_addr: str, subject: str, body: str, *, html: bool = False) -> dict:
+def create_draft(
+    to_addr: str, subject: str, body: str, *, html: bool = False, sender: str | None = None
+) -> dict:
     """Create a draft in the sender mailbox; returns the Graph message resource
-    including `id`, `conversationId` and `internetMessageId`."""
-    sender = get_settings().ms_sender
+    including `id`, `conversationId` and `internetMessageId`.
+
+    `sender` overrides the default mailbox (settings.ms_sender = bids@). Submittal
+    requests pass the ingestion mailbox so their replies thread back through the
+    email-ingestion pipeline; RFQ callers omit it and keep bids@."""
+    sender = sender or get_settings().ms_sender
     resp = graph_request(
         "POST",
         f"/users/{sender}/messages",
@@ -114,14 +120,16 @@ def add_attachment(
     content_type: str,
     *,
     content_id: str | None = None,
+    sender: str | None = None,
 ) -> None:
     """Attach a file to a draft. Small files inline; large ones via upload session.
 
     `content_id` marks the file as an inline image referenced from an HTML body
     via `<img src="cid:...">` (small attachments only — body images never come
-    near the upload-session threshold).
+    near the upload-session threshold). `sender` must match the mailbox the draft
+    was created in.
     """
-    sender = get_settings().ms_sender
+    sender = sender or get_settings().ms_sender
     if len(content) < _INLINE_ATTACHMENT_LIMIT:
         payload = {
             "@odata.type": "#microsoft.graph.fileAttachment",
@@ -171,18 +179,18 @@ def _upload_in_chunks(upload_url: str, content: bytes) -> None:
         resp.raise_for_status()
 
 
-def send_draft(message_id: str) -> None:
-    sender = get_settings().ms_sender
+def send_draft(message_id: str, *, sender: str | None = None) -> None:
+    sender = sender or get_settings().ms_sender
     graph_request("POST", f"/users/{sender}/messages/{message_id}/send")
 
 
 # ── OneDrive (fallback when drawings are too large to attach) ────────────────
 
 
-def drive_upload(path: str, content: bytes) -> str:
+def drive_upload(path: str, content: bytes, *, sender: str | None = None) -> str:
     """Upload a file to the sender's OneDrive via an upload session; returns the
     drive item id. `path` is relative to the drive root, e.g. 'BDR/123/drawings/a.pdf'."""
-    sender = get_settings().ms_sender
+    sender = sender or get_settings().ms_sender
     session = graph_request(
         "POST",
         f"/users/{sender}/drive/root:/{path}:/createUploadSession",
@@ -209,12 +217,12 @@ def drive_upload(path: str, content: bytes) -> str:
     return item["id"]
 
 
-def drive_get_item_id(path: str) -> str:
-    sender = get_settings().ms_sender
+def drive_get_item_id(path: str, *, sender: str | None = None) -> str:
+    sender = sender or get_settings().ms_sender
     return graph_request("GET", f"/users/{sender}/drive/root:/{path}").json()["id"]
 
 
-def drive_create_link(item_id: str) -> str:
+def drive_create_link(item_id: str, *, sender: str | None = None) -> str:
     """Anonymous view link (vendors are external). Requires 'Anyone' sharing links
     to be enabled in the SharePoint admin center.
 
@@ -226,12 +234,13 @@ def drive_create_link(item_id: str) -> str:
     from datetime import datetime, timedelta, timezone
 
     settings = get_settings()
+    sender = sender or settings.ms_sender
     expiry = (
         datetime.now(timezone.utc) + timedelta(days=settings.rfq_drawings_link_ttl_days)
     ).isoformat()
     resp = graph_request(
         "POST",
-        f"/users/{settings.ms_sender}/drive/items/{item_id}/createLink",
+        f"/users/{sender}/drive/items/{item_id}/createLink",
         json={"type": "view", "scope": "anonymous", "expirationDateTime": expiry},
     )
     return resp.json()["link"]["webUrl"]

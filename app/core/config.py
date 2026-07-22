@@ -21,13 +21,54 @@ class Settings(BaseSettings):
     # False (or clear SUPABASE_JWT_SECRET) so the shared-secret path is dead.
     legacy_hs256_enabled: bool = True
 
-    # Anthropic / Claude (BOQ → RFQ extraction)
+    # ── LLMs (routing lives in app/services/llm.py) ───────────────────────────
+    # Master switch: when true EVERY AI feature routes to the self-hosted
+    # OpenAI-compatible endpoint below and the SELF_HOSTED_* per-feature models.
+    # STRICT — while true, no prompt is ever sent to a 3rd-party provider; a
+    # self-hosted outage degrades each feature gracefully (same paths as a
+    # missing API key), it never falls back.
+    full_self_hosted_llms_enabled: bool = False
+
+    # 3rd-party provider keys (live while the master switch is false)
     anthropic_api_key: str = ""
-    claude_boq_model: str = "claude-opus-4-8"
+    openai_api_key: str = ""
+
+    # Self-hosted connection (OpenAI-compatible: vLLM / Ollama / llama.cpp /
+    # TGI / LM Studio). `target` picks which base-URL/key pair is live, so you
+    # can flip between a local server and the EC2 load balancer in one line.
+    self_hosted_llm_target: str = "local"       # local | ec2
+    self_hosted_llm_local_base_url: str = ""    # e.g. http://localhost:11434/v1
+    self_hosted_llm_local_api_key: str = ""
+    self_hosted_llm_ec2_base_url: str = ""      # e.g. https://llm.internal.example.com/v1
+    self_hosted_llm_ec2_api_key: str = ""
+    self_hosted_llm_timeout_seconds: int = 120
+    # TLS hardening: verification stays on; for internal ALB certs point
+    # ca_bundle at your private CA's PEM instead of disabling verification.
+    # Plain http:// in production refuses to boot unless allow_http is set
+    # (only for traffic that never leaves a private network).
+    self_hosted_llm_verify_tls: bool = True
+    self_hosted_llm_ca_bundle: str = ""
+    self_hosted_llm_allow_http: bool = False
+
+    # Per-feature models — 3rd party (Anthropic side)
+    claude_boq_model: str = "claude-opus-4-8"   # BOQ → RFQ category extraction
     claude_boq_max_tokens: int = 16000
     # General-material extraction (wiring cost from the estimate's bid recap).
     claude_estimate_model: str = "claude-sonnet-4-6"
     claude_estimate_max_tokens: int = 2000
+    # i18n catalog translation (scripts/translate_catalog.py)
+    claude_translate_model: str = "claude-opus-4-8"
+
+    # Per-feature models — self-hosted (live while the master switch is true;
+    # empty = that feature is off in self-hosted mode)
+    self_hosted_boq_model: str = ""
+    self_hosted_estimate_model: str = ""
+    self_hosted_translate_model: str = ""
+    self_hosted_proposal_model: str = ""
+    self_hosted_quote_pdf_model: str = ""
+    self_hosted_email_match_model: str = ""
+    self_hosted_email_vary_model: str = ""
+    self_hosted_aliases_model: str = ""
 
     # Microsoft Graph
     ms_tenant_id: str = ""
@@ -35,10 +76,10 @@ class Settings(BaseSettings):
     ms_client_secret: str = ""
     ms_sender: str = "bids@g3electrical.com"
 
-    # OpenAI (RFQ email wording variation + quote PDF price extraction)
-    openai_api_key: str = ""
-    openai_email_model: str = "gpt-5.4-nano"
-    openai_quote_model: str = "gpt-5.4-mini"
+    # Per-feature models — 3rd party (OpenAI side)
+    openai_email_model: str = "gpt-5.4-nano"    # RFQ email wording variation
+    openai_quote_model: str = "gpt-5.4-mini"    # vendor quote PDF price extraction
+    openai_alias_model: str = "gpt-5.4-nano"    # submittal-bank alternate names
 
     # Proposal scope-line generation (Send Out, step 10)
     openai_proposal_model: str = "gpt-5.4-mini"
@@ -146,6 +187,16 @@ class Settings(BaseSettings):
     email_rescan_llm_days: int = 14             # only LLM-confirm unknowns this recent
     email_rescan_llm_max: int = 50              # LLM call cap per project creation
 
+    # ── Project submittal requests (services/submittal_sending) ───────────────
+    # The mailbox a project's submittal REQUESTS are sent FROM. Empty falls back
+    # to EMAIL_INGEST_MAILBOX at send time, which is what makes vendor replies
+    # thread back through the ingestion pipeline (both the Sent-Items copy and
+    # the reply land in that one mailbox under a shared conversationId). Set this
+    # only to deliberately send from a DIFFERENT mailbox than the one ingested —
+    # doing so means replies are NOT tracked. Empty here + empty ingest mailbox =
+    # submittal sending is refused (nowhere for replies to return).
+    submittal_sender: str = ""
+
     # Anonymous OneDrive "Anyone with the link" URLs for RFQ drawings expire after
     # this many days (Graph honors the tenant anonymous-link max-expiry policy).
     rfq_drawings_link_ttl_days: int = 30
@@ -177,6 +228,82 @@ class Settings(BaseSettings):
                     "acknowledged). Re-enable MFA_REQUIRED as soon as possible."
                 )
         return self
+
+    @model_validator(mode="after")
+    def _validate_self_hosted_llms(self) -> "Settings":
+        """Fail fast on a broken/unsafe self-hosted LLM configuration. Only
+        enforced while the master switch is on, so 3rd-party-only deployments
+        are unaffected."""
+        if not self.full_self_hosted_llms_enabled:
+            return self
+        if self.self_hosted_llm_target not in ("local", "ec2"):
+            raise ValueError(
+                "SELF_HOSTED_LLM_TARGET must be 'local' or 'ec2' "
+                f"(got {self.self_hosted_llm_target!r})."
+            )
+        url = self.self_hosted_llm_base_url
+        if not url:
+            raise ValueError(
+                "Refusing to boot: FULL_SELF_HOSTED_LLMS_ENABLED=true but the "
+                f"'{self.self_hosted_llm_target}' target has no base URL. Set "
+                "SELF_HOSTED_LLM_LOCAL_BASE_URL or SELF_HOSTED_LLM_EC2_BASE_URL "
+                "(e.g. http://localhost:11434/v1), or turn the switch off."
+            )
+        if not url.startswith(("https://", "http://")):
+            raise ValueError(
+                "The self-hosted LLM base URL must include a scheme "
+                f"(https:// or http://); got {url!r}."
+            )
+        if self.self_hosted_llm_ca_bundle:
+            import os
+
+            if not os.path.isfile(self.self_hosted_llm_ca_bundle):
+                raise ValueError(
+                    "SELF_HOSTED_LLM_CA_BUNDLE points to a missing file: "
+                    f"{self.self_hosted_llm_ca_bundle!r}."
+                )
+        if self.environment == "production":
+            sec_log = logging.getLogger("bdr.security")
+            if url.startswith("http://"):
+                if not self.self_hosted_llm_allow_http:
+                    raise ValueError(
+                        "Refusing to boot: the self-hosted LLM URL is plain http:// "
+                        "in production. Use https (a private CA is supported via "
+                        "SELF_HOSTED_LLM_CA_BUNDLE), or set "
+                        "SELF_HOSTED_LLM_ALLOW_HTTP=true only if the traffic never "
+                        "leaves a private network."
+                    )
+                sec_log.critical(
+                    "Self-hosted LLM traffic is UNENCRYPTED (http) in production "
+                    "(SELF_HOSTED_LLM_ALLOW_HTTP acknowledged). Prompts contain "
+                    "bid data — move to https as soon as possible."
+                )
+            elif not self.self_hosted_llm_verify_tls:
+                sec_log.critical(
+                    "TLS verification for the self-hosted LLM endpoint is DISABLED "
+                    "in production. Use SELF_HOSTED_LLM_CA_BUNDLE for private CAs "
+                    "and re-enable SELF_HOSTED_LLM_VERIFY_TLS."
+                )
+        return self
+
+    @property
+    def self_hosted_llm_base_url(self) -> str:
+        """The live self-hosted endpoint (per SELF_HOSTED_LLM_TARGET). Includes
+        the /v1 suffix, e.g. http://localhost:11434/v1."""
+        url = (
+            self.self_hosted_llm_ec2_base_url
+            if self.self_hosted_llm_target == "ec2"
+            else self.self_hosted_llm_local_base_url
+        )
+        return url.strip().rstrip("/")
+
+    @property
+    def self_hosted_llm_api_key(self) -> str:
+        return (
+            self.self_hosted_llm_ec2_api_key
+            if self.self_hosted_llm_target == "ec2"
+            else self.self_hosted_llm_local_api_key
+        )
 
     @property
     def cors_origin_list(self) -> list[str]:

@@ -64,17 +64,22 @@ def _safe_name(filename: str | None) -> str:
 
 
 def _dedupe(taken: set[str], arcname: str) -> str:
-    """Return `arcname`, or `name (2).ext` etc. if it's already used."""
-    if arcname not in taken:
-        taken.add(arcname)
+    """Return `arcname`, or `name (2).ext` etc. if it's already used.
+
+    Collisions are tracked case-insensitively: most extraction targets (Windows,
+    default macOS) are case-insensitive, so "Plan.pdf" and "plan.pdf" would
+    overwrite each other on extract even though they differ as Python strings.
+    """
+    if arcname.casefold() not in taken:
+        taken.add(arcname.casefold())
         return arcname
     base, dot, ext = arcname.rpartition(".")
     stem, suffix = (base, f".{ext}") if dot else (arcname, "")
     i = 2
     while True:
         candidate = f"{stem} ({i}){suffix}"
-        if candidate not in taken:
-            taken.add(candidate)
+        if candidate.casefold() not in taken:
+            taken.add(candidate.casefold())
             return candidate
         i += 1
 
@@ -148,9 +153,56 @@ def build_export_spooled(rows: list[dict]) -> tuple[IO[bytes], list[dict], int]:
     return spool, manifest, size
 
 
-def export_filename(project: dict) -> str:
-    """A download filename like `24-118_files_20260624.zip`."""
+def export_filename(project: dict, suffix: str = "files") -> str:
+    """A download filename like `24-118_files_20260624.zip` (or `_documents_…`
+    for the unified PM hub — pass `suffix="documents"`)."""
     label = str(project.get("number") or project.get("name") or "project")
     label = re.sub(r'[\\/:*?"<>|]+', "_", label).strip() or "project"
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
-    return f"{label}_files_{stamp}.zip"
+    return f"{label}_{suffix}_{stamp}.zip"
+
+
+# ── Folder-based export (unified PM documents hub) ────────────────────────────
+# The bidding export above groups by file *category*; the PM hub groups by
+# business *folder* (Plans, Quotes, Certified Payroll, …) drawn from three
+# different tables. Rows here are pre-shaped by the caller
+# (app.services.pm_folders): each carries a display `folder` label and a
+# `folder_rank` for ordering. The download/dedupe/manifest mechanics are shared.
+
+
+def _write_folder_entries(zf: zipfile.ZipFile, rows: list[dict]) -> list[dict]:
+    """Download each row's object into `zf` under `{folder}/{filename}`; returns
+    the manifest. Peak RAM stays ~one file (see `_write_entries`)."""
+    ordered = sorted(
+        rows,
+        key=lambda r: (r.get("folder_rank", 1_000), (r.get("filename") or "").lower()),
+    )
+    taken: set[str] = set()
+    manifest: list[dict] = []
+    for r in ordered:
+        folder = _safe_name(r.get("folder") or "Other")
+        arcname = _dedupe(taken, f"{folder}/{_safe_name(r.get('filename'))}")
+        try:
+            content = storage.download_file(r["storage_path"])
+        except Exception as exc:  # noqa: BLE001 — missing object: record, skip, continue
+            manifest.append({"file": arcname, "status": "missing", "error": str(exc)})
+            continue
+        zf.writestr(arcname, content)
+        manifest.append({"file": arcname, "status": "ok", "bytes": len(content)})
+    zf.writestr("MANIFEST.txt", _render_manifest(manifest))
+    return manifest
+
+
+def build_folder_export_spooled(rows: list[dict]) -> tuple[IO[bytes], list[dict], int]:
+    """Folder-grouped variant of `build_export_spooled` for the PM documents hub.
+
+    Each row needs: `folder` (display label), `folder_rank` (int), `filename`,
+    `storage_path`. Synchronous — call via `run_in_threadpool`; the caller MUST
+    close the returned file.
+    """
+    spool: IO[bytes] = tempfile.SpooledTemporaryFile(max_size=_SPOOL_MAX_MEMORY)
+    with zipfile.ZipFile(spool, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+        manifest = _write_folder_entries(zf, rows)
+    size = spool.tell()
+    spool.seek(0)
+    return spool, manifest, size
