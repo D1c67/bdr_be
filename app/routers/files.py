@@ -334,6 +334,8 @@ def _notify_drawing_changed(project_id: str, user: CurrentUser, verb: str) -> No
     `verb` is "added" or "removed". During intake nothing is sent — the Estimating
     Admin is still assembling the package and no one is pricing off it yet.
     """
+    from app.services import workflow
+
     proj = (
         get_supabase()
         .table("projects")
@@ -342,7 +344,11 @@ def _notify_drawing_changed(project_id: str, user: CurrentUser, verb: str) -> No
         .single()
         .execute()
     ).data
-    if not proj or proj["current_stage"] == "intake":
+    # During intake nothing is sent — the Estimating Admin is still assembling the
+    # package and no one is pricing off it yet. Suppress until intake completes.
+    if not proj or not workflow.is_category_complete(
+        workflow.load_category_state(project_id), "intake"
+    ):
         return
 
     label = f"{proj.get('number') or ''} {proj.get('name') or ''}".strip() or "a project"

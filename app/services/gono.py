@@ -159,11 +159,15 @@ def finalize(
     pushed the outcome). The transition runs first so an illegal state (e.g. a
     concurrent decision already moved the project) aborts before any decision
     row is written. Returns the updated project row.
+
+    A "go" advances the intake category's head (go_no_go → to_estimator). A "no_go"
+    is a project-global kill (decline_project).
     """
-    to_stage = "to_estimator" if outcome == "go" else "declined"
-    updated = workflow.transition_project(
-        project_id, to_stage, decided_by, f"Go/No-Go: {outcome} ({method})"
-    )
+    note = f"Go/No-Go: {outcome} ({method})"
+    if outcome == "go":
+        updated = workflow.advance_category(project_id, "intake", decided_by, note)
+    else:
+        updated = workflow.decline_project(project_id, decided_by, note)
     get_supabase().table("go_no_go_decisions").upsert(
         {"project_id": project_id, "outcome": outcome, "method": method, "decided_by": decided_by},
         on_conflict="project_id",

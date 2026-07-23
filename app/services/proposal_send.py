@@ -282,7 +282,9 @@ def set_gc_amounts(
     ).data
     if not project:
         raise ProposalSendError("Project not found", status_code=404)
-    if project["current_stage"] != "gc_pricing":
+    from app.services import workflow
+
+    if workflow.load_category_state(project_id).get("send_out", {}).get("current_task") != "gc_pricing":
         raise ProposalSendError("Project is not at the GC Pricing stage.")
     membership = (
         sb.table("project_gcs").select("id").eq("project_id", project_id)
@@ -350,7 +352,7 @@ def complete_send_out(project_id: str, user_id: str) -> dict:
     ).data
     if not project:
         raise ProposalSendError("Project not found", status_code=404)
-    if project["current_stage"] != "send_out":
+    if workflow.load_category_state(project_id).get("send_out", {}).get("current_task") != "send_out":
         raise ProposalSendError("Project is not at the Send Out stage.")
     rows = (
         sb.table("proposal_sends").select("gc_id, status").eq("project_id", project_id)
@@ -373,7 +375,8 @@ def complete_send_out(project_id: str, user_id: str) -> dict:
         note += " — sent to: " + ", ".join(sent)
     if skipped:
         note += "; skipped (no bid): " + ", ".join(skipped)
-    workflow.transition_project(project_id, "submitted", user_id, note)
+    # Advance the send_out category head send_out → submitted.
+    workflow.advance_category(project_id, "send_out", user_id, note)
     for role in (Role.ESTIMATING_ENGINEER, Role.EXECUTIVE):
         notify_role(
             role, project_id, "submitted",
@@ -459,7 +462,9 @@ def generate_documents(project_id: str, draft_id: str, user_id: str) -> list[dic
     project = sb.table("projects").select("*").eq("id", project_id).single().execute().data
     if not project:
         raise ProposalSendError("Project not found", status_code=404)
-    if project["current_stage"] != "send_out":
+    from app.services import workflow
+
+    if workflow.load_category_state(project_id).get("send_out", {}).get("current_task") != "send_out":
         raise ProposalSendError("Project is not at the Send Out stage.")
     verification = _get_one("verifications", project_id)
     if not verification or not verification.get("committed_at"):
@@ -766,7 +771,9 @@ def send_proposals(
     project = sb.table("projects").select("*").eq("id", project_id).single().execute().data
     if not project:
         raise ProposalSendError("Project not found", status_code=404)
-    if project["current_stage"] != "send_out":
+    from app.services import workflow
+
+    if workflow.load_category_state(project_id).get("send_out", {}).get("current_task") != "send_out":
         raise ProposalSendError("Project is not at the Send Out stage.")
 
     rows = (

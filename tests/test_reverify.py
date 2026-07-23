@@ -58,6 +58,11 @@ class _Query:
         self._filters.append((col, list(vals)))
         return self
 
+    def is_(self, col, val):
+        # only the "null" form is exercised; match rows whose column is None
+        self._filters.append((col, None if val == "null" else val))
+        return self
+
     def single(self):
         self._single = True
         return self
@@ -97,8 +102,11 @@ class _Query:
             for p in payloads:
                 existing = None
                 if self._conflict:
+                    # on_conflict may be a COMPOSITE key ("project_id,category") —
+                    # split and match on every part, not the literal joined string.
+                    keys = [k.strip() for k in self._conflict.split(",")]
                     existing = next(
-                        (r for r in rows if r.get(self._conflict) == p.get(self._conflict)), None
+                        (r for r in rows if all(r.get(k) == p.get(k) for k in keys)), None
                     )
                 if existing is not None:
                     existing.update(p)
@@ -136,6 +144,31 @@ def _verification(committed=True):
     }
 
 
+# project_category_state is the source of truth for the send_out lane. By default
+# the three upstream lanes are complete and send_out is active at `send_out`.
+_CAT_DEFAULTS = {
+    "intake": ("to_estimator", "complete"),
+    "material_numbers": ("receive_quotes", "complete"),
+    "labor_numbers": ("markup", "complete"),
+    "send_out": ("send_out", "active"),
+}
+
+
+def _cat_rows(pid="p1", **overrides):
+    spec = {**_CAT_DEFAULTS, **overrides}
+    return [
+        {"project_id": pid, "category": c, "current_task": t, "status": s,
+         "owner_role": None, "completed_at": ("x" if s == "complete" else None)}
+        for c, (t, s) in spec.items()
+    ]
+
+
+def _cat_state(**overrides):
+    """The in-memory state dict form (for _dismiss_stale_notifications)."""
+    spec = {**_CAT_DEFAULTS, **overrides}
+    return {c: {"current_task": t, "status": s} for c, (t, s) in spec.items()}
+
+
 def _install(monkeypatch, db):
     """Point workflow at the fake DB; record notify_role calls; stub dismissal."""
     notes = []
@@ -148,28 +181,47 @@ def _install(monkeypatch, db):
     return notes
 
 
-# ── Forward-only invariant is preserved (no new backward edges) ────────────────
+# ── Re-verify only fires when the send_out head is PAST verify ─────────────────
 
 
-def test_reverify_does_not_add_backward_transitions():
-    assert not workflow.can_transition("send_out", "verify")
-    assert not workflow.can_transition("submitted", "verify")
-    assert not workflow.can_transition("bid_outcome", "verify")
-    # The return move is also not a legal forward edge — it's a deliberate bypass.
-    assert not workflow.can_transition("verify", "submitted")
-    assert not workflow.can_transition("verify", "bid_outcome")
-    assert workflow.can_transition("verify", "send_out")  # the one real edge
+def test_reopen_only_fires_when_send_out_head_past_verify(monkeypatch):
+    # Bounce is legal only from send_out / submitted / bid_outcome — never from a
+    # head at or before verify (that's the forward-only invariant, re-homed to the
+    # send_out lane).
+    cases = {
+        "gc_pricing": False,
+        "verify": False,
+        "send_out": True,
+        "submitted": True,
+        "bid_outcome": True,
+    }
+    for head, should_move in cases.items():
+        db = FakeDB({
+            "projects": [_project(head)],
+            "verifications": [_verification()],
+            "stage_events": [],
+            "project_category_state": _cat_rows(send_out=(head, "active")),
+        })
+        _install(monkeypatch, db)
+        _, moved = workflow.reopen_verify("p1", "u1", "edit")
+        assert moved is should_move, f"head={head}"
 
 
-def test_reverify_required_is_stage_dismissed_after_leaving_verify(monkeypatch):
+def test_reverify_required_dismissed_once_send_out_leaves_verify(monkeypatch):
     captured = {}
     monkeypatch.setattr(
         workflow.notifications, "dismiss_notifications", lambda **kw: captured.update(kw)
     )
-    workflow._dismiss_stale_notifications("p1", "send_out")  # order 11 > verify 10
+    # send_out head past verify → the reverify prompt is stale.
+    workflow._dismiss_stale_notifications(
+        "p1", "send_out", _cat_state(send_out=("send_out", "active"))
+    )
     assert "reverify_required" in captured["types"]
     captured.clear()
-    workflow._dismiss_stale_notifications("p1", "verify")  # still pending at verify
+    # still pending at verify → keep it.
+    workflow._dismiss_stale_notifications(
+        "p1", "send_out", _cat_state(send_out=("verify", "active"))
+    )
     assert "reverify_required" not in captured.get("types", [])
 
 
@@ -177,7 +229,14 @@ def test_reverify_required_is_stage_dismissed_after_leaving_verify(monkeypatch):
 
 
 def test_no_bounce_before_verify(monkeypatch):
-    db = FakeDB({"projects": [_project("markup")], "verifications": [_verification()]})
+    # Labor still at markup → send_out lane is locked, so nothing to bounce.
+    db = FakeDB({
+        "projects": [_project("markup")],
+        "verifications": [_verification()],
+        "project_category_state": _cat_rows(
+            labor_numbers=("markup", "active"), send_out=("gc_pricing", "locked")
+        ),
+    })
     notes = _install(monkeypatch, db)
     assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Markup edited") is False
     assert db.tables["projects"][0]["current_stage"] == "markup"
@@ -185,7 +244,11 @@ def test_no_bounce_before_verify(monkeypatch):
 
 
 def test_no_bounce_at_verify(monkeypatch):
-    db = FakeDB({"projects": [_project("verify")], "verifications": [_verification(committed=False)]})
+    db = FakeDB({
+        "projects": [_project("verify")],
+        "verifications": [_verification(committed=False)],
+        "project_category_state": _cat_rows(send_out=("verify", "active")),
+    })
     notes = _install(monkeypatch, db)
     assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Markup edited") is False
     assert notes == []
@@ -195,6 +258,7 @@ def test_skip_abandoned(monkeypatch):
     db = FakeDB({
         "projects": [_project("send_out", abandoned_at="2026-06-01T00:00:00Z")],
         "verifications": [_verification()],
+        "project_category_state": _cat_rows(send_out=("send_out", "active")),
     })
     notes = _install(monkeypatch, db)
     assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Markup edited") is False
@@ -207,6 +271,7 @@ def test_bounce_from_send_out(monkeypatch):
         "projects": [_project("send_out")],
         "verifications": [_verification()],
         "stage_events": [],
+        "project_category_state": _cat_rows(send_out=("send_out", "active")),
     })
     notes = _install(monkeypatch, db)
     assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Labor numbers edited") is True
@@ -232,6 +297,7 @@ def test_bounce_from_submitted_preserves_return_and_warns_sent(monkeypatch):
         "projects": [_project("submitted")],
         "verifications": [_verification()],
         "stage_events": [],
+        "project_category_state": _cat_rows(send_out=("submitted", "active")),
     })
     notes = _install(monkeypatch, db)
     assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Vendor quote amount changed") is True
@@ -244,6 +310,7 @@ def test_second_edit_does_not_overwrite_return_stage(monkeypatch):
         "projects": [_project("send_out")],
         "verifications": [_verification()],
         "stage_events": [],
+        "project_category_state": _cat_rows(send_out=("send_out", "active")),
     })
     _install(monkeypatch, db)
     assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "first") is True
@@ -262,6 +329,7 @@ def test_return_from_reverify_restores_stage_and_clears_marker(monkeypatch):
     db = FakeDB({
         "projects": [_project("verify", return_stage="submitted")],
         "stage_events": [],
+        "project_category_state": _cat_rows(send_out=("verify", "active")),
     })
     _install(monkeypatch, db)
     workflow.return_from_reverify("p1", "submitted", "exec1")
@@ -275,10 +343,11 @@ def test_return_from_reverify_restores_stage_and_clears_marker(monkeypatch):
 # ── commit_verify: route off Verify to the right place ─────────────────────────
 
 
-def _commit_db(stage="verify", return_stage=None):
+def _commit_db(send_head="verify", return_stage=None):
     return FakeDB({
         "verifications": [_verification(committed=False)],
-        "projects": [_project(stage, return_stage=return_stage)],
+        "projects": [_project(send_head, return_stage=return_stage)],
+        "project_category_state": _cat_rows(send_out=(send_head, "active")),
     })
 
 
@@ -287,6 +356,9 @@ def _patch_commit(monkeypatch, db):
 
     calls = []
     monkeypatch.setattr(pricing, "get_supabase", lambda: db)
+    # commit_verify reads the send_out head via workflow.load_category_state, which
+    # uses workflow's own get_supabase binding — point it at the same fake.
+    monkeypatch.setattr(pricing.workflow, "get_supabase", lambda: db)
     monkeypatch.setattr(pricing, "audit", lambda *a, **k: None)
     monkeypatch.setattr(pricing, "_deltas", lambda body, pid: {})
     monkeypatch.setattr(pricing, "notify_role", lambda *a, **k: calls.append(("notify", *a)))
@@ -295,32 +367,33 @@ def _patch_commit(monkeypatch, db):
         lambda pid, rs, uid: calls.append(("return", pid, rs)),
     )
     monkeypatch.setattr(
-        pricing.workflow, "transition_project",
-        lambda pid, to, uid, note=None: calls.append(("transition", pid, to)),
+        pricing.workflow, "advance_category",
+        lambda pid, cat, uid, note=None: calls.append(("advance", pid, cat)),
     )
     return pricing, calls
 
 
 def test_commit_returns_to_stored_stage(monkeypatch):
+    # send_out head at verify with a stored return stage → resume there, no advance.
     pricing, calls = _patch_commit(monkeypatch, _commit_db(return_stage="submitted"))
     user = SimpleNamespace(id="exec1", role=Role.EXECUTIVE)
     pricing.commit_verify("p1", None, user)
     assert ("return", "p1", "submitted") in calls
-    assert not any(c[0] == "transition" for c in calls)
+    assert not any(c[0] == "advance" for c in calls)
 
 
 def test_commit_without_return_stage_advances_to_send_out(monkeypatch):
     pricing, calls = _patch_commit(monkeypatch, _commit_db(return_stage=None))
     user = SimpleNamespace(id="exec1", role=Role.EXECUTIVE)
     pricing.commit_verify("p1", None, user)
-    assert ("transition", "p1", "send_out") in calls
+    assert ("advance", "p1", "send_out") in calls
     assert not any(c[0] == "return" for c in calls)
 
 
 def test_redundant_commit_off_verify_is_silent(monkeypatch):
-    # A re-commit when the project already advanced off Verify just re-stamps the
-    # snapshot — no transition, no return, and no spurious "verified" notification.
-    pricing, calls = _patch_commit(monkeypatch, _commit_db(stage="send_out", return_stage=None))
+    # A re-commit when the send_out head already advanced off Verify just re-stamps
+    # the snapshot — no advance, no return, and no spurious "verified" notification.
+    pricing, calls = _patch_commit(monkeypatch, _commit_db(send_head="send_out", return_stage=None))
     user = SimpleNamespace(id="exec1", role=Role.EXECUTIVE)
     pricing.commit_verify("p1", None, user)
     assert calls == []

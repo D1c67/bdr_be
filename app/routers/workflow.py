@@ -15,7 +15,7 @@ Leaving `go_no_go` is refused here: a project leaves it only through a decision
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.deps import CurrentUser, get_current_user
-from app.core.roles import INTERNAL_ROLES, VERIFY_ROLES, WRITER_ROLES
+from app.core.roles import INTERNAL_ROLES, WRITER_ROLES
 from app.core.supabase_client import get_supabase
 from app.models.schemas import TransitionIn
 from app.routers.projects import redact_for_role
@@ -45,19 +45,43 @@ def advance(
     body: TransitionIn,
     user: CurrentUser = Depends(get_current_user),
 ):
+    """Advance one CATEGORY's head task by one step (the category model). The server
+    computes the next task; `body.category` says which lane. Panel-owned heads
+    (go_no_go, verify, send_out, submitted) are completed from their own endpoints."""
+    category = body.category
+    if not category or category not in workflow.CATEGORY_TASKS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "A valid `category` is required")
+
     proj = (
-        get_supabase().table("projects").select("current_stage").eq("id", project_id).single().execute()
+        get_supabase()
+        .table("projects")
+        .select("id, current_stage")
+        .eq("id", project_id)
+        .single()
+        .execute()
     ).data
     if not proj:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
-    current = proj["current_stage"]
+    if proj["current_stage"] == "declined":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Project was declined at Go/No-Go")
 
-    if current == "go_no_go":
-        raise HTTPException(status.HTTP_409_CONFLICT, "Use the Go/No-Go decide endpoint")
+    state = workflow.load_category_state(project_id)
+    cs = state.get(category, {})
+    if cs.get("status") != "active":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"The {workflow.CATEGORY_LABELS[category]} category is not active yet",
+        )
+    head = cs["current_task"]
+    if head in workflow.PANEL_OWNED_HEADS:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"'{workflow.STAGES[head].label}' is completed from its own panel, not the generic advance",
+        )
 
-    # To Estimator can't be left until an electrical drawing exists — a hard rule
-    # mirrored in the UI (the Continue button is disabled). Specs are optional.
-    if current == "to_estimator":
+    # To Estimator (last intake task) can't be left until an electrical drawing exists —
+    # a hard rule mirrored in the UI. This gates the intake → material/labor unlock.
+    if category == "intake" and head == "to_estimator":
         has_drawing = (
             get_supabase()
             .table("project_files")
@@ -70,15 +94,12 @@ def advance(
         if not has_drawing:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
-                "Upload at least one electrical drawing/plan before advancing to Estimate Received",
+                "Upload at least one electrical drawing/plan before completing Intake",
             )
 
-    # Receive Quotes can't be left until the PE has confirmed, per category, that
-    # the vendor quoted the entire RFQ — a hard rule mirrored in the UI (the
-    # advance button blocks and lists the unconfirmed categories). General
-    # Material has no vendor quotes and is exempt. Server-side so a direct API
-    # call (or the UI's fail-open path on a fetch hiccup) can't bypass it.
-    if current == "receive_quotes":
+    # Receive Quotes (last material task) can't be left until every non-general RFQ
+    # category is confirmed quoted-in-full — server-side so a direct call can't bypass it.
+    if category == "material_numbers" and head == "receive_quotes":
         rows = (
             get_supabase()
             .table("rfqs")
@@ -100,44 +121,41 @@ def advance(
                 f"Confirm the quotes are complete for every category before advancing: {names}",
             )
 
-    # Verify is restricted to the Executive (IT Admin override); every other stage
-    # may be advanced by any writer role. The accountant (read-only) and estimator
-    # are never writers and are rejected here.
-    if current == "verify":
-        if user.role not in VERIFY_ROLES:
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN,
-                "Only the executive (or it_admin) may advance the 'verify' stage",
-            )
-    elif user.role not in WRITER_ROLES:
+    # Any writer role may advance any (non-panel-owned) category head; verify is the
+    # only role-gated head and it is panel-owned (refused above).
+    if user.role not in WRITER_ROLES:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Read-only or insufficient role to advance this stage",
+            "Read-only or insufficient role to advance this category",
         )
 
-    updated = workflow.transition_project(project_id, body.to_stage, user.id, body.note)
+    updated = workflow.advance_category(project_id, category, user.id, body.note)
 
-    # Entering Go/No-Go runs the score gate: the project may pass straight
-    # through (>= 30), be declined (< 20), or park in review — or the sender may
-    # have pushed an outcome explicitly. When the gate moves the project on, its
-    # own notifications/audit cover the handoff, so skip the generic one below.
-    if body.to_stage == "go_no_go":
+    # Advancing intake's first task moves it INTO go_no_go, which runs the score gate:
+    # the project may pass straight through (>= 30), be declined (< 20), or park in
+    # review — or the sender may push an outcome. When the gate moves it on, its own
+    # notifications/audit cover the handoff, so return early.
+    if head == "intake":
         outcome, moved = gono.apply_entry_action(project_id, user.id, body.gono_action)
         if outcome is not None:
-            # Redact like every other project-row response — the raw update row
-            # carries the confidential actual_bid_at, which non-viewer writers
-            # (e.g. estimating_engineer) must not receive.
             return {**redact_for_role(moved or updated, user.role), "gono_outcome": outcome}
 
-    # Notify the internal team that now owns the project. We use the internal
-    # owner (never the estimator) so a stage like estimate_received — co-owned by
-    # the estimator for access — hands off to the PE, not to every estimator's
-    # external inbox. Assigned estimators are notified through their own scoped
-    # paths (assignment, drawings, notes), not this broadcast.
-    new_owner = workflow.internal_owner_role_for(body.to_stage)
-    if new_owner:
-        notify_role(
-            new_owner, project_id, "stage_handoff",
-            f"Project advanced to {workflow.STAGES[body.to_stage].label}",
-        )
+    # Hand off to the internal team that now owns the affected lane(s): the advanced
+    # category's new head, plus any category the fan-out just unlocked (intake complete
+    # unlocks material + labor). Internal owner only (never broadcast to estimators).
+    new_state = workflow.load_category_state(project_id)
+    handoff_heads: list[str] = []
+    adv = new_state.get(category, {})
+    if adv.get("status") == "active":
+        handoff_heads.append(adv["current_task"])
+    for cat in workflow.CATEGORY_ORDER:
+        if state.get(cat, {}).get("status") == "locked" and new_state.get(cat, {}).get("status") == "active":
+            handoff_heads.append(new_state[cat]["current_task"])
+    for h in dict.fromkeys(handoff_heads):  # de-dupe, preserve order
+        new_owner = workflow.internal_owner_role_for(h)
+        if new_owner:
+            notify_role(
+                new_owner, project_id, "stage_handoff",
+                f"Project advanced to {workflow.STAGES[h].label}",
+            )
     return redact_for_role(updated, user.role)

@@ -56,39 +56,82 @@ def test_fire_key_actual_bid_palette():
     assert dr.fire_key(DUE, DUE, p, False, LOOKBACK) is None  # no expired
 
 
-# ── is_complete ───────────────────────────────────────────────────────────
+# ── is_complete (keyed to the OWNING category, not one global pointer) ──────
+
+_CAT_DEFAULTS = {
+    "intake": ("intake", "active"),
+    "material_numbers": ("estimate_received", "locked"),
+    "labor_numbers": ("labor_numbers", "locked"),
+    "send_out": ("gc_pricing", "locked"),
+}
 
 
-def test_is_complete_bid_kinds_only_at_terminal_stages():
+def _cs(**overrides):
+    """A {category: {current_task, status}} state dict, defaults overridable."""
+    spec = {**_CAT_DEFAULTS, **overrides}
+    return {c: {"current_task": t, "status": s} for c, (t, s) in spec.items()}
+
+
+_ALL_DONE = dict(
+    intake=("to_estimator", "complete"),
+    material_numbers=("receive_quotes", "complete"),
+    labor_numbers=("markup", "complete"),
+)
+
+
+def test_is_complete_bid_kinds_only_once_submitted_or_declined():
+    submitted = _cs(send_out=("submitted", "active"), **_ALL_DONE)
+    pre_submit = _cs(send_out=("send_out", "active"), **_ALL_DONE)
     for kind in ("internal_bid", "actual_bid"):
-        assert dr.is_complete(kind, "submitted", False, [])
-        assert dr.is_complete(kind, "declined", False, [])
-        assert not dr.is_complete(kind, "send_out", False, [])
-        assert not dr.is_complete(kind, "intake", False, [])
+        assert dr.is_complete(kind, submitted, False, False, [])       # send_out reached submitted
+        assert dr.is_complete(kind, _cs(), True, False, [])            # declined global kill
+        assert not dr.is_complete(kind, pre_submit, False, False, [])  # still at send_out
+        assert not dr.is_complete(kind, _cs(), False, False, [])       # send_out locked
 
 
 def test_is_complete_estimator_kind():
-    assert not dr.is_complete("due_from_estimator", "to_estimator", False, [])
-    assert dr.is_complete("due_from_estimator", "to_estimator", True, [])
-    assert dr.is_complete("due_from_estimator", "estimate_received", False, [])
-    assert not dr.is_complete("due_from_estimator", "intake", False, [])
+    # Not done while intake still parked at to_estimator with no deliverable…
+    assert not dr.is_complete("due_from_estimator", _cs(intake=("to_estimator", "active")), False, False, [])
+    # …done if a deliverable exists, OR once intake completes (estimate handed off).
+    assert dr.is_complete("due_from_estimator", _cs(intake=("to_estimator", "active")), False, True, [])
+    assert dr.is_complete("due_from_estimator", _cs(intake=("to_estimator", "complete")), False, False, [])
+    assert not dr.is_complete("due_from_estimator", _cs(intake=("intake", "active")), False, False, [])
 
 
 def test_is_complete_vendors_kind():
-    assert not dr.is_complete("due_from_vendors", "receive_quotes", False, [])
-    assert not dr.is_complete("due_from_vendors", "receive_quotes", False, ["sent"])
-    assert not dr.is_complete("due_from_vendors", "rfqs", False, ["draft", "quotes_in"])
-    assert dr.is_complete("due_from_vendors", "receive_quotes", False, ["quotes_in", "closed"])
-    assert dr.is_complete("due_from_vendors", "labor_numbers", False, [])
+    at_rq = _cs(material_numbers=("receive_quotes", "active"))
+    assert not dr.is_complete("due_from_vendors", at_rq, False, False, [])
+    assert not dr.is_complete("due_from_vendors", at_rq, False, False, ["sent"])
+    assert not dr.is_complete("due_from_vendors", _cs(material_numbers=("rfqs", "active")),
+                              False, False, ["draft", "quotes_in"])
+    # All quotes in/closed → done regardless of the head…
+    assert dr.is_complete("due_from_vendors", at_rq, False, False, ["quotes_in", "closed"])
+    # …or once the MATERIAL category passes Receive Quotes.
+    assert dr.is_complete("due_from_vendors", _cs(material_numbers=("receive_quotes", "complete")),
+                          False, False, [])
 
 
-def test_is_complete_unknown_stage_fails_toward_reminding():
-    assert not dr.is_complete("internal_bid", "mystery_stage", False, [])
+def test_is_complete_vendors_independent_of_labor():
+    # THE FIX: labor progress must never mark vendor quotes done. A project deep
+    # into labor while material is still at RFQs still owes vendor quotes.
+    state = _cs(
+        intake=("to_estimator", "complete"),
+        material_numbers=("rfqs", "active"),
+        labor_numbers=("markup", "complete"),  # labor fully done
+    )
+    assert not dr.is_complete("due_from_vendors", state, False, False, [])
+
+
+def test_is_complete_fresh_project_still_reminds():
+    # A brand-new project (everything early/locked) is complete for no kind.
+    fresh = _cs()
+    for kind in ("internal_bid", "actual_bid", "due_from_estimator", "due_from_vendors"):
+        assert not dr.is_complete(kind, fresh, False, False, [])
 
 
 def test_is_complete_unknown_kind_raises():
     with pytest.raises(ValueError):
-        dr.is_complete("nonsense", "intake", False, [])
+        dr.is_complete("nonsense", _cs(), False, False, [])
 
 
 # ── Messages ──────────────────────────────────────────────────────────────
@@ -272,9 +315,22 @@ def _echo_ledger(payload):
     return [{"id": f"L{i}", "user_id": row["user_id"]} for i, row in enumerate(payload)]
 
 
+def _cat_rows(pid="p1", **overrides):
+    """project_category_state rows for one project; override (task, status) per cat."""
+    spec = {**_CAT_DEFAULTS, **overrides}
+    return [
+        {"project_id": pid, "category": c, "current_task": t, "status": s,
+         "owner_role": None, "completed_at": None}
+        for c, (t, s) in spec.items()
+    ]
+
+
 def _setup(monkeypatch, responses, now):
     fake = _FakeSupabase(responses)
     monkeypatch.setattr(dr, "get_supabase", lambda: fake)
+    # poll_once batch-loads category state via workflow.load_category_states, which
+    # uses workflow's own get_supabase binding — point it at the same fake.
+    monkeypatch.setattr(dr.workflow, "get_supabase", lambda: fake)
     monkeypatch.setattr(dr, "_now", lambda: now)
     monkeypatch.setattr(
         dr, "get_settings",
@@ -302,6 +358,9 @@ def test_poll_once_vendor_event_end_to_end(monkeypatch):
     }
     fake = _setup(monkeypatch, {
         ("projects", "select"): [project],
+        ("project_category_state", "select"): _cat_rows(
+            intake=("to_estimator", "complete"), material_numbers=("receive_quotes", "active")
+        ),
         ("rfqs", "select"): [{"project_id": "p1", "status": "sent"}],
         ("profiles", "select"): [{"id": "pe1", "role": "estimating_engineer"}, {"id": "pm1", "role": "estimating_admin"}],
         ("notification_prefs", "select"): [],
@@ -332,6 +391,9 @@ def test_poll_once_duplicate_tick_inserts_nothing(monkeypatch):
     }
     fake = _setup(monkeypatch, {
         ("projects", "select"): [project],
+        ("project_category_state", "select"): _cat_rows(
+            intake=("to_estimator", "complete"), material_numbers=("receive_quotes", "active")
+        ),
         ("profiles", "select"): [{"id": "pe1", "role": "estimating_engineer"}],
         ("due_reminder_log", "upsert"): [],  # all duplicates
     }, NOW)
@@ -355,6 +417,9 @@ def test_poll_once_notification_failure_rolls_ledger_back(monkeypatch):
 
     fake = _setup(monkeypatch, {
         ("projects", "select"): [project],
+        ("project_category_state", "select"): _cat_rows(
+            intake=("to_estimator", "complete"), material_numbers=("receive_quotes", "active")
+        ),
         ("profiles", "select"): [{"id": "pe1", "role": "estimating_engineer"}],
         ("due_reminder_log", "upsert"): _echo_ledger,
         ("notifications", "insert"): _boom,
@@ -376,6 +441,10 @@ def test_poll_once_complete_task_is_silent(monkeypatch):
     }
     fake = _setup(monkeypatch, {
         ("projects", "select"): [project],
+        # intake complete → the estimate was handed off; due_from_estimator done.
+        ("project_category_state", "select"): _cat_rows(
+            intake=("to_estimator", "complete"), material_numbers=("rfqs", "active")
+        ),
         ("project_files", "select"): [],
     }, NOW)
 
@@ -394,6 +463,8 @@ def test_poll_once_estimator_added_via_assignment(monkeypatch):
     }
     fake = _setup(monkeypatch, {
         ("projects", "select"): [project],
+        # intake still parked at to_estimator (not handed off) → reminder is live.
+        ("project_category_state", "select"): _cat_rows(intake=("to_estimator", "active")),
         ("project_files", "select"): [],
         ("profiles", "select"): [
             {"id": "pa1", "role": "estimating_admin"},
@@ -425,6 +496,13 @@ def test_poll_once_actual_bid_goes_only_to_pa(monkeypatch):
     }
     fake = _setup(monkeypatch, {
         ("projects", "select"): [project],
+        # send_out at verify (past all lanes) — actual_bid not yet complete.
+        ("project_category_state", "select"): _cat_rows(
+            intake=("to_estimator", "complete"),
+            material_numbers=("receive_quotes", "complete"),
+            labor_numbers=("markup", "complete"),
+            send_out=("verify", "active"),
+        ),
         ("profiles", "select"): [
             {"id": "pa1", "role": "estimating_admin"}, {"id": "ex1", "role": "executive"},
         ],

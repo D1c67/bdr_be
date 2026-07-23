@@ -458,14 +458,16 @@ def my_assigned_projects(user: CurrentUser = Depends(get_current_user)):
     return [{**p, "due_at": due_by.get(p["id"])} for p in projs]
 
 
-def _before_receive_quotes(stage: str) -> bool:
+def _before_receive_quotes(project_id: str) -> bool:
     """True while nothing downstream has consumed the estimate figure yet —
     the window where a revised estimate may silently refresh the extraction
-    (no badge, no human step) instead of demanding a manual reprocess."""
-    from app.services.workflow import STAGES
+    (no badge, no human step) instead of demanding a manual reprocess. Keyed to
+    the MATERIAL category (independent of labor): true until material reaches
+    Receive Quotes."""
+    from app.services import workflow
 
-    defn = STAGES.get(stage)
-    return bool(defn and defn.order < STAGES["receive_quotes"].order)
+    state = workflow.load_category_state(project_id)
+    return not workflow.category_reached(state, "material_numbers", "receive_quotes")
 
 
 @router.post("/estimator/projects/{project_id}/submit", dependencies=[Depends(estimator_rate_limit)])
@@ -543,7 +545,7 @@ def submit_deliverables(
     # A revised estimate before anything consumed the figure just refreshes the
     # extraction silently; at/after Receive Quotes the team reprocesses
     # deliberately via the stale-file badge (never yank verified numbers).
-    if counts.get("estimate") and _before_receive_quotes(proj["current_stage"]):
+    if counts.get("estimate") and _before_receive_quotes(project_id):
         background.add_task(general_material.run_extraction, project_id)
     return {"submitted": True, "round": round_no, "counts": counts}
 

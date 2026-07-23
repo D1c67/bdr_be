@@ -1,14 +1,14 @@
 """Unit tests for the Win/Loss (bid outcome) pure logic — no DB.
 
 Covers the snapshot of what we bid, the grid merge of recorded outcomes onto the
-GCs we bid to, the "did we actually win the work" derivation, and the new
-submitted → bid_outcome workflow transition.
+GCs we bid to, the "did we actually win the work" derivation, and the send_out
+category gate that only lets an outcome be recorded once the bid is Submitted.
 """
 
 from decimal import Decimal
 
 from app.services import outcome
-from app.services.workflow import STAGES, can_transition, owner_role_for
+from app.services.workflow import STAGES, owner_role_for
 
 
 # ── our_amount_of ────────────────────────────────────────────────────────────
@@ -95,20 +95,115 @@ def test_merge_ignores_recorded_rows_for_gcs_we_did_not_bid_to():
     assert merged[0]["our_amount"] is None
 
 
-# ── workflow transition ──────────────────────────────────────────────────────
+# ── ownership of the closeout tasks ──────────────────────────────────────────
 
 
-def test_submitted_advances_to_bid_outcome():
-    assert can_transition("submitted", "bid_outcome")
-
-
-def test_bid_outcome_is_terminal():
-    assert can_transition("bid_outcome", "submitted") is False
+def test_bid_outcome_owned_by_estimating_admin():
     assert STAGES["bid_outcome"].owner_roles  # Estimating Admin owns it (can correct)
+    assert owner_role_for("bid_outcome").value == "estimating_admin"
 
 
 def test_submitted_now_owned_by_estimating_admin():
     # The outstanding task at Submitted is recording the outcome — the Estimating
     # Admin's job.
     assert owner_role_for("submitted").value == "estimating_admin"
-    assert owner_role_for("bid_outcome").value == "estimating_admin"
+
+
+# ── record_outcome: the send_out-head gate ────────────────────────────────────
+# record_outcome is only reachable once the send_out category head is Submitted
+# (advance to bid_outcome) or already at bid_outcome (in-place correction).
+
+from types import SimpleNamespace  # noqa: E402
+
+import pytest  # noqa: E402
+
+from app.services import workflow  # noqa: E402
+from app.services.outcome import OutcomeError, record_outcome  # noqa: E402
+from app.models.schemas import BidOutcomeIn  # noqa: E402
+
+
+class _OutcomeQuery:
+    def __init__(self, db, table):
+        self.db, self.table = db, table
+        self._op = "select"
+        self._payload = None
+        self._filters = []
+        self._single = False
+
+    def select(self, *a, **k):
+        self._op = "select"
+        return self
+
+    def upsert(self, payload, **k):
+        self._op, self._payload = "upsert", payload
+        return self
+
+    def eq(self, col, val):
+        self._filters.append((col, val))
+        return self
+
+    def single(self):
+        self._single = True
+        return self
+
+    def execute(self):
+        rows = self.db.tables.get(self.table, [])
+        if self._op == "select":
+            hits = [r for r in rows if all(r.get(c) == v for c, v in self._filters)]
+            if self._single:
+                return SimpleNamespace(data=(hits[0] if hits else None))
+            return SimpleNamespace(data=[dict(r) for r in hits])
+        self.db.upserts.append((self.table, self._payload))
+        return SimpleNamespace(data=[])
+
+
+class _OutcomeDB:
+    def __init__(self, tables):
+        self.tables = tables
+        self.upserts = []
+
+    def table(self, name):
+        return _OutcomeQuery(self, name)
+
+
+def _outcome_env(monkeypatch, send_head):
+    db = _OutcomeDB({
+        "projects": [{"id": "p1", "name": "Acme", "current_stage": send_head}],
+        "proposal_sends": [],  # no GCs → empty grid, keeps the merge trivial
+        "bid_outcomes": [],
+        "bid_gc_outcomes": [],
+    })
+    monkeypatch.setattr(outcome, "get_supabase", lambda: db)
+    monkeypatch.setattr(
+        workflow, "load_category_state",
+        lambda pid: {"send_out": {"current_task": send_head, "status": "active"}},
+    )
+    advanced = []
+    monkeypatch.setattr(
+        workflow, "advance_category",
+        lambda pid, cat, uid, note=None: advanced.append((pid, cat, note)),
+    )
+    monkeypatch.setattr(outcome, "notify_role", lambda *a, **k: None)
+    monkeypatch.setattr(outcome, "audit", lambda *a, **k: None)
+    return db, advanced
+
+
+def test_record_outcome_rejected_before_submitted(monkeypatch):
+    _outcome_env(monkeypatch, "verify")
+    with pytest.raises(OutcomeError) as exc:
+        record_outcome("p1", "pa1", BidOutcomeIn(result="won"))
+    assert "Submitted" in str(exc.value)
+
+
+def test_record_outcome_from_submitted_advances_send_out(monkeypatch):
+    _db, advanced = _outcome_env(monkeypatch, "submitted")
+    record_outcome("p1", "pa1", BidOutcomeIn(result="lost"))
+    # Advances the send_out head submitted → bid_outcome exactly once.
+    assert advanced == [("p1", "send_out", "Outcome recorded: lost")]
+
+
+def test_record_outcome_at_bid_outcome_is_in_place(monkeypatch):
+    _db, advanced = _outcome_env(monkeypatch, "bid_outcome")
+    record_outcome("p1", "pa1", BidOutcomeIn(result="won"))
+    # Already terminal: re-recording just updates in place, no further advance.
+    assert advanced == []

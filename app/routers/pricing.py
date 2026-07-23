@@ -459,20 +459,22 @@ def commit_verify(
     proj = (
         get_supabase()
         .table("projects")
-        .select("current_stage, reverify_return_stage")
+        .select("reverify_return_stage")
         .eq("id", project_id)
         .single()
         .execute()
     ).data
-    # Only advance + notify when the commit actually moved the project off Verify;
+    state = workflow.load_category_state(project_id)
+    send_head = state.get("send_out", {}).get("current_task")
+    # Only advance + notify when the commit actually moved the send_out head off Verify;
     # a redundant re-commit (already advanced) just re-stamps the snapshot silently.
-    if proj and proj["current_stage"] == "verify":
-        return_stage = proj.get("reverify_return_stage")
+    if send_head == "verify":
+        return_stage = proj.get("reverify_return_stage") if proj else None
         if return_stage:
             workflow.return_from_reverify(project_id, return_stage, user.id)
             notify_role(Role.ESTIMATING_ADMIN, project_id, "verified", "Pricing re-committed by Executive")
         else:
-            workflow.transition_project(project_id, "send_out", user.id, "Pricing committed")
+            workflow.advance_category(project_id, "send_out", user.id, "Pricing committed")
             notify_role(Role.ESTIMATING_ADMIN, project_id, "verified", "Pricing committed by Executive — ready to send out")
     return row
 

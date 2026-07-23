@@ -29,7 +29,7 @@ from app.core.supabase_client import get_supabase
 from app.services.datetime_format import _parse_ts, format_bid_datetime
 from app.services import notification_email
 from app.services.due_reminder_prefs import NotificationPrefsDoc, effective_prefs
-from app.services.workflow import STAGES
+from app.services import workflow
 
 logger = logging.getLogger(__name__)
 
@@ -125,20 +125,26 @@ def fire_key(
 
 
 def is_complete(
-    kind: str, stage: str, has_deliverables: bool, rfq_statuses: list[str]
+    kind: str,
+    cat_state: dict[str, dict],
+    is_declined: bool,
+    has_deliverables: bool,
+    rfq_statuses: list[str],
 ) -> bool:
-    """Whether the task tied to a deadline kind is already done (no reminder)."""
-    defn = STAGES.get(stage)
-    if defn is None:
-        # Enum drift — fail toward reminding rather than silently going quiet.
-        logger.warning("Unknown stage %r — treating reminder task as incomplete", stage)
-        return False
+    """Whether the task tied to a deadline kind is already done (no reminder).
+
+    Keyed to the OWNING category's own progress (not one global pointer), so a
+    labor-side advance can no longer wrongly silence a material-side reminder.
+    """
     if kind in ("internal_bid", "actual_bid"):
-        return stage in TERMINAL_STAGES
+        return is_declined or workflow.category_reached(cat_state, "send_out", "submitted")
     if kind == "due_from_estimator":
-        return defn.order > STAGES["to_estimator"].order or has_deliverables
+        # Done once intake completes (the estimate was handed off) or a deliverable
+        # exists — independent of labor/material progress.
+        return workflow.category_past(cat_state, "to_estimator") or has_deliverables
     if kind == "due_from_vendors":
-        return defn.order > STAGES["receive_quotes"].order or (
+        # Done once the MATERIAL category passes Receive Quotes, independent of labor.
+        return workflow.category_past(cat_state, "receive_quotes") or (
             bool(rfq_statuses)
             and all(s in ("quotes_in", "closed") for s in rfq_statuses)
         )
@@ -298,12 +304,18 @@ def poll_once() -> None:
         for r in rows:
             rfq_statuses_by_pid.setdefault(r["project_id"], []).append(r["status"])
 
+    # Per-category state for every candidate, so completion is judged against the
+    # OWNING category (not the single headline current_stage).
+    cat_states = workflow.load_category_states(
+        sorted({p["id"] for p, _, _, _ in candidates})
+    )
     events = [
         (p, k, off, due)
         for p, k, off, due in candidates
         if not is_complete(
             k.key,
-            p["current_stage"],
+            cat_states.get(p["id"], {}),
+            p["current_stage"] == "declined",
             p["id"] in deliverable_pids,
             rfq_statuses_by_pid.get(p["id"], []),
         )

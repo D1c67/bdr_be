@@ -11,6 +11,7 @@ from app.core.deps import CurrentUser, get_current_user, require_role
 from app.core.roles import INTERNAL_ROLES, WRITER_ROLES
 from app.core.supabase_client import get_supabase
 from app.models.schemas import GonoDecisionIn
+from app.services import workflow
 from app.services.gono import THRESHOLDS, compute_score, finalize, outcome_for_score
 
 router = APIRouter(prefix="/projects/{project_id}/gono", tags=["go-no-go"])
@@ -58,7 +59,8 @@ def decide(
     ).data
     if not project:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
-    if project["current_stage"] != "go_no_go":
-        raise HTTPException(status.HTTP_409_CONFLICT, "Project is not in the Go/No-Go stage")
+    state = workflow.load_category_state(project_id)
+    if state.get("intake", {}).get("current_task") != "go_no_go" or state["intake"]["status"] != "active":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Project is not in the Go/No-Go step")
     finalize(project_id, body.outcome, "manual", user.id, score=compute_score(project))
     return {"decided": body.outcome, "method": "manual"}

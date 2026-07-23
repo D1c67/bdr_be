@@ -481,14 +481,29 @@ def test_mark_reviewed_acks_only_the_round_the_user_saw(monkeypatch):
 
 
 # ── extraction auto-rerun window ───────────────────────────────────────────
+# _before_receive_quotes now loads category state and keys off the MATERIAL
+# category (independent of labor): the auto-rerun window is open until material
+# reaches Receive Quotes.
 
 
-def test_before_receive_quotes_window():
-    assert _before_receive_quotes("estimate_received") is True
-    assert _before_receive_quotes("rfqs") is True
-    assert _before_receive_quotes("receive_quotes") is False
-    assert _before_receive_quotes("verify") is False
-    assert _before_receive_quotes("not_a_stage") is False
+def _material_state(task, status):
+    return {"material_numbers": {"current_task": task, "status": status}}
+
+
+def test_before_receive_quotes_window(monkeypatch):
+    from app.services import workflow
+
+    def _run(task, status):
+        monkeypatch.setattr(
+            workflow, "load_category_state", lambda pid: _material_state(task, status)
+        )
+        return _before_receive_quotes("p1")
+
+    assert _run("estimate_received", "active") is True
+    assert _run("rfqs", "active") is True
+    # At or past Receive Quotes → the figure is consumed downstream; window closed.
+    assert _run("receive_quotes", "active") is False
+    assert _run("receive_quotes", "complete") is False
 
 
 # ── notifications: mirror_email flag ───────────────────────────────────────

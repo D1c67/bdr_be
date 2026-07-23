@@ -248,6 +248,16 @@ class ProjectUpdate(BaseModel):
     scope_fit: ScopeFit | None = None
 
 
+class CategoryStateOut(BaseModel):
+    """One category's progress head (source of truth for the bidding board)."""
+
+    category: str
+    current_task: str
+    status: str  # 'locked' | 'active' | 'complete'
+    owner_role: Role | None = None
+    completed_at: datetime | None = None
+
+
 class ProjectOut(BaseModel):
     id: str
     name: str
@@ -290,6 +300,11 @@ class ProjectOut(BaseModel):
     # holds the stage it will resume at after the Executive re-commits. NULL =
     # not currently in re-verification (see migration 0043 / workflow.reopen_verify).
     reverify_return_stage: str | None = None
+    # Per-category progress (the new source of truth), keyed by category
+    # ('intake' | 'material_numbers' | 'labor_numbers' | 'send_out'). `current_stage`
+    # above is the denormalized headline pointer. Default None lets reads degrade
+    # gracefully before migration 0057 is applied / for rows without category state.
+    category_state: dict[str, CategoryStateOut] | None = None
     status: ProjectStatus = "active"
     # Last successful files export (drives the post-send-out export banner).
     # Default lets reads degrade gracefully before migration 0041 is applied.
@@ -324,7 +339,12 @@ class FilesExportIn(BaseModel):
 
 
 class TransitionIn(BaseModel):
-    to_stage: str
+    # The category whose head to advance in the new category model
+    # ('intake' | 'material_numbers' | 'labor_numbers' | 'send_out'). Required by
+    # /advance. `to_stage` is retained for backward compatibility / logging only and
+    # is ignored by the endpoint (the server computes the next task per category).
+    category: str | None = None
+    to_stage: str | None = None
     note: str | None = None
     # Only honored when advancing into go_no_go: 'score' (default) lets the
     # thresholds decide, 'review' holds the project for a manual decision, and
