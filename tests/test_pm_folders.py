@@ -96,6 +96,8 @@ def test_writable_folders_cover_every_pm_category():
         ("bid", "boq", "estimates"),
         ("bid", "proposal", "proposals"),
         ("bid", "revision", "revisions"),
+        ("bid", "addendum", "revisions"),
+        ("bid", "estimator_additional", "revisions"),
         ("cp", None, "certified_payroll"),
         ("bid", "totally_unknown", "other"),
         ("pm", None, "other"),
