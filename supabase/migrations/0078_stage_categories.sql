@@ -106,7 +106,13 @@ declare
   ct  project_stage;
   st  category_status;
 begin
-  for p in select id, current_stage from projects loop
+  -- pm_only/cp_only are never-bid placeholders (0057_pm_core / 0063_cp_core):
+  -- they own NO bidding lanes, and the else-1 fallback in _bdr_stage_order would
+  -- otherwise seed them with an active intake lane. ::text comparison so the
+  -- literals don't need to exist in project_stage (they don't on BDR_Staging,
+  -- where this file ran as 0057 before the PM module).
+  for p in select id, current_stage from projects
+           where current_stage::text not in ('pm_only', 'cp_only') loop
     o   := _bdr_stage_order(p.current_stage);
     dcl := (p.current_stage = 'declined');
 
