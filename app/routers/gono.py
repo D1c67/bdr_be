@@ -1,8 +1,9 @@
-"""Go/No-Go status and the manual decision (step 2).
+"""Go/No-Go status, the manual decision (step 2), and undoing a decision.
 
 The score gate itself runs when a project enters the stage (routers/workflow.py
-→ services/gono.apply_entry_action). This router serves the current status and
-lets any writer decide a project that is parked in review.
+→ services/gono.apply_entry_action). This router serves the current status, lets
+any writer decide a project that is parked in review, and lets any writer take a
+recorded decision back (`/undo`) while it has changed nothing downstream.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -11,7 +12,7 @@ from app.core.deps import CurrentUser, get_current_user, require_role
 from app.core.roles import INTERNAL_ROLES, WRITER_ROLES
 from app.core.supabase_client import get_supabase
 from app.models.schemas import GonoDecisionIn
-from app.services import workflow
+from app.services import gono, workflow
 from app.services.gono import THRESHOLDS, compute_score, finalize, outcome_for_score
 
 router = APIRouter(prefix="/projects/{project_id}/gono", tags=["go-no-go"])
@@ -34,11 +35,14 @@ def gono_status(project_id: str, user: CurrentUser = Depends(get_current_user)):
         .execute()
     ).data
     score = compute_score(project)
+    decided = decision[0] if decision else None
     return {
         "score": score,
         "outcome": outcome_for_score(score),
         "thresholds": THRESHOLDS,
-        "decision": decision[0] if decision else None,
+        "decision": decided,
+        # Whether the recorded decision can still be taken back, and why not.
+        **gono.undo_status(project, workflow.load_category_state(project_id), decided),
     }
 
 
@@ -64,3 +68,18 @@ def decide(
         raise HTTPException(status.HTTP_409_CONFLICT, "Project is not in the Go/No-Go step")
     finalize(project_id, body.outcome, "manual", user.id, score=compute_score(project))
     return {"decided": body.outcome, "method": "manual"}
+
+
+@router.post("/undo")
+def undo_decision(
+    project_id: str,
+    user: CurrentUser = Depends(require_role(*WRITER_ROLES)),
+):
+    """Take back the recorded decision and put the project back in review here.
+
+    A No-Go always reverses (a declined project is frozen). A Go only reverses
+    while it changed nothing outside the gate — still at To Estimator, no
+    estimator assigned, no package sent — otherwise this is a 409 saying so.
+    """
+    gono.undo(project_id, user.id)
+    return {"undone": True}

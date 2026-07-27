@@ -116,7 +116,11 @@ def test_estimator_additional_is_writable_and_valid():
 
 
 def test_estimator_sees_own_additional_files():
-    assert _estimator_visible({"category": "estimator_additional"}) is True
+    # _estimator_visible now takes user_id and scopes ESTIMATOR_WRITE reads to the
+    # uploader — the estimator sees their OWN additional box, never a rival's.
+    uid = "est1"
+    assert _estimator_visible({"category": "estimator_additional", "uploaded_by": uid}, uid) is True
+    assert _estimator_visible({"category": "estimator_additional", "uploaded_by": "rival"}, uid) is False
 
 
 def test_exclude_unsent_applies_the_or_filter():
@@ -615,3 +619,54 @@ def test_queue_revision_alert_noops_when_emails_disabled(monkeypatch):
         lambda *a, **k: pytest.fail("thread spawned while emails disabled"),
     )
     revision_email.queue_revision_alert("p1", 2, [])
+
+
+# ── F2: the seal is scoped to the submitting estimator ─────────────────────
+
+
+def test_seal_is_scoped_to_the_submitting_estimator(monkeypatch):
+    # F2 (§8.2 #39): the seal UPDATE only sweeps the submitter's OWN drafts — a
+    # second estimator pressing Send must not seal (and thereby announce + freeze)
+    # a competitor's in-progress files. Guaranteed by the uploaded_by filter.
+    db = _FakeDB()
+    db.queue("estimator_submissions", "select", [])
+    db.queue("estimator_submissions", "insert", [{"id": "s1", "round": 1}])
+    db.queue("project_files", "update", [{"id": "f1", "category": "estimate", "filename": "e.xlsx"}])
+    db.queue("estimator_submissions", "update", [{"id": "s1"}])
+    _patch_db(monkeypatch, er, db)
+
+    er.create_submission_round("p1", "est1")
+    seal = db.ops("project_files", "update")[0]
+    assert ("eq", "uploaded_by", "est1") in seal.filters
+    assert ("eq", "estimator_deliverable", True) in seal.filters
+    assert ("is", "submission_round", "null") in seal.filters
+
+
+# ── F6: estimator_project_detail is scoped to the caller ───────────────────
+
+
+def test_estimator_detail_scopes_submissions_to_caller(monkeypatch):
+    # F6 (§8.2 #40): with >1 active assignee, estimator B must never read A's
+    # round count / timestamps / per-category summary. The submissions query is
+    # filtered to the caller's own estimator_id.
+    from app.routers import estimator as est_mod
+
+    db = _FakeDB()
+    db.queue("projects", "select", {"id": "p1", "name": "Acme", "number": "42"})
+    db.queue(
+        "estimator_submissions",
+        "select",
+        [{"round": 1, "submitted_at": "2026-07-02T00:00:00Z", "summary": {"estimate": 1}}],
+    )
+    _patch_db(monkeypatch, est_mod, db)
+
+    user = CurrentUser(
+        id="me", email="e@x.com", role=Role.ESTIMATOR, is_active=True, is_dev=False,
+        aal="aal2", mfa_enrolled=True,
+    )
+    out = est_mod.estimator_project_detail("p1", user)
+    q = db.ops("estimator_submissions", "select")[0]
+    assert ("eq", "estimator_id", "me") in q.filters
+    assert out["submissions"] == [
+        {"round": 1, "submitted_at": "2026-07-02T00:00:00Z", "summary": {"estimate": 1}}
+    ]

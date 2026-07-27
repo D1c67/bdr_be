@@ -2,20 +2,25 @@
 
 Storage objects live in the private `project-files` bucket; downloads are served
 as short-TTL signed URLs. The estimator is restricted: they may only read
-`drawing`/`specification` files plus the `revision`/`additional` updates that
-were actually sent to them, only write `estimate`/`boq`/`markup`, and only for
-projects they are actively assigned to.
+`drawing`/`specification` files plus the `revision`/`additional`/`addendum`
+updates that were actually sent to them (an uploaded-but-unsent update is still
+a draft), only write their own `estimate`/`boq`/`markup` deliverables, and only
+for projects they are actively assigned to.
 
-Once the estimator hand-off has begun (see `handoff_locked`), the initial
-`drawing`/`specification` blocks lock — no uploads or deletes. New material
-goes in as `revision` ("Changes/Revisions") or `additional` ("Additional
-files"), each requiring a per-file note; once emailed to the estimators those
-files become undeletable too (their notes stay editable).
+Once the initial package has actually been SENT to an estimator (see
+`handoff_locked` — a package sent, not merely an assignment created), the
+initial `drawing`/`specification` blocks lock — no uploads or deletes. New
+material goes in as `revision` ("Changes/Revisions") or `additional`
+("Additional files"), each requiring a per-file note; once emailed to the
+estimators those files become undeletable too (their notes stay editable).
+Addenda are the one category uploadable on BOTH sides of that lock; they carry
+an addendum number + issue date instead of a note, and estimators never upload
+them.
 """
 
 import os
 import threading
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote
 
 from fastapi import (
@@ -39,6 +44,26 @@ from app.core.deps import (
     require_project_assignment,
 )
 from app.core.error_codes import ErrorCode, RateLimitScope
+from app.core.file_categories import (  # re-exported: tests import these from files.py
+    DOC_TYPE_CATEGORIES,
+    DOC_TYPE_REQUIRED_CATEGORIES,
+    DOC_TYPES,
+    ESTIMATOR_READ,
+    ESTIMATOR_WRITE,
+    FILE_NOTE_MAX_CHARS,
+    INITIAL_CATEGORIES,
+    UPDATE_CATEGORIES,
+    VALID_CATEGORIES,
+)
+from app.core.file_categories import (
+    # `X as X` marks these as deliberate re-exports (pyflakes/ruff F401), not
+    # dead imports: the handler bodies that consume them land in the next wave.
+    ADDENDUM_CATEGORY as ADDENDUM_CATEGORY,
+    ADDENDUM_NUMBER_MAX_CHARS as ADDENDUM_NUMBER_MAX_CHARS,
+    ESTIMATOR_QUERY_CATEGORIES as ESTIMATOR_QUERY_CATEGORIES,
+    PACKAGE_CATEGORIES as PACKAGE_CATEGORIES,
+    SENT_GATED_CATEGORIES as SENT_GATED_CATEGORIES,
+)
 from app.core.ratelimit import estimator_rate_limit, export_rate_limit, upload_rate_limit
 from app.core.roles import WRITER_ROLES, Role
 from app.core.supabase_client import get_supabase
@@ -53,34 +78,11 @@ router = APIRouter(
     dependencies=[Depends(estimator_rate_limit)],
 )
 
-# What the estimator is allowed to touch. Specifications are part of the
-# package the estimator prices off, so they read them alongside drawings;
-# revision/additional updates are gated separately (sent-only — see
-# `_estimator_visible`). `estimator_additional` is the estimator's own
-# "Additional Files" box (their supplementary uploads back to the team) —
-# post-first-submit only, see `upload_file`.
-ESTIMATOR_READ = {"drawing", "specification"}
-ESTIMATOR_WRITE = {"estimate", "boq", "markup", "estimator_additional"}
-# The initial package blocks — locked once the hand-off begins.
-INITIAL_CATEGORIES = {"drawing", "specification"}
-# Post-hand-off updates ("Changes/Revisions" / "Additional files") — each file
-# requires a note, and the estimator only sees them once actually emailed.
-UPDATE_CATEGORIES = {"revision", "additional"}
-VALID_CATEGORIES = {
-    "drawing",
-    "specification",
-    "revision",
-    "additional",
-    "estimate",
-    "boq",
-    "markup",
-    "estimator_additional",
-    "rfq_split",
-    "quote",
-    "other",
-}
-
-FILE_NOTE_MAX_CHARS = 2000
+# The category sets now live in ONE place, app/core/file_categories.py — see
+# that module's docstring for what each set means and why `addendum` belongs to
+# neither INITIAL_CATEGORIES nor UPDATE_CATEGORIES. They are re-exported here
+# verbatim because tests/test_file_updates.py and tests/test_estimator_rounds.py
+# import them from this module. Do not re-declare them here.
 
 # Only one export archive builds per process at a time. Building downloads and
 # compresses every file; letting several run concurrently is the export OOM
@@ -151,47 +153,79 @@ ROUND_SEALED_MESSAGE = (
 ADDITIONAL_TOO_EARLY_MESSAGE = (
     "Additional files are available after your first submission"
 )
+# Addendum metadata (number + issue date). Mirrors the DB CHECK in 0076.
+ADDENDUM_NUMBER_REQUIRED_MESSAGE = "An addendum number is required (e.g. 1, 02, 3A)"
+ADDENDUM_DATE_REQUIRED_MESSAGE = "The addendum's issue date is required"
+ADDENDUM_META_ONLY_MESSAGE = "Addendum number and issue date only apply to addenda"
+DOC_TYPE_REQUIRED_MESSAGE = (
+    "Say whether this revision is to the plans/drawings or to the specifications"
+)
+DOC_TYPE_ONLY_MESSAGE = (
+    "Plans/specifications only apply to revisions and addenda — "
+    "the initial package says which it is by its own category"
+)
 
 
 def is_handoff_locked(assignments: list[dict]) -> bool:
-    """The hand-off has begun: an active assignment exists, or a package was
-    already emailed (a fully-revoked project stays locked if files went out —
-    what the estimator received must stay reconstructable)."""
-    return any(
-        a.get("revoked_at") is None or a.get("sent_to_estimator_at") for a in assignments
-    )
+    """Legacy signal: a package was actually EMAILED to this assignee.
+
+    An UNSENT active assignment no longer locks. It used to, which produced the
+    unrecoverable state: assign while Graph was unconfigured -> locked with
+    nothing sent -> drawings frozen, no way to send. That state is now
+    unreachable (assign 503s without Graph) and the historical ones are unfrozen
+    by this change so they can finally be completed."""
+    return any(a.get("sent_to_estimator_at") for a in assignments)
 
 
 def handoff_locked(project_id: str) -> bool:
+    sb = get_supabase()
+    # The authoritative signal: any send batch means the package left the
+    # building. Claimed BEFORE the email in `file_sends.claim_batch`, so this is
+    # true the instant a send is committed.
+    if (
+        sb.table("file_send_batches")
+        .select("id")
+        .eq("project_id", project_id)
+        .limit(1)
+        .execute()
+    ).data:
+        return True
     rows = (
-        get_supabase()
-        .table("estimator_assignments")
+        sb.table("estimator_assignments")
         .select("revoked_at, sent_to_estimator_at")
         .eq("project_id", project_id)
         .execute()
     ).data or []
     if is_handoff_locked(rows):
         return True
-    # Belt-and-braces: emailed updates also prove the hand-off happened, even
-    # if no assignment row carries a send stamp (e.g. assigned while Graph was
-    # unconfigured, updates sent after it came up).
+    # Belt-and-braces: emailed updates (revisions/additional/addenda) also prove
+    # the hand-off happened, even if no batch or assignment row carries a stamp.
     updates = (
-        get_supabase()
-        .table("project_files")
+        sb.table("project_files")
         .select("sent_to_estimators_at")
         .eq("project_id", project_id)
-        .in_("category", list(UPDATE_CATEGORIES))
+        .in_("category", list(SENT_GATED_CATEGORIES))
         .execute()
     ).data or []
     return any(u.get("sent_to_estimators_at") for u in updates)
 
 
-def _estimator_visible(rec: dict) -> bool:
-    """Category-level read gate for the external estimator. Updates only become
-    visible once emailed — an uploaded-but-unsent revision is still a draft."""
-    if rec["category"] in (ESTIMATOR_READ | ESTIMATOR_WRITE):
+def _estimator_visible(rec: dict, user_id: str) -> bool:
+    """Category-level read gate for the external estimator."""
+    if rec["category"] in ESTIMATOR_READ:
         return True
-    return rec["category"] in UPDATE_CATEGORIES and bool(rec.get("sent_to_estimators_at"))
+    if rec["category"] in ESTIMATOR_WRITE:
+        # A deliverable belongs to the estimator who uploaded it. With more than
+        # one active assignee (which "Re-assign" makes routine) an estimator
+        # must never read a competitor's estimate workbook. Delete was already
+        # uploader-scoped; read was not.
+        return rec.get("uploaded_by") == user_id
+    # Updates AND addenda only become visible once actually emailed — an
+    # uploaded-but-unsent revision or addendum is still a draft. `.get`, never
+    # `[]`: some callers pass a dict with no such key.
+    return rec["category"] in SENT_GATED_CATEGORIES and bool(
+        rec.get("sent_to_estimators_at")
+    )
 
 
 def _get_file_checked(project_id: str, file_id: str, user: CurrentUser) -> dict:
@@ -208,7 +242,7 @@ def _get_file_checked(project_id: str, file_id: str, user: CurrentUser) -> dict:
     ).data
     if not rec:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found")
-    if user.role == Role.ESTIMATOR and not _estimator_visible(rec):
+    if user.role == Role.ESTIMATOR and not _estimator_visible(rec, user.id):
         audit(user.id, "access.denied", "project_file", file_id, {"category": rec["category"]})
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
     return rec
@@ -220,20 +254,72 @@ def list_files(
 ):
     q = get_supabase().table("project_files").select("*").eq("project_id", project_id)
     if user.role == Role.ESTIMATOR:
-        q = q.in_("category", list(ESTIMATOR_READ | ESTIMATOR_WRITE | UPDATE_CATEGORIES))
+        q = q.in_("category", list(ESTIMATOR_QUERY_CATEGORIES))
     rows = q.order("created_at", desc=True).execute().data or []
     if user.role == Role.ESTIMATOR:
-        rows = [r for r in rows if _estimator_visible(r)]
+        rows = [r for r in rows if _estimator_visible(r, user.id)]
+        # The log is the estimator's only view of send history, and it is scoped
+        # to batches addressed to THEM. Leaving the raw stamp here hands a
+        # re-assigned estimator send timestamps that predate their assignment —
+        # i.e. proof that other sends, and therefore other recipients, exist.
+        # The column stays in the query so _estimator_visible still gates on it;
+        # only the serialized value is blanked.
+        for r in rows:
+            r["sent_to_estimators_at"] = None
     return rows
 
 
 @router.get("/lock")
 def lock_state(
-    project_id: str, _: CurrentUser = Depends(require_project_assignment)
+    project_id: str, user: CurrentUser = Depends(require_project_assignment)
 ):
-    """Whether the initial drawing/spec blocks are locked (hand-off begun) —
-    lets the UI collapse the blocks and reroute uploads to Changes/Revisions."""
-    return {"locked": handoff_locked(project_id)}
+    """Whether the initial drawing/spec blocks are locked (package actually
+    sent) — lets the UI collapse the blocks and reroute uploads to
+    Changes/Revisions. Role-branched: the estimator gets only facts about
+    themselves; project-wide counts would leak that earlier sends (and therefore
+    other recipients) exist."""
+    from app.services import file_sends
+
+    locked = handoff_locked(project_id)
+    if user.role == Role.ESTIMATOR:
+        stats = file_sends.batch_stats(project_id, estimator_id=user.id)
+        return {"locked": locked, "sent": stats["batch_count"] > 0}
+    stats = file_sends.batch_stats(project_id)
+    return {
+        "locked": locked,
+        "sent": stats["package_sent_at"] is not None,  # kind='initial' EXISTS
+        "batch_count": stats["batch_count"],
+        "first_sent_at": stats["first_sent_at"],
+    }
+
+
+@router.get("/send-batches")
+def send_batches(
+    project_id: str, user: CurrentUser = Depends(require_project_assignment)
+):
+    """The Plans & Specs Log — every send batch this caller is entitled to see.
+
+    Two role-shaped projections built entirely inside `file_sends.build_log`
+    (never one payload post-filtered): the internal viewer sees recipients and
+    the sender; the estimator sees only batches addressed to them, with the
+    recipient/sender keys ABSENT and 'reassign' collapsed to 'initial'. Returned
+    as the raw role-shaped dict — no response_model — so the estimator's absent
+    keys stay absent rather than serializing as null.
+    """
+    from app.services import file_sends
+
+    payload = file_sends.build_log(project_id, user)
+    if user.role == Role.ESTIMATOR:
+        # External-user reads are a security signal (same rationale as
+        # file.download). No audit for internal reads.
+        audit(
+            user.id,
+            "estimator.log_view",
+            "project",
+            project_id,
+            {"batch_count": len(payload.get("batches", []))},
+        )
+    return payload
 
 
 @router.post(
@@ -247,6 +333,9 @@ async def upload_file(
     category: str = Form(...),
     material_category_id: str | None = Form(None),
     note: str | None = Form(None),
+    doc_type: str | None = Form(None),  # 'drawing' | 'specification' (0077)
+    addendum_number: str | None = Form(None),
+    addendum_issued_on: str | None = Form(None),  # ISO calendar date "YYYY-MM-DD"
     file: UploadFile = File(...),
     user: CurrentUser = Depends(require_project_assignment),
 ):
@@ -271,6 +360,49 @@ async def upload_file(
     note = (note or "").strip() or None
     if note and len(note) > FILE_NOTE_MAX_CHARS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Note is too long")
+
+    if category == ADDENDUM_CATEGORY:
+        # Estimators never reach here: 'addendum' is not in ESTIMATOR_WRITE, so
+        # the ESTIMATOR_WRITE gate above already 403s them. This is the only
+        # thing enforcing "estimators view addenda but never upload them" — an
+        # addendum carries a number + issue date instead of a note, and is
+        # uploadable on BOTH sides of the hand-off lock (neither UPDATE_CATEGORIES
+        # nor INITIAL_CATEGORIES contains it, so the lock branches below skip it).
+        addendum_number = (addendum_number or "").strip()
+        if not addendum_number:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, ADDENDUM_NUMBER_REQUIRED_MESSAGE)
+        if len(addendum_number) > ADDENDUM_NUMBER_MAX_CHARS:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Addendum number is too long")
+        try:
+            issued_on = date.fromisoformat((addendum_issued_on or "").strip())
+        except ValueError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, ADDENDUM_DATE_REQUIRED_MESSAGE)
+        # +1 day of clock skew; a far-future date is a typo on a document that,
+        # by definition, has already been issued.
+        if issued_on > (datetime.now(timezone.utc).date() + timedelta(days=1)):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, "The addendum issue date cannot be in the future"
+            )
+    elif addendum_number or addendum_issued_on:
+        # Addendum metadata on a non-addendum — mirrors the DB CHECK.
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, ADDENDUM_META_ONLY_MESSAGE)
+
+    # doc_type — WHICH DOCUMENT SET a post-hand-off file belongs to (0077).
+    # Orthogonal to `category`: it splits the one "Changes/Revisions" bucket into
+    # revised plans vs revised specs so the modal, the email and the log can keep
+    # them apart. Required for revisions (the Revisions modal always knows which
+    # section the file came from); optional for addenda, which the initial
+    # "Upload plans and specs" modal also uploads without asking. Legacy rows
+    # predating 0077 stay NULL and render in the untitled group.
+    doc_type = (doc_type or "").strip() or None
+    if doc_type is not None:
+        if doc_type not in DOC_TYPES:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid document type")
+        if category not in DOC_TYPE_CATEGORIES:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, DOC_TYPE_ONLY_MESSAGE)
+    elif category in DOC_TYPE_REQUIRED_CATEGORIES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, DOC_TYPE_REQUIRED_MESSAGE)
+
     if category in UPDATE_CATEGORIES:
         # Updates only exist relative to a hand-off, and each must say what it
         # is — the note travels with the file to the estimators.
@@ -304,6 +436,15 @@ async def upload_file(
                 "size_bytes": len(content),
                 "preview_status": "pending" if convertible else "none",
                 "note": note,
+                # NULL for everything except revisions/addenda (0077 CHECK).
+                "doc_type": doc_type,
+                # Both NULL for non-addenda (required by the 0076 DB CHECK);
+                # `issued_on` is only bound in the addendum branch above, so the
+                # conditional never evaluates it for other categories.
+                "addendum_number": addendum_number or None,
+                "addendum_issued_on": (
+                    issued_on.isoformat() if category == ADDENDUM_CATEGORY else None
+                ),
                 # Estimator deliverables start as drafts of the open round —
                 # sealed (submission_round stamped) only when they press Send.
                 "estimator_deliverable": user.role == Role.ESTIMATOR
@@ -312,8 +453,13 @@ async def upload_file(
         )
     )
     row = (await run_in_threadpool(insert.execute)).data[0]
+    audit_payload = {"category": category}
+    if doc_type:
+        audit_payload["doc_type"] = doc_type
+    if category == ADDENDUM_CATEGORY:
+        audit_payload["addendum_number"] = addendum_number
     await run_in_threadpool(
-        audit, user.id, "file.upload", "project_file", row["id"], {"category": category}
+        audit, user.id, "file.upload", "project_file", row["id"], audit_payload
     )
     if convertible:
         # Sync task → runs in the threadpool after the response; never blocks.
@@ -459,11 +605,18 @@ async def export_files(
         sb = get_supabase()
         q = (
             sb.table("project_files")
-            .select("id, category, storage_path, filename, size_bytes, sent_to_estimators_at")
+            # `uploaded_by` is MANDATORY here: _estimator_visible now scopes
+            # ESTIMATOR_WRITE reads to the uploader, and without this column
+            # every row evaluates `None == user.id` and 100% of an estimator's
+            # own deliverables silently drop from their ZIP (a 404 below).
+            .select(
+                "id, category, storage_path, filename, size_bytes, "
+                "sent_to_estimators_at, uploaded_by"
+            )
             .eq("project_id", project_id)
         )
         if user.role == Role.ESTIMATOR:
-            q = q.in_("category", list(ESTIMATOR_READ | ESTIMATOR_WRITE | UPDATE_CATEGORIES))
+            q = q.in_("category", list(ESTIMATOR_QUERY_CATEGORIES))
         else:
             # Internal exports must never bundle an unsent estimator draft —
             # the team only receives files the estimator actually sent.
@@ -472,7 +625,7 @@ async def export_files(
             q = q.in_("id", body.file_ids)
         rows = (await run_in_threadpool(q.execute)).data or []
         if user.role == Role.ESTIMATOR:
-            rows = [r for r in rows if _estimator_visible(r)]
+            rows = [r for r in rows if _estimator_visible(r, user.id)]
         if not rows:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "No files to export")
 
@@ -640,9 +793,9 @@ def delete_file(
     # in as Changes/Revisions instead.
     if rec["category"] in INITIAL_CATEGORIES and handoff_locked(project_id):
         raise HTTPException(status.HTTP_409_CONFLICT, LOCKED_MESSAGE)
-    # Same once an update was emailed: sent files are evidence of what the
-    # estimators received (mirrors the sent-proposal rule below).
-    if rec["category"] in UPDATE_CATEGORIES and rec.get("sent_to_estimators_at"):
+    # Same once an update OR addendum was emailed: sent files are evidence of
+    # what the estimators received (mirrors the sent-proposal rule below).
+    if rec["category"] in SENT_GATED_CATEGORIES and rec.get("sent_to_estimators_at"):
         raise HTTPException(status.HTTP_409_CONFLICT, SENT_IMMUTABLE_MESSAGE)
 
     # Sent proposals are evidence of what we bid — immutable; and only a writer

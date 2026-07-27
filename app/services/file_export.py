@@ -28,6 +28,7 @@ _SPOOL_MAX_MEMORY = 8 * 1024 * 1024
 _CATEGORY_ORDER = [
     "drawing",
     "specification",
+    "addendum",
     "revision",
     "additional",
     "estimate",

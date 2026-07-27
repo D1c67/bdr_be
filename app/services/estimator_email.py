@@ -29,17 +29,41 @@ from app.services.email_branding import (
     render_branded_html,
 )
 
-# Category -> section title, in display order. Initial files first, then the
-# post-hand-off updates.
-SECTION_TITLES: list[tuple[str, str]] = [
-    ("drawing", "Electrical drawings"),
-    ("specification", "Specifications"),
-    ("revision", "Changes/Revisions"),
-    ("additional", "Additional files"),
+# (category, doc_type) -> section title, in display order. Initial files first,
+# then addenda (which live on both sides of the hand-off), then the post-hand-off
+# updates.
+#
+# The 0077 doc_type axis is what splits one "Changes/Revisions" list into revised
+# PLANS and revised SPECS — the estimator prices those from different documents,
+# so they must arrive as different sections, not as one pile the reader has to
+# sort by filename. Each split category keeps a trailing `None` row for files
+# uploaded before 0077 (and for addenda sent from the initial modal, which never
+# asks): they group under the original undivided title rather than being dropped.
+#
+# ORDER IS THE RENDER ORDER. `doc_type` None on a SPLIT category means "no
+# document set recorded", never "any".
+SECTION_TITLES: list[tuple[str, str | None, str]] = [
+    ("drawing", None, "Electrical drawings"),
+    ("specification", None, "Specifications"),
+    ("addendum", "drawing", "Addenda — plans/drawings"),
+    ("addendum", "specification", "Addenda — specifications"),
+    ("addendum", None, "Addenda"),
+    ("revision", "drawing", "Revised plans/drawings"),
+    ("revision", "specification", "Revised specifications"),
+    ("revision", None, "Changes/Revisions"),
+    ("additional", None, "Additional files"),
 ]
 INITIAL_TAG = "Initial files"
 UPDATE_TAG = "Sent after hand-off"
 _INITIAL = {"drawing", "specification"}
+# Addenda carry no "Initial files"/"Sent after hand-off" pill: they exist in the
+# initial package AND in later batches, so either tag would be wrong. Each
+# addendum line shows its number + issue date, which is more informative anyway.
+_NO_TAG = {"addendum"}
+# Categories whose sections are keyed by (category, doc_type); mirrors
+# file_categories.DOC_TYPE_CATEGORIES. Imported as a literal rather than from
+# that module so this renderer stays a leaf with no app.core import.
+_SPLIT_CATEGORIES = {"revision", "addendum"}
 
 PORTAL_LINE_PACKAGE = "Please upload your Estimate, BOQ, and markups via the BDR portal."
 PORTAL_LINE_UPDATES = (
@@ -53,17 +77,20 @@ def graph_configured() -> bool:
     return bool(get_settings().ms_client_id)
 
 
+# Ordered so an addenda-only batch never mislabels as "Changes/Revisions".
+# ORDER IS LOAD-BEARING — do not reorder.
+_UPDATE_LABELS = [
+    ("addendum", "Addenda"),
+    ("revision", "Changes/Revisions"),
+    ("additional", "Additional files"),
+]
+
+
 def updates_label(files: list[dict]) -> str:
     """Human label for what an updates send contains — drives the subject and
     heading ("whichever were sent")."""
     cats = {f["category"] for f in files}
-    has_rev = "revision" in cats
-    has_add = "additional" in cats
-    if has_rev and has_add:
-        return "Changes/Revisions & Additional files"
-    if has_add:
-        return "Additional files"
-    return "Changes/Revisions"
+    return " & ".join(label for c, label in _UPDATE_LABELS if c in cats) or "Changes/Revisions"
 
 
 def _greeting(recipient_name: str | None) -> str:
@@ -86,6 +113,14 @@ def _file_item(f: dict, url: str) -> str:
         f'<li style="margin:0 0 10px;"><a href="{safe_url}" '
         f'style="color:{_NAVY};font-weight:bold;">{html.escape(f["filename"])}</a>'
     )
+    if f.get("category") == "addendum" and f.get("addendum_number"):
+        meta = f'Addendum {html.escape(str(f["addendum_number"]))}'
+        if f.get("addendum_issued_on"):
+            meta += f' · issued {html.escape(str(f["addendum_issued_on"]))}'
+        item += (
+            f'<br><span style="font-size:13px;color:{_NAVY};font-weight:bold;">'
+            f"{meta}</span>"
+        )
     if f.get("note"):
         item += (
             f'<br><span style="font-size:13px;color:{_MUTED};">'
@@ -94,20 +129,65 @@ def _file_item(f: dict, url: str) -> str:
     return item + "</li>"
 
 
-def render_sections(files: list[dict], signer) -> str:
-    """The grouped file lists: one titled section per category, initial files
-    tagged apart from post-hand-off updates. `signer(storage_path) -> url` is
-    injected so rendering stays pure and testable."""
+def section_key(category: str, doc_type: str | None) -> str:
+    """The key one section's note is filed under. MUST stay identical to
+    `app.core.file_categories.section_key` — that module owns the definition and
+    the API validates against it; this copy keeps the renderer a leaf."""
+    if category in _SPLIT_CATEGORIES and doc_type in ("drawing", "specification"):
+        return f"{category}:{doc_type}"
+    return category
+
+
+def _section_note_block(note: str | None) -> str:
+    """The section's "what changed in the plans / in the specs" line, rendered
+    directly under its heading and above the file list. Distinct from the
+    batch-wide MESSAGE FROM THE G3 TEAM block and from each file's own note."""
+    text = (note or "").strip()
+    if not text:
+        return ""
+    return (
+        f'<div style="margin:0 0 8px;font-size:13px;color:{_MUTED};">'
+        f"{html.escape(text).replace(chr(10), '<br>')}</div>"
+    )
+
+
+def render_sections(files: list[dict], signer, section_notes: dict | None = None) -> str:
+    """The grouped file lists: one titled section per (category, doc_type), with
+    that section's note under the heading, initial files tagged apart from
+    post-hand-off updates. `signer(storage_path) -> url` is injected so rendering
+    stays pure and testable.
+
+    A file matches a split-category section only when its doc_type matches
+    EXACTLY — including the `None` row, which collects the pre-0077 files that
+    never recorded one. So every file lands in exactly one section and none is
+    silently dropped."""
+    notes = section_notes or {}
     out: list[str] = []
-    for category, title in SECTION_TITLES:
-        group = [f for f in files if f["category"] == category]
+    for category, doc_type, title in SECTION_TITLES:
+        if category in _SPLIT_CATEGORIES:
+            group = [
+                f
+                for f in files
+                if f["category"] == category and (f.get("doc_type") or None) == doc_type
+            ]
+        else:
+            group = [f for f in files if f["category"] == category]
         if not group:
             continue
-        tag = INITIAL_TAG if category in _INITIAL else UPDATE_TAG
+        tag_html = "" if category in _NO_TAG else _tag_pill(
+            INITIAL_TAG if category in _INITIAL else UPDATE_TAG
+        )
         out.append(
             f'<div style="margin:18px 0 8px;font-size:15px;font-weight:bold;'
-            f'color:{_NAVY};">{html.escape(title)}{_tag_pill(tag)}</div>'
-            f'<ul style="margin:0;padding-left:20px;">'
+            f'color:{_NAVY};">{html.escape(title)}{tag_html}</div>'
+            # Exact section key first, then the bare category: the Revisions
+            # modal keeps addenda in ONE box (whose files are tagged plans/specs
+            # per row), so its single note arrives keyed "addendum" and belongs
+            # above BOTH addendum sub-sections.
+            + _section_note_block(
+                notes.get(section_key(category, doc_type)) or notes.get(category)
+            )
+            + '<ul style="margin:0;padding-left:20px;">'
             + "".join(_file_item(f, signer(f["storage_path"])) for f in group)
             + "</ul>"
         )
@@ -133,9 +213,10 @@ def render_package_email(
     files: list[dict],
     recipient_name: str | None,
     signer,
+    message: str | None = None,
 ) -> str:
     """The full-package email body: greeting, project intro with the due-back
-    date, and every file grouped by section."""
+    date, an optional team message, and every file grouped by section."""
     due = proj.get("due_from_estimator_at") or "TBD"
     intro = (
         f'<p style="margin:0 0 14px;">Project '
@@ -146,10 +227,118 @@ def render_package_email(
     body = (
         f'<p style="margin:0 0 14px;color:{_MUTED};">{_greeting(recipient_name)}</p>'
         + intro
+        + _message_block(message)
         + render_sections(files, signer)
         + f'<p style="margin:18px 0 0;">{html.escape(PORTAL_LINE_PACKAGE)}</p>'
     )
     return render_branded_html(body, subtitle="ESTIMATE FILES")
+
+
+# The catch-up "Update history" table's Contents column renders each batch's
+# summary snapshot, in display order, as e.g. "12 drawings, 3 specs, 1 addendum".
+_CONTENTS_LABELS: list[tuple[str, tuple[str, str]]] = [
+    ("drawing", ("drawing", "drawings")),
+    ("specification", ("spec", "specs")),
+    ("addendum", ("addendum", "addenda")),
+    ("revision", ("revision", "revisions")),
+    ("additional", ("additional file", "additional files")),
+]
+
+# kind -> the "Sent" column label in the catch-up history table.
+_KIND_LABELS = {
+    "initial": "Initial package",
+    "revision": "Update",
+    "reassign": "Catch-up",
+}
+
+
+def _summary_contents(summary: dict | None) -> str:
+    """Render a batch's summary-count snapshot as a human phrase in display
+    order — "12 drawings, 3 specs, 1 addendum". Empty -> em dash."""
+    summary = summary or {}
+    parts: list[str] = []
+    for cat, (one, many) in _CONTENTS_LABELS:
+        n = summary.get(cat) or 0
+        if n:
+            parts.append(f"{n} {one if n == 1 else many}")
+    return ", ".join(parts) if parts else "—"
+
+
+def _history_table(prior: list[dict] | None) -> str:
+    """Outlook-safe "Update history" table (Date | Sent | Contents), one row per
+    prior batch oldest-first. Same table construction as revision_email._banner.
+    Empty/None -> no table."""
+    if not prior:
+        return ""
+    head_cell = (
+        f'font-size:12px;font-weight:bold;color:{_MUTED};letter-spacing:1px;'
+        f"text-transform:uppercase;padding:6px 12px;border-bottom:1px solid {_BORDER};"
+        "text-align:left;"
+    )
+    body_cell = f"font-size:13px;padding:8px 12px;border-bottom:1px solid {_BORDER};"
+    rows = [
+        '<tr>'
+        f'<td style="{head_cell}">Date</td>'
+        f'<td style="{head_cell}">Sent</td>'
+        f'<td style="{head_cell}">Contents</td></tr>'
+    ]
+    for b in prior:
+        sent_at = html.escape(str(b.get("sent_at") or ""))
+        kind_label = html.escape(_KIND_LABELS.get(b.get("kind"), "Update"))
+        contents = html.escape(_summary_contents(b.get("summary")))
+        rows.append(
+            "<tr>"
+            f'<td style="{body_cell}">{sent_at}</td>'
+            f'<td style="{body_cell}">{kind_label}</td>'
+            f'<td style="{body_cell}">{contents}</td></tr>'
+        )
+    return (
+        '<div style="margin:22px 0 8px;font-size:15px;font-weight:bold;'
+        f'color:{_NAVY};">Update history</div>'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'style="border-collapse:collapse;border:1px solid {_BORDER};border-radius:6px;">'
+        + "".join(rows)
+        + "</table>"
+    )
+
+
+def render_reassign_email(
+    *,
+    proj: dict,
+    files: list[dict],
+    recipient_name: str | None,
+    signer,
+    message: str | None = None,
+    prior: list[dict] | None = None,
+) -> str:
+    """Catch-up package for an estimator added after the project went out.
+
+    `files` is the full current package (initial package + everything already
+    sent), grouped by category exactly like the initial package. `prior` is
+    `file_sends.prior_batches(project_id)`: [{kind, sent_at, summary}]
+    oldest-first, rendered as the compact "Update history" table so the
+    chronology is visible without fragmenting the plan set into per-batch lists.
+
+    Everything renders through the branded shell — navy/silver, inline logo,
+    (702) 916-3355 signature. No red anywhere (red stays reserved for
+    revision_email's high-importance banner)."""
+    due = proj.get("due_from_estimator_at") or "TBD"
+    intro = (
+        f'<p style="margin:0 0 14px;">You’ve been added to project '
+        f"<b>{html.escape(proj['name'])}</b> ({html.escape(proj['number'])}). "
+        "This package is the complete file set, including every change issued "
+        "since the project first went out.</p>"
+        f'<p style="margin:0 0 6px;">Due back from estimator: <b>{html.escape(str(due))}</b></p>'
+    )
+    body = (
+        f'<p style="margin:0 0 14px;color:{_MUTED};">{_greeting(recipient_name)}</p>'
+        + intro
+        + _message_block(message)
+        + render_sections(files, signer)
+        + _history_table(prior)
+        + f'<p style="margin:18px 0 0;">{html.escape(PORTAL_LINE_PACKAGE)}</p>'
+    )
+    return render_branded_html(body, subtitle="ESTIMATE FILES — CATCH-UP")
 
 
 def render_updates_email(
@@ -158,19 +347,26 @@ def render_updates_email(
     files: list[dict],
     message: str | None,
     signer,
+    recipient_name: str | None = None,
+    section_notes: dict | None = None,
 ) -> str:
     """The Changes/Revisions & Additional files email body: optional message
-    from the team, then the new files with their notes."""
+    from the team, then the new files grouped into revised plans / revised specs
+    / addenda / additional, each section headed by its own "what changed" note
+    (`section_notes`, keyed by `section_key`) and each file by its own note.
+
+    `section_notes` belongs to THIS send only, which is why the full-package and
+    catch-up emails (which span every batch) never render it."""
     label = updates_label(files)
     intro = (
         f'<p style="margin:0 0 14px;"><b>{html.escape(label)}</b> for project '
         f"<b>{html.escape(proj['name'])}</b> ({html.escape(proj['number'])}).</p>"
     )
     body = (
-        '<p style="margin:0 0 14px;color:' + _MUTED + ';">Hi there,</p>'
+        f'<p style="margin:0 0 14px;color:{_MUTED};">{_greeting(recipient_name)}</p>'
         + intro
         + _message_block(message)
-        + render_sections(files, signer)
+        + render_sections(files, signer, section_notes)
         + f'<p style="margin:18px 0 0;">{html.escape(PORTAL_LINE_UPDATES)}</p>'
     )
     return render_branded_html(body, subtitle="FILE UPDATES")
@@ -196,14 +392,37 @@ def send_package(
     files: list[dict],
     recipient_name: str | None = None,
     sent_by: str | None = None,
+    message: str | None = None,
+    kind: str = "initial",
+    prior: list[dict] | None = None,
 ) -> dict:
-    """Email the full file package; returns the email_log row."""
-    body_html = render_package_email(
-        proj=proj, files=files, recipient_name=recipient_name, signer=_email_signer
-    )
+    """Email the full file package; returns the email_log row.
+
+    `kind="reassign"` renders the catch-up variant (full package + an Update
+    history table built from `prior`) and marks the subject; the default
+    `kind="initial"` renders the standard package email."""
+    if kind == "reassign":
+        body_html = render_reassign_email(
+            proj=proj,
+            files=files,
+            recipient_name=recipient_name,
+            signer=_email_signer,
+            message=message,
+            prior=prior,
+        )
+        subject_suffix = " (full catch-up)"
+    else:
+        body_html = render_package_email(
+            proj=proj,
+            files=files,
+            recipient_name=recipient_name,
+            signer=_email_signer,
+            message=message,
+        )
+        subject_suffix = ""
     return graph_email.send_mail(
         to=to,
-        subject=f"[BDR] Estimate request — {proj['name']} ({proj['number']})",
+        subject=f"[BDR] Estimate request{subject_suffix} — {proj['name']} ({proj['number']})",
         body_html=body_html,
         inline_images=[(LOGO_CONTENT_ID, LOGO_FILENAME, logo_bytes(), "image/jpeg")],
         project_id=proj["id"],
@@ -217,11 +436,22 @@ def send_updates(
     to: list[str],
     files: list[dict],
     message: str | None = None,
+    recipient_name: str | None = None,
     sent_by: str | None = None,
+    section_notes: dict | None = None,
 ) -> dict:
     """Email the pending Changes/Revisions & Additional files; returns the
-    email_log row."""
-    body_html = render_updates_email(proj=proj, files=files, message=message, signer=_email_signer)
+    email_log row. `recipient_name` personalises the greeting when the caller
+    loops one send per active assignee. `section_notes` is this batch's
+    per-section "what changed" text (see render_updates_email)."""
+    body_html = render_updates_email(
+        proj=proj,
+        files=files,
+        message=message,
+        recipient_name=recipient_name,
+        signer=_email_signer,
+        section_notes=section_notes,
+    )
     return graph_email.send_mail(
         to=to,
         subject=f"[BDR] {updates_label(files)} — {proj['name']} ({proj['number']})",

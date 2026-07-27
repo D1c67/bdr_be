@@ -42,6 +42,13 @@ def test_drawings_never_convert_even_office_ext():
     assert not office_preview.is_convertible("plan.docx", "drawing")
 
 
+def test_addendum_office_files_are_convertible():
+    # §8.1: pin the Gotenberg decision for the addendum category — an addendum is
+    # not a drawing, so an office-format addendum gets a PDF preview like any
+    # other non-drawing upload.
+    assert office_preview.is_convertible("addendum.docx", "addendum")
+
+
 def test_engine_off_disables_conversion(monkeypatch):
     _set_engine(monkeypatch, "off")
     assert not office_preview.is_convertible("a.xlsx", "estimate")

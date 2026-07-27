@@ -399,6 +399,24 @@ def decline_project(
     return updated[0] if updated else _project_row(project_id)
 
 
+def reopen_go_no_go(
+    project_id: str, from_task: str, actor_id: str | None, note: str | None = None
+) -> dict:
+    """Undo of a Go/No-Go decision: park the intake lane back on `go_no_go`, in
+    review, from wherever the decision put it (`from_task` is 'to_estimator' after
+    a Go, 'declined' after a No-Go).
+
+    The reverse move is recorded as its own stage event — nothing is erased — and
+    the headline is recomputed, which is what clears a declined project's
+    'declined' current_stage. Callers (services.gono.undo) own the guard that this
+    is only reachable while nothing downstream has happened.
+    """
+    _emit_event(project_id, "intake", from_task, "go_no_go", actor_id, note)
+    _upsert_head(project_id, "intake", "go_no_go", "active")
+    _recompute_headline(project_id)
+    return _project_row(project_id)
+
+
 def _project_row(project_id: str) -> dict:
     return (
         get_supabase()
