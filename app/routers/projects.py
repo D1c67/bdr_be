@@ -50,10 +50,17 @@ def redact_for_role(project: dict, role: Role) -> dict:
     return {**project, "actual_bid_at": None}
 
 
-def _present(project: dict, role: Role) -> dict:
+def _serialize_cat_state(state: dict[str, dict]) -> dict[str, dict]:
+    """Shape workflow.load_category_state output for ProjectOut.category_state
+    (each value needs its own `category` key)."""
+    return {cat: {"category": cat, **vals} for cat, vals in state.items()}
+
+
+def _present(project: dict, role: Role, cat_state: dict[str, dict] | None = None) -> dict:
     """Attach the derived lifecycle `status` (from the embedded bid outcome, if
-    any) and redact. Pass every returned project row through here so the API
-    `status` field stays consistent with the dashboard/analytics derivation."""
+    any) plus the per-category `category_state`, and redact. Pass every returned
+    project row through here so the API `status` field stays consistent with the
+    dashboard/analytics derivation."""
     outcome = project.pop("bid_outcomes", None)
     # The projects↔bid_outcomes FK is unique, so PostgREST may embed it as a
     # single object (to-one) or a list depending on version — handle both.
@@ -66,6 +73,8 @@ def _present(project: dict, role: Role) -> dict:
     project["status"] = derive_status(
         project.get("current_stage"), project.get("abandoned_at"), result
     )
+    if cat_state is not None:
+        project["category_state"] = _serialize_cat_state(cat_state)
     return redact_for_role(project, role)
 
 
@@ -104,7 +113,9 @@ def list_projects(
         # for ?stage=pm_only / ?stage=cp_only still returns them.
         query = query.neq("current_stage", "pm_only").neq("current_stage", "cp_only")
     resp = query.order("created_at", desc=True).execute()
-    return [_present(p, user.role) for p in resp.data or []]
+    rows = resp.data or []
+    states = workflow.load_category_states([p["id"] for p in rows])
+    return [_present(p, user.role, states.get(p["id"])) for p in rows]
 
 
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
@@ -133,20 +144,40 @@ def create_project(
 
     # Record the initial stage event so analytics has a start timestamp.
     sb.table("stage_events").insert(
-        {"project_id": created["id"], "from_stage": None, "to_stage": "intake", "actor_id": user.id}
+        {"project_id": created["id"], "from_stage": None, "to_stage": "intake",
+         "category": "intake", "actor_id": user.id}
+    ).execute()
+    # Seed the 4-category state: intake active at its first task, the rest locked.
+    sb.table("project_category_state").insert(
+        [
+            {
+                "project_id": created["id"],
+                "category": cat,
+                "current_task": workflow.CATEGORY_TASKS[cat][0],
+                "status": "active" if cat == "intake" else "locked",
+                "owner_role": (
+                    workflow.owner_role_for(workflow.CATEGORY_TASKS[cat][0]) or None
+                ),
+            }
+            for cat in workflow.CATEGORY_ORDER
+        ]
     ).execute()
     audit(user.id, "project.create", "project", created["id"], {"number": created["number"]})
     # Learn-back: re-scan Unknown emails against the new project (bid invites
     # often arrive before the project exists). Best-effort, never raises.
     background.add_task(email_ingest.rescan_unknown_for_project, created["id"])
-    return _present(created, user.role)
+    return _present(created, user.role, workflow.load_category_state(created["id"]))
 
 
 @router.get("/{project_id}", response_model=ProjectOut)
 def get_project(project_id: str, user: CurrentUser = Depends(get_current_user)):
     if user.role not in INTERNAL_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
-    return _present(_fetch_project_with_outcome(project_id), user.role)
+    return _present(
+        _fetch_project_with_outcome(project_id),
+        user.role,
+        workflow.load_category_state(project_id),
+    )
 
 
 # Who may edit each intake field via PATCH. Any writer role can edit any field
@@ -218,12 +249,11 @@ def update_project(
 
 
 # ── Abandon / reactivate ────────────────────────────────────────────────────
-# A status change that is NOT a stage transition: abandon leaves current_stage
-# untouched (so we know where the bid died) and only flips the abandon marker,
-# so it does a direct projects.update rather than going through
-# workflow.transition_project (which would validate against TRANSITIONS and
-# overwrite the stage). Reversible via /reactivate. Both are open to any writer
-# role (the read-only accountant and the estimator are rejected).
+# A status change that is NOT a category transition: abandon leaves the category
+# state and headline current_stage untouched (so we know where the bid died) and
+# only flips the abandon marker via a direct projects.update. Reversible via
+# /reactivate. Both are open to any writer role (the read-only accountant and the
+# estimator are rejected).
 
 
 def _project_status_row(project_id: str) -> dict:

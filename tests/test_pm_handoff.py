@@ -10,9 +10,28 @@ from datetime import datetime, timezone
 import pytest
 
 from app.models.schemas import BidGcOutcomeIn, BidOutcomeIn
-from app.services import pm
+from app.services import outcome as outcome_svc
+from app.services import pm, workflow
 from app.services.outcome import OutcomeError, record_outcome
 from tests.test_pm_workflow import FakeDB, audit_actions, install
+
+
+@pytest.fixture(autouse=True)
+def _send_out_state_from_stage(monkeypatch):
+    """record_outcome gates on the send_out category head (category model), not
+    projects.current_stage. These scenarios encode the bid's position in the fake
+    project's current_stage; mirror it into a synthetic active send_out state so
+    they keep meaning 'the bid is at submitted / awaiting outcome'."""
+
+    def state(pid):
+        proj = (
+            outcome_svc.get_supabase()
+            .table("projects").select("current_stage").eq("id", pid).single().execute()
+        ).data
+        return {"send_out": {"current_task": (proj or {}).get("current_stage"), "status": "active"}}
+
+    monkeypatch.setattr(workflow, "load_category_state", state)
+    monkeypatch.setattr(workflow, "advance_category", lambda *a, **k: None)
 
 
 def _bid_project(**overrides):

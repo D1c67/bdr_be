@@ -255,6 +255,16 @@ class ProjectUpdate(BaseModel):
     scope_fit: ScopeFit | None = None
 
 
+class CategoryStateOut(BaseModel):
+    """One category's progress head (source of truth for the bidding board)."""
+
+    category: str
+    current_task: str
+    status: str  # 'locked' | 'active' | 'complete'
+    owner_role: Role | None = None
+    completed_at: datetime | None = None
+
+
 class ProjectOut(BaseModel):
     id: str
     name: str
@@ -297,6 +307,11 @@ class ProjectOut(BaseModel):
     # holds the stage it will resume at after the Executive re-commits. NULL =
     # not currently in re-verification (see migration 0043 / workflow.reopen_verify).
     reverify_return_stage: str | None = None
+    # Per-category progress (the new source of truth), keyed by category
+    # ('intake' | 'material_numbers' | 'labor_numbers' | 'send_out'). `current_stage`
+    # above is the denormalized headline pointer. Default None lets reads degrade
+    # gracefully before migration 0057 is applied / for rows without category state.
+    category_state: dict[str, CategoryStateOut] | None = None
     status: ProjectStatus = "active"
     # Project Management lifecycle (migration 0057): pm_stage/pm_origin are set
     # when a won bid enters Precon (or a project is created directly in PM);
@@ -321,6 +336,14 @@ class FilesExportIn(BaseModel):
     """
 
     file_ids: list[str] | None = None
+    # Whether this export stamps projects.files_exported_at. Defaults True so the
+    # existing "export all" path is unchanged, but the per-batch ZIP download in
+    # the Plans & Specs Log passes False: an internal user pulling a 2-file
+    # revision batch must NOT set files_exported_at and thereby suppress the
+    # post-send-out "export your files to the team" banner for everyone
+    # (files.py export_files → app/(app)/projects/[id]/page.tsx). The stamp is
+    # additionally gated to non-estimator callers in export_files.
+    stamp_exported: bool = True
 
     @field_validator("file_ids")
     @classmethod
@@ -360,7 +383,12 @@ class PmDocsExportIn(BaseModel):
 
 
 class TransitionIn(BaseModel):
-    to_stage: str
+    # The category whose head to advance in the new category model
+    # ('intake' | 'material_numbers' | 'labor_numbers' | 'send_out'). Required by
+    # /advance. `to_stage` is retained for backward compatibility / logging only and
+    # is ignored by the endpoint (the server computes the next task per category).
+    category: str | None = None
+    to_stage: str | None = None
     note: str | None = None
     # Only honored when advancing into go_no_go: 'score' (default) lets the
     # thresholds decide, 'review' holds the project for a manual decision, and
@@ -1415,3 +1443,102 @@ class CpIgnoredProjectCreate(BaseModel):
     raw_number: str | None = Field(None, max_length=100)
     shift_type: CpShiftType = "regular"
     note: str | None = Field(None, max_length=2000)
+
+
+# ── Estimator hand-off: send-batch log + compact summary (0075/0076) ─────────
+#
+# These shape the two new estimator-hand-off reads. The service layer
+# (app.services.file_sends: build_log / build_handoff) does the role-dependent
+# scoping and returns plain dicts; these models are the response contract.
+#
+# PRIVACY — the estimator projection: for the estimator viewer, build_log OMITS
+# the `recipients` and `sent_by_name` keys entirely (they are absent, not null),
+# so no co-assignee's identity is ever serialized. A router MUST NOT re-add them
+# via a response_model that fills the Optional fields with null: return the
+# service dict as-is, or serialize with the null keys excluded. Two projections,
+# never one payload post-filtered.
+
+
+class SendBatchFileOut(BaseModel):
+    file_id: str
+    category: str
+    # 0077 — WHICH DOCUMENT SET a post-hand-off file belongs to. Set only on
+    # 'revision' / 'addendum'; None on the initial package (whose category is
+    # already the document set) and on rows predating the column.
+    doc_type: Literal["drawing", "specification"] | None = None
+    filename: str
+    size_bytes: int | None = None
+    note: str | None = None
+    addendum_number: str | None = None
+    addendum_issued_on: date | None = None
+    # False when the project_files row is gone, or (estimator) when the file is
+    # no longer visible to them. Render greyed, no open, exclude from the ZIP.
+    available: bool = True
+
+
+class SendBatchRecipientOut(BaseModel):
+    estimator_id: str | None = None
+    full_name: str | None = None
+    email: str
+
+
+class SendBatchOut(BaseModel):
+    id: str
+    kind: Literal["initial", "revision", "reassign"]
+    sent_at: datetime
+    message: str | None = None
+    reconstructed: bool = False
+    counts: dict[str, int]  # from the batch.summary snapshot, not the live join
+    # 0077 — per-section "what changed" notes captured at send time, keyed by
+    # file_categories.section_key(): "revision:drawing", "revision:specification",
+    # "addendum", "additional". Shown to BOTH viewers (the estimator is who they
+    # are written for); the per-file `note` still describes each file.
+    section_notes: dict[str, str] = Field(default_factory=dict)
+    files: list[SendBatchFileOut]
+    # INTERNAL ONLY. Both keys are ABSENT (not null) in the estimator payload —
+    # build_log emits a separate dict shape, never a post-filter.
+    recipients: list[SendBatchRecipientOut] | None = None
+    sent_by_name: str | None = None
+
+
+class SendBatchLogOut(BaseModel):
+    viewer: Literal["internal", "estimator"]
+    batches: list[SendBatchOut]  # newest first
+
+
+class HandoffAssigneeOut(BaseModel):
+    assignment_id: str
+    estimator_id: str
+    full_name: str | None = None
+    email: str | None = None  # ALWAYS None for Role.ESTIMATOR
+    due_at: datetime | None = None
+    expires_at: datetime | None = None
+    revoked_at: datetime | None = None
+    sent_to_estimator_at: datetime | None = None
+
+
+class LatestAddendumOut(BaseModel):
+    number: str
+    issued_on: date
+
+
+class HandoffOut(BaseModel):
+    # SOURCE OF TRUTH for the button predicates. sent_at of the kind='initial'
+    # batch; None => the initial package was never emailed. NOT the same as
+    # `locked`.
+    package_sent_at: datetime | None = None
+    last_sent_at: datetime | None = None
+    batch_count: int = 0
+    due_back_at: datetime | None = None  # projects.due_from_estimator_at
+    # Internal: every assignment, revoked included, newest first.
+    # ESTIMATOR: EXACTLY the caller's own row, email blanked.
+    assignees: list[HandoffAssigneeOut]
+    # Uploaded, never emailed. Internal only; {} for the estimator.
+    staged: dict[str, int]
+    # Cumulative distinct files across the caller's visible batches.
+    sent: dict[str, int]
+    latest_addendum: LatestAddendumOut | None = None
+    locked: bool  # mirrors GET /files/lock
+    # ESTIMATOR only: their own assignment window. Never another's.
+    my_access_expires_at: datetime | None = None
+    my_due_at: datetime | None = None

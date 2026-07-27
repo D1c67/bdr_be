@@ -116,6 +116,7 @@ _BID_CATEGORY_FOLDER: dict[str, str] = {
     "markup": "estimates",
     "proposal": "proposals",
     "revision": "revisions",
+    "addendum": "revisions",
     "additional": "revisions",
     "estimator_additional": "revisions",
     "other": "other",

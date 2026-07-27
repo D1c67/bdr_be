@@ -154,7 +154,9 @@ def record_outcome(project_id: str, user_id: str, body: BidOutcomeIn) -> dict:
     ).data
     if not project:
         raise OutcomeError("Project not found", status_code=404)
-    if project["current_stage"] not in ("submitted", "bid_outcome"):
+    state = workflow.load_category_state(project_id)
+    send_head = state.get("send_out", {}).get("current_task")
+    if send_head not in ("submitted", "bid_outcome"):
         raise OutcomeError(
             "Project is not awaiting an outcome — the bid must be Submitted first."
         )
@@ -233,11 +235,12 @@ def record_outcome(project_id: str, user_id: str, body: BidOutcomeIn) -> dict:
             on_conflict="project_id,gc_id",
         ).execute()
 
-    if project["current_stage"] == "submitted":
+    if send_head == "submitted":
         note = f"Outcome recorded: {body.result}"
         if body.winning_gc_id:
             note += f" — won by {sent_by_id[body.winning_gc_id]['gc_name']}"
-        workflow.transition_project(project_id, "bid_outcome", user_id, note)
+        # Advance the send_out category head submitted → bid_outcome (terminal).
+        workflow.advance_category(project_id, "send_out", user_id, note)
 
     # Won → enter Project Management at Preconstruction (idempotent, so this
     # also covers lost→won corrections and re-records). Not wrapped in a

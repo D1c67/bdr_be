@@ -123,6 +123,13 @@ def create_submission_round(
     The seal UPDATE is conditional on `submission_round IS NULL`, so a file
     uploaded mid-send stays a draft for the next round instead of slipping
     into an already-announced one.
+
+    The seal is also scoped to `uploaded_by = estimator_id`: with more than one
+    active assignee (which "Re-assign" makes routine) estimator B pressing Send
+    must seal only their own drafts. Sealing A's in-progress files would announce
+    them under B's round and freeze them to A (files.py delete/read scoping).
+    `open_drafts` and `freshness.open_draft_count` stay project-wide on purpose —
+    they feed the internal team view, which wants the project total.
     """
     sb = get_supabase()
     latest = latest_submission(project_id)
@@ -159,6 +166,7 @@ def create_submission_round(
             .update({"submission_round": round_no})
             .eq("project_id", project_id)
             .eq("estimator_deliverable", True)
+            .eq("uploaded_by", estimator_id)
             .is_("submission_round", "null")
             .execute()
         ).data or []
