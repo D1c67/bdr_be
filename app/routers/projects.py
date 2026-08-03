@@ -1,10 +1,12 @@
 """Projects + intake (step 1) and the dashboard list."""
 
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from app.core.deps import CurrentUser, get_current_user, require_internal, require_writer
+from app.core.features import SubApp, require_feature
 from app.core.roles import (
     ACTUAL_BID_EDITOR_ROLES,
     ACTUAL_BID_VIEWER_ROLES,
@@ -17,14 +19,40 @@ from app.models.schemas import (
     AbandonIn,
     ProjectCreate,
     ProjectGCIn,
+    ProjectGCUpdate,
     ProjectOut,
     ProjectUpdate,
 )
-from app.services import email_ingest, pm, proposal_send, workflow
-from app.services.notifications import audit, notify_role
+from app.services import email_ingest, estimator_lifecycle, pm, proposal_send, workflow
+from app.services.notifications import (
+    ESTIMATOR_NOTIFICATION_TYPES,
+    audit,
+    dismiss_notifications,
+    notify_role,
+)
 from app.services.project_status import derive_status
 
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+logger = logging.getLogger(__name__)
+
+# This router is the SHARED SPINE — PM and Certified Payroll both create rows in
+# `projects` and read them back — so it is mounted ungated (app/main.py). Some of
+# its routes are nonetheless pure bidding, and carry the flag individually:
+#
+#   POST ""                  bid intake — sets current_stage='intake', writes a
+#                            stage_event and seeds all four lanes of the bidding
+#                            DAG. PM creates via POST /pm/projects, CP via
+#                            POST /payroll/projects; neither comes through here.
+#   /{id}/abandon, /reactivate   bid lifecycle (reactivate is also the deferred
+#                            won→PM entry point).
+#   /{id}/gcs …              bid-invitation membership. `project_gcs` is read
+#                            only by this router, services/bid_invitations and
+#                            services/proposal_send — all bidding.
+#
+# GET "", GET /{id} and PATCH /{id} deliberately stay open: they are how a PM or
+# CP deployment reads and renames the project rows it owns.
+_BIDDING_ONLY = [Depends(require_feature(SubApp.BIDDING))]
 
 # The projects.number unique index (migration 0052) retires every number ever
 # used — they can't be re-used, even by an abandoned project. A collision surfaces
@@ -105,7 +133,12 @@ def list_projects(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown stage: {stage}")
     query = get_supabase().table("projects").select("*, bid_outcomes(result)")
     if stage is not None:
-        query = query.eq("current_stage", stage)
+        # Abandon preserves current_stage (so we always know where the bid died),
+        # which means a stage-filtered list would still serve abandoned bids. A
+        # stage filter asks for that stage's work queue (e.g. the Go/No-Go page),
+        # and an abandoned project is on no one's plate — read the marker here.
+        # The unfiltered dashboard list keeps them (with their abandoned status).
+        query = query.eq("current_stage", stage).is_("abandoned_at", "null")
     else:
         # Projects created directly in Project Management (pm_only) or imported
         # from the legacy Certified Payroll app (cp_only) were never bids — keep
@@ -118,7 +151,8 @@ def list_projects(
     return [_present(p, user.role, states.get(p["id"])) for p in rows]
 
 
-@router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED,
+             dependencies=_BIDDING_ONLY)
 def create_project(
     body: ProjectCreate,
     background: BackgroundTasks,
@@ -139,7 +173,11 @@ def create_project(
 
     if body.gcs:
         sb.table("project_gcs").insert(
-            [{"project_id": created["id"], "gc_id": g.gc_id} for g in body.gcs]
+            [
+                {"project_id": created["id"], "gc_id": g.gc_id,
+                 "needs_by": g.needs_by.isoformat() if g.needs_by else None}
+                for g in body.gcs
+            ]
         ).execute()
 
     # Record the initial stage event so analytics has a start timestamp.
@@ -197,6 +235,8 @@ _FIELD_EDITORS: dict[str, frozenset[Role]] = {
     "wage_type": _OPEN,
     "labor_note": _OPEN,
     "address": _OPEN,
+    "bidding_url": _OPEN,
+    "no_bidding_url": _OPEN,
     "name": _OPEN,
     "number": _OPEN,
     "invitation_at": _OPEN,
@@ -216,6 +256,29 @@ _FIELD_EDITORS: dict[str, frozenset[Role]] = {
 }
 
 
+def _apply_bidding_url_rules(patch: dict) -> None:
+    """Keep the bidding link and its "no link" flag from ever disagreeing.
+
+    They're two halves of one answer, so a patch that sets either side clears
+    the other — that way a client can send just the half it changed. The one
+    thing a patch may not do is un-answer the question: clearing the URL without
+    ticking "no link" would leave the project with neither.
+    """
+    if "bidding_url" not in patch and "no_bidding_url" not in patch:
+        return
+    if patch.get("bidding_url"):
+        patch["no_bidding_url"] = False
+    elif patch.get("no_bidding_url"):
+        patch["bidding_url"] = None
+    else:
+        # The URL was cleared, or "no link" was turned off, with nothing supplied
+        # in its place — either way the question ends up unanswered.
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Provide a bidding link, or set no_bidding_url if the project has none",
+        )
+
+
 @router.patch("/{project_id}", response_model=ProjectOut)
 def update_project(
     project_id: str,
@@ -228,6 +291,7 @@ def update_project(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No fields to update")
     if patch.get("name", "") is None or patch.get("number", "") is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "name and number cannot be cleared")
+    _apply_bidding_url_rules(patch)
     denied = sorted(f for f in patch if user.role not in _FIELD_EDITORS.get(f, frozenset()))
     if denied:
         raise HTTPException(
@@ -260,7 +324,13 @@ def _project_status_row(project_id: str) -> dict:
     row = (
         get_supabase()
         .table("projects")
-        .select("id, name, current_stage, abandoned_at, pm_stage")
+        # `number` and the estimator due date ride along for the estimator-facing
+        # withdrawn/reactivated notices, which name the project the way the
+        # estimator knows it and restate the deadline when it comes back.
+        .select(
+            "id, name, number, current_stage, abandoned_at, pm_stage, "
+            "due_from_estimator_at"
+        )
         .eq("id", project_id)
         .execute()
     ).data
@@ -269,7 +339,35 @@ def _project_status_row(project_id: str) -> dict:
     return row[0]
 
 
-@router.post("/{project_id}/abandon", response_model=ProjectOut)
+def _sweep_estimator_notifications(project_id: str) -> None:
+    """Clear the assigned estimators' bells for a project they can no longer open.
+
+    Abandon closes the portal on them (`require_project_assignment` 403s and the
+    portal dashboard hides the row), so any live notification would only deep-link
+    into a dead end. Scoped per assignee — the internal team keeps its own bells,
+    and only the estimator-facing types are touched, so a shared type like
+    `estimator_note` doesn't sweep the internal side of the thread. Best-effort:
+    the abandon is already committed and must not be undone by a failed sweep.
+    """
+    try:
+        assignees = (
+            get_supabase()
+            .table("estimator_assignments")
+            .select("estimator_id")
+            .eq("project_id", project_id)
+            .execute()
+        ).data or []
+        for est_id in {a["estimator_id"] for a in assignees if a.get("estimator_id")}:
+            dismiss_notifications(
+                project_id=project_id,
+                types=ESTIMATOR_NOTIFICATION_TYPES,
+                user_id=est_id,
+            )
+    except Exception:  # noqa: BLE001
+        logger.exception("Estimator notification sweep failed on abandon of %s", project_id)
+
+
+@router.post("/{project_id}/abandon", response_model=ProjectOut, dependencies=_BIDDING_ONLY)
 def abandon_project(
     project_id: str,
     body: AbandonIn | None = None,
@@ -299,14 +397,21 @@ def abandon_project(
     ).data
     if not updated:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+    note = body.note if body else None
     audit(user.id, "project.abandon", "project", project_id,
-          {"stage": existing["current_stage"], "note": body.note if body else None})
+          {"stage": existing["current_stage"], "note": note})
+    _sweep_estimator_notifications(project_id)
+    # AFTER the sweep: the withdrawn notice is the one estimator-facing row that
+    # must survive it — it's what explains where the rest of their bells went.
+    # The reason note is written in the modal as estimator-facing text, so it
+    # rides along into their email (see estimator_lifecycle).
+    estimator_lifecycle.notify_withdrawn(existing, note=note, actor_id=user.id)
     notify_role(Role.EXECUTIVE, project_id, "project_abandoned",
                 f"Project abandoned: {existing['name']}")
     return _present(updated[0], user.role)
 
 
-@router.post("/{project_id}/reactivate", response_model=ProjectOut)
+@router.post("/{project_id}/reactivate", response_model=ProjectOut, dependencies=_BIDDING_ONLY)
 def reactivate_project(
     project_id: str,
     user: CurrentUser = Depends(require_writer),
@@ -326,6 +431,9 @@ def reactivate_project(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
     audit(user.id, "project.reactivate", "project", project_id,
           {"stage": existing["current_stage"]})
+    # The estimators were told it was dead; they get told it isn't. This also
+    # clears the withdrawn bell, which is now false.
+    estimator_lifecycle.notify_reactivated(existing, actor_id=user.id)
     # A bid abandoned at `submitted` can still have its outcome recorded as won;
     # PM entry is deferred until the project is revived — this is that moment.
     pm.activate_pm_if_won(project_id, user.id)
@@ -363,7 +471,7 @@ def _project_gc_rows(project_id: str) -> list[dict]:
     rows = (
         get_supabase()
         .table("project_gcs")
-        .select("general_contractors(id, name, gc_contacts(id, name, email, phone))")
+        .select("needs_by, general_contractors(id, name, gc_contacts(id, name, email, phone))")
         .eq("project_id", project_id)
         .execute()
     ).data or []
@@ -373,7 +481,10 @@ def _project_gc_rows(project_id: str) -> list[dict]:
         if not gc:
             continue
         contacts = sorted(gc.get("gc_contacts") or [], key=lambda c: (c.get("name") or "").lower())
-        out.append({"id": gc["id"], "name": gc["name"], "contacts": contacts})
+        out.append(
+            {"id": gc["id"], "name": gc["name"], "needs_by": r.get("needs_by"),
+             "contacts": contacts}
+        )
     return sorted(out, key=lambda g: g["name"].lower())
 
 
@@ -397,13 +508,14 @@ def _block_if_sending(project_id: str, gc_id: str) -> None:
         )
 
 
-@router.get("/{project_id}/gcs")
+@router.get("/{project_id}/gcs", dependencies=_BIDDING_ONLY)
 def list_project_gcs(project_id: str, _: CurrentUser = Depends(require_internal)):
     _project_or_404(project_id)
     return _project_gc_rows(project_id)
 
 
-@router.post("/{project_id}/gcs", status_code=status.HTTP_201_CREATED)
+@router.post("/{project_id}/gcs", status_code=status.HTTP_201_CREATED,
+             dependencies=_BIDDING_ONLY)
 def add_project_gc(
     project_id: str,
     body: ProjectGCIn,
@@ -429,14 +541,45 @@ def add_project_gc(
             status.HTTP_409_CONFLICT, f"{gc[0]['name']} is already on this project"
         )
     sb.table("project_gcs").insert(
-        {"project_id": project_id, "gc_id": body.gc_id}
+        {"project_id": project_id, "gc_id": body.gc_id,
+         "needs_by": body.needs_by.isoformat() if body.needs_by else None}
     ).execute()
     audit(user.id, "project.gc_add", "project", project_id,
-          {"gc_id": body.gc_id, "gc_name": gc[0]["name"]})
+          {"gc_id": body.gc_id, "gc_name": gc[0]["name"],
+           "needs_by": body.needs_by.isoformat() if body.needs_by else None})
     return _project_gc_rows(project_id)
 
 
-@router.delete("/{project_id}/gcs/{gc_id}")
+@router.patch("/{project_id}/gcs/{gc_id}", dependencies=_BIDDING_ONLY)
+def update_project_gc(
+    project_id: str,
+    gc_id: str,
+    body: ProjectGCUpdate,
+    user: CurrentUser = Depends(require_writer),
+):
+    """Edit the per-GC needs-by date (the only mutable field on the link —
+    membership itself is add/remove)."""
+    sb = get_supabase()
+    _project_or_404(project_id)
+    rows = (
+        sb.table("project_gcs")
+        .select("id")
+        .eq("project_id", project_id)
+        .eq("gc_id", gc_id)
+        .execute()
+    ).data
+    if not rows:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "GC is not on this project")
+    needs_by = body.needs_by.isoformat() if body.needs_by else None
+    sb.table("project_gcs").update({"needs_by": needs_by}).eq(
+        "project_id", project_id
+    ).eq("gc_id", gc_id).execute()
+    audit(user.id, "project.gc_update", "project", project_id,
+          {"gc_id": gc_id, "needs_by": needs_by})
+    return _project_gc_rows(project_id)
+
+
+@router.delete("/{project_id}/gcs/{gc_id}", dependencies=_BIDDING_ONLY)
 def remove_project_gc(
     project_id: str,
     gc_id: str,

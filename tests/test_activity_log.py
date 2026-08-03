@@ -71,7 +71,7 @@ _TABLES = {
         }
     ],
     "profiles": [
-        {"id": "u1", "full_name": "Alice", "role": "estimating_engineer"},
+        {"id": "u1", "full_name": "Alice", "role": "estimating_engineer_materials"},
         {"id": "u2", "full_name": "Bob", "role": "executive"},
     ],
     "projects": [{"id": "p1", "number": "42", "name": "Acme"}],
@@ -98,7 +98,7 @@ def test_merges_audit_and_stage_events_newest_first():
 
     assert second["action"] == "labor.review"
     assert second["action_label"] == "Set labor numbers"  # friendly label resolved
-    assert second["actor_name"] == "Alice" and second["actor_role"] == "estimating_engineer"
+    assert second["actor_name"] == "Alice" and second["actor_role"] == "estimating_engineer_materials"
     assert second["project_label"] == "42 — Acme"
 
 

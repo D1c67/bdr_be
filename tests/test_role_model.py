@@ -32,7 +32,8 @@ def _user(role: Role) -> CurrentUser:
 def test_writer_roles_are_internal_minus_accountant():
     assert WRITER_ROLES == {
         Role.ESTIMATING_ADMIN,
-        Role.ESTIMATING_ENGINEER,
+        Role.ESTIMATING_ENGINEER_MATERIALS,
+        Role.ESTIMATING_ENGINEER_LABOR,
         Role.EXECUTIVE,
         Role.IT_ADMIN,
     }
@@ -44,26 +45,41 @@ def test_writer_roles_are_internal_minus_accountant():
 
 def test_verify_roles_are_executive_and_it_admin():
     assert VERIFY_ROLES == {Role.EXECUTIVE, Role.IT_ADMIN}
-    # The merged engineer (former PM) can no longer verify.
-    assert Role.ESTIMATING_ENGINEER not in VERIFY_ROLES
+    # Neither engineer focus may verify (the split kept the old engineer's
+    # permissions, which never included Verify).
+    assert Role.ESTIMATING_ENGINEER_MATERIALS not in VERIFY_ROLES
+    assert Role.ESTIMATING_ENGINEER_LABOR not in VERIFY_ROLES
 
 
 def test_accountant_can_view_actual_bid_but_engineer_cannot():
     assert Role.ACCOUNTANT in ACTUAL_BID_VIEWER_ROLES
-    assert Role.ESTIMATING_ENGINEER not in ACTUAL_BID_VIEWER_ROLES
+    assert Role.ESTIMATING_ENGINEER_MATERIALS not in ACTUAL_BID_VIEWER_ROLES
+    assert Role.ESTIMATING_ENGINEER_LABOR not in ACTUAL_BID_VIEWER_ROLES
 
 
 def test_old_role_codes_are_gone():
     values = {r.value for r in Role}
-    assert {"pm", "pe", "pa"}.isdisjoint(values)
-    assert {"estimating_engineer", "estimating_admin"} <= values
+    # 'estimating_engineer' joined the graveyard with the 0087/0088 focus split.
+    assert {"pm", "pe", "pa", "estimating_engineer"}.isdisjoint(values)
+    assert {
+        "estimating_engineer_materials",
+        "estimating_engineer_labor",
+        "estimating_admin",
+    } <= values
 
 
 # ── require_writer: writers pass, accountant + estimator are blocked ───────
 
 
 @pytest.mark.parametrize(
-    "role", [Role.ESTIMATING_ADMIN, Role.ESTIMATING_ENGINEER, Role.EXECUTIVE, Role.IT_ADMIN]
+    "role",
+    [
+        Role.ESTIMATING_ADMIN,
+        Role.ESTIMATING_ENGINEER_MATERIALS,
+        Role.ESTIMATING_ENGINEER_LABOR,
+        Role.EXECUTIVE,
+        Role.IT_ADMIN,
+    ],
 )
 def test_require_writer_allows_writers(role):
     user = _user(role)

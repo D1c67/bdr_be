@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.deps import CurrentUser, require_pm_read, require_pm_write
 from app.core.supabase_client import get_supabase
-from app.models.schemas import PmMaterialIn, PmMaterialUpdate
+from app.models.schemas import PmMaterialBulkIn, PmMaterialIn, PmMaterialUpdate
 from app.services.notifications import audit
 from app.services.pm import require_pm_project
 
@@ -80,6 +80,38 @@ def create_material(
         "project",
         project_id,
         {"material_id": created.get("id"), "description": body.description[:200]},
+    )
+    return created
+
+
+@router.post("/bulk", status_code=status.HTTP_201_CREATED)
+def create_materials_bulk(
+    project_id: str,
+    body: PmMaterialBulkIn,
+    user: CurrentUser = Depends(require_pm_write),
+):
+    """Insert a whole batch of lines at once — the add-materials modal lets a
+    writer type many rows before saving. All-or-nothing: every category is
+    validated before the single insert, so a typo in row 12 doesn't leave rows
+    1-11 behind."""
+    require_pm_project(project_id)
+    for category_id in {m.material_category_id for m in body.materials if m.material_category_id}:
+        _require_category(category_id)
+    payloads = []
+    for m in body.materials:
+        payload = m.model_dump(mode="json")
+        payload.update({"project_id": project_id, "created_by": user.id})
+        payloads.append(payload)
+    created = get_supabase().table("pm_materials").insert(payloads).execute().data or []
+    audit(
+        user.id,
+        "pm_material.create_bulk",
+        "project",
+        project_id,
+        {
+            "count": len(created),
+            "descriptions": [m.description[:200] for m in body.materials[:20]],
+        },
     )
     return created
 

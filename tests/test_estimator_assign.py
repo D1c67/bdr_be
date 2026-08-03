@@ -158,17 +158,31 @@ class _EE:
         return "Changes/Revisions"
 
 
+class _EN:
+    """Stand-in for the estimator_notes module (the send-message mirror)."""
+
+    SOURCE_PACKAGE_SEND = "package_send"
+    SOURCE_UPDATE_SEND = "update_send"
+
+    def __init__(self):
+        self.mirrored: list[dict] = []
+
+    def mirror_send_message(self, **kw):
+        self.mirrored.append(kw)
+        return {"id": f"note{len(self.mirrored)}"} if (kw.get("message") or "").strip() else None
+
+
 class _Env:
-    def __init__(self, db, fs, ee):
-        self.db, self.fs, self.ee = db, fs, ee
+    def __init__(self, db, fs, ee, en):
+        self.db, self.fs, self.ee, self.en = db, fs, ee, en
         self.pending: list[dict] = []
         self.active: list[dict] = []
         self.package_files: list[dict] = [{"id": "f1", "category": "drawing", "addendum_number": None}]
 
 
 def _assign_env(monkeypatch, *, pending=None, active=None, package_files=None):
-    db, fs, ee = _FakeDB(), _FS(), _EE()
-    env = _Env(db, fs, ee)
+    db, fs, ee, en = _FakeDB(), _FS(), _EE(), _EN()
+    env = _Env(db, fs, ee, en)
     if pending is not None:
         env.pending = pending
     if active is not None:
@@ -180,6 +194,7 @@ def _assign_env(monkeypatch, *, pending=None, active=None, package_files=None):
     monkeypatch.setattr(est_mod, "get_supabase", lambda: db)
     monkeypatch.setattr(est_mod, "file_sends", fs)
     monkeypatch.setattr(est_mod, "estimator_email", ee)
+    monkeypatch.setattr(est_mod, "estimator_notes", en)
     monkeypatch.setattr(est_mod, "_unsent_updates", lambda pid: env.pending)
     monkeypatch.setattr(est_mod, "_package_files", lambda pid: env.package_files)
     monkeypatch.setattr(est_mod, "_active_assignments", lambda pid: env.active)
@@ -428,6 +443,97 @@ def test_send_updates_one_email_per_recipient(monkeypatch):
     assert ["e9@x.com"] in tos and ["e8@x.com"] in tos
     assert len(env.ee.updates) == 2
     assert out["batch_id"] == "batch1"
+
+
+# ── the send-message → Project notes mirror (0080) ─────────────────────────
+
+
+def test_assign_mirrors_the_message_into_the_notes_thread(monkeypatch):
+    # The message typed in the send modal used to live only in the email and on
+    # the batch, so it never showed up in Project notes. It is now mirrored in as
+    # a note by the sender, tagged with the send it came from.
+    env = _assign_env(monkeypatch)
+    env.fs.has_initial = False
+    _queue_assign_insert_happy(env)
+    est_mod.assign_estimator("p1", _body(message="Bob is picking this up"), _writer())
+    assert env.en.mirrored == [
+        {
+            "project_id": "p1",
+            "author_id": "u1",
+            "message": "Bob is picking this up",
+            "source": "package_send",
+        }
+    ]
+
+
+def test_assign_mirror_happens_once_despite_the_ride_along(monkeypatch):
+    # The ride-along re-sends the same message to the other assignees as its own
+    # batch; the thread is per PROJECT, so one mirrored note — not two.
+    env = _assign_env(
+        monkeypatch,
+        pending=[{"id": "u1", "category": "revision", "note": "x", "addendum_number": None}],
+        active=[{"estimator_id": "e9", "profiles": {"email": "e9@x.com", "full_name": "Nine"}}],
+    )
+    env.fs.has_initial = False
+    _queue_assign_insert_happy(env)
+    est_mod.assign_estimator("p1", _body(message="heads up"), _writer())
+    assert len(env.fs.claimed) == 2          # initial + ride-along revision
+    assert len(env.en.mirrored) == 1
+
+
+def test_assign_without_a_message_mirrors_nothing_visible(monkeypatch):
+    # No message → no note. (The route still calls the mirror; the service is the
+    # one place that decides an empty message is a no-op.)
+    env = _assign_env(monkeypatch)
+    env.fs.has_initial = False
+    _queue_assign_insert_happy(env)
+    est_mod.assign_estimator("p1", _body(), _writer())
+    assert [m["message"] for m in env.en.mirrored] == [None]
+
+
+def test_assign_failed_send_mirrors_nothing(monkeypatch):
+    # The mirror sits AFTER the email: a rolled-back send leaves no note claiming
+    # a package went out.
+    env = _assign_env(monkeypatch)
+    env.ee.package_error = RuntimeError("smtp down")
+    _queue_assign_insert_happy(env)
+    with pytest.raises(HTTPException):
+        est_mod.assign_estimator("p1", _body(message="never sent"), _writer())
+    assert env.en.mirrored == []
+
+
+def test_send_updates_mirrors_the_message_not_the_section_notes(monkeypatch):
+    # Only the batch-wide message is mirrored — the per-section "what changed"
+    # notes stay in the Plans & Specs Log.
+    env = _assign_env(
+        monkeypatch,
+        active=[{"estimator_id": "e9", "profiles": {"email": "e9@x.com", "full_name": "Nine"}}],
+        pending=[
+            {
+                "id": "u1",
+                "category": "revision",
+                "doc_type": "drawing",
+                "note": "x",
+                "addendum_number": None,
+            }
+        ],
+    )
+    env.fs.has_initial = True
+    env.db.queue("projects", "select", _proj())
+    body = est_mod.UpdatesIn(
+        message="  Sheet E-3 reissued  ",
+        section_notes={"revision:drawing": "panel schedule changed"},
+    )
+    est_mod.send_file_updates("p1", body, _writer())
+    assert env.en.mirrored == [
+        {
+            "project_id": "p1",
+            "author_id": "u1",
+            # Stripped by the route before both the email and the mirror.
+            "message": "Sheet E-3 reissued",
+            "source": "update_send",
+        }
+    ]
 
 
 # ── send_to_estimator (the RETAINED re-send route) ─────────────────────────

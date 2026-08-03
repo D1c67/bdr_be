@@ -6,6 +6,11 @@ Both sides read and write the same thread. The estimator is gated by
 the other side through the in-app notification bell:
   internal author → the actively-assigned estimator(s)
   estimator author → PA/PM plus any other internal user already in the thread
+
+Not every row here was typed into this panel: the batch-wide message left on a
+package/update send is mirrored in as a note by the sender, tagged with a
+non-null `source` (services/estimator_notes, 0080). Those arrive silently — no
+bell, no email — because the same text already headed the send's own email.
 """
 
 import uuid
@@ -19,6 +24,7 @@ from app.core.ratelimit import estimator_rate_limit
 from app.core.roles import INTERNAL_ROLES, WRITER_ROLES, Role
 from app.core.supabase_client import get_supabase
 from app.services import notification_email
+from app.services.estimator_notes import NOTE_MAX_CHARS
 from app.services.notifications import audit, dismiss_notifications
 
 router = APIRouter(
@@ -27,7 +33,6 @@ router = APIRouter(
     dependencies=[Depends(estimator_rate_limit)],
 )
 
-NOTE_MAX_CHARS = 4000
 _AUTHOR_JOIN = "author:profiles!estimator_notes_author_id_fkey"
 
 
@@ -88,7 +93,9 @@ def list_notes(
     return (
         get_supabase()
         .table("estimator_notes")
-        .select(f"id, body, created_at, author_id, {_AUTHOR_JOIN}(full_name, role)")
+        .select(
+            f"id, body, created_at, author_id, source, {_AUTHOR_JOIN}(full_name, role)"
+        )
         .eq("project_id", project_id)
         .order("created_at")
         .limit(500)
@@ -195,7 +202,14 @@ def create_note(
         owners = (
             sb.table("profiles")
             .select("id")
-            .in_("role", [Role.ESTIMATING_ADMIN.value, Role.ESTIMATING_ENGINEER.value])
+            .in_(
+                "role",
+                [
+                    Role.ESTIMATING_ADMIN.value,
+                    Role.ESTIMATING_ENGINEER_MATERIALS.value,
+                    Role.ESTIMATING_ENGINEER_LABOR.value,
+                ],
+            )
             .eq("is_active", True)
             .execute()
         ).data or []
@@ -237,6 +251,7 @@ def create_note(
             }
             for uid in targets
         ]
-        sb.table("notifications").insert(notif_rows).execute()
-        notification_email.queue(notif_rows)
+        # The inserted rows carry the ids the mirror emails link back to (0091).
+        inserted = (sb.table("notifications").insert(notif_rows).execute()).data or notif_rows
+        notification_email.queue(inserted)
     return row

@@ -499,7 +499,10 @@ def _notify_drawing_changed(project_id: str, user: CurrentUser, verb: str) -> No
 
     label = f"{proj.get('number') or ''} {proj.get('name') or ''}".strip() or "a project"
     msg = f"Electrical drawing {verb} for {label} — re-check anything priced off it."
-    notify_role(Role.ESTIMATING_ENGINEER, project_id, "drawing_changed", msg)
+    # A drawing change can invalidate material pricing AND labor counts — both
+    # engineer focuses need the re-check ping.
+    notify_role(Role.ESTIMATING_ENGINEER_MATERIALS, project_id, "drawing_changed", msg)
+    notify_role(Role.ESTIMATING_ENGINEER_LABOR, project_id, "drawing_changed", msg)
 
     # Plus any currently-assigned (active) estimator on this project.
     assignments = (

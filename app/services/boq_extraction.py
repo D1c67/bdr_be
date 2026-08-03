@@ -7,13 +7,12 @@ The category list the model is told to use is built from the system's
 `material_categories` table at call time, so adding / renaming / deactivating a
 category (via the admin UI) automatically updates the prompt — no hardcoded list.
 
-Runs as a background job: `run_extraction` / `refine_extraction` update the
-`boq_analyses` row's status (pending → running → done|failed) so the frontend can
-poll for the result.
+Runs as a background job: `run_extraction` updates the `boq_analyses` row's
+status (pending → running → done|failed) so the frontend can poll for the
+result.
 """
 
 import io
-import json
 from typing import Any
 
 from app.core.config import get_settings
@@ -217,48 +216,13 @@ def run_extraction(analysis_id: str) -> None:
             return
         doc_text = _load_boq_text(analysis)
         system_prompt = build_system_prompt(_active_material_category_names())
-        result = _call_llm(
-            system_prompt, [{"role": "user", "content": build_user_prompt(doc_text)}]
-        )
+        user_prompt = build_user_prompt(doc_text)
+        # Snapshot the exact model input before the call — the dev Training page
+        # replays it verbatim, and even a failed run keeps what it was asked.
+        _mark(analysis_id, input_snapshot={"system": system_prompt, "user": user_prompt})
+        result = _call_llm(system_prompt, [{"role": "user", "content": user_prompt}])
         _mark(analysis_id, status="done", result_json=result)
     except Exception as exc:  # surface the failure to the poller
-        _mark(
-            analysis_id,
-            status="failed",
-            error=llm_errors.user_message(exc, llm.active_model("boq", settings)),
-        )
-
-
-def refine_extraction(analysis_id: str, user_message: str) -> None:
-    """Re-run the extraction with the PE's correction, seeding the prior result."""
-    settings = get_settings()
-    try:
-        analysis = (
-            get_supabase().table("boq_analyses").select("*").eq("id", analysis_id).single().execute()
-        ).data
-        if not analysis:
-            return
-        prior = analysis.get("result_json")
-        _mark(analysis_id, status="running", error=None, model=llm.active_model("boq", settings))
-        doc_text = _load_boq_text(analysis)
-        system_prompt = build_system_prompt(_active_material_category_names())
-        messages: list[dict[str, Any]] = [
-            {"role": "user", "content": build_user_prompt(doc_text)}
-        ]
-        if prior:
-            messages.append({"role": "assistant", "content": json.dumps(prior)})
-        messages.append(
-            {
-                "role": "user",
-                "content": (
-                    "Please revise the JSON based on this feedback, keeping the exact same "
-                    f"schema and returning ONLY the corrected JSON:\n\n{user_message}"
-                ),
-            }
-        )
-        result = _call_llm(system_prompt, messages)
-        _mark(analysis_id, status="done", result_json=result)
-    except Exception as exc:
         _mark(
             analysis_id,
             status="failed",

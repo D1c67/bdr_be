@@ -2,13 +2,18 @@
 
 The Estimating Engineer kicks off an analysis of the estimator's BOQ; Claude
 separates the materials by category (returning JSON) as a background job. The
-engineer polls for the result, then reviews / refines / edits it, and on confirm
-we create one RFQ per material category (merging sites), persist the line items,
-and generate a per-category RFQ Excel that becomes the RFQ's split file.
+engineer polls for the result, then reviews and corrects it directly (inline
+qty/unit edits, category moves, removals — autosaved as a server-side draft),
+and on confirm we create one RFQ per material category (merging sites), persist
+the line items, and generate a per-category RFQ Excel that becomes the RFQ's
+split file. The confirm also captures a training example (model output vs the
+user's corrected output) for the dev Training page.
 
 Open to any writer role, like the rest of the RFQ flow.
 """
 
+import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
@@ -16,9 +21,10 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from app.core.deps import CurrentUser, require_writer
 from app.core.ratelimit import ai_rate_limit
 from app.core.supabase_client import get_supabase
-from app.models.schemas import BoqAnalysisStart, BoqConfirmIn, BoqRefineIn
+from app.models.schemas import BoqAnalysisStart, BoqConfirmIn, BoqDraftIn
 from app.services import (
     boq_extraction,
+    boq_training,
     estimator_rounds,
     office_preview,
     rfq_excel,
@@ -26,6 +32,8 @@ from app.services import (
     workflow,
 )
 from app.services.notifications import audit
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects/{project_id}/boq-analysis", tags=["boq-analysis"])
 _PE = require_writer
@@ -35,6 +43,14 @@ _XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 # A pending/running analysis older than this is treated as abandoned (a crashed
 # job) so it can't block new runs forever.
 _JOB_STALE_MINUTES = 15
+
+
+def _is_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(value)
+    except (ValueError, AttributeError, TypeError):
+        return False
+    return True
 
 
 def _active_job_exists(sb, project_id: str) -> bool:
@@ -95,10 +111,17 @@ def start_analysis(
 
 @router.get("/latest")
 def latest_analysis(project_id: str, user: CurrentUser = Depends(_PE)):
+    # Everything except input_snapshot: the panel polls this every 3s during a
+    # run, and the snapshot (up to ~400KB of rendered BOQ text) is only read by
+    # the training detail route.
     rows = (
         get_supabase()
         .table("boq_analyses")
-        .select("*")
+        .select(
+            "id, project_id, boq_file_id, status, model, result_json, error, "
+            "draft_json, draft_updated_by, draft_updated_at, "
+            "created_by, created_at, updated_at"
+        )
         .eq("project_id", project_id)
         .order("created_at", desc=True)
         .limit(1)
@@ -107,21 +130,40 @@ def latest_analysis(project_id: str, user: CurrentUser = Depends(_PE)):
     return rows[0] if rows else None
 
 
-@router.post("/{analysis_id}/refine", dependencies=[Depends(ai_rate_limit)])
-def refine_analysis(
+@router.patch("/{analysis_id}/draft")
+def save_draft(
     project_id: str,
     analysis_id: str,
-    body: BoqRefineIn,
-    background: BackgroundTasks,
+    body: BoqDraftIn,
     user: CurrentUser = Depends(_PE),
 ):
+    """Autosave the reviewer's correction draft (inline edits / moves / removals).
+
+    Last-write-wins, no locking — the panel debounces saves and one reviewer
+    realistically works an analysis at a time. Deliberately not audited: a
+    keystroke-debounced autosave would flood the activity log.
+    """
     sb = get_supabase()
-    sb.table("boq_analyses").update({"status": "running", "error": None}).eq(
-        "id", analysis_id
-    ).eq("project_id", project_id).execute()
-    background.add_task(boq_extraction.refine_extraction, analysis_id, body.message)
-    audit(user.id, "boq.refine", "boq_analysis", analysis_id, {"message": body.message})
-    return {"status": "running"}
+    rows = (
+        sb.table("boq_analyses")
+        .select("id, status")
+        .eq("id", analysis_id)
+        .eq("project_id", project_id)
+        .limit(1)
+        .execute()
+    ).data or []
+    if not rows:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Analysis not found")
+    if rows[0].get("status") != "done":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Only a completed analysis can hold a draft."
+        )
+    draft_json = body.draft.model_dump(mode="json") if body.draft else None
+    now = datetime.now(timezone.utc).isoformat()
+    sb.table("boq_analyses").update(
+        {"draft_json": draft_json, "draft_updated_by": user.id, "draft_updated_at": now}
+    ).eq("id", analysis_id).execute()
+    return {"draft_json": draft_json, "draft_updated_at": now}
 
 
 @router.post("/{analysis_id}/confirm")
@@ -137,10 +179,15 @@ def confirm_analysis(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No category groups to confirm")
     sb = get_supabase()
 
-    # Resolve category names up front for the generated workbook titles.
-    cat_ids = [g.material_category_id for g in body.groups]
+    # Resolve category names up front for the generated workbook titles — and
+    # for the training diff, which also needs names for mapped-but-empty groups.
+    # Mapping ids only feed the diff, so a malformed one (a stale client passing
+    # the panel's "" Hold sentinel through) must not abort the confirm: filter
+    # instead of letting PostgREST reject the uuid cast.
+    cat_ids = {g.material_category_id for g in body.groups}
+    cat_ids.update(m.material_category_id for m in body.group_mappings if _is_uuid(m.material_category_id))
     cats = (
-        sb.table("material_categories").select("id, name").in_("id", cat_ids).execute()
+        sb.table("material_categories").select("id, name").in_("id", sorted(cat_ids)).execute()
     ).data or []
     names = {c["id"]: c["name"] for c in cats}
 
@@ -175,9 +222,10 @@ def confirm_analysis(
                 .execute()
             ).data[0]["id"]
 
-        # Replace the line items behind this RFQ with the confirmed set.
+        # Replace the line items behind this RFQ with the confirmed set. `src`
+        # is diff bookkeeping, not an rfq_line_items column — keep it out.
         sb.table("rfq_line_items").delete().eq("rfq_id", rfq_id).execute()
-        items = [it.model_dump(mode="json") for it in group.items]
+        items = [it.model_dump(mode="json", exclude={"src"}) for it in group.items]
         if items:
             sb.table("rfq_line_items").insert(
                 [{**it, "rfq_id": rfq_id, "sort_order": i} for i, it in enumerate(items)]
@@ -216,4 +264,20 @@ def confirm_analysis(
     # Re-confirming reshapes the RFQ categories/line items that feed pricing, so
     # re-verify if the project already passed Verify.
     workflow.maybe_reopen_verify_after_edit(project_id, user.id, "BOQ re-confirmed — RFQ categories changed")
+
+    # Training capture — record (model output vs user-corrected output) for the
+    # dev Training page. Best-effort: a capture bug must never fail the confirm.
+    try:
+        analysis = (
+            sb.table("boq_analyses")
+            .select("*")
+            .eq("id", analysis_id)
+            .eq("project_id", project_id)
+            .limit(1)
+            .execute()
+        ).data or []
+        if analysis:
+            boq_training.capture_example(analysis[0], project_id, body, user.id, names)
+    except Exception:
+        logger.exception("BOQ training capture failed (analysis %s)", analysis_id)
     return {"created": created}

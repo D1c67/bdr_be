@@ -23,7 +23,7 @@ class _Query:
         self.db, self.table = db, table
         self._op, self._payload = None, None
         self._eq, self._neq, self._null, self._notnull, self._in = [], [], [], [], []
-        self._gte, self._or = [], []
+        self._gte, self._lt, self._or = [], [], []
         self._negate_next = False
 
     def select(self, *a, **k):
@@ -75,6 +75,10 @@ class _Query:
         self._gte.append((col, val))
         return self
 
+    def lt(self, col, val):  # rfq_inbox's stale-send sweep
+        self._lt.append((col, val))
+        return self
+
     def or_(self, expr):
         # Backoff gate + lease acquisition expressions.
         self._or.append(expr)
@@ -111,6 +115,7 @@ class _Query:
             and all(row.get(c) is not None for c in self._notnull)
             and all(row.get(c) in v for c, v in self._in)
             and all(row.get(c) is not None and row[c] >= v for c, v in self._gte)
+            and all(row.get(c) is not None and row[c] < v for c, v in self._lt)
             and all(self._or_matches(row, e) for e in self._or)
         )
 
@@ -252,6 +257,7 @@ def test_full_walk_received_to_subject_match(db, use_settings, monkeypatch):
     assert row["status"] == "processed"
     assert row["project_id"] == "p1"
     assert row["matched_by"] == "subject"
+    assert row["pipeline_round"] == "r2"
     assert row["body_text"] == "hello body"
     # Learn-back: the conversation map now knows conv-1 → p1.
     maps = db.tables["email_conversation_projects"]
@@ -270,6 +276,7 @@ def test_r1_conversation_map_short_circuits(db, use_settings):
     assert row["status"] == "processed"
     assert row["project_id"] == "p2"
     assert row["matched_by"] == "conversation"
+    assert row["pipeline_round"] == "r1"
     # R1 must not rewrite the (manual) map entry.
     assert db.tables["email_conversation_projects"][0]["source"] == "manual"
 
@@ -307,6 +314,7 @@ def test_r3_confident_match_assigns_and_learns(db, use_settings, monkeypatch):
     assert row["project_id"] == "p2"
     assert row["matched_by"] == "llm"
     assert row["match_confidence"] == 0.93
+    assert row["pipeline_round"] == "r3"
     assert db.tables["email_conversation_projects"][0]["source"] == "llm"
 
 
@@ -324,6 +332,8 @@ def test_r3_below_threshold_stores_suggestion_and_lands_unknown(db, use_settings
     assert row["project_id"] is None
     assert row["suggested_project_id"] == "p1"
     assert row["suggested_confidence"] == 0.6
+    # Ran out of rounds at R3 — that is where it landed in the Unknown pool.
+    assert row["pipeline_round"] == "r3"
     assert "email_conversation_projects" not in db.tables  # no learn-back on a guess
 
 
@@ -391,11 +401,13 @@ def test_transient_r3_failure_backs_off_then_fails_at_max(db, use_settings, monk
     row = _row(db)
     assert row["status"] == "id_r3" and row["attempts"] == 1
     assert row["next_attempt_at"] is not None
+    assert row.get("pipeline_round") is None   # not terminal yet — nothing decided
 
     email_ingest._process_email(db, dict(row))
     row = _row(db)
     assert row["status"] == "failed"         # terminal, but still triageable
     assert "http 500" in row["error"]
+    assert row["pipeline_round"] == "r3"     # 'failed' alone would lose the step
 
 
 def test_llm_down_halts_r3_for_the_rest_of_the_sweep(db, use_settings, monkeypatch):
@@ -539,7 +551,7 @@ def test_pipeline_finalizes_a_mid_pipeline_manual_assignment(db, use_settings, m
     )
     # Manually assigned while still at 'received' (no conversation → no map).
     email = _seed(db, _email(status="received", project_id="p2", matched_by="manual",
-                             conversation_id=None,
+                             pipeline_round="manual", conversation_id=None,
                              subject="RE: 26-104 - Riverside BOM"))  # R2 would say p1!
     email_ingest._process_email(db, dict(email))
     row = _row(db)
@@ -549,6 +561,7 @@ def test_pipeline_finalizes_a_mid_pipeline_manual_assignment(db, use_settings, m
     assert row["status"] == "processed"
     assert row["project_id"] == "p2"
     assert row["matched_by"] == "manual"
+    assert row["pipeline_round"] == "manual"  # the sweep never restamps it
 
 
 def test_lease_is_fenced_and_reacquirable_by_its_holder(db, use_settings, monkeypatch):
@@ -614,3 +627,73 @@ def test_rescan_assigns_deterministic_hits_and_respects_manual_race(db, use_sett
     assert _row(db, "e1")["project_id"] == "p1"
     assert _row(db, "e1")["matched_by"] == "subject"
     assert _row(db, "e2")["project_id"] is None
+
+
+# ── pipeline_round: which step decided the email (0084) ────────────────────────
+#
+# `status` collapses to 'failed' from every step and `matched_by` names evidence
+# rather than a round (the retro-assign writes 'conversation', the rescan writes
+# 'subject'/'llm'), so the round only survives if each terminal write stamps it.
+# The live-round cases ride along on the tests above; these cover the paths that
+# would otherwise be indistinguishable in the UI.
+
+
+def test_fetch_failure_records_the_step_it_died_in(db, use_settings, monkeypatch):
+    use_settings(email_match_max_attempts=1)
+
+    def _boom(*a, **k):
+        raise RuntimeError("graph 503")
+
+    monkeypatch.setattr(email_ingest.graph_inbox, "get_message", _boom)
+    monkeypatch.setattr(email_ingest, "notify_role", lambda *a, **k: None)
+
+    email = _seed(db, _email(status="received"))
+    email_ingest._process_email(db, dict(email))
+    row = _row(db)
+    assert row["status"] == "failed"
+    # Never reached an identification round — it died pulling the content.
+    assert row["pipeline_round"] == "fetch"
+
+
+def test_manual_assign_and_its_retro_siblings_are_distinguishable(db, use_settings):
+    use_settings()
+    target = _seed(db, _email(id="e1", graph_message_id="g1", status="processed",
+                              body_text="hello"))
+    _seed(db, _email(id="e2", graph_message_id="g2", status="processed",
+                     body_text="sibling"))
+
+    updated, retro = email_ingest.assign_manual(db, dict(target), "p1", "user-1")
+    assert retro == 1
+    assert updated["pipeline_round"] == "manual"
+    sibling = _row(db, "e2")
+    # Same matched_by as a live R1 match, but it never ran a round — it rode
+    # along on the human's decision, and the badge must say so.
+    assert sibling["matched_by"] == "conversation"
+    assert sibling["pipeline_round"] == "retro"
+
+
+def test_unassign_clears_the_round_with_the_decision(db, use_settings):
+    use_settings()
+    email = _seed(db, _email(status="processed", project_id="p1",
+                             matched_by="subject", pipeline_round="r2"))
+    updated = email_ingest.unassign(db, dict(email), "user-1")
+    assert updated["project_id"] is None
+    assert updated["matched_by"] is None
+    assert updated["pipeline_round"] is None
+
+
+def test_rescan_is_stamped_apart_from_the_live_subject_round(db, use_settings, monkeypatch):
+    use_settings()
+    monkeypatch.setattr(email_ingest, "get_supabase", lambda: db)
+    monkeypatch.setattr(
+        email_ingest.openai_text,
+        "confirm_subject_matches_project",
+        lambda subject, project: {"match": False, "confidence": 0.1},
+    )
+    _seed(db, _email(status="processed", subject="RE: 26-104 – Riverside",
+                     pipeline_round="r3", message_at="2026-07-01T00:00:00+00:00"))
+    email_ingest.rescan_unknown_for_project("p1")
+    row = _row(db)
+    assert row["project_id"] == "p1" and row["matched_by"] == "subject"
+    # Ran against ONE new project outside the sweep — not the live R2 round.
+    assert row["pipeline_round"] == "rescan"

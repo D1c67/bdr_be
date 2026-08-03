@@ -1,0 +1,16 @@
+-- RFQ inbox poller: fenced lease holder.
+--
+-- The poller took a lease of 2 × RFQ_POLL_INTERVAL_SECONDS but slept only one
+-- interval, and its lease check could not distinguish its own live lease from a
+-- rival's — so a single worker stood itself down on every other tick and the
+-- real poll rate was half the configured one (360s at the 180s default).
+-- services/rfq_inbox now uses the same holder-token lease as the PM mail
+-- ingester: acquire when free/expired/OURS, renew mid-batch, release on the way
+-- out.
+--
+-- 0061_email_ingestion.sql already adds this column (noting there that "the RFQ
+-- poller ignores this column" — no longer true). Repeated here, idempotently,
+-- because 0061 is dev-only: environments that have not taken the email-ingest
+-- work still need `holder` before the RFQ poller change can be deployed, or
+-- every acquire fails on an unknown column.
+alter table graph_sync_state add column if not exists holder text;

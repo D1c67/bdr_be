@@ -4,7 +4,12 @@ from enum import StrEnum
 
 
 class Role(StrEnum):
-    ESTIMATING_ENGINEER = "estimating_engineer"  # merge of the former PM + PE roles
+    # The former single Estimating Engineer role (itself a merge of PM + PE) is
+    # split by FOCUS: identical permissions, different default to-do list.
+    # Materials owns the material-numbers lane; Labor owns the labor-numbers
+    # lane plus the engineer-owned send-out tasks.
+    ESTIMATING_ENGINEER_MATERIALS = "estimating_engineer_materials"
+    ESTIMATING_ENGINEER_LABOR = "estimating_engineer_labor"
     ESTIMATING_ADMIN = "estimating_admin"  # the former PA role, renamed
     EXECUTIVE = "executive"
     ACCOUNTANT = "accountant"
@@ -12,12 +17,18 @@ class Role(StrEnum):
     ESTIMATOR = "estimator"
 
 
+# Both engineer focuses — for audiences that mean "the engineers" regardless of
+# materials/labor focus (permissions, cross-cutting alerts, note recipients).
+ESTIMATING_ENGINEER_ROLES = frozenset(
+    {Role.ESTIMATING_ENGINEER_MATERIALS, Role.ESTIMATING_ENGINEER_LABOR}
+)
+
 # Roles that may perform any pipeline step / write. Everyone internal can act on
 # any stage (the per-stage owner is just a "whose task" hint now) EXCEPT the
 # accountant (read-only) and the estimator (external, narrowly scoped).
 WRITER_ROLES = frozenset(
-    {Role.ESTIMATING_ADMIN, Role.ESTIMATING_ENGINEER, Role.EXECUTIVE, Role.IT_ADMIN}
-)
+    {Role.ESTIMATING_ADMIN, Role.EXECUTIVE, Role.IT_ADMIN}
+) | ESTIMATING_ENGINEER_ROLES
 
 # Internal roles see the dashboard, project status and all read views. This is
 # the writer set plus the read-only accountant. The estimator is the sole
@@ -28,13 +39,19 @@ INTERNAL_ROLES = WRITER_ROLES | {Role.ACCOUNTANT}
 # IT Admin is retained as the system/superuser override.
 VERIFY_ROLES = frozenset({Role.EXECUTIVE, Role.IT_ADMIN})
 
+# Who may RENAME, reorder or retire a material category (the Contacts →
+# Categories tab). ADDING one is open to every writer — the BOQ and PM panels
+# create a bucket inline — but editing one rewrites the taxonomy under live
+# projects, so it stays with the Executive and the IT Admin override.
+CATEGORY_ADMIN_ROLES = frozenset({Role.EXECUTIVE, Role.IT_ADMIN})
+
 # Who must review estimator revision rounds (post-hand-off file changes): they
 # get the high-importance alert email + bell row, and the per-user red banner
 # on the project until they press "Mark as reviewed". Everyone who works the
 # bid — not the read-only accountant, not the IT Admin override account.
 CHANGE_REVIEW_ROLES = frozenset(
-    {Role.ESTIMATING_ADMIN, Role.ESTIMATING_ENGINEER, Role.EXECUTIVE}
-)
+    {Role.ESTIMATING_ADMIN, Role.EXECUTIVE}
+) | ESTIMATING_ENGINEER_ROLES
 
 # Project Management (PM) module access. Today these are identical to the bidding
 # sets — the accountant reads everything, writers write, and the external

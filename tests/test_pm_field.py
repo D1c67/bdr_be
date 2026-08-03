@@ -14,7 +14,7 @@ semantics, and the bulk read-side enrichment. `pm_folders.list_project_documents
 is stubbed — the hub's own union is covered in test_pm_folders.
 """
 
-from datetime import date, datetime, timezone
+from datetime import date
 from types import SimpleNamespace
 
 import pytest
@@ -216,7 +216,10 @@ def _install(monkeypatch, db, details=None):
 
 
 def _today():
-    return datetime.now(timezone.utc).date().isoformat()
+    # Delegate to the app's own helper so the test's notion of "today" always
+    # matches how the app stamps dates (America/Los_Angeles business time). Using
+    # UTC here flaked during the LA-evening / UTC-next-day window.
+    return pm_field._today()
 
 
 # ── The per-project guard ─────────────────────────────────────────────────────

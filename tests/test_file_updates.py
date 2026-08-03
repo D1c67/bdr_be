@@ -337,6 +337,36 @@ async def test_addendum_metadata_on_non_addendum_rejected():
     assert exc.value.status_code == 400
 
 
+# ── estimator deliverable notes (optional, attached at upload) ─────────────
+
+
+async def test_estimator_deliverable_carries_an_optional_note(monkeypatch):
+    # The estimator portal's upload boxes let the estimator type a note that is
+    # attached to every file in that drop. `estimate` is in neither
+    # INITIAL_CATEGORIES nor UPDATE_CATEGORIES, so the note stays OPTIONAL and
+    # the lock is never consulted (forbid_lock proves it) — it is stored, and
+    # trimmed, exactly like a team-side update note.
+    sb = _upload_env(monkeypatch, forbid_lock=True)
+    row = await _do_upload(
+        project_id="p1", category="estimate", note="  Priced per Addendum 2  ",
+        file=_FakeUpload(filename="estimate.xlsx"), user=_estimator(),
+    )
+    assert sb.inserted["note"] == "Priced per Addendum 2"
+    assert sb.inserted["estimator_deliverable"] is True
+    assert row["category"] == "estimate"
+
+
+async def test_estimator_deliverable_without_a_note_is_accepted(monkeypatch):
+    # The note is a convenience, never a gate: NOTE_REQUIRED_MESSAGE belongs to
+    # UPDATE_CATEGORIES alone. A blank one normalises to NULL, not "".
+    sb = _upload_env(monkeypatch, forbid_lock=True)
+    await _do_upload(
+        project_id="p1", category="boq", note="   ",
+        file=_FakeUpload(filename="boq.xlsx"), user=_estimator(),
+    )
+    assert sb.inserted["note"] is None
+
+
 # ── lock_state / list_files role branch ────────────────────────────────────
 
 

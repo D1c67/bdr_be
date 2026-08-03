@@ -1,8 +1,9 @@
 """Project ↔ Submittal Bank links (migration 0074).
 
-Covers the service that backs the "fill from the bank" section: pull links the
-top file-bearing fuzzy match (and skips already-linked / no-match / fileless
-materials), upload archives a pm_documents row + link and rejects non-PDF at the
+Covers the service that backs the "fill from the bank" section: pull links every
+fuzzy match that brings a NEW file, up to a per-material cap (skipping
+already-linked / no-match / fileless ones, and siblings that share a cut-sheet),
+upload archives a pm_documents row + link and rejects non-PDF at the
 router, add-to-bank creates a bank material + file + M:N link and records
 bank_material_id, delete cleans up an uploaded doc/object, and every id is
 project-scoped (a link/material from another project is a 404).
@@ -195,39 +196,132 @@ def test_migration_declares_table_and_sources():
 # ── Pull ──────────────────────────────────────────────────────────────────────
 
 
-def test_pull_links_top_file_bearing_match(monkeypatch):
+def test_pull_links_every_file_bearing_match(monkeypatch):
+    """One product needs several submittals, so a pull links ALL file-bearing
+    matches in rank order — only the fileless one is skipped."""
+    db = FakeDB({
+        "pm_materials": [_mat("m1")],
+        "submittal_materials": [
+            {"id": "s1", "name": "EMT 3/4"},
+            {"id": "s2", "name": "EMT 1"},
+            {"id": "s3", "name": "EMT 3/4 alt vendor"},
+        ],
+        "submittal_files": [{"id": "f1", "file_name": "emt.pdf"}, {"id": "f2", "file_name": "emt-alt.pdf"}],
+        # s1 has no file → nothing to preview, so it's the only one skipped.
+        "submittal_material_files": [
+            {"material_id": "s2", "file_id": "f1"},
+            {"material_id": "s3", "file_id": "f2"},
+        ],
+    })
+    db.rpc_rows = [
+        {"id": "s1", "name": "EMT 3/4"},
+        {"id": "s2", "name": "EMT 1"},
+        {"id": "s3", "name": "EMT 3/4 alt vendor"},
+    ]
+    audits, _ = _install(monkeypatch, db)
+
+    out = bank.pull("p1", ["m1"], "u1")
+    assert [link["submittal_material_id"] for link in out] == ["s2", "s3"]
+    assert all(link["source"] == "bank" for link in out)
+    assert out[0]["files"] == [{"file_id": "f1", "file_name": "emt.pdf"}]
+    assert {r["submittal_material_id"] for r in db.tables["pm_material_submittals"]} == {"s2", "s3"}
+
+
+def test_pull_skips_matches_sharing_a_file(monkeypatch):
+    """A group cut-sheet is reachable from every size/color it covers — linking
+    each of those matches would attach the SAME PDF repeatedly, so a match that
+    brings no new file is dropped."""
+    db = FakeDB({
+        "pm_materials": [_mat("m1")],
+        "submittal_materials": [
+            {"id": "s1", "name": "EMT 3/4"},
+            {"id": "s2", "name": "EMT 1"},      # same shared cut-sheet as s1
+            {"id": "s3", "name": "EMT vendor B"},
+        ],
+        "submittal_files": [{"id": "f1", "file_name": "emt.pdf"}, {"id": "f2", "file_name": "emt-b.pdf"}],
+        "submittal_material_files": [
+            {"material_id": "s1", "file_id": "f1"},
+            {"material_id": "s2", "file_id": "f1"},
+            {"material_id": "s3", "file_id": "f2"},
+        ],
+    })
+    db.rpc_rows = [{"id": "s1"}, {"id": "s2"}, {"id": "s3"}]
+    _install(monkeypatch, db)
+
+    out = bank.pull("p1", ["m1"], "u1")
+    assert [link["submittal_material_id"] for link in out] == ["s1", "s3"]
+
+
+def test_pull_skips_file_already_linked_from_a_sibling(monkeypatch):
+    """The same dedup across pulls: the material already previews f1 through s1,
+    so s2 (a different bank item, same PDF) adds nothing."""
     db = FakeDB({
         "pm_materials": [_mat("m1")],
         "submittal_materials": [{"id": "s1", "name": "EMT 3/4"}, {"id": "s2", "name": "EMT 1"}],
         "submittal_files": [{"id": "f1", "file_name": "emt.pdf"}],
-        # only s2 has a file → s1 (higher rank, no file) is skipped for s2
-        "submittal_material_files": [{"material_id": "s2", "file_id": "f1"}],
-    })
-    db.rpc_rows = [{"id": "s1", "name": "EMT 3/4"}, {"id": "s2", "name": "EMT 1"}]
-    audits, _ = _install(monkeypatch, db)
-
-    out = bank.pull("p1", ["m1"], "u1")
-    assert len(out) == 1
-    link = out[0]
-    assert link["source"] == "bank" and link["submittal_material_id"] == "s2"
-    assert link["files"] == [{"file_id": "f1", "file_name": "emt.pdf"}]
-    assert db.tables["pm_material_submittals"][0]["submittal_material_id"] == "s2"
-
-
-def test_pull_skips_already_linked_and_no_match(monkeypatch):
-    db = FakeDB({
-        "pm_materials": [_mat("m1"), _mat("m2", desc="Mystery Widget")],
-        "submittal_materials": [{"id": "s1", "name": "EMT"}],
-        "submittal_files": [{"id": "f1", "file_name": "emt.pdf"}],
-        "submittal_material_files": [{"material_id": "s1", "file_id": "f1"}],
+        "submittal_material_files": [
+            {"material_id": "s1", "file_id": "f1"},
+            {"material_id": "s2", "file_id": "f1"},
+        ],
         "pm_material_submittals": [
             {"id": "L1", "project_id": "p1", "pm_material_id": "m1", "source": "bank",
              "submittal_material_id": "s1", "created_at": "2026-07-01T00:00:00Z"},
         ],
     })
-    db.rpc_rows = []  # nothing matches m2
+    db.rpc_rows = [{"id": "s1"}, {"id": "s2"}]
     _install(monkeypatch, db)
-    assert bank.pull("p1", ["m1", "m2"], "u1") == []  # m1 already linked, m2 no match
+    assert bank.pull("p1", ["m1"], "u1") == []
+
+
+def test_pull_caps_links_per_material(monkeypatch):
+    """A vague description that matches half the bank can't bury the page: the
+    per-material cap counts links the material already carries."""
+    n = bank._MAX_LINKS_PER_MATERIAL + 5
+    db = FakeDB({
+        "pm_materials": [_mat("m1")],
+        "submittal_materials": [{"id": f"s{i}", "name": f"EMT {i}"} for i in range(n)],
+        "submittal_files": [{"id": f"f{i}", "file_name": f"emt-{i}.pdf"} for i in range(n)],
+        "submittal_material_files": [{"material_id": f"s{i}", "file_id": f"f{i}"} for i in range(n)],
+        "pm_material_submittals": [
+            {"id": "L1", "project_id": "p1", "pm_material_id": "m1", "source": "uploaded",
+             "document_id": "d1", "created_at": "2026-07-01T00:00:00Z"},
+        ],
+    })
+    db.rpc_rows = [{"id": f"s{i}", "name": f"EMT {i}"} for i in range(n)]
+    _install(monkeypatch, db)
+
+    out = bank.pull("p1", ["m1"], "u1")
+    # One slot is already taken by the uploaded PDF.
+    assert len(out) == bank._MAX_LINKS_PER_MATERIAL - 1
+    assert [link["submittal_material_id"] for link in out] == [f"s{i}" for i in range(len(out))]
+
+
+def test_pull_skips_already_linked_bank_item(monkeypatch):
+    """Re-pulling adds only bank items the material doesn't already carry."""
+    db = FakeDB({
+        "pm_materials": [_mat("m1")],
+        "submittal_materials": [{"id": "s1", "name": "EMT"}, {"id": "s2", "name": "EMT alt"}],
+        "submittal_files": [{"id": "f1", "file_name": "emt.pdf"}, {"id": "f2", "file_name": "alt.pdf"}],
+        "submittal_material_files": [
+            {"material_id": "s1", "file_id": "f1"},
+            {"material_id": "s2", "file_id": "f2"},
+        ],
+        "pm_material_submittals": [
+            {"id": "L1", "project_id": "p1", "pm_material_id": "m1", "source": "bank",
+             "submittal_material_id": "s1", "created_at": "2026-07-01T00:00:00Z"},
+        ],
+    })
+    db.rpc_rows = [{"id": "s1", "name": "EMT"}, {"id": "s2", "name": "EMT alt"}]
+    _install(monkeypatch, db)
+    out = bank.pull("p1", ["m1"], "u1")
+    assert [link["submittal_material_id"] for link in out] == ["s2"]
+
+
+def test_pull_skips_material_with_no_match(monkeypatch):
+    db = FakeDB({"pm_materials": [_mat("m2", desc="Mystery Widget")]})
+    db.rpc_rows = []  # nothing matches
+    _install(monkeypatch, db)
+    assert bank.pull("p1", ["m2"], "u1") == []
 
 
 def test_pull_skips_match_without_file(monkeypatch):

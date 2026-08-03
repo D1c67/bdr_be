@@ -2,9 +2,9 @@
 
 Backs the "Other submittals — fill from the bank" section of a project's
 Submittals page. For the materials NOT requested from a vendor (General Material
-and self-performed / uncategorized items) the team either PULLS a matching bank
-submittal (fuzzy `search_submittals`, 0072) or UPLOADS a PDF for one the bank
-doesn't cover. An uploaded PDF is archived into the Documents hub (pm_documents,
+and self-performed / uncategorized items) the team either PULLS the matching bank
+submittals (fuzzy `search_submittals`, 0072 — all of them, since one product
+routinely needs several) or UPLOADS a PDF for one the bank doesn't cover. An uploaded PDF is archived into the Documents hub (pm_documents,
 category 'submittal') and can later be pushed into the global bank.
 
 A `pm_material_submittals` row is one submittal covering one pm_material, of a
@@ -24,9 +24,15 @@ from app.services.notifications import audit
 
 logger = logging.getLogger(__name__)
 
-# How many top fuzzy matches to consider when picking a file-bearing one. The RPC
-# returns rows already ordered by word_similarity, so the first with a file wins.
-_PULL_CANDIDATES = 20
+# How many top fuzzy matches to consider per material. The RPC returns rows
+# already ordered by word_similarity, so the best matches come first.
+_PULL_CANDIDATES = 50
+# A pull links EVERY file-bearing match, not just the best one — a product
+# legitimately carries several submittals (multiple vendors, a group cut-sheet
+# plus a spec sheet). This caps how many one material can accumulate so a vague
+# description that matches half the bank can't bury the page; the overflow is
+# logged rather than silently dropped.
+_MAX_LINKS_PER_MATERIAL = 10
 _MAX_ALIASES = 30
 
 
@@ -160,10 +166,20 @@ def list_links(project_id: str) -> dict:
 
 
 def pull(project_id: str, material_ids: list[str], user_id: str) -> list[dict]:
-    """For each project material without a link, fuzzy-search the bank by its
-    description and link the top match that HAS a file (a match with nothing to
-    preview is no use). Materials with an existing link or no file-bearing match
-    are skipped. Returns the newly created links, resolved."""
+    """For each project material, fuzzy-search the bank by its description and
+    link EVERY match that HAS a file (a match with nothing to preview is no use)
+    — one product often needs several submittals, so this is deliberately not a
+    single best-match pick.
+
+    Distinctness is judged by FILE, not by bank material: files are M:N with
+    materials, so a shared cut-sheet is reachable from every size/color it
+    covers, and linking each of those matches would attach the same PDF over and
+    over. A match is linked only if it brings a file the material doesn't
+    already have — from an earlier pull or from an earlier match in this one.
+
+    Matches keep the RPC's relevance order and stop at `_MAX_LINKS_PER_MATERIAL`
+    per material (existing links count toward it). Re-pulling after the bank
+    grows adds only what's new. Returns the created links, resolved."""
     sb = get_supabase()
     mats = (
         sb.table("pm_materials")
@@ -176,16 +192,26 @@ def pull(project_id: str, material_ids: list[str], user_id: str) -> list[dict]:
         return []
     existing = (
         sb.table("pm_material_submittals")
-        .select("pm_material_id")
+        .select("pm_material_id, submittal_material_id")
         .eq("project_id", project_id)
         .in_("pm_material_id", [m["id"] for m in mats])
         .execute()
     ).data or []
-    already = {r["pm_material_id"] for r in existing}
+    # Per material: how many submittals it already carries (any source, for the
+    # cap) and which bank ones (whose files it therefore already has).
+    link_count: dict[str, int] = {}
+    linked_bank: dict[str, set[str]] = {}
+    for r in existing:
+        mid = r["pm_material_id"]
+        link_count[mid] = link_count.get(mid, 0) + 1
+        if r.get("submittal_material_id"):
+            linked_bank.setdefault(mid, set()).add(r["submittal_material_id"])
+    already_files = _files_by_material([sid for ids in linked_bank.values() for sid in ids])
 
     created_ids: list[str] = []
     for m in mats:
-        if m["id"] in already:
+        room = _MAX_LINKS_PER_MATERIAL - link_count.get(m["id"], 0)
+        if room <= 0:
             continue
         q = _sanitize_query(m.get("description"))
         if not q:
@@ -193,27 +219,59 @@ def pull(project_id: str, material_ids: list[str], user_id: str) -> list[dict]:
         rows = (sb.rpc("search_submittals", {"q": q, "cat": None}).execute().data or [])[:_PULL_CANDIDATES]
         if not rows:
             continue
-        with_files = _materials_with_files([r["id"] for r in rows])
-        match = next((r for r in rows if r["id"] in with_files), None)
-        if not match:
+        files_by_mat = _files_by_material([r["id"] for r in rows])
+        linked = linked_bank.get(m["id"], set())
+        # Files this material can already preview — anything a candidate adds on
+        # top of these is genuinely new; a candidate that adds nothing is the
+        # same PDF reached through a sibling bank item.
+        have: set[str] = set()
+        for sid in linked:
+            have |= already_files.get(sid, set())
+        matches = []
+        for r in rows:
+            if r["id"] in linked:
+                continue
+            new_files = files_by_mat.get(r["id"], set()) - have
+            if not new_files:
+                continue
+            matches.append(r)
+            have |= new_files
+        if not matches:
             continue
-        ins = (
+        if len(matches) > room:
+            logger.info(
+                "pm_submittal pull: material %s capped at %d of %d bank matches",
+                m["id"],
+                room,
+                len(matches),
+            )
+            matches = matches[:room]
+        inserted = (
             sb.table("pm_material_submittals")
             .insert(
-                {
-                    "project_id": project_id,
-                    "pm_material_id": m["id"],
-                    "source": "bank",
-                    "submittal_material_id": match["id"],
-                    "created_by": user_id,
-                }
+                [
+                    {
+                        "project_id": project_id,
+                        "pm_material_id": m["id"],
+                        "source": "bank",
+                        "submittal_material_id": match["id"],
+                        "created_by": user_id,
+                    }
+                    for match in matches
+                ]
             )
             .execute()
-        ).data[0]
-        created_ids.append(ins["id"])
+        ).data or []
+        created_ids.extend(row["id"] for row in inserted)
 
     if created_ids:
-        audit(user_id, "pm_submittal.pull", "project", project_id, {"linked": len(created_ids)})
+        audit(
+            user_id,
+            "pm_submittal.pull",
+            "project",
+            project_id,
+            {"linked": len(created_ids), "materials": len(mats)},
+        )
         new_rows = (
             sb.table("pm_material_submittals").select("*").in_("id", created_ids).execute()
         ).data or []
@@ -221,17 +279,23 @@ def pull(project_id: str, material_ids: list[str], user_id: str) -> list[dict]:
     return []
 
 
-def _materials_with_files(material_ids: list[str]) -> set[str]:
-    if not material_ids:
-        return set()
+def _files_by_material(material_ids: list[str]) -> dict[str, set[str]]:
+    """{bank material id → its file ids}. Materials with no file are absent, so
+    an empty lookup doubles as "nothing to preview here"."""
+    ids = list(dict.fromkeys(material_ids))
+    if not ids:
+        return {}
     links = (
         get_supabase()
         .table("submittal_material_files")
-        .select("material_id")
-        .in_("material_id", material_ids)
+        .select("material_id, file_id")
+        .in_("material_id", ids)
         .execute()
     ).data or []
-    return {link["material_id"] for link in links}
+    out: dict[str, set[str]] = {}
+    for link in links:
+        out.setdefault(link["material_id"], set()).add(link["file_id"])
+    return out
 
 
 # ── Upload a PDF for a missing submittal ─────────────────────────────────────

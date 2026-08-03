@@ -24,6 +24,7 @@ import logging
 import threading
 
 from app.core.config import get_settings
+from app.core.features import SubApp, home_path, is_enabled, notification_sub_app
 from app.core.roles import Role
 from app.core.supabase_client import get_supabase
 from app.services import graph_email
@@ -65,9 +66,23 @@ _TYPE_META: dict[str, tuple[str, str]] = {
     "pm_activated": ("Project won — entered Preconstruction", "Open project"),
     "pm_stage_change": ("Project moved PM stages", "Open project"),
     "pm_outcome_conflict": ("Outcome change attempted on an active PM project", "Review project"),
+    # Types that reached here only through _DEFAULT_META until the notification
+    # log started rendering these same headings as its entry titles.
+    "reverify_required": ("Pricing changed — re-verification required", "Open project"),
+    "project_abandoned": ("Project abandoned", "Open project"),
+    "project_withdrawn": ("Project withdrawn", "Open your assignments"),
+    "project_reactivated": ("Project reactivated", "Open your assignment"),
+    "submittal.response_received": ("A vendor returned a submittal", "View submittals"),
 }
 
 _DEFAULT_META = ("BDR notification", "Open BDR")
+
+
+def heading_for(type_: str) -> str:
+    """The short human title for a notification type — the email heading, reused
+    by the per-project notification log as an entry title so both surfaces name
+    the same event the same way."""
+    return _meta(type_)[0]
 
 
 def _meta(type_: str) -> tuple[str, str]:
@@ -80,20 +95,32 @@ def _meta(type_: str) -> tuple[str, str]:
 
 
 def _deep_link(project_id: str | None, role: str | None, type_: str | None = None) -> str:
+    """Where this notification's email button lands.
+
+    Flag-aware, unlike an in-app link: these URLs are permanent and arrive in a
+    mailbox, so one built for a module this deployment doesn't serve is a dead
+    link forever rather than a redirect the shell can quietly fix.
+    """
     base = get_settings().frontend_url.rstrip("/")
     is_estimator = role == Role.ESTIMATOR.value
     if project_id:
         # PM notifications land on the PM view of the project. Estimators never
-        # receive pm_* types (notify_role refuses estimator broadcasts), but the
+        # receive them (notify_role refuses estimator broadcasts), but the
         # estimator check stays first as a defense-in-depth link floor.
-        if not is_estimator and type_ and type_.startswith("pm_"):
-            return f"{base}/pm/projects/{project_id}"
+        if not is_estimator:
+            if notification_sub_app(type_) is SubApp.PM and is_enabled(SubApp.PM):
+                return f"{base}/pm/projects/{project_id}"
+            # Bidding's project page is the fallback for everything else — and
+            # for a PM row on a PM-less deployment, since the project is still
+            # there and its bid history is what remains readable.
+            if not is_enabled(SubApp.BIDDING):
+                return f"{base}{home_path()}"
         prefix = "/estimator/projects" if is_estimator else "/projects"
         return f"{base}{prefix}/{project_id}"
     # A nudge isn't tied to a project — send the recipient straight to their list.
     if type_ == "nudge":
         return f"{base}/todos"
-    return f"{base}/estimator" if is_estimator else f"{base}/dashboard"
+    return f"{base}/estimator" if is_estimator else f"{base}{home_path()}"
 
 
 def _project_label(project: dict | None) -> str | None:
@@ -120,6 +147,12 @@ def queue(rows: list[dict]) -> None:
     Each row is a dict with `user_id`, `project_id` (nullable), `type`,
     `message` — the same shape inserted into the notifications table. No-op
     (and never raises) when disabled or when Graph isn't configured.
+
+    Pass the rows RETURNED BY the insert (they carry `id`) rather than the ones
+    handed to it: an `id` lets each send record its email_log row back onto the
+    notification (0091), which is what lets the per-project notification log
+    collapse a bell row and its mirror email into one entry. Rows without an
+    `id` still send — they just leave the link NULL.
     """
     rows = [r for r in (rows or []) if r.get("user_id")]
     if not rows:
@@ -181,10 +214,27 @@ def _send_one(row: dict, profile: dict | None, project: dict | None) -> None:
         cta_url=_deep_link(row.get("project_id"), profile.get("role"), type_),
         project_label=_project_label(project),
     )
-    graph_email.send_mail(
+    log = graph_email.send_mail(
         to=[profile["email"]],
         subject=_subject(heading, project),
         body_html=html,
         inline_images=[(LOGO_CONTENT_ID, LOGO_FILENAME, logo_bytes(), "image/jpeg")],
         project_id=row.get("project_id"),
     )
+    _link_email_log(row.get("id"), log)
+
+
+def _link_email_log(notification_id: str | None, log: dict | None) -> None:
+    """Record which email delivered this notification (0091). Best-effort: the
+    mail is already sent, so a lost link only costs the notification log its
+    delivery badge — never the send, and never the bell row."""
+    if not notification_id or not log or not log.get("id"):
+        return
+    try:
+        get_supabase().table("notifications").update({"email_log_id": log["id"]}).eq(
+            "id", notification_id
+        ).execute()
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Could not link notification %s to its mirror email", notification_id, exc_info=True
+        )

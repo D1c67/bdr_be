@@ -50,16 +50,19 @@ class StageDef:
 # anymore; gating is per-category (CATEGORY_TASKS) + the DAG (CATEGORY_PREREQS).
 STAGES: dict[str, StageDef] = {
     "intake":            StageDef("intake",            1, (Role.ESTIMATING_ADMIN,), "Intake"),
-    "go_no_go":          StageDef("go_no_go",          2, (Role.ESTIMATING_ENGINEER, Role.ESTIMATING_ADMIN, Role.EXECUTIVE), "Go / No-Go"),
-    "to_estimator":      StageDef("to_estimator",      3, (Role.ESTIMATING_ADMIN, Role.ESTIMATING_ENGINEER), "To Estimator"),
-    "estimate_received": StageDef("estimate_received", 4, (Role.ESTIMATOR, Role.ESTIMATING_ENGINEER), "Estimate Received"),
-    "rfqs":              StageDef("rfqs",              5, (Role.ESTIMATING_ENGINEER,), "RFQs"),
-    "receive_quotes":    StageDef("receive_quotes",    6, (Role.ESTIMATING_ENGINEER,), "Receive Quotes"),
-    "labor_numbers":     StageDef("labor_numbers",     7, (Role.ESTIMATING_ENGINEER,), "Labor Numbers"),
-    "markup":            StageDef("markup",            8, (Role.ESTIMATING_ENGINEER,), "Markup"),
-    "gc_pricing":        StageDef("gc_pricing",        9, (Role.ESTIMATING_ENGINEER, Role.EXECUTIVE), "GC Pricing"),
+    # The engineer role is split by focus: the Materials engineer owns the
+    # material_numbers lane, the Labor engineer owns the labor_numbers lane AND
+    # the engineer side of send_out. Shared intake tasks keep both engineers.
+    "go_no_go":          StageDef("go_no_go",          2, (Role.ESTIMATING_ENGINEER_MATERIALS, Role.ESTIMATING_ENGINEER_LABOR, Role.ESTIMATING_ADMIN, Role.EXECUTIVE), "Go / No-Go"),
+    "to_estimator":      StageDef("to_estimator",      3, (Role.ESTIMATING_ADMIN, Role.ESTIMATING_ENGINEER_MATERIALS, Role.ESTIMATING_ENGINEER_LABOR), "To Estimator"),
+    "estimate_received": StageDef("estimate_received", 4, (Role.ESTIMATOR, Role.ESTIMATING_ENGINEER_MATERIALS), "Estimate Received"),
+    "rfqs":              StageDef("rfqs",              5, (Role.ESTIMATING_ENGINEER_MATERIALS,), "RFQs"),
+    "receive_quotes":    StageDef("receive_quotes",    6, (Role.ESTIMATING_ENGINEER_MATERIALS,), "Receive Quotes"),
+    "labor_numbers":     StageDef("labor_numbers",     7, (Role.ESTIMATING_ENGINEER_LABOR,), "Labor Numbers"),
+    "markup":            StageDef("markup",            8, (Role.ESTIMATING_ENGINEER_LABOR,), "Markup"),
+    "gc_pricing":        StageDef("gc_pricing",        9, (Role.ESTIMATING_ENGINEER_LABOR, Role.EXECUTIVE), "GC Pricing"),
     "verify":            StageDef("verify",            10, (Role.EXECUTIVE,), "Verify"),
-    "send_out":          StageDef("send_out",          11, (Role.ESTIMATING_ADMIN, Role.ESTIMATING_ENGINEER), "Send Out"),
+    "send_out":          StageDef("send_out",          11, (Role.ESTIMATING_ADMIN, Role.ESTIMATING_ENGINEER_LABOR), "Send Out"),
     "submitted":         StageDef("submitted",         12, (Role.ESTIMATING_ADMIN,), "Submitted"),
     "bid_outcome":       StageDef("bid_outcome",       13, (Role.ESTIMATING_ADMIN,), "Win / Loss"),
     "declined":          StageDef("declined",          99, (), "Declined"),
@@ -551,7 +554,9 @@ def maybe_reopen_verify_after_edit(
                     " The bid already sent to GCs is unchanged; this updates the "
                     "internal pricing record only."
                 )
-            for role in (Role.EXECUTIVE, Role.ESTIMATING_ENGINEER):
+            # Verify/send-out is the Labor engineer's lane, so the re-commit
+            # ping goes to them (plus the verifying Executive).
+            for role in (Role.EXECUTIVE, Role.ESTIMATING_ENGINEER_LABOR):
                 notifications.notify_role(role, project_id, "reverify_required", message)
         return moved
     except Exception:  # noqa: BLE001 — the edit succeeded; bouncing is best-effort

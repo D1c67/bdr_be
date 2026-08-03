@@ -160,16 +160,16 @@ def _eff(role: Role, stored=None) -> NotificationPrefsDoc:
 
 
 def test_recipients_role_defaults():
-    profiles = [{"id": "pe1", "role": "estimating_engineer"}, {"id": "acct1", "role": "accountant"}]
+    profiles = [{"id": "pe1", "role": "estimating_engineer_materials"}, {"id": "acct1", "role": "accountant"}]
     eff = {p["id"]: _eff(Role(p["role"])) for p in profiles}
     got = dr._internal_recipients(dr.KINDS["due_from_vendors"], "1h", profiles, eff)
     assert got == {"pe1"}
 
 
 def test_recipients_stored_offsets_respected():
-    profiles = [{"id": "pm1", "role": "estimating_engineer"}, {"id": "pa1", "role": "estimating_admin"}]
+    profiles = [{"id": "pm1", "role": "estimating_engineer_materials"}, {"id": "pa1", "role": "estimating_admin"}]
     eff = {
-        "pm1": _eff(Role.ESTIMATING_ENGINEER, {"internal_bid": {"enabled": True, "offsets": ["1h"]}}),
+        "pm1": _eff(Role.ESTIMATING_ENGINEER_MATERIALS, {"internal_bid": {"enabled": True, "offsets": ["1h"]}}),
         "pa1": _eff(Role.ESTIMATING_ADMIN),
     }
     got = dr._internal_recipients(dr.KINDS["internal_bid"], "2d", profiles, eff)
@@ -362,7 +362,7 @@ def test_poll_once_vendor_event_end_to_end(monkeypatch):
             intake=("to_estimator", "complete"), material_numbers=("receive_quotes", "active")
         ),
         ("rfqs", "select"): [{"project_id": "p1", "status": "sent"}],
-        ("profiles", "select"): [{"id": "pe1", "role": "estimating_engineer"}, {"id": "pm1", "role": "estimating_admin"}],
+        ("profiles", "select"): [{"id": "pe1", "role": "estimating_engineer_materials"}, {"id": "pm1", "role": "estimating_admin"}],
         ("notification_prefs", "select"): [],
         ("due_reminder_log", "upsert"): _echo_ledger,
         ("notifications", "insert"): [],
@@ -394,7 +394,7 @@ def test_poll_once_duplicate_tick_inserts_nothing(monkeypatch):
         ("project_category_state", "select"): _cat_rows(
             intake=("to_estimator", "complete"), material_numbers=("receive_quotes", "active")
         ),
-        ("profiles", "select"): [{"id": "pe1", "role": "estimating_engineer"}],
+        ("profiles", "select"): [{"id": "pe1", "role": "estimating_engineer_materials"}],
         ("due_reminder_log", "upsert"): [],  # all duplicates
     }, NOW)
 
@@ -420,7 +420,7 @@ def test_poll_once_notification_failure_rolls_ledger_back(monkeypatch):
         ("project_category_state", "select"): _cat_rows(
             intake=("to_estimator", "complete"), material_numbers=("receive_quotes", "active")
         ),
-        ("profiles", "select"): [{"id": "pe1", "role": "estimating_engineer"}],
+        ("profiles", "select"): [{"id": "pe1", "role": "estimating_engineer_materials"}],
         ("due_reminder_log", "upsert"): _echo_ledger,
         ("notifications", "insert"): _boom,
     }, NOW)

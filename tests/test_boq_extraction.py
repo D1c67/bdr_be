@@ -49,6 +49,18 @@ def test_parse_json_rejects_non_schema():
         bx._parse_json('{"not": "a boq"}')
 
 
+def test_refine_feature_is_removed():
+    """The "ask model to fix" loop is gone — user corrections (drafts + the
+    confirm diff capture) replaced it. No service entrypoint, no schema, no
+    route may survive, or a stale frontend could resurrect a paid LLM call."""
+    import app.models.schemas as schemas
+    from app.routers.boq_analysis import router
+
+    assert not hasattr(bx, "refine_extraction")
+    assert not hasattr(schemas, "BoqRefineIn")
+    assert not any("refine" in getattr(r, "path", "") for r in router.routes)
+
+
 def test_build_rfq_workbook_matches_reference_shape():
     items = [
         {"sr_no": "51", "description": "BOH 2X4 LED PANEL", "quantity": 56, "unit": "EA", "notes": None},

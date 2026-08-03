@@ -23,7 +23,8 @@ from app.services.email_branding import (
 # lib/labels.roleLabel; the backend has no equivalent, so keep this small map
 # local to the invite text.
 _ROLE_LABELS: dict[Role, str] = {
-    Role.ESTIMATING_ENGINEER: "Estimating Engineer",
+    Role.ESTIMATING_ENGINEER_MATERIALS: "Estimating Engineer (Materials)",
+    Role.ESTIMATING_ENGINEER_LABOR: "Estimating Engineer (Labor)",
     Role.ESTIMATING_ADMIN: "Estimating Admin",
     Role.EXECUTIVE: "Executive",
     Role.ACCOUNTANT: "Accountant",

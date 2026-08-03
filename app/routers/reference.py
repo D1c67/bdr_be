@@ -2,7 +2,11 @@
 
 GCs are needed by the intake form's multi-select; material categories drive RFQ
 splitting. Any internal user can read GCs and GC contacts; writer roles can add
-them (the Contacts page); material category writes stay restricted to IT Admin.
+them (the Contacts page). Any writer may ADD a material category — the BOQ
+extraction and PM materials panels create one inline when a group doesn't fit
+an existing bucket — but editing/deactivating an existing category rewrites the
+taxonomy under everyone's live projects, so that stays with CATEGORY_ADMIN_ROLES
+(Executive + the IT Admin override) on the Contacts → Categories tab.
 GC contacts mirror
 vendor_contacts: many named people per company; proposal sends pick recipients
 from them per send.
@@ -11,7 +15,7 @@ from them per send.
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.deps import CurrentUser, require_internal, require_role, require_writer
-from app.core.roles import Role
+from app.core.roles import CATEGORY_ADMIN_ROLES
 from app.core.supabase_client import get_supabase
 from app.models.schemas import GCContactIn, GCContactOut, GCIn, GCOut, MaterialCategoryUpdate
 
@@ -74,13 +78,31 @@ def create_material_category(
     name: str,
     kind: str = "material",
     sort_order: int = 0,
-    _: CurrentUser = Depends(require_role(Role.IT_ADMIN)),
+    _: CurrentUser = Depends(require_writer),
 ):
     if kind not in ("material", "markup"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "kind must be material|markup")
+    name = name.strip()
+    if not name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "name is required")
+    sb = get_supabase()
+    # Any writer can add one inline from the BOQ/PM panels, so two people naming
+    # the same bucket must not fork the taxonomy — that would split one material
+    # group across two RFQs. Same active name+kind: hand back what already
+    # exists instead of inserting a twin. (Inactive same-name rows are left
+    # alone; reactivating what IT Admin retired is their call, not a writer's.)
+    existing = (
+        sb.table("material_categories")
+        .select("*")
+        .eq("kind", kind)
+        .eq("is_active", True)
+        .execute()
+    ).data or []
+    for row in existing:
+        if (row.get("name") or "").strip().casefold() == name.casefold():
+            return row
     return (
-        get_supabase()
-        .table("material_categories")
+        sb.table("material_categories")
         .insert({"name": name, "kind": kind, "sort_order": sort_order})
         .execute()
     ).data[0]
@@ -90,7 +112,7 @@ def create_material_category(
 def update_material_category(
     category_id: str,
     body: MaterialCategoryUpdate,
-    _: CurrentUser = Depends(require_role(Role.IT_ADMIN)),
+    _: CurrentUser = Depends(require_role(*CATEGORY_ADMIN_ROLES)),
 ):
     """Rename, reorder, or deactivate a category.
 

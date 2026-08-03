@@ -13,10 +13,17 @@ from app.services import notifications as n
 
 
 class _Recorder:
-    """Minimal Supabase fake that records table() access and insert payloads."""
+    """Minimal Supabase fake that records table() access and insert payloads.
+
+    An insert echoes its rows back with server-assigned ids, as PostgREST does —
+    those returned rows (not the ones handed in) are what gets mirrored to email,
+    because the id is how each send links its email_log row back to the bell row
+    (migration 0091).
+    """
 
     def __init__(self, profiles):
         self._profiles = profiles
+        self._returning = profiles
         self.tables_touched = []
         self.inserted = []
 
@@ -25,6 +32,7 @@ class _Recorder:
         return self
 
     def select(self, *a, **k):
+        self._returning = self._profiles
         return self
 
     def eq(self, *a, **k):
@@ -32,10 +40,12 @@ class _Recorder:
 
     def insert(self, payload):
         self.inserted.append(payload)
+        rows = payload if isinstance(payload, list) else [payload]
+        self._returning = [{**r, "id": f"n{i}"} for i, r in enumerate(rows)]
         return self
 
     def execute(self):
-        return SimpleNamespace(data=self._profiles)
+        return SimpleNamespace(data=self._returning)
 
 
 def _patch(monkeypatch, profiles):
@@ -57,10 +67,14 @@ def test_notify_role_refuses_estimator_broadcast(monkeypatch):
 
 def test_notify_role_internal_inserts_and_queues_email(monkeypatch):
     rec, queued = _patch(monkeypatch, [{"id": "pe1"}, {"id": "pe2"}])
-    n.notify_role(Role.ESTIMATING_ENGINEER, "p1", "stage_handoff", "Project advanced")
+    n.notify_role(Role.ESTIMATING_ENGINEER_MATERIALS, "p1", "stage_handoff", "Project advanced")
     assert rec.inserted and len(rec.inserted[0]) == 2
     assert [r["user_id"] for r in rec.inserted[0]] == ["pe1", "pe2"]
-    assert queued == [rec.inserted[0]]  # the same rows are mirrored to email
+    # The same rows are mirrored to email — as returned by the insert, so each
+    # carries the id its mirror email links its email_log row back to.
+    assert len(queued) == 1
+    assert [r["user_id"] for r in queued[0]] == ["pe1", "pe2"]
+    assert all(r.get("id") for r in queued[0])
 
 
 def test_notify_user_inserts_and_queues_email(monkeypatch):
@@ -69,12 +83,12 @@ def test_notify_user_inserts_and_queues_email(monkeypatch):
     assert rec.inserted == [{"user_id": "est1", "project_id": "p1",
                              "type": "assigned", "message": "You were assigned to a project",
                              "rfq_id": None}]
-    assert queued == [[rec.inserted[0]]]
+    assert queued == [[{**rec.inserted[0], "id": "n0"}]]
 
 
 def test_notify_role_carries_rfq_id(monkeypatch):
     rec, queued = _patch(monkeypatch, [{"id": "pe1"}])
-    n.notify_role(Role.ESTIMATING_ENGINEER, "p1", "quote.received", "Quote in", rfq_id="r1")
+    n.notify_role(Role.ESTIMATING_ENGINEER_MATERIALS, "p1", "quote.received", "Quote in", rfq_id="r1")
     assert rec.inserted[0][0]["rfq_id"] == "r1"
 
 

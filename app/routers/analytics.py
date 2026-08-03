@@ -8,21 +8,32 @@ project spent in a stage = when it left it minus when it entered). The current
 from collections import defaultdict
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.core.deps import CurrentUser, get_current_user
+from app.core.ratelimit import export_rate_limit, report_rate_limit
 from app.core.roles import INTERNAL_ROLES
 from app.core.supabase_client import get_supabase
 from app.services import analytics_metrics as metrics
+from app.services import bid_invitations as bi
 from app.services.analytics_metrics import WindowData
+from app.services.bid_invitations_excel import build_bid_invitations_workbook
 from app.services.workflow import STAGES
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
-# Shared query params for every windowed endpoint.
-RangeParam = Query("month", pattern="^(day|week|month|quarter|year|custom)$")
+# Shared query params for every windowed endpoint. The aliases matter: the
+# python names carry a trailing underscore (shadowing builtins) but FastAPI
+# matches query params by NAME, not by a stripped version — without the alias
+# the FE's `?range=`/`?status=` would be silently ignored and every request
+# would fall back to the month window with no status filter.
+RangeParam = Query("month", alias="range", pattern="^(day|week|month|quarter|year|custom)$")
 # Optional lifecycle-status filter; prunes the project cohort across all sections.
-StatusParam = Query(None, pattern="^(active|sent|won|lost|no_award|declined|abandoned)$")
+StatusParam = Query(
+    None, alias="status", pattern="^(active|sent|won|lost|no_award|declined|abandoned)$"
+)
 
 
 def _parse(ts: str) -> datetime:
@@ -244,6 +255,59 @@ def activity(
         )
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+
+# ── Bid Invitations report ─────────────────────────────────────────────────
+#
+# Calendar-anchored ranges (unlike the rolling windows above) with the *-to-date
+# presets open-ended into the future — see services/bid_invitations.py. Rows
+# omit bid_at entirely for roles outside ACTUAL_BID_VIEWER_ROLES.
+
+BidInvRangeParam = Query("wtd", alias="range", pattern="^(" + "|".join(bi.RANGE_NAMES) + ")$")
+
+
+def _bid_invitations_payload(
+    range_: str, date_from: str | None, date_to: str | None, user: CurrentUser
+) -> dict:
+    _gate(user)
+    try:
+        df, dt = bi.resolve_range(range_, date_from, date_to)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return bi.report(df, dt, user.role, range_)
+
+
+@router.get("/bid-invitations", dependencies=[Depends(report_rate_limit)])
+def bid_invitations(
+    range_: str = BidInvRangeParam,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    user: CurrentUser = Depends(get_current_user),
+):
+    return _bid_invitations_payload(range_, date_from, date_to, user)
+
+
+@router.get("/bid-invitations/export", dependencies=[Depends(export_rate_limit)])
+def bid_invitations_export(
+    range_: str = BidInvRangeParam,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    user: CurrentUser = Depends(get_current_user),
+):
+    payload = _bid_invitations_payload(range_, date_from, date_to, user)
+    content = build_bid_invitations_workbook(payload)
+    filename = f"Bid Invitations - {range_.replace('_', ' ')}.xlsx"
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{filename}"; '
+                f"filename*=UTF-8''{quote(filename)}"
+            ),
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.get("/projects/{project_id}")

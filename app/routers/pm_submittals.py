@@ -17,8 +17,14 @@ from app.core.config import get_settings
 from app.core.deps import CurrentUser, require_pm_read, require_pm_write
 from app.core.ratelimit import ai_rate_limit, bulk_send_rate_limit, upload_rate_limit
 from app.core.supabase_client import get_supabase
-from app.models.schemas import PmAddToBankIn, PmBankPullIn, SubmittalRequestIn
-from app.services import pm_submittal_bank, submittal_sending
+from app.models.schemas import (
+    PmAddToBankIn,
+    PmBankPullIn,
+    SubmittalApprovalIn,
+    SubmittalRequestIn,
+    SubmittalVerdictIn,
+)
+from app.services import pm_submittal_bank, submittal_approval, submittal_sending
 from app.services.notifications import audit
 from app.services.pm import require_pm_project
 
@@ -140,6 +146,167 @@ def create_request(
     return result
 
 
+# ── Submittal approval packages: send to the GC (migration 0081) ─────────────
+#
+# The other direction from the vendor requests above: we package the submittals
+# we've collected and email them to the general contractor for approval. One
+# email per package (To + CC), logged per file so the approval verdicts the next
+# feature records have something to hang off.
+
+
+@router.get("/approval/available")
+def approval_available(project_id: str, _: CurrentUser = Depends(require_pm_read)):
+    """Every submittal file on file for the project, grouped by material
+    category — what the Request Submittal Approval modal offers to send."""
+    require_pm_project(project_id)
+    return submittal_approval.available(project_id)
+
+
+@router.get("/approval/packages")
+def approval_packages(project_id: str, _: CurrentUser = Depends(require_pm_read)):
+    """Approval-package history, newest first, with each package's files and
+    their recorded approval status."""
+    require_pm_project(project_id)
+    return submittal_approval.list_packages(project_id)
+
+
+@router.post("/approval/packages/{package_id}/verdict")
+def approval_verdict(
+    project_id: str,
+    package_id: str,
+    body: SubmittalVerdictIn,
+    user: CurrentUser = Depends(require_pm_write),
+):
+    """Record the GC's response to a package, per file (migration 0082).
+
+    The GC answers by email, by returning the marked-up transmittal, or by phone;
+    a human logs it here. The package's own status is derived from its files, not
+    accepted from the client. A package outside this project, a file outside the
+    package, or a package that was never delivered is a 400.
+    """
+    require_pm_project(project_id)
+    try:
+        return submittal_approval.record_verdicts(
+            project_id, package_id, body.model_dump(), user.id
+        )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+
+
+@router.get("/approval/packages/{package_id}/resend-options")
+def approval_resend_options(
+    project_id: str,
+    package_id: str,
+    _: CurrentUser = Depends(require_pm_read),
+):
+    """What the resend modal offers: the project's available submittals merged
+    with the files this package contains, each annotated with the verdict it came
+    back with so the caller can pre-tick the rejected ones."""
+    require_pm_project(project_id)
+    try:
+        return submittal_approval.resend_options(project_id, package_id)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+
+
+@router.post(
+    "/approval/packages/{package_id}/resend", dependencies=[Depends(bulk_send_rate_limit)]
+)
+def approval_resend(
+    project_id: str,
+    package_id: str,
+    body: SubmittalApprovalIn,
+    user: CurrentUser = Depends(require_pm_write),
+):
+    """Resubmit selected files in answer to a GC's review — a NEW package, with
+    its own number and verdicts, linked back to the one it answers. Same body and
+    same failure semantics as the plain send above."""
+    require_pm_project(project_id)
+    try:
+        result = submittal_approval.create_and_send(
+            project_id, body.model_dump(), user.id, supersedes_package_id=package_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+    audit(
+        user.id,
+        "submittal_approval.resend_endpoint",
+        "project",
+        project_id,
+        {
+            "package_id": result["package_id"],
+            "number": result["number"],
+            "supersedes_package_id": package_id,
+            "send_status": result["send_status"],
+            "files": result["file_count"],
+        },
+    )
+    return result
+
+
+@router.post(
+    "/approval/uploads",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(upload_rate_limit)],
+)
+async def approval_upload(
+    project_id: str,
+    material_category_id: str | None = Form(None),
+    file: UploadFile = File(...),
+    user: CurrentUser = Depends(require_pm_write),
+):
+    """Stage a submittal the sender is adding to a package. The file is archived
+    into the Documents hub immediately and comes back as a `pm:<id>` key the
+    modal includes in its selection — so the send endpoint stays JSON.
+
+    PDF-only, enforced by extension AND magic bytes (the extension alone is
+    spoofable), matching the bank-upload route above.
+    """
+    require_pm_project(project_id)
+    filename = file.filename or "submittal.pdf"
+    content = await _read_capped(file, get_settings().upload_max_bytes)
+    if not filename.lower().endswith(".pdf") or content[:5] != b"%PDF-":
+        raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "Submittals must be PDF files")
+    return await run_in_threadpool(
+        submittal_approval.stage_upload,
+        project_id,
+        material_category_id or None,
+        filename,
+        content,
+        user.id,
+    )
+
+
+@router.post("/approval/packages", dependencies=[Depends(bulk_send_rate_limit)])
+def approval_send(
+    project_id: str,
+    body: SubmittalApprovalIn,
+    user: CurrentUser = Depends(require_pm_write),
+):
+    """Build a submittal approval package and email it to the selected GC
+    contacts. A bad selection or an id outside the project is a 400; a delivery
+    failure comes back as send_status='failed' in the body (the package row still
+    exists, so the attempt stays in the log)."""
+    require_pm_project(project_id)
+    try:
+        result = submittal_approval.create_and_send(project_id, body.model_dump(), user.id)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+    audit(
+        user.id,
+        "submittal_approval.endpoint",
+        "project",
+        project_id,
+        {
+            "package_id": result["package_id"],
+            "number": result["number"],
+            "send_status": result["send_status"],
+            "files": result["file_count"],
+        },
+    )
+    return result
+
+
 # ── Other submittals: fill from the Submittal Bank (migration 0074) ──────────
 #
 # For materials NOT requested from a vendor, the team either PULLS a matching
@@ -161,8 +328,9 @@ def bank_pull(
     body: PmBankPullIn,
     user: CurrentUser = Depends(require_pm_write),
 ):
-    """Fuzzy-match the given materials against the bank and link the best
-    file-bearing hit for each (skipping ones already linked or with no match)."""
+    """Fuzzy-match the given materials against the bank and link every
+    file-bearing hit for each — a product can carry several submittals — skipping
+    bank items already linked to the material."""
     require_pm_project(project_id)
     return pm_submittal_bank.pull(project_id, body.material_ids, user.id)
 

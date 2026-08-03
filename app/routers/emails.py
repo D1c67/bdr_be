@@ -30,8 +30,8 @@ _LIST_SELECT = (
     "id, mailbox, folder, direction, conversation_id, from_name, from_address, "
     "to_recipients, cc_recipients, subject, body_preview, message_at, "
     "has_attachments, status, error, project_id, matched_by, match_confidence, "
-    "match_model, suggested_project_id, suggested_confidence, assigned_at, "
-    "processed_at, created_at"
+    "match_model, pipeline_round, suggested_project_id, suggested_confidence, "
+    "assigned_at, processed_at, created_at"
 )
 # The suggested-project embed must name the FK — ingested_emails has two FKs
 # to projects (project_id and suggested_project_id).

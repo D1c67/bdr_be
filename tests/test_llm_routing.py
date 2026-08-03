@@ -242,8 +242,8 @@ def test_parse_json_loose_handles_fence_shapes():
 
 
 def test_self_hosted_merges_consecutive_same_role_turns(monkeypatch):
-    # BOQ refine of a failed run has no assistant turn → [user, user]; strict-
-    # alternation chat templates (Mistral on vLLM/TGI) 400 on that unless merged.
+    # A caller may legitimately pass consecutive same-role turns ([user, user]);
+    # strict-alternation chat templates (Mistral on vLLM/TGI) 400 unless merged.
     client, calls = _fake_sh_client(content='{"sites": []}')
     monkeypatch.setattr(llm, "_client_for", lambda route, settings: client)
     llm.complete_json(

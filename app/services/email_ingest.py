@@ -21,6 +21,12 @@ Rounds:
       provider is out of credits, attempts are NOT burned: the row waits
       (next_attempt_at) and IT_ADMIN is notified once (deduped).
 
+Every terminal write also stamps `pipeline_round` (fetch/r1/r2/r3/manual/
+retro/rescan) — the step that actually decided the email. `status` can't say
+it (a failure from any step reads 'failed') and neither can `matched_by`
+(the retro-assign writes 'conversation', the rescan writes 'subject'/'llm'),
+so this is the column the UI reads to show which round identified a message.
+
 Learn-back: every assignment upserts the conversation map (manual outranks
 auto — enforced by a conditional UPDATE, not just a read-check), manual
 assignment retro-assigns the rest of the conversation, and project creation
@@ -56,6 +62,17 @@ _SYNC_PREFIX = "pm-mail"
 _FOLDERS = ("inbox", "sentitems")
 _TERMINAL = ("processed", "failed")
 _PENDING = ("received", "id_r1", "id_r2", "id_r3")
+# `pipeline_round` (0084): which step decided the email, recorded on every
+# terminal write because `status` collapses to 'failed' from any step and
+# `matched_by` can't tell a live round from a retro-assign/rescan. Since
+# `status` names the step ABOUT to run, an email's status IS the round it is
+# on — so this map also names the round a failure happened in.
+_ROUND_BY_STATUS = {
+    "received": "fetch",
+    "id_r1": "r1",
+    "id_r2": "r2",
+    "id_r3": "r3",
+}
 _SWEEP_BATCH = 200
 _RENEW_EVERY = 20            # sweep rows between lease renewals
 _PAGE = 1000                 # PostgREST pagination page size
@@ -392,6 +409,8 @@ def _retry_or_fail(sb, email: dict, expected_status: str, exc: Exception) -> Non
             "error": error,
             "next_attempt_at": None,
             "processed_at": _now().isoformat(),
+            # Terminal: pin the round it died in, which 'failed' would erase.
+            "pipeline_round": _ROUND_BY_STATUS.get(expected_status),
         }):
             _notify_once(
                 sb,
@@ -634,6 +653,9 @@ def _finalize_r3(sb, email: dict, extra_fields: dict) -> str | None:
         "processed_at": _now().isoformat(),
         "next_attempt_at": None,
         "error": None,
+        # Reached the end of the rounds without a confident match — R3 is where
+        # this email gave up, and the Unknown pool is where it landed.
+        "pipeline_round": "r3",
         **extra_fields,
     }
     if _cas(sb, email["id"], "id_r3", fields, only_unassigned=True):
@@ -691,7 +713,8 @@ def _assign(
     """Automatic assignment. The write is guarded on BOTH the expected status
     and project_id still being null; when the guard misses because a manual
     assignment landed first, the row is finalized untouched (the manual
-    decision wins) and the map is NOT taught our candidate."""
+    decision wins — including its pipeline_round) and the map is NOT taught our
+    candidate."""
     fields = {
         "project_id": project_id,
         "matched_by": matched_by,
@@ -701,6 +724,9 @@ def _assign(
         "processed_at": _now().isoformat(),
         "error": None,
         "next_attempt_at": None,
+        # The live round is the step we were on — never 'retro'/'rescan',
+        # which assign outside the sweep.
+        "pipeline_round": _ROUND_BY_STATUS.get(expected_status),
     }
     if _cas(sb, email["id"], expected_status, fields, only_unassigned=True):
         if update_map and email.get("conversation_id"):
@@ -795,6 +821,7 @@ def assign_manual(sb, email: dict, project_id: str, user_id: str) -> tuple[dict,
         "assigned_at": now_iso,
         "error": None,
         "next_attempt_at": None,
+        "pipeline_round": "manual",
     }
     if _needs_content_fetch(email):
         fields.update({"status": "received", "attempts": 0})
@@ -852,6 +879,9 @@ def _retro_assign_conversation(sb, email: dict, project_id: str, now_iso: str) -
         "suggested_confidence": None,
         "error": None,
         "next_attempt_at": None,
+        # Not R1: these siblings never ran a round: they rode along on someone
+        # else's manual decision.
+        "pipeline_round": "retro",
     }
     # Terminal siblings whose content was fetched → fully processed.
     done = scoped(
@@ -889,6 +919,9 @@ def unassign(sb, email: dict, user_id: str) -> dict:
                 "status": "processed",
                 "error": None,
                 "next_attempt_at": None,
+                # The decision is revoked, so the round that made it no longer
+                # describes the row — cleared alongside matched_by.
+                "pipeline_round": None,
             }
         )
         .eq("id", email["id"])
@@ -1045,6 +1078,9 @@ def _rescan_assign(
                 "processed_at": _now().isoformat(),
                 "error": None,
                 "next_attempt_at": None,
+                # matched_by says subject/llm, but this ran outside the sweep —
+                # against ONE new project, not the live round.
+                "pipeline_round": "rescan",
             }
         )
         .eq("id", email["id"])

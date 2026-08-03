@@ -39,5 +39,5 @@ def test_internal_bid_date_is_never_redacted():
 
 
 def test_redaction_copies_rather_than_mutates():
-    redact_for_role(PROJECT, Role.ESTIMATING_ENGINEER)
+    redact_for_role(PROJECT, Role.ESTIMATING_ENGINEER_MATERIALS)
     assert PROJECT["actual_bid_at"] == "2026-06-24T18:00:00+00:00"

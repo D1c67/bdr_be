@@ -20,6 +20,7 @@ import logging
 from datetime import datetime, timezone
 from decimal import Decimal
 
+from app.core.features import SubApp, is_enabled
 from app.core.roles import Role
 from app.core.supabase_client import get_supabase
 from app.services.notifications import audit, dismiss_notifications, notify_role
@@ -282,12 +283,19 @@ def activate_pm_for_win(
         project_id,
         {"origin": "bid", "materials_seeded": seeded},
     )
-    notify_role(
-        Role.EXECUTIVE,
-        project_id,
-        "pm_activated",
-        f"{proj['name']} was won — now in Preconstruction",
-    )
+    # The activation ITSELF runs whether or not PM_ENABLED is on: pm_details, the
+    # stage flip and the BOQ-seeded materials are just rows, and recording them
+    # as the win happens is what lets the module be switched on later with its
+    # history already correct — no backfill, no won job silently missing from PM.
+    # What must not happen while the module is dark is telling someone about it:
+    # the bell deep-links pm_* rows to /pm/projects/{id}, which does not render.
+    if is_enabled(SubApp.PM):
+        notify_role(
+            Role.EXECUTIVE,
+            project_id,
+            "pm_activated",
+            f"{proj['name']} was won — now in Preconstruction",
+        )
     return True
 
 
@@ -358,13 +366,17 @@ def reconcile_pm_customer(project_id: str, project_name: str, winning_gc_id: str
     if existing_gc_id == winning_gc_id:
         return  # already the GC over this project
     if existing_gc_id is not None:
-        notify_role(
-            Role.EXECUTIVE,
-            project_id,
-            "pm_outcome_conflict",
-            f"The winning GC on {project_name} changed after it entered Project "
-            "Management — review the PM customer and contract value.",
-        )
+        # Same rule as the activation bell above: the reconciliation still needs
+        # doing, but nobody is asked to "review the PM customer" on a deployment
+        # where the PM record can't be opened.
+        if is_enabled(SubApp.PM):
+            notify_role(
+                Role.EXECUTIVE,
+                project_id,
+                "pm_outcome_conflict",
+                f"The winning GC on {project_name} changed after it entered Project "
+                "Management — review the PM customer and contract value.",
+            )
         return
 
     patch: dict = {"customer_gc_id": winning_gc_id}

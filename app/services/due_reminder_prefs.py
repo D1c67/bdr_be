@@ -36,10 +36,12 @@ TASK_KINDS: tuple[str, ...] = ("internal_bid", "due_from_estimator", "due_from_v
 
 # Default internal audiences (decided with G3). The estimator's inclusion for
 # due_from_estimator is handled by the poller's assignment path, not prefs.
+# The engineer split: the bid deadline and the estimator's return feed BOTH
+# engineer lanes; vendor quotes are material-numbers work only.
 _DEFAULT_AUDIENCE: dict[str, frozenset[Role]] = {
-    "internal_bid":       frozenset({Role.ESTIMATING_ENGINEER, Role.ESTIMATING_ADMIN}),
-    "due_from_estimator": frozenset({Role.ESTIMATING_ENGINEER, Role.ESTIMATING_ADMIN}),
-    "due_from_vendors":   frozenset({Role.ESTIMATING_ENGINEER}),
+    "internal_bid":       frozenset({Role.ESTIMATING_ENGINEER_MATERIALS, Role.ESTIMATING_ENGINEER_LABOR, Role.ESTIMATING_ADMIN}),
+    "due_from_estimator": frozenset({Role.ESTIMATING_ENGINEER_MATERIALS, Role.ESTIMATING_ENGINEER_LABOR, Role.ESTIMATING_ADMIN}),
+    "due_from_vendors":   frozenset({Role.ESTIMATING_ENGINEER_MATERIALS}),
 }
 
 

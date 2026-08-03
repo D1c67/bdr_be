@@ -21,6 +21,33 @@ class Settings(BaseSettings):
     # False (or clear SUPABASE_JWT_SECRET) so the shared-secret path is dead.
     legacy_hs256_enabled: bool = True
 
+    # ── Sub-app feature flags (release gating) ────────────────────────────────
+    # One deployment serves three sub-apps — Bidding, Project Management and
+    # Certified Payroll. These switches decide which of them this deployment
+    # actually serves, so the whole codebase can ship to production while a
+    # not-yet-tested module stays dark until its var is flipped.
+    #
+    # THIS BACKEND IS THE SINGLE SOURCE OF TRUTH: the frontend reads the live
+    # values from GET /features at sign-in rather than carrying its own build-
+    # time copy, so turning a module on/off is one env change here (plus the
+    # restart the platform does anyway) — no frontend rebuild, and the UI can
+    # never advertise a module the API refuses to serve.
+    #
+    # Default TRUE so development, staging and the test suite are unaffected and
+    # a forgotten var never silently kills a working module; production sets the
+    # ones that aren't ready to false. Disabled means GONE, not hidden: every
+    # route of that sub-app 404s (see app/core/features.py) and the frontend
+    # drops its nav, its switcher tile and every cross-app link into it.
+    #
+    # What each flag does NOT cover: the shared spine all three hang off —
+    # /users, /notifications, /projects (the row PM and CP also use), /vendors,
+    # /gcs, /material-categories, /submittals (the global bank, reachable from
+    # both Bidding and PM) — stays served whatever the flags say, because
+    # switching one module off must never break the other two.
+    bidding_enabled: bool = True
+    pm_enabled: bool = True
+    certified_payroll_enabled: bool = True
+
     # ── LLMs (routing lives in app/services/llm.py) ───────────────────────────
     # Master switch: when true EVERY AI feature routes to the self-hosted
     # OpenAI-compatible endpoint below and the SELF_HOSTED_* per-feature models.
@@ -158,6 +185,8 @@ class Settings(BaseSettings):
     export_rate_limit_per_min: int = 5        # in-memory ZIP export builds
     bulk_send_rate_limit_per_min: int = 3     # RFQ email fan-out
     outbound_email_rate_limit_per_hour: int = 60   # invites + package / proposal mail
+    notification_log_rate_limit_per_min: int = 30  # per-project log assembly (query fan-out)
+    report_rate_limit_per_min: int = 30       # bid-invitations report assembly
     default_rate_limit_per_min: int = 240     # generous catch-all for all other routes
 
     # Inbound vendor-reply attachment ingestion (rfq_inbox): bound how much an
@@ -165,6 +194,7 @@ class Settings(BaseSettings):
     inbound_attachment_max_bytes: int = 25 * 1024 * 1024   # skip larger attachments
     inbound_attachment_max_count: int = 10                 # per inbound message
     inbound_pdf_extract_max: int = 3                       # paid OpenAI calls per message
+    inbound_link_max_count: int = 5                        # cloud-share links fetched per message
 
     # ── PM mailbox email ingestion (services/email_ingest) ────────────────────
     # Poll a mailbox (Inbox + Sent Items) and assign every email to a project.
@@ -227,6 +257,20 @@ class Settings(BaseSettings):
                     "MFA enforcement is DISABLED in production (break-glass "
                     "acknowledged). Re-enable MFA_REQUIRED as soon as possible."
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_sub_apps(self) -> "Settings":
+        """At least one sub-app must be served — all three off is a config typo,
+        not a deployment. Every route would 404 and the frontend would have
+        nowhere to land, which is far harder to diagnose after the fact than a
+        refused boot."""
+        if not (self.bidding_enabled or self.pm_enabled or self.certified_payroll_enabled):
+            raise ValueError(
+                "Refusing to boot: BIDDING_ENABLED, PM_ENABLED and "
+                "CERTIFIED_PAYROLL_ENABLED are all false, so this deployment "
+                "would serve no application at all. Enable at least one."
+            )
         return self
 
     @model_validator(mode="after")

@@ -16,10 +16,14 @@ material flows through `revision`/`additional`/`addendum` files sent via
 /send-file-updates as their own batch. Every outbound send goes one email per
 recipient — never a single to=[all], which would leak every estimator's address
 to the others (graph_email has no BCC path).
+
+The batch-wide `message` on a send is mirrored into the Project notes thread
+(services/estimator_notes, 0080) once the send is out, so a message left here
+lands where people look for it instead of only in the email and the log.
 """
 
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -42,6 +46,7 @@ from app.core.roles import CHANGE_REVIEW_ROLES, Role
 from app.core.supabase_client import get_supabase
 from app.services import (
     estimator_email,
+    estimator_notes,
     estimator_rounds,
     file_sends,
     general_material,
@@ -132,6 +137,18 @@ def _active_assignments(project_id: str) -> list[dict]:
     ).data or []
 
 
+def _refuse_if_abandoned(proj: dict) -> None:
+    """409 once the bid is abandoned. Nothing may be pushed AT an estimator for a
+    dead bid — no new assignment, no package, no revision email — and the portal
+    already refuses to open it (`require_project_assignment`). Reversible: the
+    marker clears on /reactivate and every one of these paths reopens."""
+    if proj.get("abandoned_at"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This project is abandoned — reactivate it before sending anything to an estimator",
+        )
+
+
 def _recipient_dicts(assigns: list[dict]) -> list[dict]:
     """Turn `_active_assignments` rows into `file_sends.claim_batch` recipient
     dicts, dropping any with no email (nothing to deliver to). claim_batch
@@ -202,6 +219,36 @@ def list_estimators(_: CurrentUser = Depends(require_writer)):
     ).data or []
 
 
+# ── Dev "view as" (portal impersonation) ──────────────────────────────────
+
+
+@router.get("/estimator/impersonation-targets")
+def impersonation_targets(user: CurrentUser = Depends(get_current_user)):
+    """The active EXTERNAL estimators a dev may view the portal as.
+
+    Feeds the portal header's "View as" picker. Allowed for dev accounts and for
+    a dev currently impersonating (their effective user is the estimator, so
+    `is_dev` alone would lock them out of switching targets or exiting). Dev
+    accounts themselves are excluded — they're not external estimators.
+    """
+    if not (user.is_dev or user.impersonated_by):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Dev account required")
+    rows = (
+        get_supabase()
+        .table("profiles")
+        .select("id, full_name, email, is_dev")
+        .eq("role", Role.ESTIMATOR.value)
+        .eq("is_active", True)
+        .order("full_name")
+        .execute()
+    ).data or []
+    return [
+        {"id": r["id"], "full_name": r.get("full_name"), "email": r.get("email")}
+        for r in rows
+        if not r.get("is_dev")
+    ]
+
+
 # ── Assignment management ─────────────────────────────────────────────────
 
 
@@ -241,13 +288,14 @@ def assign_estimator(
     sb = get_supabase()
     proj = (
         sb.table("projects")
-        .select("id, name, number, due_from_estimator_at")
+        .select("id, name, number, due_from_estimator_at, abandoned_at")
         .eq("id", project_id)
         .single()
         .execute()
     ).data
     if not proj:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+    _refuse_if_abandoned(proj)
 
     # Only the profiles the /estimators picker offers are assignable — same
     # filter server-side so a stale/handcrafted id can't hand project files to a
@@ -406,6 +454,16 @@ def assign_estimator(
     # The drafts just rode along in the package — stamp them sent (first-send-wins,
     # NULL-guarded inside stamp_sent).
     file_sends.stamp_sent([f["id"] for f in pending])
+    # Mirror the message into the Project notes thread — silently, since it just
+    # went out at the top of this package email. Once per request, even when the
+    # ride-along below re-sends the same message to the other assignees: the
+    # thread is per project, not per batch.
+    estimator_notes.mirror_send_message(
+        project_id=project_id,
+        author_id=user.id,
+        message=body.message,
+        source=estimator_notes.SOURCE_PACKAGE_SEND,
+    )
 
     # Ride-along: the pre-existing assignees never received these drafts. Send
     # them their own 'revision' batch — actually emailed, not merely belled, so
@@ -652,13 +710,14 @@ def send_to_estimator(
     sb = get_supabase()
     proj = (
         sb.table("projects")
-        .select("id, name, number, due_from_estimator_at")
+        .select("id, name, number, due_from_estimator_at, abandoned_at")
         .eq("id", project_id)
         .single()
         .execute()
     ).data
     if not proj:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+    _refuse_if_abandoned(proj)
 
     assigns = _active_assignments(project_id)
     if not assigns:
@@ -740,7 +799,7 @@ def send_to_estimator(
 
 class UpdatesIn(BaseModel):
     # Optional overall message included at the top of the updates email, above
-    # the per-file notes.
+    # the per-file notes — and mirrored into the notes thread after the send.
     message: str | None = Field(default=None, max_length=4000)
     # Send exactly this staged subset. `None` keeps the legacy "everything unsent"
     # behaviour; an explicit list stops the modal from sweeping a colleague's
@@ -819,13 +878,14 @@ def send_file_updates(
     sb = get_supabase()
     proj = (
         sb.table("projects")
-        .select("id, name, number, due_from_estimator_at")
+        .select("id, name, number, due_from_estimator_at, abandoned_at")
         .eq("id", project_id)
         .single()
         .execute()
     ).data
     if not proj:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+    _refuse_if_abandoned(proj)
 
     assigns = _active_assignments(project_id)
     if not assigns:
@@ -907,6 +967,14 @@ def send_file_updates(
             first_log_id = lg["id"]
 
     file_sends.stamp_sent(sent_ids)
+    # Same mirror as the package send: the batch-wide message only — the
+    # per-section "what changed" notes stay in the Plans & Specs Log.
+    estimator_notes.mirror_send_message(
+        project_id=project_id,
+        author_id=user.id,
+        message=message,
+        source=estimator_notes.SOURCE_UPDATE_SEND,
+    )
 
     counts = _category_counts(pending)
     audit(
@@ -935,28 +1003,123 @@ def send_file_updates(
 # ── Estimator-facing minimal endpoints ────────────────────────────────────
 
 
+def _iso(ts: str | None) -> datetime | None:
+    """PostgREST timestamptz → datetime, for comparisons that cross tables (the
+    string form is consistent enough to sort within one table, but not worth
+    trusting between `file_send_batches` and `estimator_submissions`)."""
+    if not ts:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    # Both sides of the comparison come from timestamptz, so both should already
+    # be offset-aware; assume UTC rather than let one stray naive value raise.
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 @router.get("/estimator/projects", dependencies=[Depends(estimator_rate_limit)])
 def my_assigned_projects(user: CurrentUser = Depends(get_current_user)):
-    """An estimator's assigned projects — minimal fields only."""
+    """An estimator's assigned projects — one dashboard row each.
+
+    The portal dashboard mirrors the internal one minus everything internal
+    (stage, task-for, bid due) and adds the estimator's own clock instead:
+    assigned_at / due_at / turned_in_at plus a four-value `status`
+    (assigned / sent / changes / withdrawn).
+
+    `status` is "changes" only AFTER a hand-off — a package that lands before
+    the estimator has submitted anything is just their package, not a change to
+    review (the same rule the project page's "New" badge uses). Note the
+    comparison is against their LATEST round while `turned_in_at` is their
+    FIRST: a revision round answers the changes, but "turned in" must keep
+    reporting the original hand-off, which is what on-time is measured against.
+    """
     if user.role != Role.ESTIMATOR:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Estimators only")
     sb = get_supabase()
     assigns = (
         sb.table("estimator_assignments")
-        .select("project_id, due_at, expires_at")
+        .select("project_id, due_at, expires_at, created_at, returned_at")
         .eq("estimator_id", user.id)
         .is_("revoked_at", "null")
         .or_("expires_at.is.null,expires_at.gt.now()")
+        .order("created_at")
         .execute()
     ).data or []
     if not assigns:
         return []
-    ids = [a["project_id"] for a in assigns]
+    # Oldest-first above, so a re-assignment (a second live row for the same
+    # project) leaves the NEWEST row as the one the row renders from.
+    assign_by: dict[str, dict] = {a["project_id"]: a for a in assigns}
+    ids = list(assign_by)
+    # `abandoned_at` rides along because an abandoned bid KEEPS its row, reported
+    # as `withdrawn`: the row is the portal's durable record that G3 stopped work
+    # (the bell notice explaining it can be read and forgotten). The portal
+    # renders that row inert — `require_project_assignment` still 403s the
+    # project itself. The assignment is deliberately left alone either way, so
+    # /reactivate brings the work back exactly as it was.
     projs = (
-        sb.table("projects").select("id, name, number, current_stage").in_("id", ids).execute()
+        sb.table("projects")
+        .select("id, name, number, due_from_estimator_at, abandoned_at")
+        .in_("id", ids)
+        .execute()
     ).data or []
-    due_by = {a["project_id"]: a["due_at"] for a in assigns}
-    return [{**p, "due_at": due_by.get(p["id"])} for p in projs]
+
+    # My own rounds only — first submitted_at backs up a null returned_at on
+    # assignments predating 0036, last one dates the "changes" comparison.
+    subs = (
+        sb.table("estimator_submissions")
+        .select("project_id, submitted_at")
+        .eq("estimator_id", user.id)
+        .in_("project_id", ids)
+        .execute()
+    ).data or []
+    first_sub: dict[str, str] = {}
+    last_sub: dict[str, str] = {}
+    for s in subs:
+        pid, at = s["project_id"], s.get("submitted_at")
+        if not at:
+            continue
+        if pid not in first_sub or at < first_sub[pid]:
+            first_sub[pid] = at
+        if pid not in last_sub or at > last_sub[pid]:
+            last_sub[pid] = at
+
+    last_sent = file_sends.last_sent_at_by_project(ids, user.id)
+
+    out = []
+    for p in projs:
+        pid = p["id"]
+        a = assign_by.get(pid) or {}
+        turned_in_at = a.get("returned_at") or first_sub.get(pid)
+        sent_at, mine = _iso(last_sent.get(pid)), _iso(last_sub.get(pid))
+        withdrawn = bool(p.get("abandoned_at"))
+        # Withdrawn wins over every other state: there is nothing left to review
+        # on a bid G3 stopped working, so the changes flag is cleared rather
+        # than nagging the estimator toward a page that 403s.
+        has_changes = bool(turned_in_at and sent_at and mine and sent_at > mine) and not withdrawn
+        out.append(
+            {
+                "id": pid,
+                "name": p["name"],
+                "number": p["number"],
+                "assigned_at": a.get("created_at"),
+                # Per-assignment benchmark first; the project-wide date is the
+                # fallback for assignments made without one.
+                "due_at": a.get("due_at") or p.get("due_from_estimator_at"),
+                "turned_in_at": turned_in_at,
+                "status": (
+                    "withdrawn" if withdrawn
+                    else "changes" if has_changes
+                    else "sent" if turned_in_at
+                    else "assigned"
+                ),
+                "has_changes": has_changes,
+                "withdrawn": withdrawn,
+                "withdrawn_at": p.get("abandoned_at"),
+            }
+        )
+    return out
 
 
 def _before_receive_quotes(project_id: str) -> bool:
@@ -1016,7 +1179,10 @@ def submit_deliverables(
         audit(user.id, "estimator.submit", "project", project_id, {"counts": counts})
         msg = f"Estimator submitted deliverables for {proj['name']} ({proj['number']}): {summary}"
         notify_role(Role.ESTIMATING_ADMIN, project_id, "estimate_submitted", msg)
-        notify_role(Role.ESTIMATING_ENGINEER, project_id, "estimate_submitted", msg)
+        # The estimate kicks off BOTH engineer lanes (material takeoff → RFQs,
+        # labor hours → Labor Numbers), so both focuses get the ping.
+        notify_role(Role.ESTIMATING_ENGINEER_MATERIALS, project_id, "estimate_submitted", msg)
+        notify_role(Role.ESTIMATING_ENGINEER_LABOR, project_id, "estimate_submitted", msg)
         # Pull the general-material (wiring) price from the estimate in the background.
         if counts.get("estimate"):
             background.add_task(general_material.run_extraction, project_id)

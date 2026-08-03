@@ -108,7 +108,7 @@ def _send_out_window():
 
 def test_send_out_internal_benchmark_classifies():
     w = _send_out_window()
-    out = m.send_out(w, "month", "internal_bid_at", Role.ESTIMATING_ENGINEER)
+    out = m.send_out(w, "month", "internal_bid_at", Role.ESTIMATING_ENGINEER_MATERIALS)
     assert out["total"] == 3
     assert out["on_time"] == 1  # p1
     assert out["late"] == 1  # p2
@@ -119,7 +119,7 @@ def test_send_out_internal_benchmark_classifies():
 
 def test_send_out_redacts_actual_for_non_viewer():
     w = _send_out_window()
-    out = m.send_out(w, "month", "actual_bid_at", Role.ESTIMATING_ENGINEER)  # engineer cannot see actual
+    out = m.send_out(w, "month", "actual_bid_at", Role.ESTIMATING_ENGINEER_MATERIALS)  # engineer cannot see actual
     assert out["benchmark"] == "internal_bid_at"
     assert out["benchmark_redacted"] is True
     # Falls back to internal classification (p1 on time), and never leaks an actual date.
@@ -141,7 +141,7 @@ def test_send_out_actual_benchmark_for_viewer():
 def test_send_out_excludes_projects_submitted_outside_window():
     w = _send_out_window()
     w.submitted_at["p2"] = _dt(2026, 5, 1, 12)  # before window start
-    out = m.send_out(w, "month", "internal_bid_at", Role.ESTIMATING_ENGINEER)
+    out = m.send_out(w, "month", "internal_bid_at", Role.ESTIMATING_ENGINEER_MATERIALS)
     assert {r["project_id"] for r in out["projects"]} == {"p1", "p3"}
 
 

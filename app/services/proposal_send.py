@@ -265,6 +265,21 @@ def amounts_overview(project_id: str) -> dict:
     }
 
 
+# Send-out lane heads at which per-GC pricing may still be changed: from GC
+# Pricing (where the numbers are first set) through Verify and Send Out — a
+# change after documents were generated just forces a regeneration (the send
+# stamp check fails closed on stale documents). Once bids are out (submitted /
+# bid_outcome) the numbers are history.
+GC_AMOUNTS_EDITABLE_HEADS = frozenset({"gc_pricing", "verify", "send_out"})
+
+
+def assert_gc_amounts_editable(current_task: str | None) -> None:
+    if current_task not in GC_AMOUNTS_EDITABLE_HEADS:
+        raise ProposalSendError(
+            "GC pricing can no longer be changed — bids have already gone out."
+        )
+
+
 def set_gc_amounts(
     project_id: str,
     gc_id: str,
@@ -273,8 +288,9 @@ def set_gc_amounts(
     user_id: str,
 ) -> dict:
     """Set (or clear, with None) one GC's proposal amount overrides. Allowed
-    until that GC's proposal is sent/sending. An already-generated document
-    goes stale — send fails closed on the stamp mismatch until regenerated."""
+    from the GC Pricing step through Send Out, until that GC's proposal is
+    sent/sending. An already-generated document goes stale — send fails closed
+    on the stamp mismatch until regenerated."""
     sb = get_supabase()
     project = (
         sb.table("projects").select("id, current_stage").eq("id", project_id)
@@ -284,8 +300,9 @@ def set_gc_amounts(
         raise ProposalSendError("Project not found", status_code=404)
     from app.services import workflow
 
-    if workflow.load_category_state(project_id).get("send_out", {}).get("current_task") != "gc_pricing":
-        raise ProposalSendError("Project is not at the GC Pricing stage.")
+    assert_gc_amounts_editable(
+        workflow.load_category_state(project_id).get("send_out", {}).get("current_task")
+    )
     membership = (
         sb.table("project_gcs").select("id").eq("project_id", project_id)
         .eq("gc_id", gc_id).limit(1).execute()
@@ -329,18 +346,42 @@ def retire_unsent_proposals(project_id: str, gc_id: str) -> None:
     ).eq("gc_id", gc_id).in_("status", ["generated", "failed"]).execute()
 
 
-def send_out_outcome(gcs: list[dict], sent_gc_ids: set[str]) -> tuple[list[str], list[str]]:
-    """(sent, skipped) GC names for the completion record. Skipped = on the
-    project but never sent a proposal — the 'decided not to bid to them'
-    signal the stage-event note preserves."""
-    sent = sorted(g["name"] for g in gcs if g["id"] in sent_gc_ids)
+def send_out_outcome(
+    gcs: list[dict], sent_gc_ids: set[str], external_gc_ids: set[str] = frozenset()
+) -> tuple[list[str], list[str], list[str]]:
+    """(emailed, external, skipped) GC names for the completion record.
+    External = submitted through a third-party application ("Mark as
+    submitted", no email from us); skipped = on the project but never sent a
+    proposal — the 'decided not to bid to them' signal the stage-event note
+    preserves."""
+    emailed = sorted(
+        g["name"] for g in gcs if g["id"] in sent_gc_ids and g["id"] not in external_gc_ids
+    )
+    external = sorted(g["name"] for g in gcs if g["id"] in external_gc_ids)
     skipped = sorted(g["name"] for g in gcs if g["id"] not in sent_gc_ids)
-    return sent, skipped
+    return emailed, external, skipped
+
+
+def build_done_sending_note(
+    emailed: list[str], external: list[str], skipped: list[str]
+) -> str:
+    """The stage-event note "Done sending" writes — the durable prose record of
+    who got the bid and how (emailed vs. third-party) and who we chose not to
+    bid to."""
+    parts = []
+    if emailed:
+        parts.append("emailed: " + ", ".join(emailed))
+    if external:
+        parts.append("submitted via third-party application: " + ", ".join(external))
+    if skipped:
+        parts.append("skipped (no bid): " + ", ".join(skipped))
+    return "Done sending" + (" — " + "; ".join(parts) if parts else "")
 
 
 def complete_send_out(project_id: str, user_id: str) -> dict:
     """The PA's explicit "Done sending" — the only way Send Out ends. Requires
-    at least one sent proposal (a bid was actually submitted to someone);
+    at least one sent proposal (a bid was actually submitted to someone,
+    whether emailed by us or marked submitted via a third-party application);
     everything else is the PA's judgment, not a count the system enforces."""
     from app.core.roles import Role
     from app.services import workflow
@@ -355,7 +396,7 @@ def complete_send_out(project_id: str, user_id: str) -> dict:
     if workflow.load_category_state(project_id).get("send_out", {}).get("current_task") != "send_out":
         raise ProposalSendError("Project is not at the Send Out stage.")
     rows = (
-        sb.table("proposal_sends").select("gc_id, status").eq("project_id", project_id)
+        sb.table("proposal_sends").select("gc_id, status, sent_via").eq("project_id", project_id)
         .execute()
     ).data or []
     if any(r["status"] == "sending" for r in rows):
@@ -363,28 +404,40 @@ def complete_send_out(project_id: str, user_id: str) -> dict:
             "A proposal send is in progress or unresolved — wait or retry it first."
         )
     sent_gc_ids = {r["gc_id"] for r in rows if r["status"] == "sent"}
+    external_gc_ids = {
+        r["gc_id"] for r in rows if r["status"] == "sent" and r.get("sent_via") == "external"
+    }
     if not sent_gc_ids:
         raise ProposalSendError(
-            "No proposal has been sent yet — send at least one before marking the bid submitted.",
+            "No proposal has been sent yet — send at least one (or mark one as "
+            "submitted) before marking the bid submitted.",
             status_code=400,
         )
 
-    sent, skipped = send_out_outcome(_project_gcs(project_id), sent_gc_ids)
-    note = "Done sending"
-    if sent:
-        note += " — sent to: " + ", ".join(sent)
-    if skipped:
-        note += "; skipped (no bid): " + ", ".join(skipped)
+    emailed, external, skipped = send_out_outcome(
+        _project_gcs(project_id), sent_gc_ids, external_gc_ids
+    )
+    sent = sorted(emailed + external)
+    note = build_done_sending_note(emailed, external, skipped)
     # Advance the send_out category head send_out → submitted.
     workflow.advance_category(project_id, "send_out", user_id, note)
-    for role in (Role.ESTIMATING_ENGINEER, Role.EXECUTIVE):
+    # Submission news for the whole bid team: both engineer focuses + Executive
+    # (send-out is the Labor engineer's lane, but the Materials engineer's
+    # pricing just went out the door too).
+    for role in (
+        Role.ESTIMATING_ENGINEER_MATERIALS,
+        Role.ESTIMATING_ENGINEER_LABOR,
+        Role.EXECUTIVE,
+    ):
         notify_role(
             role, project_id, "submitted",
             f"Bid submitted — proposals sent for {project['name']}",
         )
     audit(user_id, "project.send_out_complete", "project", project_id,
-          {"sent_gcs": sent, "skipped_gcs": skipped})
-    return {"stage": "submitted", "sent": sent, "skipped": skipped}
+          {"sent_gcs": sent, "emailed_gcs": emailed, "external_gcs": external,
+           "skipped_gcs": skipped})
+    return {"stage": "submitted", "sent": sent, "emailed": emailed,
+            "external": external, "skipped": skipped}
 
 
 def _all_project_gc_names(project_id: str) -> list[str]:
@@ -987,6 +1040,149 @@ def send_proposals(
 
     audit(user_id, "project.send_out", "project", project_id,
           {"sent": sum(1 for r in results if r["status"] == "sent"),
+           "failed": sum(1 for r in results if r["status"] == "failed")})
+    return {"results": results, "stage": project["current_stage"]}
+
+
+# ── mark as submitted (third-party application, no email) ──────────────────
+
+
+def assert_mark_ready(
+    *,
+    row: dict,
+    draft: dict | None,
+    latest_draft_id: str | None,
+    expected_amounts: dict[str, Decimal] | None,
+) -> None:
+    """Staleness gate before recording an external submission. Nothing is
+    emailed here, so no byte-level isolation — but a row whose document no
+    longer matches the live draft/amounts would make the 'what we bid them'
+    record a lie, so it fails closed exactly like a send would."""
+    if not row.get("file_id"):
+        raise ProposalSendError("Generated document is missing — regenerate.")
+    if draft is None or draft.get("id") != row.get("draft_id"):
+        raise ProposalSendError("Proposal draft changed — regenerate documents.")
+    if latest_draft_id is not None and draft["id"] != latest_draft_id:
+        raise ProposalSendError("A newer draft exists — regenerate documents.")
+    if not draft.get("approved_at"):
+        raise ProposalSendError("Proposal lines are no longer approved — regenerate.")
+    if lines_hash(list(draft.get("lines_json") or [])) != row.get("lines_hash"):
+        raise ProposalSendError(
+            "Proposal lines changed since documents were generated — regenerate."
+        )
+    stamped = stamped_amounts(row)
+    if stamped is not None and expected_amounts is not None:
+        if stamped != (expected_amounts["material"], expected_amounts["labor"]):
+            raise ProposalSendError(
+                "Amounts changed since this document was generated — regenerate documents."
+            )
+
+
+def mark_submitted(project_id: str, user_id: str, proposal_ids: list[str]) -> dict:
+    """Record proposals as submitted WITHOUT emailing anyone — the bid went out
+    through a third-party application (GC portal etc.). Reaches the same
+    terminal state as a send (status 'sent', sent_at/sent_by stamped) so "Done
+    sending", amount locks, and the outcome grid all treat it as a submitted
+    bid — but sent_via='external' with no email_log row is the durable record
+    that we never emailed it."""
+    sb = get_supabase()
+    project = (
+        sb.table("projects").select("id, current_stage").eq("id", project_id)
+        .single().execute()
+    ).data
+    if not project:
+        raise ProposalSendError("Project not found", status_code=404)
+    from app.services import workflow
+
+    if workflow.load_category_state(project_id).get("send_out", {}).get("current_task") != "send_out":
+        raise ProposalSendError("Project is not at the Send Out stage.")
+
+    rows = (
+        sb.table("proposal_sends").select("*").eq("project_id", project_id)
+        .in_("id", proposal_ids).execute()
+    ).data or []
+    if len(rows) != len(set(proposal_ids)):
+        raise ProposalSendError(
+            "Proposals were regenerated since you opened the confirm dialog — review again.",
+            status_code=404,
+        )
+
+    drafts = {
+        d["id"]: d
+        for d in (
+            sb.table("proposal_drafts").select("*").eq("project_id", project_id).execute()
+        ).data
+        or []
+    }
+    latest_draft = max(drafts.values(), key=lambda d: d["created_at"], default=None)
+    live_gcs = {gc["id"]: gc for gc in _project_gcs(project_id)}
+    from app.routers.pricing import _get_one, _verify_originals
+
+    verification = _get_one("verifications", project_id)
+    default_amounts = (
+        proposal_amounts(_verify_originals(project_id), verification)
+        if verification and verification.get("committed_at")
+        else None
+    )
+
+    results = []
+    for row in rows:
+        if row["status"] == "sent":
+            results.append(_result(row, "skipped", None))
+            continue
+        if row["status"] == "superseded":
+            results.append(_result(row, "skipped", "GC is no longer on this project"))
+            continue
+        if row["status"] == "sending":
+            results.append(_result(row, "skipped", "an email send is in progress for this GC"))
+            continue
+        try:
+            live_gc = live_gcs.get(row["gc_id"])
+            assert_mark_ready(
+                row=row,
+                draft=drafts.get(row.get("draft_id")),
+                latest_draft_id=latest_draft["id"] if latest_draft else None,
+                expected_amounts=(
+                    resolve_gc_amounts(default_amounts, live_gc)
+                    if default_amounts is not None and live_gc
+                    else None
+                ),
+            )
+        except ProposalSendError as exc:
+            results.append(_result(row, "failed", str(exc)))
+            continue
+        claimed = (
+            sb.table("proposal_sends")
+            .update(
+                {
+                    "status": "sent",
+                    "sent_via": "external",
+                    "sent_at": datetime.now(timezone.utc).isoformat(),
+                    "sent_by": user_id,
+                    # No recipients and no email — their absence IS the record.
+                    "gc_email": None,
+                    "email_log_id": None,
+                    "error": None,
+                }
+            )
+            .eq("id", row["id"])
+            .in_("status", ["generated", "failed"])
+            .execute()
+        ).data
+        if not claimed:
+            results.append(_result(row, "skipped", "claimed by another request"))
+            continue
+        row = claimed[0]
+        audit(user_id, "proposal.mark_submitted", "proposal_send", row["id"],
+              {"gc_id": row["gc_id"], "file_id": row["file_id"]})
+        results.append(_result(row, "marked", None))
+
+    # A row previously failed-by-email is resolved once it's marked submitted.
+    if any(r["status"] == "marked" for r in results):
+        dismiss_notifications(project_id=project_id, types=["proposal_send_failed"])
+
+    audit(user_id, "project.mark_submitted", "project", project_id,
+          {"marked": sum(1 for r in results if r["status"] == "marked"),
            "failed": sum(1 for r in results if r["status"] == "failed")})
     return {"results": results, "stage": project["current_stage"]}
 

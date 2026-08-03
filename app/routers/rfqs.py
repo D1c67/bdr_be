@@ -13,7 +13,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.deps import CurrentUser, get_current_user, require_writer
-from app.core.ratelimit import bulk_send_rate_limit
+from app.core.ratelimit import ai_rate_limit, bulk_send_rate_limit
 from app.core.roles import INTERNAL_ROLES
 from app.core.supabase_client import get_supabase
 from app.models.schemas import (
@@ -26,7 +26,7 @@ from app.models.schemas import (
     TaxIn,
 )
 from app.routers.pricing import taxed_amount
-from app.services import rfq_sending, workflow
+from app.services import rfq_inbox, rfq_sending, workflow
 from app.services.notifications import audit, dismiss_notifications
 
 # Quote/reply notifications for an RFQ are stale once the engineer makes that
@@ -160,13 +160,40 @@ def list_messages(project_id: str, user: CurrentUser = Depends(get_current_user)
         .table("rfq_messages")
         .select(
             "id, rfq_send_id, from_addr, subject, body_preview, received_at, "
-            "has_attachments, extraction_status, extraction_error, created_at, "
-            "rfq_sends!inner(rfq_id, conversation_id, rfqs!inner(project_id))"
+            "has_attachments, extraction_status, extraction_error, cloud_link_count, "
+            "created_at, rfq_sends!inner(rfq_id, conversation_id, rfqs!inner(project_id))"
         )
         .eq("rfq_sends.rfqs.project_id", project_id)
         .order("received_at", desc=True)
         .execute()
     ).data or []
+
+
+@router.post("/messages/{message_id}/refetch-links", dependencies=[Depends(ai_rate_limit)])
+def refetch_message_links(
+    project_id: str, message_id: str, user: CurrentUser = Depends(_PE)
+):
+    """Retry pulling the cloud-share links (OneDrive/Drive/Dropbox/Box) out of a
+    vendor reply whose files never made it in — downloads run in the request,
+    so the PE sees the outcome immediately."""
+    try:
+        result = rfq_inbox.refetch_link_files(project_id, message_id)
+    except LookupError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Message not found")
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc))
+    audit(
+        user.id,
+        "rfq.link_refetch",
+        "rfq_message",
+        message_id,
+        {
+            "links_found": result["links_found"],
+            "files_ingested": result["files_ingested"],
+            "extraction_status": result["extraction_status"],
+        },
+    )
+    return result
 
 
 # ── Quotes ────────────────────────────────────────────────────────────────

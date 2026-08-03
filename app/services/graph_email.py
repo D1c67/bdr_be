@@ -92,24 +92,35 @@ _UPLOAD_CHUNK = 10 * 320 * 1024             # upload-session chunks: 320 KiB mul
 
 
 def create_draft(
-    to_addr: str, subject: str, body: str, *, html: bool = False, sender: str | None = None
+    to_addr: str | list[str],
+    subject: str,
+    body: str,
+    *,
+    html: bool = False,
+    sender: str | None = None,
+    cc: list[str] | None = None,
 ) -> dict:
     """Create a draft in the sender mailbox; returns the Graph message resource
     including `id`, `conversationId` and `internetMessageId`.
 
     `sender` overrides the default mailbox (settings.ms_sender = bids@). Submittal
     requests pass the ingestion mailbox so their replies thread back through the
-    email-ingestion pipeline; RFQ callers omit it and keep bids@."""
+    email-ingestion pipeline; RFQ callers omit it and keep bids@.
+
+    `to_addr` accepts a single address (the vendor-facing senders, one email per
+    contact) or a list (GC-facing submittal approval packages, which go out as
+    one email to several people). `cc` adds copied recipients — they receive the
+    same message rather than a separate one, so the GC's thread stays single."""
     sender = sender or get_settings().ms_sender
-    resp = graph_request(
-        "POST",
-        f"/users/{sender}/messages",
-        json={
-            "subject": subject,
-            "body": {"contentType": "HTML" if html else "Text", "content": body},
-            "toRecipients": [{"emailAddress": {"address": to_addr}}],
-        },
-    )
+    to_list = [to_addr] if isinstance(to_addr, str) else list(to_addr)
+    message: dict = {
+        "subject": subject,
+        "body": {"contentType": "HTML" if html else "Text", "content": body},
+        "toRecipients": [{"emailAddress": {"address": a}} for a in to_list],
+    }
+    if cc:
+        message["ccRecipients"] = [{"emailAddress": {"address": a}} for a in cc]
+    resp = graph_request("POST", f"/users/{sender}/messages", json=message)
     return resp.json()
 
 

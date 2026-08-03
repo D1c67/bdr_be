@@ -302,7 +302,8 @@ def test_bounce_from_send_out(monkeypatch):
     back = [e for e in db.tables["stage_events"] if e["to_stage"] == "verify"]
     assert back and back[0]["from_stage"] == "send_out"
 
-    assert {n[0] for n in notes} == {Role.EXECUTIVE, Role.ESTIMATING_ENGINEER}
+    # The re-commit ping targets the Labor engineer (verify/send-out is their lane).
+    assert {n[0] for n in notes} == {Role.EXECUTIVE, Role.ESTIMATING_ENGINEER_LABOR}
     assert all(n[1] == "reverify_required" for n in notes)
     assert "already sent" not in notes[0][2]  # not yet dispatched at send_out
 

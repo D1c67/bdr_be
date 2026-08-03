@@ -124,3 +124,14 @@ outbound_email_rate_limit = rate_limit(
     lambda: get_settings().outbound_email_rate_limit_per_hour,
     window_seconds=3600,
 )
+# The notification log is the app's most query-amplifying read: one request
+# assembles the event view from dozens of project-scoped lookups.
+notification_log_rate_limit = rate_limit(
+    RateLimitScope.NOTIFICATION_LOG,
+    lambda: get_settings().notification_log_rate_limit_per_min,
+)
+# The bid-invitations JSON report scans several tables across the whole window
+# on every call; the export already sits behind export_rate_limit.
+report_rate_limit = rate_limit(
+    RateLimitScope.REPORT, lambda: get_settings().report_rate_limit_per_min
+)

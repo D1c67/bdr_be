@@ -18,6 +18,7 @@ from app.models.schemas import (
     ProposalAmountsIn,
     ProposalGenerateIn,
     ProposalLinesIn,
+    ProposalMarkSubmittedIn,
     ProposalSendIn,
 )
 from app.services import estimator_rounds, office_preview, proposal_scope, proposal_send
@@ -248,7 +249,7 @@ def list_proposals(project_id: str, user: CurrentUser = Depends(get_current_user
     return _proposal_rows(project_id)
 
 
-# ── per-GC amounts (numbers editor — set on the GC Pricing step) ──────────
+# ── per-GC amounts (set on GC Pricing; changeable through Send Out) ───────
 
 
 @router.get("/proposals/amounts")
@@ -330,6 +331,21 @@ def send_proposals(
             body.force,
             body.contacts,
         )
+    except ProposalSendError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+
+
+@router.post("/proposals/mark-submitted")
+def mark_proposals_submitted(
+    project_id: str,
+    body: ProposalMarkSubmittedIn,
+    user: CurrentUser = Depends(_PA_PM),
+):
+    """Record proposals as submitted WITHOUT emailing — the bid went out
+    through a third-party application (GC portal etc.). Same terminal state as
+    a send, but sent_via='external' and no email_log row."""
+    try:
+        return proposal_send.mark_submitted(project_id, user.id, body.proposal_ids)
     except ProposalSendError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
 

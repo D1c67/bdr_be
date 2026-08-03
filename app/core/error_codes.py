@@ -36,6 +36,8 @@ class RateLimitScope(StrEnum):
     FILE_EXPORT = "file_export"         # ZIP export builds
     BULK_SEND = "bulk_send"             # RFQ email fan-out
     OUTBOUND_EMAIL = "outbound_email"   # invites + package / proposal mail
+    NOTIFICATION_LOG = "notification_log"  # per-project notification-log assembly
+    REPORT = "report"                   # multi-table report assembly (bid invitations)
     DEFAULT = "api"                     # generic catch-all budget
 
 
@@ -60,6 +62,16 @@ RATE_LIMIT_HELP: dict[str, str] = {
     RateLimitScope.OUTBOUND_EMAIL: (
         "Caps branded outbound email (invites, packages, proposals) per account "
         "per hour to protect the shared mailbox's sending reputation."
+    ),
+    RateLimitScope.NOTIFICATION_LOG: (
+        "Caps per-project notification-log reads per account per minute — each "
+        "request fans out into dozens of database lookups to assemble the "
+        "event/recipient view. Wait for the Retry-After window."
+    ),
+    RateLimitScope.REPORT: (
+        "Caps multi-table report reads (Bid Invitations) per account per "
+        "minute — each request scans several tables across the whole window. "
+        "Wait for the Retry-After window."
     ),
     RateLimitScope.DEFAULT: "Generous catch-all request budget for other routes.",
 }

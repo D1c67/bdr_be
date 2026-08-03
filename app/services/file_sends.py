@@ -153,6 +153,38 @@ def batch_stats(project_id: str, estimator_id: str | None = None) -> dict:
     }
 
 
+def last_sent_at_by_project(
+    project_ids: list[str], estimator_id: str
+) -> dict[str, str]:
+    """{project_id: newest sent_at} across the batches addressed to THIS
+    estimator — `batch_stats` for a whole list in two queries.
+
+    Scoped by `_recipient_batch_ids` exactly like `batch_stats` and
+    `build_handoff`, so a project the estimator was added to late reports only
+    the sends they actually received. Projects with no send to them are absent
+    from the map (not present-with-None), so callers can test membership.
+    """
+    if not project_ids:
+        return {}
+    sb = get_supabase()
+    batches = (
+        sb.table("file_send_batches")
+        .select("id, project_id, sent_at")
+        .in_("project_id", project_ids)
+        .execute()
+    ).data or []
+    allowed = _recipient_batch_ids(sb, estimator_id)
+    newest: dict[str, str] = {}
+    for b in batches:
+        sent_at = b.get("sent_at")
+        if not sent_at or b["id"] not in allowed:
+            continue
+        pid = b["project_id"]
+        if pid not in newest or sent_at > newest[pid]:
+            newest[pid] = sent_at
+    return newest
+
+
 # ── Batch lifecycle ────────────────────────────────────────────────────────
 
 

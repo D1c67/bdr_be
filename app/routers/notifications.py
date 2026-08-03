@@ -13,7 +13,13 @@ def my_notifications(user: CurrentUser = Depends(get_current_user)):
     return (
         get_supabase()
         .table("notifications")
-        .select("*")
+        # Explicit list, not "*": the bell serves every role including the
+        # external estimator, so infrastructure columns (email_log_id) stay
+        # server-side rather than riding along to the least-trusted client.
+        .select(
+            "id, user_id, project_id, type, message, read_at, created_at,"
+            " dismissed_at, rfq_id"
+        )
         .eq("user_id", user.id)
         # Auto-dismissed (task complete) rows drop out of the bell entirely.
         # Filter before the limit so they don't consume the 50-row budget.

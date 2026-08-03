@@ -41,6 +41,11 @@ class ProfileOut(BaseModel):
     # Defaults to English so reads degrade gracefully if migration 0040 hasn't
     # been applied yet.
     locale: SupportedLocale = "en"
+    # When this user first finished the estimator portal tour (migration 0092).
+    # NULL/absent = offer it. Defaults to None so reads degrade gracefully
+    # before the column is deployed — the portal then offers the tour, which is
+    # the safe direction to be wrong in.
+    estimator_tour_completed_at: datetime | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -192,8 +197,80 @@ ScopeFit = Literal["yes", "no", "maybe", "other", "unknown"]
 
 # Membership is just the link — any GC on a project is a bid candidate; who
 # we actually bid to is recorded by which proposals were sent (Send Out).
+# needs_by is per-GC because GCs on the same bid can want our number on
+# different days. Bounded to a sane window: a stored 9999-12-31 (typo or
+# malice) overflows the +1-day deadline math in the Bid Invitations report and
+# would 500 the report for everyone until the row is found and fixed.
+_NEEDS_BY_MIN = date(2000, 1, 1)
+_NEEDS_BY_MAX = date(2100, 12, 31)
+
+
+def _check_needs_by(v: date | None) -> date | None:
+    if v is not None and not (_NEEDS_BY_MIN <= v <= _NEEDS_BY_MAX):
+        raise ValueError("needs_by must be between 2000-01-01 and 2100-12-31")
+    return v
+
+
 class ProjectGCIn(BaseModel):
     gc_id: str
+    needs_by: date | None = None
+
+    _needs_by_bounds = field_validator("needs_by")(_check_needs_by)
+
+
+class ProjectGCUpdate(BaseModel):
+    needs_by: date | None = None
+
+    _needs_by_bounds = field_validator("needs_by")(_check_needs_by)
+
+
+# The bidding-site link is rendered as an href on the project page, so the
+# scheme is allow-listed here rather than trusted: without this, `javascript:`
+# or `data:` text typed into the field would become a working XSS payload the
+# moment someone clicked the button.
+_BIDDING_URL_MAX = 2000
+
+# Leading "<word>:" — a candidate scheme. Only a candidate: a host with a port
+# ("example.com:8080", "localhost:3000") wears the same shape, so what follows
+# decides which one it is.
+_SCHEME_RE = re.compile(r"^([A-Za-z][A-Za-z0-9+.\-]*):(.*)$", re.DOTALL)
+
+
+def _clean_bidding_url(value: str | None) -> str | None:
+    """Normalize a bidding-site URL; empty/whitespace reads as "not provided".
+
+    People paste what they copied — "app.buildingconnected.com/projects/abc" as
+    often as a full link — so a missing scheme is filled in with https:// rather
+    than bounced back at them. A URL that names some *other* scheme is still
+    refused, because this ends up as an href on the project page.
+    """
+    if value is None:
+        return None
+    url = value.strip()
+    if not url:
+        return None
+    if len(url) > _BIDDING_URL_MAX:
+        raise ValueError(f"bidding_url may not exceed {_BIDDING_URL_MAX} characters")
+    scheme_match = _SCHEME_RE.match(url)
+    if scheme_match:
+        scheme, rest = scheme_match.group(1).lower(), scheme_match.group(2)
+        if scheme in ("http", "https"):
+            # Also repairs a fumbled "https:/example.com" / "https:example.com".
+            url = f"{scheme}://{rest.lstrip('/')}"
+        elif "." in scheme or rest[:1].isdigit():
+            # Not a scheme at all — a host with a port, or a host whose TLD the
+            # colon follows. Treat it like any other scheme-less paste.
+            url = f"https://{url}"
+        else:
+            raise ValueError("bidding_url must be a web link (http:// or https://)")
+    else:
+        # "//host/path" is protocol-relative; everything else is a bare host.
+        url = f"https://{url.lstrip('/')}" if url.startswith("//") else f"https://{url}"
+    # Whatever we built has to have an actual host behind the scheme — "https://"
+    # on its own, or a paste that was nothing but slashes, is not a link.
+    if not re.match(r"^https?://[^/\s]", url, re.IGNORECASE):
+        raise ValueError("bidding_url must be a web link (http:// or https://)")
+    return url
 
 
 class ProjectCreate(BaseModel):
@@ -212,6 +289,11 @@ class ProjectCreate(BaseModel):
     due_from_vendors_at: datetime
     notes: str | None = None
     address: str | None = None
+    # Link to the site hosting the bid details (BuildingConnected, iSqFt, a GC's
+    # own portal). Required at intake: either a URL, or no_bidding_url ticked to
+    # say this project has none. The two are mutually exclusive.
+    bidding_url: str | None = None
+    no_bidding_url: bool = False
     # True when the project came to us from NGEM (checkbox on the intake form).
     is_ngem: bool = False
     # Go/No-Go scoring answers (reference only for scoring, but required at intake)
@@ -225,6 +307,24 @@ class ProjectCreate(BaseModel):
     est_value_band: EstValueBand
     scope_fit: ScopeFit
     gcs: list[ProjectGCIn] = []
+
+    @field_validator("bidding_url")
+    @classmethod
+    def _check_bidding_url(cls, v: str | None) -> str | None:
+        return _clean_bidding_url(v)
+
+    @model_validator(mode="after")
+    def _bidding_url_answered(self) -> "ProjectCreate":
+        """Intake must answer the bidding link one way or the other."""
+        if self.no_bidding_url and self.bidding_url:
+            raise ValueError(
+                "Provide a bidding_url or set no_bidding_url — not both"
+            )
+        if not self.no_bidding_url and not self.bidding_url:
+            raise ValueError(
+                "A bidding_url is required; set no_bidding_url if the project has no link"
+            )
+        return self
 
 
 class ProjectUpdate(BaseModel):
@@ -242,6 +342,10 @@ class ProjectUpdate(BaseModel):
     due_from_vendors_at: datetime | None = None
     notes: str | None = None
     address: str | None = None
+    # Cross-field consistency (URL xor "no link") is settled by the router, which
+    # is the only place that knows which half of the pair the patch touched.
+    bidding_url: str | None = None
+    no_bidding_url: bool | None = None
     is_ngem: bool | None = None
     # Go/No-Go scoring answers (reference only)
     project_type: ProjectType | None = None
@@ -253,6 +357,11 @@ class ProjectUpdate(BaseModel):
     subs_needed: SubsNeeded | None = None
     est_value_band: EstValueBand | None = None
     scope_fit: ScopeFit | None = None
+
+    @field_validator("bidding_url")
+    @classmethod
+    def _check_bidding_url(cls, v: str | None) -> str | None:
+        return _clean_bidding_url(v)
 
 
 class CategoryStateOut(BaseModel):
@@ -281,6 +390,12 @@ class ProjectOut(BaseModel):
     due_from_vendors_at: datetime | None = None
     notes: str | None
     address: str | None = None
+    # Bidding-site link, and the "this project has no link" answer. Defaults let
+    # reads degrade gracefully before migration 0079 is applied; a project
+    # created before it reads as unanswered (null + false), which the UI shows
+    # as "add a bidding link".
+    bidding_url: str | None = None
+    no_bidding_url: bool = False
     # True when the project originated from NGEM. Default lets reads degrade
     # gracefully before migration 0046 is applied.
     is_ngem: bool = False
@@ -521,8 +636,53 @@ class BoqAnalysisStart(BaseModel):
     boq_file_id: str | None = None
 
 
-class BoqRefineIn(BaseModel):
-    message: str
+class BoqItemSrc(BaseModel):
+    """An item's position in the analysis's pristine result_json —
+    sites[s].material_groups[g].items[i]. Rides through drafts and the confirm
+    payload so the server can diff the user's output against the model's."""
+
+    s: int = Field(..., ge=0)
+    g: int = Field(..., ge=0)
+    i: int = Field(..., ge=0)
+
+
+class BoqOverrideIn(BaseModel):
+    """One touched item in the correction draft. quantity/unit are the item's
+    CURRENT effective values (may equal the original); category_id null means
+    "inherit the group mapping"; removed excludes the item from confirm."""
+
+    src: BoqItemSrc
+    quantity: Decimal | None = None
+    unit: str | None = Field(None, max_length=80)
+    category_id: str | None = Field(None, max_length=64)
+    removed: bool = False
+
+
+class BoqDraftBody(BaseModel):
+    # Sparse — an entry exists only for touched items — so the cap comfortably
+    # exceeds any real correction pass while bounding the stored jsonb.
+    overrides: list[BoqOverrideIn] = Field(default_factory=list, max_length=5000)
+    # Mirrors the panel's group→category Select ("" = Hold/skip).
+    group_mappings: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("group_mappings")
+    @classmethod
+    def _cap_mappings(cls, v: dict[str, str]) -> dict[str, str]:
+        if len(v) > 200:
+            raise ValueError("Too many group mappings in one draft")
+        # Key/value length caps too — the draft is stored verbatim as jsonb and
+        # echoed back on every /latest, so unbounded strings would be amplified.
+        for name, cat_id in v.items():
+            if len(name) > 300:
+                raise ValueError("Group name too long")
+            if len(cat_id) > 64:
+                raise ValueError("Category id too long")
+        return v
+
+
+class BoqDraftIn(BaseModel):
+    # null clears the stored draft.
+    draft: BoqDraftBody | None = None
 
 
 class RFQLineItemIn(BaseModel):
@@ -532,6 +692,9 @@ class RFQLineItemIn(BaseModel):
     quantity: Decimal | None = None
     unit: str | None = None
     notes: str | None = None
+    # Where this item sits in the model's result_json (for the training diff).
+    # Optional so pre-corrections confirm payloads still validate.
+    src: BoqItemSrc | None = None
 
 
 class RFQGroupIn(BaseModel):
@@ -541,11 +704,36 @@ class RFQGroupIn(BaseModel):
     items: list[RFQLineItemIn] = Field(default_factory=list, max_length=2000)
 
 
+class BoqGroupMapIn(BaseModel):
+    group_name: str = Field(..., max_length=300)
+    material_category_id: str
+
+
 class BoqConfirmIn(BaseModel):
     # One group per material category; sites already merged client-side, invented
     # categories already mapped to a material_category_id. Material categories are
     # a small fixed table, so a modest cap can't reject legitimate input.
     groups: list[RFQGroupIn] = Field(..., min_length=1, max_length=50)
+    # Model group names the reviewer left on Hold — neutral for the training
+    # diff: their items are never counted as removed.
+    held_groups: list[str] = Field(default_factory=list, max_length=200)
+    # The panel's group→category mapping at confirm time, so the training diff
+    # knows which model groups went in and under which category.
+    group_mappings: list[BoqGroupMapIn] = Field(default_factory=list, max_length=200)
+
+    @field_validator("held_groups")
+    @classmethod
+    def _cap_held(cls, v: list[str]) -> list[str]:
+        if any(len(name) > 300 for name in v):
+            raise ValueError("Held group name too long")
+        return v
+
+
+class BoqTrainingReviewIn(BaseModel):
+    """Dev Training page sign-off on a captured example; false clears it."""
+
+    reviewed: bool
+    note: str | None = Field(None, max_length=2000)
 
 
 # ── Material categories ────────────────────────────────────────────────────
@@ -654,6 +842,12 @@ class ProposalSendIn(BaseModel):
         if v is not None and (len(v) > 100 or any(len(ids) > 50 for ids in v.values())):
             raise ValueError("Too many recipient selections")
         return v
+
+
+class ProposalMarkSubmittedIn(BaseModel):
+    # The bid went out through a third-party application (GC portal etc.), not
+    # our email — record the listed proposals as submitted without sending.
+    proposal_ids: list[str] = Field(..., min_length=1, max_length=100)
 
 
 # ── Win / Loss (bid outcome) — final step ───────────────────────────────────
@@ -1069,6 +1263,13 @@ class PmMaterialIn(BaseModel):
     site_name: str | None = Field(None, max_length=300)
 
 
+class PmMaterialBulkIn(BaseModel):
+    """A batch of material lines typed in one sitting (the add-materials modal).
+    Bounded so a runaway paste can't turn into an unbounded insert."""
+
+    materials: list[PmMaterialIn] = Field(min_length=1, max_length=200)
+
+
 class PmMaterialUpdate(BaseModel):
     material_category_id: str | None = None
     description: str | None = Field(None, min_length=1, max_length=2000)
@@ -1113,6 +1314,63 @@ class SubmittalRequestIn(BaseModel):
     def _blank_body_means_default(cls, v: str | None) -> str | None:
         # A whitespace-only edit means "no custom body", never an empty email.
         return v if v and v.strip() else None
+
+
+# ── Submittal approval packages (GC-facing, migration 0081) ──────────────────
+
+
+class SubmittalApprovalGroup(BaseModel):
+    """One category's contribution to an approval package: which of that
+    category's available files the sender ticked. `material_category_id` is null
+    for the Uncategorized bucket. Keys are opaque ("att:"/"bank:"/"pm:") and are
+    validated against the project's available set on the server — never trusted."""
+
+    material_category_id: str | None = None
+    file_keys: list[str] = Field(default_factory=list, max_length=300)
+
+
+class SubmittalApprovalIn(BaseModel):
+    """Send collected submittals to the GC for approval — one email, To + CC."""
+
+    groups: list[SubmittalApprovalGroup] = Field(..., min_length=1, max_length=100)
+    # gc_contacts ids. The fan-out is one message, so these bound the header
+    # size rather than a send count, but a cap keeps a pasted list sane.
+    recipient_contact_ids: list[str] = Field(..., min_length=1, max_length=50)
+    cc_contact_ids: list[str] = Field(default_factory=list, max_length=50)
+    message: str | None = Field(None, max_length=20_000)
+
+    @field_validator("message")
+    @classmethod
+    def _blank_message_is_none(cls, v: str | None) -> str | None:
+        return v if v and v.strip() else None
+
+
+# Mirror of submittal_package_items.approval_status (0081) — no 'partial' here:
+# one file is approved, approved with comments, or rejected. 'partial' belongs
+# to the package alone, and is derived from these rather than sent by the client.
+SubmittalItemVerdict = Literal["pending", "approved", "approved_as_noted", "rejected"]
+
+
+class SubmittalVerdictItemIn(BaseModel):
+    """One file's verdict. `id` is a submittal_package_items id, re-validated
+    server-side against the package it's being recorded on."""
+
+    id: str
+    approval_status: SubmittalItemVerdict
+    response_notes: str | None = Field(None, max_length=5_000)
+
+
+class SubmittalVerdictIn(BaseModel):
+    """Record the GC's response to an approval package, per file.
+
+    Only the items listed are touched, so the modal can save one row or all of
+    them. The PACKAGE's headline status is deliberately not accepted here — it is
+    derived from the items (submittal_approval._rollup) so the two can never
+    disagree.
+    """
+
+    items: list[SubmittalVerdictItemIn] = Field(default_factory=list, max_length=300)
+    response_notes: str | None = Field(None, max_length=20_000)
 
 
 # ── Submittal Bank ───────────────────────────────────────────────────────────

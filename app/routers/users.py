@@ -5,6 +5,7 @@ created with the assigned role.
 """
 
 import logging
+from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -65,6 +66,16 @@ def _confirm_url(props) -> str:
     return f"{get_settings().frontend_url}/auth/confirm?{qs}"
 
 
+def _refuse_while_impersonating(user: CurrentUser) -> None:
+    """Durable self-profile edits (name/locale, MFA reset) target `user.id` —
+    under dev impersonation that is the REAL estimator's account, so refuse
+    rather than let a dev testing the portal rewrite someone's identity."""
+    if user.impersonated_by:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Not available while viewing as an estimator"
+        )
+
+
 @router.get("/me", response_model=ProfileOut)
 def me(user: CurrentUser = Depends(get_current_user)):
     return (
@@ -80,6 +91,7 @@ def update_me(body: UpdateMeIn, user: CurrentUser = Depends(get_current_user)):
     Declared before `PATCH /{user_id}` so the literal path wins. Email and role
     stay admin-managed via the endpoints below.
     """
+    _refuse_while_impersonating(user)
     patch: dict = {}
     if body.full_name is not None:
         patch["full_name"] = body.full_name
@@ -100,10 +112,38 @@ def reset_my_mfa(user: CurrentUser = Depends(get_current_user)):
     user to /auth/mfa to re-enroll; `mfa_enrolled` is reset so the AAL1 hint stays
     correct. Declared before `PATCH /{user_id}` so the literal path wins.
     """
+    _refuse_while_impersonating(user)
     _delete_user_factors(user.id)
     updated = sb_update(user.id, {"mfa_enrolled": False})
     audit(user.id, "user.mfa.self_reset", "profile", user.id, {})
     return updated
+
+
+@router.post("/me/estimator-tour", response_model=ProfileOut)
+def complete_estimator_tour(user: CurrentUser = Depends(get_current_user)):
+    """Stop offering the external estimator portal's first-run tour to the caller.
+
+    Called when the tour is finished AND when it is dismissed part way: from the
+    portal's point of view those are the same answer ("don't ask me again"), and
+    a tour that re-opened itself because someone closed it would be a worse
+    failure than one that never re-opened. Replaying it from the documentation
+    page does not clear the stamp, so the value stays the FIRST completion.
+
+    Not audited: unlike the self-writes above it changes nothing about the
+    account's identity or access. Declared before `PATCH /{user_id}` with the
+    rest of the /me routes so the literal path wins.
+    """
+    _refuse_while_impersonating(user)
+    sb = get_supabase()
+    rows = sb.table("profiles").select("*").eq("id", user.id).limit(1).execute().data
+    if not rows:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    if rows[0].get("estimator_tour_completed_at"):
+        # Already stamped — a replay must not rewrite when they first finished.
+        return rows[0]
+    return sb_update(
+        user.id, {"estimator_tour_completed_at": datetime.now(timezone.utc).isoformat()}
+    )
 
 
 @router.get("/me/notification-prefs", response_model=NotificationPrefsOut)

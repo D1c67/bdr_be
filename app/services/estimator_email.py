@@ -23,6 +23,7 @@ from app.services.email_branding import (
     LOGO_CONTENT_ID,
     LOGO_FILENAME,
     _BORDER,
+    _button,
     _MUTED,
     _NAVY,
     logo_bytes,
@@ -194,17 +195,23 @@ def render_sections(files: list[dict], signer, section_notes: dict | None = None
     return "".join(out)
 
 
-def _message_block(message: str | None) -> str:
-    if not (message or "").strip():
+def _labeled_block(label: str, text: str | None) -> str:
+    """The navy-ruled callout used for free text from the team — the batch-wide
+    message on a package/updates send, the reason on a withdrawal notice."""
+    if not (text or "").strip():
         return ""
     return (
         f'<div style="margin:0 0 16px;padding:12px 16px;border-left:3px solid {_NAVY};'
         f'background-color:#f5f6f9;border-radius:0 8px 8px 0;">'
         f'<div style="font-size:12px;font-weight:bold;color:{_MUTED};'
-        f'letter-spacing:1px;">MESSAGE FROM THE G3 TEAM</div>'
+        f'letter-spacing:1px;">{html.escape(label)}</div>'
         f'<div style="padding-top:4px;">'
-        f"{html.escape(message.strip()).replace(chr(10), '<br>')}</div></div>"
+        f"{html.escape(text.strip()).replace(chr(10), '<br>')}</div></div>"
     )
+
+
+def _message_block(message: str | None) -> str:
+    return _labeled_block("MESSAGE FROM THE G3 TEAM", message)
 
 
 def render_package_email(
@@ -424,6 +431,97 @@ def send_package(
         to=to,
         subject=f"[BDR] Estimate request{subject_suffix} — {proj['name']} ({proj['number']})",
         body_html=body_html,
+        inline_images=[(LOGO_CONTENT_ID, LOGO_FILENAME, logo_bytes(), "image/jpeg")],
+        project_id=proj["id"],
+        sent_by=sent_by,
+    )
+
+
+# ── Lifecycle notices (withdrawn / reactivated) ─────────────────────────────
+# No file links: these say the WORK changed state, not that files did. The
+# button lands on the portal home rather than the project — a withdrawn project
+# 403s on its detail route (deps.require_project_assignment), so deep-linking
+# into it would only dead-end the reader.
+
+
+def _portal_url() -> str:
+    return f"{get_settings().frontend_url.rstrip('/')}/estimator"
+
+
+def _project_line(proj: dict, sentence: str) -> str:
+    return (
+        f'<p style="margin:0 0 14px;">Project '
+        f"<b>{html.escape(proj['name'])}</b> ({html.escape(proj['number'])}) "
+        f"{sentence}</p>"
+    )
+
+
+def render_withdrawn_email(
+    *, proj: dict, recipient_name: str | None, note: str | None = None
+) -> str:
+    """The "stop work" notice: the bid was abandoned while this estimator held
+    it. `note` is the internal reason, included only when the team wrote one."""
+    body = (
+        f'<p style="margin:0 0 14px;color:{_MUTED};">{_greeting(recipient_name)}</p>'
+        + _project_line(proj, "has been <b>withdrawn</b> — G3 is no longer bidding it.")
+        + _labeled_block("REASON", note)
+        + '<p style="margin:0 0 14px;">Please stop work on this estimate. Nothing '
+        "further is due from us or from you.</p>"
+        + '<p style="margin:0 0 14px;">The project now shows as <b>Withdrawn</b> in '
+        "your BDR portal and its files are no longer available there. If that "
+        "changes, we'll email you.</p>"
+        + _button("Open your portal", _portal_url())
+    )
+    return render_branded_html(body, subtitle="PROJECT WITHDRAWN")
+
+
+def render_reactivated_email(*, proj: dict, recipient_name: str | None) -> str:
+    """The reverse notice: a withdrawn bid is live again and back on their desk."""
+    due = proj.get("due_from_estimator_at") or "TBD"
+    body = (
+        f'<p style="margin:0 0 14px;color:{_MUTED};">{_greeting(recipient_name)}</p>'
+        + _project_line(proj, "is <b>active again</b> — G3 is bidding it after all.")
+        + '<p style="margin:0 0 6px;">Due back from estimator: '
+        f"<b>{html.escape(str(due))}</b></p>"
+        + '<p style="margin:14px 0;">Your assignment was never revoked, so the '
+        "project and its full file package are waiting for you in the BDR portal "
+        "exactly as you left them.</p>"
+        + _button("Open your portal", _portal_url())
+    )
+    return render_branded_html(body, subtitle="PROJECT REACTIVATED")
+
+
+def send_withdrawn(
+    *,
+    proj: dict,
+    to: list[str],
+    recipient_name: str | None = None,
+    note: str | None = None,
+    sent_by: str | None = None,
+) -> dict:
+    """Email one estimator that the bid they hold has been abandoned."""
+    return graph_email.send_mail(
+        to=to,
+        subject=f"[BDR] Project withdrawn — {proj['name']} ({proj['number']})",
+        body_html=render_withdrawn_email(proj=proj, recipient_name=recipient_name, note=note),
+        inline_images=[(LOGO_CONTENT_ID, LOGO_FILENAME, logo_bytes(), "image/jpeg")],
+        project_id=proj["id"],
+        sent_by=sent_by,
+    )
+
+
+def send_reactivated(
+    *,
+    proj: dict,
+    to: list[str],
+    recipient_name: str | None = None,
+    sent_by: str | None = None,
+) -> dict:
+    """Email one estimator that a withdrawn bid is back on."""
+    return graph_email.send_mail(
+        to=to,
+        subject=f"[BDR] Project reactivated — {proj['name']} ({proj['number']})",
+        body_html=render_reactivated_email(proj=proj, recipient_name=recipient_name),
         inline_images=[(LOGO_CONTENT_ID, LOGO_FILENAME, logo_bytes(), "image/jpeg")],
         project_id=proj["id"],
         sent_by=sent_by,

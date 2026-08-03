@@ -63,6 +63,11 @@ def decide(
     ).data
     if not project:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+    if project.get("abandoned_at"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This project is abandoned — reactivate it before deciding Go/No-Go",
+        )
     state = workflow.load_category_state(project_id)
     if state.get("intake", {}).get("current_task") != "go_no_go" or state["intake"]["status"] != "active":
         raise HTTPException(status.HTTP_409_CONFLICT, "Project is not in the Go/No-Go step")

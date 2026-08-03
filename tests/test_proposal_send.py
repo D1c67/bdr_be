@@ -68,6 +68,14 @@ def test_resolve_gc_amounts_override_wins_per_figure():
     ) == {"material": Decimal("100"), "labor": Decimal("200"), "total": Decimal("300")}
 
 
+def test_gc_amounts_editable_from_gc_pricing_through_send_out():
+    for head in ("gc_pricing", "verify", "send_out"):
+        psend.assert_gc_amounts_editable(head)  # must not raise
+    for head in ("submitted", "bid_outcome", None):
+        with pytest.raises(ProposalSendError, match="no longer be changed"):
+            psend.assert_gc_amounts_editable(head)
+
+
 def test_stamped_amounts_require_both_figures():
     assert psend.stamped_amounts({}) is None
     assert psend.stamped_amounts({"material_amount": 41188, "labor_amount": None}) is None
@@ -281,3 +289,71 @@ def test_isolation_rejects_bytes_not_carrying_stamped_amounts():
     kwargs["expected_amounts"].update(material=Decimal("50000"), total=Decimal("90950"))
     with pytest.raises(Exception, match="missing from the document"):
         assert_send_isolation(**kwargs)
+
+
+# ── mark as submitted (third-party application, no email) ──────────────────
+
+
+def _mark_ready_kwargs() -> dict:
+    digest = psend.lines_hash(LINES)
+    return dict(
+        row={
+            "id": "ps-1",
+            "file_id": "f-1",
+            "draft_id": "d-1",
+            "lines_hash": digest,
+            "material_amount": "41188",
+            "labor_amount": "40950",
+        },
+        draft={"id": "d-1", "approved_at": "2026-06-10T00:00:00Z", "lines_json": LINES},
+        latest_draft_id="d-1",
+        expected_amounts={
+            "material": Decimal("41188"),
+            "labor": Decimal("40950"),
+            "total": Decimal("82138"),
+        },
+    )
+
+
+def test_mark_ready_happy_path_passes():
+    psend.assert_mark_ready(**_mark_ready_kwargs())
+
+
+@pytest.mark.parametrize(
+    "mutate, match",
+    [
+        (lambda k: k["row"].update(file_id=None), "document is missing"),
+        (lambda k: k.update(draft=None), "draft changed"),
+        (lambda k: k["draft"].update(id="d-2"), "draft changed"),
+        (lambda k: k.update(latest_draft_id="d-9"), "newer draft exists"),
+        (lambda k: k["draft"].update(approved_at=None), "no longer approved"),
+        (lambda k: k["draft"].update(lines_json=LINES + ["Furnish and install panels."]),
+         "lines changed"),
+        (lambda k: k["row"].update(material_amount="50000"), "Amounts changed"),
+        (lambda k: k["expected_amounts"].update(labor=Decimal("45000")), "Amounts changed"),
+    ],
+)
+def test_mark_ready_staleness_raises(mutate, match):
+    kwargs = _mark_ready_kwargs()
+    mutate(kwargs)
+    with pytest.raises(ProposalSendError, match=match):
+        psend.assert_mark_ready(**kwargs)
+
+
+def test_mark_ready_legacy_rows_without_stamps_skip_amounts_check():
+    kwargs = _mark_ready_kwargs()
+    kwargs["row"].update(material_amount=None, labor_amount=None)
+    kwargs["expected_amounts"] = {
+        "material": Decimal("1"),
+        "labor": Decimal("2"),
+        "total": Decimal("3"),
+    }
+    psend.assert_mark_ready(**kwargs)
+
+
+def test_mark_ready_without_live_amounts_skips_amounts_check():
+    # Defensive: verification uncommitted (shouldn't happen at send_out) —
+    # the metadata checks still run; only the amounts comparison is skipped.
+    kwargs = _mark_ready_kwargs()
+    kwargs["expected_amounts"] = None
+    psend.assert_mark_ready(**kwargs)

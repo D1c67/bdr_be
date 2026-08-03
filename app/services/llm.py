@@ -273,7 +273,7 @@ def _anthropic_call(
     resp = client.messages.create(
         model=model,
         max_tokens=max_tokens or _DEFAULT_MAX_TOKENS,
-        # Cache the (often large, reused) system prompt across re-runs/refines.
+        # Cache the (often large, reused) system prompt across re-runs.
         system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
         messages=messages,
     )
@@ -310,10 +310,9 @@ def _openai_call(
 
 
 def _merge_same_role(messages: list[dict]) -> list[dict]:
-    """Fold consecutive same-role turns into one. Anthropic does this server-
-    side (so e.g. the BOQ refine of a failed run — [user, user] when there is
-    no prior result — works there), but self-hosted chat templates with strict
-    role alternation (Mistral-family under vLLM/TGI) reject it with a 400."""
+    """Fold consecutive same-role turns into one. Anthropic accepts them
+    (merged server-side), but self-hosted chat templates with strict role
+    alternation (Mistral-family under vLLM/TGI) reject them with a 400."""
     merged: list[dict] = []
     for m in messages:
         if (

@@ -55,7 +55,7 @@ def advance(
     proj = (
         get_supabase()
         .table("projects")
-        .select("id, current_stage")
+        .select("id, current_stage, abandoned_at")
         .eq("id", project_id)
         .single()
         .execute()
@@ -64,6 +64,13 @@ def advance(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
     if proj["current_stage"] == "declined":
         raise HTTPException(status.HTTP_409_CONFLICT, "Project was declined at Go/No-Go")
+    # An abandoned bid is frozen where it died — it can't be advanced (which would
+    # also be the door into Go/No-Go). Reactivate first.
+    if proj.get("abandoned_at"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This project is abandoned — reactivate it before advancing",
+        )
 
     state = workflow.load_category_state(project_id)
     cs = state.get(category, {})

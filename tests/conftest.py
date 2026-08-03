@@ -20,6 +20,14 @@ os.environ["EMAIL_INGEST_ENABLED"] = "false"
 # monkeypatch get_settings explicitly.
 os.environ["MFA_REQUIRED"] = "true"
 os.environ["ENVIRONMENT"] = "test"
+# Every sub-app is served during the suite, whatever a local .env is rehearsing.
+# The flags default true, but pinning them keeps the whole suite independent of a
+# developer who has temporarily switched a module off — otherwise a PM or CP test
+# would fail with a bare 404 that looks nothing like the real cause. Tests that
+# exercise a module being OFF set the flag themselves (see test_feature_flags).
+os.environ["BIDDING_ENABLED"] = "true"
+os.environ["PM_ENABLED"] = "true"
+os.environ["CERTIFIED_PAYROLL_ENABLED"] = "true"
 # Pin LLM routing to the 3rd-party pool so a local .env experimenting with
 # self-hosted models can never redirect (or break) the suite's LLM stubs, and
 # drop any shell-exported LLM knobs (.env.example documents them as the

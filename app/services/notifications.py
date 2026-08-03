@@ -15,6 +15,22 @@ from app.services import notification_email
 
 logger = logging.getLogger(__name__)
 
+# Every notification type an external estimator can receive FOR LIVE WORK
+# (assignment, file updates, a changed drawing, a note reply). Kept here so a
+# sweep that has to clear an estimator's bell for a project — see
+# projects.abandon_project — doesn't have to re-derive the list from the routers
+# that create them.
+#
+# `project_withdrawn` / `project_reactivated` (estimator_lifecycle) are
+# deliberately absent: the withdrawn notice is created right after this sweep
+# runs and is the row that explains where all the others went.
+ESTIMATOR_NOTIFICATION_TYPES = [
+    "assigned",
+    "files_updated",
+    "drawing_changed",
+    "estimator_note",
+]
+
 
 def notify_role(
     role: Role,
@@ -64,9 +80,11 @@ def notify_role(
         }
         for u in users
     ]
-    sb.table("notifications").insert(rows).execute()
+    # Queue the INSERTED rows, not `rows`: they carry the `id` each mirror email
+    # writes its email_log link back onto (0091).
+    inserted = (sb.table("notifications").insert(rows).execute()).data or rows
     if mirror_email:
-        notification_email.queue(rows)
+        notification_email.queue(inserted)
 
 
 def notify_user(
@@ -84,9 +102,9 @@ def notify_user(
         "message": message,
         "rfq_id": rfq_id,
     }
-    get_supabase().table("notifications").insert(row).execute()
+    inserted = (get_supabase().table("notifications").insert(row).execute()).data or [row]
     if mirror_email:
-        notification_email.queue([row])
+        notification_email.queue(inserted)
 
 
 def dismiss_notifications(

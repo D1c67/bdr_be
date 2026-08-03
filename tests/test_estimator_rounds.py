@@ -397,11 +397,11 @@ def test_review_cleared_by_newer_ack_and_retripped_by_next_round(monkeypatch):
     _patch_db(monkeypatch, er, db)
     monkeypatch.setattr(er, "latest_submission", lambda pid: _latest(2, "2026-07-02T05:00:00+00:00"))
     db.queue("change_review_acks", "select", [{"last_reviewed_at": "2026-07-02T06:00:00+00:00"}])
-    assert er.needs_review("p1", "u1", Role.ESTIMATING_ENGINEER) is False
+    assert er.needs_review("p1", "u1", Role.ESTIMATING_ENGINEER_MATERIALS) is False
     # Round 3 lands after the ack → needs review again.
     monkeypatch.setattr(er, "latest_submission", lambda pid: _latest(3, "2026-07-02T07:00:00+00:00"))
     db.queue("change_review_acks", "select", [{"last_reviewed_at": "2026-07-02T06:00:00+00:00"}])
-    assert er.needs_review("p1", "u1", Role.ESTIMATING_ENGINEER) is True
+    assert er.needs_review("p1", "u1", Role.ESTIMATING_ENGINEER_MATERIALS) is True
 
 
 # ── mark_changes_reviewed endpoint ─────────────────────────────────────────

@@ -99,6 +99,29 @@ def get_message(
     ).json()
 
 
+def list_reference_links(message_id: str, *, mailbox: str | None = None) -> list[dict]:
+    """`{name, sourceUrl}` for each reference attachment (a OneDrive/cloud file
+    "attached" via Outlook is not a fileAttachment — it is a link). The cheap
+    listing's $select can't include sourceUrl, so each one costs a full GET."""
+    user = mailbox or get_settings().ms_sender
+    listing = graph_request(
+        "GET",
+        f"/users/{user}/messages/{message_id}/attachments",
+        params={"$select": "id,name"},
+    ).json()
+    links: list[dict] = []
+    for att in listing.get("value", []):
+        if att.get("@odata.type") != "#microsoft.graph.referenceAttachment":
+            continue
+        full = graph_request(
+            "GET",
+            f"/users/{user}/messages/{message_id}/attachments/{att['id']}",
+        ).json()
+        if full.get("sourceUrl"):
+            links.append({"name": full.get("name"), "sourceUrl": full["sourceUrl"]})
+    return links
+
+
 def list_attachments(
     message_id: str,
     *,

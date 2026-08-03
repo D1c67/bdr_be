@@ -15,6 +15,7 @@ union. The frontend mirrors FOLDER_ORDER / the writable-folder map the same way
 
 import logging
 
+from app.core.features import SubApp, is_enabled
 from app.core.supabase_client import get_supabase
 from app.services import estimator_rounds
 
@@ -169,6 +170,12 @@ def _bidding_documents(project_id: str) -> list[dict]:
     # Read-only mirror. Exclude unsent estimator drafts exactly as the internal
     # bidding export does (estimator_rounds.exclude_unsent) so a hub download can
     # never surface a draft the team hasn't received.
+    #
+    # Deliberately NOT gated on BIDDING_ENABLED, unlike _cp_documents below: these
+    # are the project's own plans, specs and quotes, and a PM crew must keep them
+    # when the bidding module is dark. The CP asymmetry is about content, not
+    # symmetry — payroll files are employee pay data that has no business
+    # reaching a PM reader once that module is switched off.
     q = (
         get_supabase()
         .table("project_files")
@@ -203,7 +210,16 @@ def _cp_documents(project_id: str) -> list[dict]:
     show only the newest revision of each weekly report to keep the hub tidy —
     older revisions live in the Payroll module. Degrades to [] (logged) if the CP
     tagging table isn't present, so the hub never hard-fails on a partial deploy.
+
+    Empty while CERTIFIED_PAYROLL_ENABLED is off. This is the containment
+    boundary for the CP flag, not a cosmetic one: the hub's /documents/file and
+    /documents/export routes resolve through this same list, so without the
+    check a deployment with Payroll switched off would still hand every PM
+    reader signed URLs to certified-payroll files — employee names,
+    classifications and pay data — through the PM module.
     """
+    if not is_enabled(SubApp.CERTIFIED_PAYROLL):
+        return []
     sb = get_supabase()
     try:
         links = (

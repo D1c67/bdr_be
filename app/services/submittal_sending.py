@@ -13,6 +13,7 @@ raised; a PDF-render failure fails only that category's contacts; drawings/specs
 that exceed the inline limit go to OneDrive as a single anonymous link.
 """
 
+import hashlib
 import logging
 import mimetypes
 import re
@@ -90,7 +91,16 @@ def _prepare_shared_files(
     if total <= get_settings().rfq_drawings_inline_limit_mb * 1024 * 1024:
         return files, None
     number = _safe_component(str(project.get("number") or project["id"]))
-    folder = f"BDR/{number}/submittal-docs"
+    # The anonymous link is minted on the upload FOLDER, so it must be unique to
+    # THIS exact file selection. A project-level folder accumulates every send's
+    # files and its link exposes all of them — leaking one vendor batch's docs to
+    # another. Digest the selection (mirrors rfq_sending._link_for): the same
+    # plans+specs re-send lands in the same folder (idempotent), a different
+    # selection gets its own, and no link ever reaches files outside its set.
+    digest = hashlib.sha1(
+        "|".join(sorted(i.get("storage_path") or "" for i in items)).encode()
+    ).hexdigest()[:12]
+    folder = f"BDR/{number}/submittal-docs/{digest}"
     for f in files:
         graph_email.drive_upload(
             f"{folder}/{_safe_component(f['filename'])}", f["content"], sender=sender

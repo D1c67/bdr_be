@@ -198,7 +198,15 @@ def _cat(db, category, pid="p1"):
 
 def test_owner_roles():
     assert owner_role_for("intake") == Role.ESTIMATING_ADMIN
-    assert owner_role_for("rfqs") == Role.ESTIMATING_ENGINEER
+    # The engineer focus split: material-lane tasks belong to the Materials
+    # engineer, labor-lane + engineer-side send-out tasks to the Labor engineer.
+    assert owner_role_for("rfqs") == Role.ESTIMATING_ENGINEER_MATERIALS
+    assert owner_role_for("receive_quotes") == Role.ESTIMATING_ENGINEER_MATERIALS
+    assert owner_role_for("labor_numbers") == Role.ESTIMATING_ENGINEER_LABOR
+    assert owner_role_for("markup") == Role.ESTIMATING_ENGINEER_LABOR
+    assert owner_role_for("gc_pricing") == Role.ESTIMATING_ENGINEER_LABOR
+    assert Role.ESTIMATING_ENGINEER_LABOR in STAGES["send_out"].owner_roles
+    assert Role.ESTIMATING_ENGINEER_MATERIALS not in STAGES["send_out"].owner_roles
     assert owner_role_for("verify") == Role.EXECUTIVE
     # submitted is Estimating-Admin-owned (records the Win/Loss outcome);
     # declined is the only ownerless terminal.
@@ -208,7 +216,7 @@ def test_owner_roles():
 
 def test_internal_owner_skips_estimator_for_handoff():
     assert owner_role_for("estimate_received") == Role.ESTIMATOR  # access owner
-    assert internal_owner_role_for("estimate_received") == Role.ESTIMATING_ENGINEER
+    assert internal_owner_role_for("estimate_received") == Role.ESTIMATING_ENGINEER_MATERIALS
     for stage in STAGES:
         internal = internal_owner_role_for(stage)
         if stage != "estimate_received":

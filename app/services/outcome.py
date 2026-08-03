@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from app.core.features import SubApp, is_enabled
 from app.core.roles import Role
 from app.core.supabase_client import get_supabase
 from app.models.schemas import BidOutcomeIn
@@ -174,13 +175,19 @@ def record_outcome(project_id: str, user_id: str, body: BidOutcomeIn) -> dict:
             if pm.is_retractable(project):
                 retract_pm_after = True
             else:
-                notify_role(
-                    Role.EXECUTIVE,
-                    project_id,
-                    "pm_outcome_conflict",
-                    f"An attempt was made to change the won outcome of {project['name']}, "
-                    "which is already active in Project Management.",
-                )
+                # The REFUSAL stands whatever PM_ENABLED says — change orders and
+                # daily logs exist in the database regardless of whether the
+                # module is currently served, and stranding them is the thing
+                # this guard is for. Only the bell is suppressed, since it would
+                # point at a project view that doesn't render.
+                if is_enabled(SubApp.PM):
+                    notify_role(
+                        Role.EXECUTIVE,
+                        project_id,
+                        "pm_outcome_conflict",
+                        f"An attempt was made to change the won outcome of {project['name']}, "
+                        "which is already active in Project Management.",
+                    )
                 raise OutcomeError(
                     "This project is already active in Project Management — its "
                     "outcome can no longer be changed away from won."
@@ -255,7 +262,12 @@ def record_outcome(project_id: str, user_id: str, body: BidOutcomeIn) -> dict:
     elif retract_pm_after:
         pm.retract_pm(project_id, user_id)
 
-    for role in (Role.ESTIMATING_ENGINEER, Role.EXECUTIVE):
+    # Win/loss is team news, not lane work — both engineer focuses hear it.
+    for role in (
+        Role.ESTIMATING_ENGINEER_MATERIALS,
+        Role.ESTIMATING_ENGINEER_LABOR,
+        Role.EXECUTIVE,
+    ):
         notify_role(
             role, project_id, "bid_outcome",
             f"Bid outcome recorded ({body.result}) for {project['name']}",

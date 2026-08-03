@@ -410,7 +410,11 @@ def poll_once() -> None:
                 for row in inserted
             ]
             try:
-                sb.table("notifications").insert(notif_rows).execute()
+                # Keep the inserted rows: their ids let each mirror email link
+                # itself back to its bell row (0091).
+                notif_rows = (
+                    sb.table("notifications").insert(notif_rows).execute()
+                ).data or notif_rows
             except Exception:
                 # Roll the ledger back so the next tick retries — otherwise this
                 # offset (possibly the final "expired" notice) is lost forever.
