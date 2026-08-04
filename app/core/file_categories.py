@@ -51,7 +51,12 @@ The sets, and what each one actually means
 """
 
 # What the estimator may read unconditionally: the priced-off package.
-ESTIMATOR_READ = {"drawing", "specification"}
+# 'electrical_drawing' (0099) is the electrical-only sheet set, split out from
+# 'drawing' (now labelled "General Drawings/Plans" in the UI). It behaves
+# exactly like the other initial-package blocks: estimator-readable from the
+# moment it exists, frozen once the hand-off has sent. RFQs attach this set,
+# falling back to 'drawing' on projects that predate the split.
+ESTIMATOR_READ = {"drawing", "specification", "electrical_drawing"}
 # What the estimator may upload: their own deliverables. 'addendum' MUST NEVER
 # be added here — estimators view addenda but never upload them, and the
 # ESTIMATOR_WRITE check in files.upload_file is the only gate.
@@ -60,7 +65,7 @@ ESTIMATOR_READ = {"drawing", "specification"}
 # by writers (it has no estimator-only gate, unlike 'estimator_additional').
 ESTIMATOR_WRITE = {"estimate", "boq", "markup", "marked_plans", "estimator_additional"}
 # The initial package blocks — frozen once the hand-off has actually sent.
-INITIAL_CATEGORIES = {"drawing", "specification"}
+INITIAL_CATEGORIES = {"drawing", "specification", "electrical_drawing"}
 # Post-hand-off updates: each requires a note AND requires the lock.
 # 'addendum' is deliberately NOT here (no note requirement, no lock requirement).
 UPDATE_CATEGORIES = {"revision", "additional"}
@@ -80,6 +85,7 @@ ESTIMATOR_QUERY_CATEGORIES = ESTIMATOR_READ | ESTIMATOR_WRITE | SENT_GATED_CATEG
 
 VALID_CATEGORIES = {
     "drawing",
+    "electrical_drawing",
     "specification",
     "addendum",
     "revision",
@@ -146,6 +152,7 @@ SECTION_NOTE_MAX_CHARS = 2000
 # Display/grouping order used by the log, the ZIP export and the package email.
 CATEGORY_DISPLAY_ORDER = [
     "drawing",
+    "electrical_drawing",
     "specification",
     "addendum",
     "revision",

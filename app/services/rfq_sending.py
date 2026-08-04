@@ -161,10 +161,15 @@ def _load_files(sb, project_id: str, category: str) -> list[dict]:
 
 
 def _prepare_drawings(sb, project: dict) -> tuple[list[dict], str | None]:
-    """Download drawings; if they exceed the inline limit, push them to OneDrive
-    and return a single anonymous folder link instead (shared by every email)."""
+    """Download the drawings vendors get: the Electrical Drawings set when one
+    exists, otherwise the General Drawings/Plans set (projects that predate the
+    0099 split have no electrical bucket yet). If they exceed the inline limit,
+    push them to OneDrive and return a single anonymous folder link instead
+    (shared by every email)."""
     settings = get_settings()
-    drawings = _load_files(sb, project["id"], "drawing")
+    drawings = _load_files(sb, project["id"], "electrical_drawing")
+    if not drawings:
+        drawings = _load_files(sb, project["id"], "drawing")
     total = sum(len(d["content"]) for d in drawings)
     if total <= settings.rfq_drawings_inline_limit_mb * 1024 * 1024:
         return drawings, None
@@ -194,7 +199,11 @@ class _ExplicitAttachments:
     def for_group(self, file_ids: list[str]) -> tuple[list[dict], str | None]:
         """(attachments, drawings_link) for one group's chosen file ids."""
         ids = list(dict.fromkeys(file_ids))  # dedupe, keep the PE's order
-        drawing_ids = [i for i in ids if self._files[i]["category"] == "drawing"]
+        drawing_ids = [
+            i
+            for i in ids
+            if self._files[i]["category"] in ("drawing", "electrical_drawing")
+        ]
         total = sum(len(self._files[i]["content"]) for i in drawing_ids)
         limit = get_settings().rfq_drawings_inline_limit_mb * 1024 * 1024
         if not drawing_ids or total <= limit:

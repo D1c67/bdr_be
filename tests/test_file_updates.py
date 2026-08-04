@@ -150,12 +150,25 @@ def test_marked_plans_category_membership():
     assert "marked_plans" not in SENT_GATED_CATEGORIES
 
 
+def test_electrical_drawing_category_membership():
+    # 0099: the electrical-only sheet set, split out of 'drawing' (which the UI
+    # now labels "General Drawings/Plans"). A first-class initial-package block:
+    # frozen by the hand-off lock and estimator-readable from the moment it
+    # exists. RFQs attach this set, falling back to 'drawing' when it is empty.
+    assert "electrical_drawing" in VALID_CATEGORIES
+    assert "electrical_drawing" in INITIAL_CATEGORIES
+    assert "electrical_drawing" in ESTIMATOR_READ
+    assert "electrical_drawing" not in ESTIMATOR_WRITE
+    assert "electrical_drawing" not in UPDATE_CATEGORIES
+    assert "electrical_drawing" not in SENT_GATED_CATEGORIES
+
+
 # ── _estimator_visible (now takes user_id) ─────────────────────────────────
 
 
 def test_estimator_sees_initial_and_own_deliverables():
     uid = "me"
-    for cat in ["drawing", "specification"]:
+    for cat in ["drawing", "electrical_drawing", "specification"]:
         assert _estimator_visible({"category": cat, "sent_to_estimators_at": None}, uid) is True
     # ESTIMATOR_WRITE rows are uploader-scoped — pass a matching uploaded_by.
     for cat in ["estimate", "boq", "markup", "marked_plans"]:
@@ -529,7 +542,7 @@ signer = lambda path: f"https://signed.example/{path}"  # noqa: E731
 
 def test_sections_group_and_tag_initial_vs_updates():
     html = ee.render_sections(FILES, signer)
-    assert "Electrical drawings" in html
+    assert "General drawings/plans" in html
     assert "Specifications" in html
     assert "Changes/Revisions" in html
     assert "Additional files" in html
@@ -539,9 +552,27 @@ def test_sections_group_and_tag_initial_vs_updates():
 
 def test_sections_omit_empty_categories():
     html = ee.render_sections(FILES[:1], signer)
-    assert "Electrical drawings" in html
+    assert "General drawings/plans" in html
     assert "Specifications" not in html
+    assert "Electrical drawings" not in html
     assert ee.UPDATE_TAG not in html
+
+
+def test_sections_render_electrical_drawings():
+    # 0099: the electrical set is its own initial-package section, distinct from
+    # the general set's section.
+    files = [
+        {
+            "category": "electrical_drawing",
+            "filename": "E-201.pdf",
+            "storage_path": "p1/electrical_drawing/x",
+            "note": None,
+        }
+    ]
+    html = ee.render_sections(files, signer)
+    assert "Electrical drawings" in html
+    assert "General drawings/plans" not in html
+    assert html.count(ee.INITIAL_TAG) == 1
 
 
 def test_sections_link_via_signer_and_escape_notes():
@@ -613,7 +644,7 @@ def test_reassign_email_catchup(monkeypatch):
     )
     assert "Update history" in html
     assert "CATCH-UP" in html
-    assert "Electrical drawings" in html
+    assert "General drawings/plans" in html
     assert "Changes/Revisions" in html
     assert "Van Ness &lt;Tower&gt;" in html
     assert "Van Ness <Tower>" not in html

@@ -86,22 +86,23 @@ def advance(
             f"'{workflow.STAGES[head].label}' is completed from its own panel, not the generic advance",
         )
 
-    # To Estimator (last intake task) can't be left until an electrical drawing exists —
-    # a hard rule mirrored in the UI. This gates the intake → material/labor unlock.
+    # To Estimator (last intake task) can't be left until a drawing exists (either
+    # bucket: General or Electrical) - a hard rule mirrored in the UI. This gates
+    # the intake → material/labor unlock.
     if category == "intake" and head == "to_estimator":
         has_drawing = (
             get_supabase()
             .table("project_files")
             .select("id")
             .eq("project_id", project_id)
-            .eq("category", "drawing")
+            .in_("category", ["drawing", "electrical_drawing"])
             .limit(1)
             .execute()
         ).data
         if not has_drawing:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
-                "Upload at least one electrical drawing/plan before completing Intake",
+                "Upload at least one General or Electrical drawing/plan before completing Intake",
             )
 
     # Receive Quotes (last material task) can't be left until every non-general RFQ

@@ -44,7 +44,8 @@ from app.services.email_branding import (
 # ORDER IS THE RENDER ORDER. `doc_type` None on a SPLIT category means "no
 # document set recorded", never "any".
 SECTION_TITLES: list[tuple[str, str | None, str]] = [
-    ("drawing", None, "Electrical drawings"),
+    ("drawing", None, "General drawings/plans"),
+    ("electrical_drawing", None, "Electrical drawings"),
     ("specification", None, "Specifications"),
     ("addendum", "drawing", "Addenda — plans/drawings"),
     ("addendum", "specification", "Addenda — specifications"),
@@ -56,7 +57,7 @@ SECTION_TITLES: list[tuple[str, str | None, str]] = [
 ]
 INITIAL_TAG = "Initial files"
 UPDATE_TAG = "Sent after hand-off"
-_INITIAL = {"drawing", "specification"}
+_INITIAL = {"drawing", "electrical_drawing", "specification"}
 # Addenda carry no "Initial files"/"Sent after hand-off" pill: they exist in the
 # initial package AND in later batches, so either tag would be wrong. Each
 # addendum line shows its number + issue date, which is more informative anyway.
@@ -244,7 +245,8 @@ def render_package_email(
 # The catch-up "Update history" table's Contents column renders each batch's
 # summary snapshot, in display order, as e.g. "12 drawings, 3 specs, 1 addendum".
 _CONTENTS_LABELS: list[tuple[str, tuple[str, str]]] = [
-    ("drawing", ("drawing", "drawings")),
+    ("drawing", ("general drawing", "general drawings")),
+    ("electrical_drawing", ("electrical drawing", "electrical drawings")),
     ("specification", ("spec", "specs")),
     ("addendum", ("addendum", "addenda")),
     ("revision", ("revision", "revisions")),

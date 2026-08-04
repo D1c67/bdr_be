@@ -467,17 +467,22 @@ async def upload_file(
 
     # Adding a drawing after intake means whoever prices off the drawings should
     # re-check their work. (Multiple drawings per project are legitimate.)
-    if category == "drawing":
-        await run_in_threadpool(_notify_drawing_changed, project_id, user, "added")
+    if category in ("drawing", "electrical_drawing"):
+        await run_in_threadpool(
+            _notify_drawing_changed, project_id, user, "added", category
+        )
 
     return row
 
 
-def _notify_drawing_changed(project_id: str, user: CurrentUser, verb: str) -> None:
+def _notify_drawing_changed(
+    project_id: str, user: CurrentUser, verb: str, category: str = "drawing"
+) -> None:
     """Alert the Estimating Engineer + assigned estimator that a project's drawings
     changed, post-intake.
 
-    `verb` is "added" or "removed". During intake nothing is sent — the Estimating
+    `verb` is "added" or "removed"; `category` is 'drawing' (General) or
+    'electrical_drawing'. During intake nothing is sent — the Estimating
     Admin is still assembling the package and no one is pricing off it yet.
     """
     from app.services import workflow
@@ -498,7 +503,8 @@ def _notify_drawing_changed(project_id: str, user: CurrentUser, verb: str) -> No
         return
 
     label = f"{proj.get('number') or ''} {proj.get('name') or ''}".strip() or "a project"
-    msg = f"Electrical drawing {verb} for {label} — re-check anything priced off it."
+    noun = "Electrical drawing" if category == "electrical_drawing" else "General drawing"
+    msg = f"{noun} {verb} for {label} - re-check anything priced off it."
     # A drawing change can invalidate material pricing AND labor counts — both
     # engineer focuses need the re-check ping.
     notify_role(Role.ESTIMATING_ENGINEER_MATERIALS, project_id, "drawing_changed", msg)
@@ -857,5 +863,5 @@ def delete_file(
     audit(user.id, "file.delete", "project_file", file_id, {"category": rec["category"]})
 
     # Removing a drawing after intake is a change downstream pricers must know about.
-    if rec["category"] == "drawing":
-        _notify_drawing_changed(project_id, user, "removed")
+    if rec["category"] in ("drawing", "electrical_drawing"):
+        _notify_drawing_changed(project_id, user, "removed", rec["category"])

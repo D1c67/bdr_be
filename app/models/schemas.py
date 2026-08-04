@@ -579,9 +579,10 @@ class RFQBulkSendGroup(BaseModel):
     # One email is sent per contact per group; cap the fan-out so a single
     # request can't be turned into a mass-mail amplifier.
     vendor_contact_ids: list[str] = Field(..., min_length=1, max_length=100)
-    # None = the default set (BOM split + drawings + Trenching markup). An
-    # explicit list (possibly empty) is exactly what the PE left in the confirm
-    # modal after adding/removing files — what they saw is what gets sent.
+    # None = the default set: BOM split + Electrical Drawings (falling back to
+    # General Drawings/Plans when no electrical set exists) + Trenching markup.
+    # An explicit list (possibly empty) is exactly what the PE left in the
+    # confirm modal after adding/removing files — what they saw is what gets sent.
     attachment_file_ids: list[str] | None = Field(default=None, max_length=50)
     # Optional CC lists keyed by To-contact id: each CC contact is copied on
     # that one email instead of getting their own. The send layer enforces that

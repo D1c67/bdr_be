@@ -109,6 +109,7 @@ _PM_CATEGORY_FOLDER: dict[str, str] = {
 # project_files.category (bidding, read-only) → folder.
 _BID_CATEGORY_FOLDER: dict[str, str] = {
     "drawing": "plans",
+    "electrical_drawing": "plans",
     "specification": "specifications",
     "quote": "quotes",
     "rfq_split": "quotes",

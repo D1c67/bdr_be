@@ -27,6 +27,7 @@ _SPOOL_MAX_MEMORY = 8 * 1024 * 1024
 # sent proposals get their own folder rather than the unranked fallback bucket.
 _CATEGORY_ORDER = [
     "drawing",
+    "electrical_drawing",
     "specification",
     "addendum",
     "revision",

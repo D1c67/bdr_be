@@ -161,6 +161,32 @@ def test_safe_component_strips_path_separators():
     assert rs._safe_component("  ") == "file"
 
 
+# ── Default drawings set: electrical-first with general fallback (0099) ────
+
+
+def test_prepare_drawings_prefers_electrical_set(monkeypatch):
+    # When an electrical set exists, vendors get ONLY it — the general set
+    # (full plans) stays home.
+    by_cat = {
+        "electrical_drawing": [{"filename": "E-201.pdf", "content": b"e"}],
+        "drawing": [{"filename": "full-set.pdf", "content": b"g"}],
+    }
+    monkeypatch.setattr(rs, "_load_files", lambda sb, pid, cat: list(by_cat.get(cat, [])))
+    atts, link = rs._prepare_drawings(None, _PROJECT)
+    assert [f["filename"] for f in atts] == ["E-201.pdf"]
+    assert link is None
+
+
+def test_prepare_drawings_falls_back_to_general(monkeypatch):
+    # Projects that predate the split have no electrical bucket; the general
+    # set still goes out so a vendor email never ships without plans.
+    by_cat = {"drawing": [{"filename": "full-set.pdf", "content": b"g"}]}
+    monkeypatch.setattr(rs, "_load_files", lambda sb, pid, cat: list(by_cat.get(cat, [])))
+    atts, link = rs._prepare_drawings(None, _PROJECT)
+    assert [f["filename"] for f in atts] == ["full-set.pdf"]
+    assert link is None
+
+
 def test_bulk_send_schema_normalizes_blank_body_and_defaults():
     from app.models.schemas import RFQBulkSendIn
 

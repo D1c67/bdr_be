@@ -60,7 +60,7 @@ def test_section_key_suffixes_only_split_categories():
 
 def test_section_note_keys_cover_every_renderable_section():
     for category, doc_type, _title in ee.SECTION_TITLES:
-        if category in ("drawing", "specification"):
+        if category in ee._INITIAL:
             continue  # the initial package is not a Revisions-modal section
         assert section_key(category, doc_type) in SECTION_NOTE_KEYS
 

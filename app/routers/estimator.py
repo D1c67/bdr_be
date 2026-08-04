@@ -59,10 +59,16 @@ router = APIRouter(tags=["estimator"])
 
 logger = logging.getLogger(__name__)
 
-# A project must have at least one electrical drawing before it can be handed to
-# the estimator — enforced here (not just in the UI) because it's a hard rule:
-# you can't assign or email an estimator a package with no drawings.
-NO_DRAWING_MESSAGE = "Upload at least one electrical drawing/plan first"
+# A project must have at least one drawing (General or Electrical bucket) before
+# it can be handed to the estimator — enforced here (not just in the UI) because
+# it's a hard rule: you can't assign or email an estimator a package with no
+# drawings.
+NO_DRAWING_MESSAGE = "Upload at least one General or Electrical drawing/plan first"
+
+# The two drawing buckets. 'drawing' is the general/full plan set (labelled
+# "General Drawings/Plans" in the UI); 'electrical_drawing' (0099) is the
+# electrical-only set that RFQs attach. Either satisfies the drawing gates.
+DRAWING_CATEGORIES = ("drawing", "electrical_drawing")
 
 
 def _queue_general_material(project_id: str, user_id: str, background: BackgroundTasks) -> None:
@@ -99,7 +105,7 @@ def project_has_drawing(project_id: str) -> bool:
         .table("project_files")
         .select("id")
         .eq("project_id", project_id)
-        .eq("category", "drawing")
+        .in_("category", list(DRAWING_CATEGORIES))
         .limit(1)
         .execute()
     ).data or []
@@ -124,14 +130,25 @@ def _package_files(project_id: str) -> list[dict]:
         .table("project_files")
         .select(_FILE_FIELDS)
         .eq("project_id", project_id)
-        .in_("category", ["drawing", "specification", "addendum", "revision", "additional"])
+        .in_(
+            "category",
+            [
+                "drawing",
+                "electrical_drawing",
+                "specification",
+                "addendum",
+                "revision",
+                "additional",
+            ],
+        )
         .order("created_at")
         .execute()
     ).data or []
     return [
         r
         for r in rows
-        if r["category"] in ("drawing", "specification") or r.get("sent_to_estimators_at")
+        if r["category"] in ("drawing", "electrical_drawing", "specification")
+        or r.get("sent_to_estimators_at")
     ]
 
 
@@ -757,7 +774,7 @@ def send_to_estimator(
 
     # Never email an estimator a package with no drawings.
     files = _package_files(project_id)
-    if not any(f["category"] == "drawing" for f in files):
+    if not any(f["category"] in DRAWING_CATEGORIES for f in files):
         raise HTTPException(status.HTTP_409_CONFLICT, NO_DRAWING_MESSAGE)
 
     kind = "initial" if not file_sends.has_initial_send(project_id) else "reassign"

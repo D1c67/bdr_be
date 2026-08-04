@@ -51,7 +51,8 @@ def is_convertible(filename: str | None, category: str) -> bool:
     """Whether this file should get a PDF preview derivative."""
     if get_settings().preview_engine == "off":
         return False
-    if category == "drawing":  # drawings are PDFs; never enter a converter
+    # Both drawing buckets are PDFs; never enter a converter.
+    if category in ("drawing", "electrical_drawing"):
         return False
     return _ext(filename) in CONVERTIBLE_EXTS
 
