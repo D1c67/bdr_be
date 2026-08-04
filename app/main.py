@@ -172,6 +172,30 @@ async def _storage_exception_handler(_: Request, exc: StorageException) -> JSONR
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             content={"detail": "This file is too large to store and was not uploaded."},
         )
+
+    # Storage rejects object keys containing characters outside its allowlist
+    # with a 400 InvalidKey (seen in prod: "~" in the Windows 8.3 short name
+    # "E002-E~1.PDF"). build_object_path passes the original filename through,
+    # so this is a filename the user can fix, not an outage; saying
+    # "temporarily unavailable, try again" sends them into a retry loop that
+    # can never succeed.
+    err_code = str(getattr(exc, "code", "") or "")
+    err_message = str(getattr(exc, "message", "") or "")
+    if (
+        err_code.replace("_", "").lower() == "invalidkey"
+        or "invalid key" in err_message.lower()
+    ):
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "detail": (
+                    "This file's name contains characters that cannot be stored. "
+                    "Rename the file using letters, numbers, spaces, hyphens, or "
+                    "periods, then try again."
+                )
+            },
+        )
+
     # Any other storage failure is an upstream dependency problem, not the
     # client's fault → 502 (still CORS-safe) rather than a bare 500.
     return JSONResponse(

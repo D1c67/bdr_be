@@ -55,7 +55,10 @@ ESTIMATOR_READ = {"drawing", "specification"}
 # What the estimator may upload: their own deliverables. 'addendum' MUST NEVER
 # be added here — estimators view addenda but never upload them, and the
 # ESTIMATOR_WRITE check in files.upload_file is the only gate.
-ESTIMATOR_WRITE = {"estimate", "boq", "markup", "estimator_additional"}
+# 'marked_plans' (0098) is the drawing set the estimator marked up while
+# pricing: uploadable pre-submit like estimate/boq/markup, and ALSO uploadable
+# by writers (it has no estimator-only gate, unlike 'estimator_additional').
+ESTIMATOR_WRITE = {"estimate", "boq", "markup", "marked_plans", "estimator_additional"}
 # The initial package blocks — frozen once the hand-off has actually sent.
 INITIAL_CATEGORIES = {"drawing", "specification"}
 # Post-hand-off updates: each requires a note AND requires the lock.
@@ -84,6 +87,7 @@ VALID_CATEGORIES = {
     "estimate",
     "boq",
     "markup",
+    "marked_plans",
     "estimator_additional",
     "rfq_split",
     "quote",
@@ -149,6 +153,7 @@ CATEGORY_DISPLAY_ORDER = [
     "estimate",
     "boq",
     "markup",
+    "marked_plans",
     "estimator_additional",
     "rfq_split",
     "quote",

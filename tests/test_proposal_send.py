@@ -68,6 +68,67 @@ def test_resolve_gc_amounts_override_wins_per_figure():
     ) == {"material": Decimal("100"), "labor": Decimal("200"), "total": Decimal("300")}
 
 
+def test_gc_markups_price_change_moves_only_that_category():
+    # Costs 40k/40k with default markups 1188/950: base prices 41188/40950.
+    final = {
+        "labor_amount": Decimal("40000"),
+        "materials_amount": Decimal("40000"),
+        "labor_markup_amount": Decimal("950"),
+        "materials_markup_amount": Decimal("1188"),
+    }
+    basis = psend.pricing_basis(final)
+    assert basis == {
+        "material_cost": Decimal("40000"),
+        "labor_cost": Decimal("40000"),
+        "material_markup": Decimal("1188"),
+        "labor_markup": Decimal("950"),
+    }
+    defaults = psend.amounts_from_final(final)
+
+    # No override: each markup is exactly the project default.
+    no_override = psend.resolve_gc_amounts(
+        defaults, {"material_override": None, "labor_override": None}
+    )
+    assert psend.gc_markups(basis, no_override) == {
+        "material_markup": Decimal("1188"),
+        "labor_markup": Decimal("950"),
+    }
+
+    # A material price change lands entirely in the material markup; the labor
+    # markup (and both costs) are untouched.
+    material_up = psend.resolve_gc_amounts(
+        defaults, {"material_override": Decimal("50000"), "labor_override": None}
+    )
+    assert psend.gc_markups(basis, material_up) == {
+        "material_markup": Decimal("10000"),
+        "labor_markup": Decimal("950"),
+    }
+
+
+def test_gc_markups_below_cost_goes_negative_unclamped():
+    # A price far below cost must come back as a deep negative markup, not a
+    # clamped zero and not a shifted cost basis.
+    final = {
+        "labor_amount": Decimal("40000"),
+        "materials_amount": Decimal("40000"),
+        "labor_markup_amount": Decimal("950"),
+        "materials_markup_amount": Decimal("1188"),
+    }
+    basis = psend.pricing_basis(final)
+    resolved = psend.resolve_gc_amounts(
+        psend.amounts_from_final(final),
+        {"material_override": Decimal("100"), "labor_override": Decimal("200")},
+    )
+    assert psend.gc_markups(basis, resolved) == {
+        "material_markup": Decimal("-39900"),
+        "labor_markup": Decimal("-39800"),
+    }
+    # The basis is a pure read of the shared figures; deriving markups from it
+    # must not have mutated the costs.
+    assert basis["material_cost"] == Decimal("40000")
+    assert basis["labor_cost"] == Decimal("40000")
+
+
 def test_gc_amounts_editable_from_gc_pricing_through_send_out():
     for head in ("gc_pricing", "verify", "send_out"):
         psend.assert_gc_amounts_editable(head)  # must not raise

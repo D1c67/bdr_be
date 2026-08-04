@@ -41,6 +41,7 @@ SECTION_LABELS: list[tuple[str, str]] = [
     ("estimate", "Revised estimate"),
     ("boq", "Revised BOQ"),
     ("markup", "Revised markups"),
+    ("marked_plans", "Marked plans"),
     ("estimator_additional", "Additional files"),
 ]
 

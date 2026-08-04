@@ -137,6 +137,19 @@ def test_addendum_category_membership():
     assert ADDENDUM_CATEGORY not in INITIAL_CATEGORIES
 
 
+def test_marked_plans_category_membership():
+    # 0098: the estimator's marked-up drawing set. Estimator-writable like the
+    # deliverable trio, and deliberately WITHOUT the estimator-only gate that
+    # protects 'estimator_additional' — writers fill this bucket too, from the
+    # Estimate Received step's upload box.
+    assert "marked_plans" in VALID_CATEGORIES
+    assert "marked_plans" in ESTIMATOR_WRITE
+    assert "marked_plans" not in ESTIMATOR_READ
+    assert "marked_plans" not in UPDATE_CATEGORIES
+    assert "marked_plans" not in INITIAL_CATEGORIES
+    assert "marked_plans" not in SENT_GATED_CATEGORIES
+
+
 # ── _estimator_visible (now takes user_id) ─────────────────────────────────
 
 
@@ -145,7 +158,7 @@ def test_estimator_sees_initial_and_own_deliverables():
     for cat in ["drawing", "specification"]:
         assert _estimator_visible({"category": cat, "sent_to_estimators_at": None}, uid) is True
     # ESTIMATOR_WRITE rows are uploader-scoped — pass a matching uploaded_by.
-    for cat in ["estimate", "boq", "markup"]:
+    for cat in ["estimate", "boq", "markup", "marked_plans"]:
         assert _estimator_visible(
             {"category": cat, "sent_to_estimators_at": None, "uploaded_by": uid}, uid
         ) is True

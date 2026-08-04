@@ -115,6 +115,14 @@ def test_estimator_additional_is_writable_and_valid():
     assert "estimator_additional" not in UPDATE_CATEGORIES
 
 
+def test_marked_plans_is_a_deliverable_category():
+    # 0098: marked plans ride the same submission rounds as the other
+    # deliverables (sealing keys off estimator_deliverable, not the category,
+    # so ESTIMATOR_WRITE membership is what puts them in the round).
+    assert "marked_plans" in er.DELIVERABLE_CATEGORIES
+    assert "marked_plans" in ESTIMATOR_WRITE
+
+
 def test_estimator_sees_own_additional_files():
     # _estimator_visible now takes user_id and scopes ESTIMATOR_WRITE reads to the
     # uploader — the estimator sees their OWN additional box, never a rival's.

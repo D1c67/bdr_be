@@ -5,6 +5,7 @@ short-TTL signed URLs (critical for the hardened estimator). Object paths are
 namespaced by project: `{project_id}/{category}/{uuid}-{filename}`.
 """
 
+import string
 import time
 import uuid
 
@@ -12,6 +13,25 @@ from app.core.config import get_settings
 from app.core.supabase_client import get_supabase
 
 BUCKET = "project-files"
+
+# Characters Supabase Storage accepts in object keys (storage-api's isValidKey
+# allowlist). Anything else is rejected with a 400 InvalidKey at upload time:
+# seen in prod with the "~" in Windows 8.3 short names ("E002-E~1.PDF", which
+# Windows substitutes for the real name when a file sits beyond the 260-char
+# path limit), and equally true of accented/unicode letters. "/" is excluded
+# on purpose: inside a filename it would mint bogus path segments.
+_KEY_SAFE_CHARS = frozenset(string.ascii_letters + string.digits + "_!-.*'() &$@=;:+,?")
+
+
+def safe_key_component(filename: str) -> str:
+    """Map a user-supplied filename onto Storage's allowed key charset.
+
+    Only the object key is sanitized; the display name shown to users comes
+    from the DB row, which keeps the filename exactly as uploaded. The mapping
+    is deterministic (each bad char becomes "_") so callers that rely on
+    stable, re-derivable paths (email ingest upserts) stay idempotent.
+    """
+    return "".join(ch if ch in _KEY_SAFE_CHARS else "_" for ch in filename)
 
 # Signed-URL memoization: a fresh token per request defeats every cache layer
 # (browser and Supabase Smart CDN key on the token), so repeat previews would
@@ -25,8 +45,7 @@ _signed_url_cache: dict[str, tuple[str, float]] = {}
 
 
 def build_object_path(project_id: str, category: str, filename: str) -> str:
-    safe = filename.replace("/", "_")
-    return f"{project_id}/{category}/{uuid.uuid4().hex}-{safe}"
+    return f"{project_id}/{category}/{uuid.uuid4().hex}-{safe_key_component(filename)}"
 
 
 def build_submittal_object_path(filename: str) -> str:
@@ -34,8 +53,7 @@ def build_submittal_object_path(filename: str) -> str:
     project-scoped), so these live under a reserved `submittal-bank/` prefix in
     the same private bucket. A file may cover materials across categories, so the
     path is not category-namespaced."""
-    safe = filename.replace("/", "_")
-    return f"submittal-bank/{uuid.uuid4().hex}-{safe}"
+    return f"submittal-bank/{uuid.uuid4().hex}-{safe_key_component(filename)}"
 
 
 def upload_file(path: str, content: bytes, content_type: str, *, upsert: bool = False) -> None:

@@ -443,6 +443,14 @@ class ProjectOut(BaseModel):
     updated_at: datetime
 
 
+class BidsTodayProjectOut(ProjectOut):
+    """A Bids Today row: a full project plus the one page-specific fact the
+    client can't derive — whether the bid went out earlier today (rows sent
+    today stay on the page with a Sent badge and drop off tomorrow)."""
+
+    sent_today: bool = False
+
+
 class FilesExportIn(BaseModel):
     """Subset selector for the project-files ZIP export.
 

@@ -34,6 +34,7 @@ _CATEGORY_ORDER = [
     "estimate",
     "boq",
     "markup",
+    "marked_plans",
     "rfq_split",
     "quote",
     "proposal",

@@ -77,10 +77,11 @@ class ProposalSendError(Exception):
 # ── amounts ────────────────────────────────────────────────────────────────
 
 
-def proposal_amounts(originals: dict, verification: dict) -> dict[str, Decimal]:
-    """Material/Labor/TOTAL for the green table. Committed overrides win per
-    key, falling back to the upstream figure (same semantics the verify step
-    and pricing summary use)."""
+def resolved_verify_numbers(originals: dict, verification: dict) -> dict[str, Decimal]:
+    """Pure: the four pricing figures (labor/materials cost + the two markups)
+    after the verify step: committed overrides win per key, falling back to
+    the upstream figure (same semantics the verify step and pricing summary
+    use). Missing figures resolve to 0."""
     from app.routers.pricing import VERIFY_NUMBERS, _num
 
     final: dict[str, Decimal] = {}
@@ -89,9 +90,46 @@ def proposal_amounts(originals: dict, verification: dict) -> dict[str, Decimal]:
         if v is None:
             v = originals.get(key)
         final[key] = v if v is not None else Decimal(0)
+    return final
+
+
+def amounts_from_final(final: dict[str, Decimal]) -> dict[str, Decimal]:
+    """Pure: the default per-GC bid figures, each category's cost plus its
+    project-wide markup."""
     material = final["materials_amount"] + final["materials_markup_amount"]
     labor = final["labor_amount"] + final["labor_markup_amount"]
     return {"material": material, "labor": labor, "total": material + labor}
+
+
+def proposal_amounts(originals: dict, verification: dict) -> dict[str, Decimal]:
+    """Material/Labor/TOTAL for the green table. Committed overrides win per
+    key, falling back to the upstream figure (same semantics the verify step
+    and pricing summary use)."""
+    return amounts_from_final(resolved_verify_numbers(originals, verification))
+
+
+def pricing_basis(final: dict[str, Decimal]) -> dict[str, Decimal]:
+    """Pure: the shared cost basis and default markups every per-GC price
+    decomposes against. The costs are the project's: a per-GC price change
+    never moves them; it lands entirely in that GC's markup."""
+    return {
+        "material_cost": final["materials_amount"],
+        "labor_cost": final["labor_amount"],
+        "material_markup": final["materials_markup_amount"],
+        "labor_markup": final["labor_markup_amount"],
+    }
+
+
+def gc_markups(basis: dict[str, Decimal], resolved: dict[str, Decimal]) -> dict[str, Decimal]:
+    """Pure: one GC's effective markups: its resolved price minus the shared
+    cost basis, per category. Changing a GC's Material figure moves only its
+    material markup; the Labor figure only its labor markup. A below-cost
+    price yields a negative markup, carried as-is: never clamped and never
+    rebalanced into the cost side."""
+    return {
+        "material_markup": resolved["material"] - basis["material_cost"],
+        "labor_markup": resolved["labor"] - basis["labor_cost"],
+    }
 
 
 def resolve_gc_amounts(defaults: dict[str, Decimal], gc: dict) -> dict[str, Decimal]:
@@ -221,7 +259,9 @@ def amounts_overview(project_id: str) -> dict:
     # figure. Computed even before the Verify commit so the GC Pricing step (which
     # runs *before* Verify) always has a base for each GC to override against; the
     # `committed` flag below still tells the UI whether pricing is locked.
-    defaults = proposal_amounts(_verify_originals(project_id), verification or {})
+    final = resolved_verify_numbers(_verify_originals(project_id), verification or {})
+    basis = pricing_basis(final)
+    defaults = amounts_from_final(final)
 
     locked = {
         r["gc_id"]
@@ -242,6 +282,7 @@ def amounts_overview(project_id: str) -> dict:
     gcs = []
     for gc in sorted(_project_gcs(project_id), key=lambda g: g["name"].lower()):
         resolved = resolve_gc_amounts(defaults, gc)
+        markups = gc_markups(basis, resolved)
         gcs.append(
             {
                 "gc_id": gc["id"],
@@ -251,6 +292,11 @@ def amounts_overview(project_id: str) -> dict:
                 "material": _s(resolved["material"]),
                 "labor": _s(resolved["labor"]),
                 "total": _s(resolved["total"]),
+                # This GC's effective markups (price minus shared cost, per
+                # category): the ONLY thing a per-GC price change moves.
+                # Negative when the GC is being bid below cost.
+                "material_markup": _s(markups["material_markup"]),
+                "labor_markup": _s(markups["labor_markup"]),
                 "locked": gc["id"] in locked,
             }
         )
@@ -261,6 +307,9 @@ def amounts_overview(project_id: str) -> dict:
             "labor": str(defaults["labor"]),
             "total": str(defaults["total"]),
         },
+        # The shared decomposition the per-GC figures read against: category
+        # costs (never moved by a per-GC edit) plus the project-default markups.
+        "basis": {k: str(v) for k, v in basis.items()},
         "gcs": gcs,
     }
 
@@ -323,6 +372,11 @@ def set_gc_amounts(
             "proposal_labor_amount": str(labor) if labor is not None else None,
         }
     ).eq("project_id", project_id).eq("gc_id", gc_id).execute()
+    # Audit the change as what it is: a markup adjustment. The shared cost
+    # basis is untouched by design; what moved is this GC's effective markup
+    # per category (negative when the GC is now bid below cost).
+    overview = amounts_overview(project_id)
+    mine = next((g for g in overview["gcs"] if g["gc_id"] == gc_id), {})
     audit(
         user_id,
         "proposal.amounts_set",
@@ -332,9 +386,15 @@ def set_gc_amounts(
             "gc_id": gc_id,
             "material_amount": str(material) if material is not None else None,
             "labor_amount": str(labor) if labor is not None else None,
+            "material_markup": mine.get("material_markup"),
+            "labor_markup": mine.get("labor_markup"),
+            "cost_basis": {
+                "material": overview["basis"]["material_cost"],
+                "labor": overview["basis"]["labor_cost"],
+            },
         },
     )
-    return amounts_overview(project_id)
+    return overview
 
 
 def retire_unsent_proposals(project_id: str, gc_id: str) -> None:

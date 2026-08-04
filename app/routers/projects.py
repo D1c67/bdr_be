@@ -1,7 +1,7 @@
 """Projects + intake (step 1) and the dashboard list."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
@@ -17,6 +17,7 @@ from app.core.roles import (
 from app.core.supabase_client import get_supabase
 from app.models.schemas import (
     AbandonIn,
+    BidsTodayProjectOut,
     ProjectCreate,
     ProjectGCIn,
     ProjectGCUpdate,
@@ -24,6 +25,7 @@ from app.models.schemas import (
     ProjectUpdate,
 )
 from app.services import email_ingest, estimator_lifecycle, pm, proposal_send, workflow
+from app.services.bid_invitations import REPORT_TZ, _day_start
 from app.services.notifications import (
     ESTIMATOR_NOTIFICATION_TYPES,
     audit,
@@ -149,6 +151,76 @@ def list_projects(
     rows = resp.data or []
     states = workflow.load_category_states([p["id"] for p in rows])
     return [_present(p, user.role, states.get(p["id"])) for p in rows]
+
+
+# Registered before GET /{project_id} so the literal path wins the match.
+_SENT_STAGES = ("submitted", "bid_outcome")
+
+
+def _bids_today_day_bounds(now: datetime | None = None) -> tuple[datetime, datetime]:
+    """(start, end) of the office's current calendar day, as aware UTC."""
+    now = now or datetime.now(timezone.utc)
+    start = _day_start(now.astimezone(REPORT_TZ).date())
+    return start, start + timedelta(days=1)
+
+
+@router.get("/today", response_model=list[BidsTodayProjectOut], dependencies=_BIDDING_ONLY)
+def bids_today(user: CurrentUser = Depends(get_current_user)):
+    """The Bids Today page: every live bid whose internal due date has arrived
+    (office calendar) and which hasn't gone out yet — however overdue — plus
+    bids that went out earlier today, which stay for the rest of the day with
+    `sent_today` set and drop off tomorrow.
+
+    Membership is driven by internal_bid_at ONLY, never actual_bid_at: if the
+    confidential actual date decided when a row appeared, a non-privileged user
+    could read it off the calendar (services/bid_invitations applies the same
+    rule). Privileged roles just see the actual_bid_at column that
+    redact_for_role already leaves in place for them.
+    """
+    if user.role == Role.ESTIMATOR:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Estimators use /estimator/projects")
+    sb = get_supabase()
+    day_start, day_end = _bids_today_day_bounds()
+    resp = (
+        sb.table("projects")
+        .select("*, bid_outcomes(result)")
+        .neq("current_stage", "pm_only")
+        .neq("current_stage", "cp_only")
+        .neq("current_stage", "declined")
+        .is_("abandoned_at", "null")
+        .not_.is_("internal_bid_at", "null")
+        .lt("internal_bid_at", day_end.isoformat())
+        .order("internal_bid_at")
+        .execute()
+    )
+    rows = resp.data or []
+
+    # A bid past send-out is on the page only if it went out today. "Sent" is
+    # the entry into `submitted` (advance_category emits the stage_event for
+    # both the email send and mark-as-submitted), so a same-day win/loss record
+    # moving the head to bid_outcome doesn't hide the row early.
+    sent_today_ids: set[str] = set()
+    already_sent = [p["id"] for p in rows if p["current_stage"] in _SENT_STAGES]
+    if already_sent:
+        ev = (
+            sb.table("stage_events")
+            .select("project_id")
+            .eq("to_stage", "submitted")
+            .gte("entered_at", day_start.isoformat())
+            .in_("project_id", already_sent)
+            .execute()
+        )
+        sent_today_ids = {e["project_id"] for e in (ev.data or [])}
+
+    keep = [
+        p for p in rows
+        if p["current_stage"] not in _SENT_STAGES or p["id"] in sent_today_ids
+    ]
+    states = workflow.load_category_states([p["id"] for p in keep])
+    return [
+        {**_present(p, user.role, states.get(p["id"])), "sent_today": p["id"] in sent_today_ids}
+        for p in keep
+    ]
 
 
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED,

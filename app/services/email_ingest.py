@@ -473,7 +473,12 @@ def _attachment_path(email_id: str, att_id: str | None, filename: str) -> str:
     under fresh random names. Email-namespaced (NOT project-namespaced): the
     assignment can change after upload and the object must not move."""
     digest = hashlib.sha1((att_id or filename).encode()).hexdigest()[:16]
-    return f"emails/{email_id}/{digest}-{filename.replace('/', '_')}"
+    # safe_key_component, not just "/"-replacement: a vendor attachment named
+    # with a char outside Storage's key allowlist (a "~", an accented letter)
+    # would otherwise 400 the upload and abort this email's ingestion. The
+    # digest above still hashes the RAW name, so pre-existing paths for
+    # already-safe names are unchanged.
+    return f"emails/{email_id}/{digest}-{storage.safe_key_component(filename)}"
 
 
 def _ingest_attachments(sb, email: dict) -> None:

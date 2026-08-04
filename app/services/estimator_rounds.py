@@ -38,7 +38,7 @@ SENT_OR_INTERNAL = "estimator_deliverable.eq.false,submission_round.not.is.null"
 # What the estimator hands the team, in display order. `estimator_additional`
 # is the estimator's "Additional Files" box — distinct from the team-side
 # 'additional' category (0048), which flows the other way.
-DELIVERABLE_CATEGORIES = ("estimate", "boq", "markup", "estimator_additional")
+DELIVERABLE_CATEGORIES = ("estimate", "boq", "markup", "marked_plans", "estimator_additional")
 
 # Spam guard, not a product limit: no real bid needs anywhere near this many
 # hand-offs, but each round fans out high-importance email to the whole review
