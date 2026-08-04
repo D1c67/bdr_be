@@ -50,6 +50,7 @@ from app.services import (
     estimator_rounds,
     file_sends,
     general_material,
+    llm_queue,
     revision_email,
 )
 from app.services.notifications import audit, dismiss_notifications, notify_role, notify_user
@@ -62,6 +63,34 @@ logger = logging.getLogger(__name__)
 # the estimator — enforced here (not just in the UI) because it's a hard rule:
 # you can't assign or email an estimator a package with no drawings.
 NO_DRAWING_MESSAGE = "Upload at least one electrical drawing/plan first"
+
+
+def _queue_general_material(project_id: str, user_id: str, background: BackgroundTasks) -> None:
+    """Kick off the general-material (wiring) extraction for a fresh estimate.
+    Queued durably when the LLM queue is on (double-submits collapse onto the
+    active job); best-effort either way - a dispatch hiccup must never undo an
+    estimator's submit."""
+    try:
+        from app.core.config import get_settings
+
+        if get_settings().llm_queue_enabled:
+            try:
+                llm_queue.enqueue(
+                    llm_queue.JOB_GENERAL_MATERIAL,
+                    target_id=project_id,
+                    project_id=project_id,
+                    payload={"project_id": project_id},
+                    created_by=user_id,
+                )
+            except Exception:  # noqa: BLE001 - queue outage degrades to inline dispatch
+                logger.exception(
+                    "general-material enqueue failed for %s; falling back", project_id
+                )
+                background.add_task(general_material.run_extraction, project_id)
+        else:
+            background.add_task(general_material.run_extraction, project_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("general-material dispatch failed for %s", project_id)
 
 
 def project_has_drawing(project_id: str) -> bool:
@@ -1185,7 +1214,7 @@ def submit_deliverables(
         notify_role(Role.ESTIMATING_ENGINEER_LABOR, project_id, "estimate_submitted", msg)
         # Pull the general-material (wiring) price from the estimate in the background.
         if counts.get("estimate"):
-            background.add_task(general_material.run_extraction, project_id)
+            _queue_general_material(project_id, user.id, background)
         return {"submitted": True, "round": round_no, "counts": counts}
 
     # Round ≥ 2 — the round stands even if alerting hiccups, so notifications
@@ -1213,7 +1242,7 @@ def submit_deliverables(
     # extraction silently; at/after Receive Quotes the team reprocesses
     # deliberately via the stale-file badge (never yank verified numbers).
     if counts.get("estimate") and _before_receive_quotes(project_id):
-        background.add_task(general_material.run_extraction, project_id)
+        _queue_general_material(project_id, user.id, background)
     return {"submitted": True, "round": round_no, "counts": counts}
 
 

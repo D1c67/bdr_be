@@ -135,3 +135,12 @@ notification_log_rate_limit = rate_limit(
 report_rate_limit = rate_limit(
     RateLimitScope.REPORT, lambda: get_settings().report_rate_limit_per_min
 )
+# Forced AI-provider health probe ("Check now"). The cached read the indicator
+# polls is unlimited — only the button that skips the cache is capped.
+model_status_rate_limit = rate_limit(
+    RateLimitScope.MODEL_STATUS, lambda: get_settings().llm_health_rate_limit_per_min
+)
+# Dev AI monitor page: summary reads aggregate the call ledger in memory.
+llm_monitor_rate_limit = rate_limit(
+    RateLimitScope.LLM_MONITOR, lambda: get_settings().llm_monitor_rate_limit_per_min
+)

@@ -38,6 +38,7 @@ import io
 import json
 import logging
 import ssl
+import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -45,6 +46,7 @@ import httpx
 import openai
 
 from app.core.config import Settings, get_settings
+from app.services import llm_gate
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,14 @@ class LlmNotConfigured(RuntimeError):
 
 class SelfHostedUnreachable(RuntimeError):
     """The self-hosted endpoint did not respond (connection failed / timed out)."""
+
+
+class LlmBadOutput(ValueError):
+    """The model answered, but unusably (cut off, invalid JSON, wrong shape).
+
+    Distinct from plain ValueError so failure handling can tell "this input
+    can never work" (permanent) from "regenerate and it will probably work"
+    (transient, retried by the job queue)."""
 
 
 @dataclass(frozen=True)
@@ -245,7 +255,7 @@ def parse_json_loose(text: str) -> Any:
     try:
         return json.loads(t, strict=False)
     except json.JSONDecodeError as exc:
-        raise ValueError("Model response was not valid JSON — retry generation.") from exc
+        raise LlmBadOutput("Model response was not valid JSON. Retry the generation.") from exc
 
 
 def _schema_hint(system: str, schema: dict | None) -> str:
@@ -305,7 +315,7 @@ def _openai_call(
     resp = client.responses.create(**kwargs)
     if getattr(resp, "status", None) == "incomplete":
         reason = getattr(getattr(resp, "incomplete_details", None), "reason", "unknown")
-        raise ValueError(f"Model response was cut off ({reason}) — retry generation.")
+        raise LlmBadOutput(f"Model response was cut off ({reason}). Retry the generation.")
     return resp.output_text or ""
 
 
@@ -372,11 +382,44 @@ def _self_hosted_call(
         ) from exc
     choice = resp.choices[0]
     if json_output and getattr(choice, "finish_reason", None) == "length":
-        raise ValueError("Model response was cut off (token limit) — retry generation.")
+        raise LlmBadOutput("Model response was cut off (token limit). Retry the generation.")
     return choice.message.content or ""
 
 
 # ── Public operations ────────────────────────────────────────────────────────
+
+
+def _guarded(feature: str, route: Route, s: Settings, fn: Callable[[], Any]) -> Any:
+    """Run one provider call inside the concurrency gate and account for it.
+
+    The gate caps in-flight calls per provider (LlmBusy on admission
+    timeout); every outcome lands in llm_call_log for the AI monitor."""
+    tier = llm_gate.current_tier()
+    started = time.monotonic()
+    try:
+        with llm_gate.slot(route.provider, tier, s):
+            result = fn()
+    except Exception as exc:
+        llm_gate.log_call(
+            feature=feature,
+            provider=route.provider,
+            model=route.model,
+            tier_name=tier,
+            ok=False,
+            error=exc,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        raise
+    llm_gate.log_call(
+        feature=feature,
+        provider=route.provider,
+        model=route.model,
+        tier_name=tier,
+        ok=True,
+        error=None,
+        duration_ms=int((time.monotonic() - started) * 1000),
+    )
+    return result
 
 
 def complete_text(
@@ -391,16 +434,20 @@ def complete_text(
     """Plain-text completion. `messages` are neutral {role, content} turns."""
     route, s = _require_route(feature, settings)
     client = _with_timeout(_client_for(route, s), timeout)
-    if route.provider == "anthropic":
-        return _anthropic_call(client, route.model, system, messages, max_tokens)
-    if route.provider == "openai":
-        input_ = messages if len(messages) > 1 else messages[0]["content"]
-        return _openai_call(
-            client, route.model, system, input_, max_tokens, None, "response", False
+
+    def call() -> str:
+        if route.provider == "anthropic":
+            return _anthropic_call(client, route.model, system, messages, max_tokens)
+        if route.provider == "openai":
+            input_ = messages if len(messages) > 1 else messages[0]["content"]
+            return _openai_call(
+                client, route.model, system, input_, max_tokens, None, "response", False
+            )
+        return _self_hosted_call(
+            client, route.model, system, messages, max_tokens, None, "response", False
         )
-    return _self_hosted_call(
-        client, route.model, system, messages, max_tokens, None, "response", False
-    )
+
+    return _guarded(feature, route, s, call)
 
 
 def complete_json(
@@ -420,18 +467,22 @@ def complete_json(
     with the caller."""
     route, s = _require_route(feature, settings)
     client = _with_timeout(_client_for(route, s), timeout)
-    if route.provider == "anthropic":
-        text = _anthropic_call(client, route.model, system, messages, max_tokens)
-    elif route.provider == "openai":
-        input_ = messages if len(messages) > 1 else messages[0]["content"]
-        text = _openai_call(
-            client, route.model, system, input_, max_tokens, schema, schema_name, True
-        )
-    else:
-        text = _self_hosted_call(
-            client, route.model, system, messages, max_tokens, schema, schema_name, True
-        )
-    return parse_json_loose(text)
+
+    def call() -> Any:
+        if route.provider == "anthropic":
+            text = _anthropic_call(client, route.model, system, messages, max_tokens)
+        elif route.provider == "openai":
+            input_ = messages if len(messages) > 1 else messages[0]["content"]
+            text = _openai_call(
+                client, route.model, system, input_, max_tokens, schema, schema_name, True
+            )
+        else:
+            text = _self_hosted_call(
+                client, route.model, system, messages, max_tokens, schema, schema_name, True
+            )
+        return parse_json_loose(text)
+
+    return _guarded(feature, route, s, call)
 
 
 def complete_pdf_json(
@@ -451,64 +502,68 @@ def complete_pdf_json(
     file itself never leaves the server."""
     route, s = _require_route(feature, settings)
     client = _with_timeout(_client_for(route, s), timeout)
-    if route.provider == "anthropic":
-        import base64
 
-        content = [
-            {
-                "type": "document",
-                "source": {
-                    "type": "base64",
-                    "media_type": "application/pdf",
-                    "data": base64.b64encode(pdf_bytes).decode(),
-                },
-            },
-            {"type": "text", "text": prompt},
-        ]
-        text = _anthropic_call(
-            client, route.model, _schema_hint("", schema), [{"role": "user", "content": content}], max_tokens
-        )
-    elif route.provider == "openai":
-        import base64
+    def call() -> Any:
+        if route.provider == "anthropic":
+            import base64
 
-        input_ = [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "input_file",
-                        "filename": filename,
-                        "file_data": "data:application/pdf;base64,"
-                        + base64.b64encode(pdf_bytes).decode(),
+            content = [
+                {
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "application/pdf",
+                        "data": base64.b64encode(pdf_bytes).decode(),
                     },
-                    {"type": "input_text", "text": prompt},
-                ],
-            }
-        ]
-        text = _openai_call(
-            client, route.model, "", input_, max_tokens, schema, schema_name, True
-        )
-    else:
-        doc_text = _pdf_to_text(pdf_bytes)
-        if not doc_text.strip():
-            raise ValueError(
-                "The PDF contains no extractable text (likely a scanned image) — "
-                "a self-hosted text model cannot read it."
+                },
+                {"type": "text", "text": prompt},
+            ]
+            text = _anthropic_call(
+                client, route.model, _schema_hint("", schema), [{"role": "user", "content": content}], max_tokens
             )
-        user = (
-            f"{prompt}\n\nExtracted text of {filename}:\n<document>\n{doc_text}\n</document>"
-        )
-        text = _self_hosted_call(
-            client,
-            route.model,
-            "",
-            [{"role": "user", "content": user}],
-            max_tokens,
-            schema,
-            schema_name,
-            True,
-        )
-    return parse_json_loose(text)
+        elif route.provider == "openai":
+            import base64
+
+            input_ = [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_file",
+                            "filename": filename,
+                            "file_data": "data:application/pdf;base64,"
+                            + base64.b64encode(pdf_bytes).decode(),
+                        },
+                        {"type": "input_text", "text": prompt},
+                    ],
+                }
+            ]
+            text = _openai_call(
+                client, route.model, "", input_, max_tokens, schema, schema_name, True
+            )
+        else:
+            doc_text = _pdf_to_text(pdf_bytes)
+            if not doc_text.strip():
+                raise ValueError(
+                    "The PDF contains no extractable text (likely a scanned image) — "
+                    "a self-hosted text model cannot read it."
+                )
+            user = (
+                f"{prompt}\n\nExtracted text of {filename}:\n<document>\n{doc_text}\n</document>"
+            )
+            text = _self_hosted_call(
+                client,
+                route.model,
+                "",
+                [{"role": "user", "content": user}],
+                max_tokens,
+                schema,
+                schema_name,
+                True,
+            )
+        return parse_json_loose(text)
+
+    return _guarded(feature, route, s, call)
 
 
 class _ExtractBudgetReached(Exception):

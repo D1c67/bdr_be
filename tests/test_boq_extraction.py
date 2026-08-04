@@ -1,5 +1,6 @@
 """Unit tests for BOQ extraction + RFQ Excel generation (pure, no DB / no LLM)."""
 
+import io
 from pathlib import Path
 
 import pytest
@@ -61,17 +62,61 @@ def test_refine_feature_is_removed():
     assert not any("refine" in getattr(r, "path", "") for r in router.routes)
 
 
+ITEMS = [
+    {"sr_no": "51", "description": "BOH 2X4 LED PANEL", "quantity": 56, "unit": "EA", "notes": None},
+    {"sr_no": "61", "description": "FLEX LED", "quantity": 1340.2, "unit": "FT", "notes": "3.7W/FT"},
+]
+
+
 def test_build_rfq_workbook_matches_reference_shape():
-    items = [
-        {"sr_no": "51", "description": "BOH 2X4 LED PANEL", "quantity": 56, "unit": "EA", "notes": None},
-        {"sr_no": "61", "description": "FLEX LED", "quantity": 1340.2, "unit": "FT", "notes": "3.7W/FT"},
-    ]
-    rows = rx.rows_for_preview(rx.build_rfq_workbook("Lighting", items))
-    # Title row, then header (SR.NO/DESCRIPTION/QUANTITY/UNIT), then the items.
-    assert rows[0][1] == "LIGHTING"
+    rows = rx.rows_for_preview(rx.build_rfq_workbook("Lighting", ITEMS))
+    # Letterhead, category banner, then header (SR.NO/DESCRIPTION/QUANTITY/UNIT)
+    # and the items.
+    flat = [c for r in rows for c in r]
+    assert "REQUEST FOR QUOTE" in flat
+    assert "LIGHTING" in flat  # the navy category banner
     header = next(r for r in rows if r and r[0] == "SR.NO")
     assert header[:4] == ["SR.NO", "DESCRIPTION", "QUANTITY", "UNIT"]
     assert "PRICE" not in [str(c).upper() for c in header]  # vendor fills pricing
     data_rows = [r for r in rows if r and r[0] in ("51", "61")]
     assert len(data_rows) == 2
     assert data_rows[0][1] == "BOH 2X4 LED PANEL" and data_rows[0][2] == 56
+
+
+def test_build_rfq_workbook_letterhead_carries_project_context():
+    """The project number/name and the vendor due date land on the letterhead —
+    and the G3 logo is embedded, not just referenced."""
+    project = {
+        "number": "6954",
+        "name": "Sunset Ridge",
+        "due_from_vendors_at": "2026-08-11T21:00:00+00:00",
+    }
+    xlsx = rx.build_rfq_workbook("Lighting", ITEMS, project)
+    flat = [str(c) for r in rx.rows_for_preview(xlsx) for c in r]
+    assert "6954 - Sunset Ridge" in flat
+    due = next(c for c in flat if c.startswith("QUOTES DUE"))
+    assert "AUGUST 11TH" in due
+    assert any(c.startswith("Issued ") for c in flat)
+    assert any(c.startswith("G3 Electrical") for c in flat)
+
+    import zipfile
+
+    with zipfile.ZipFile(io.BytesIO(xlsx)) as z:
+        assert [n for n in z.namelist() if n.startswith("xl/media/")]
+
+
+def test_build_rfq_workbook_neutralizes_formula_injection():
+    """A BOQ description lifted from the GC's sheet must not reach the vendor's
+    workbook as a live formula (CWE-1236)."""
+    items = [{"sr_no": "1", "description": '=cmd|/C calc!A0', "quantity": 1, "unit": "EA",
+              "notes": "@SUM(1)"}]
+    rows = rx.rows_for_preview(rx.build_rfq_workbook("Gear", items))
+    row = next(r for r in rows if r and r[0] == "1")
+    assert row[1].startswith("'=") and row[4].startswith("'@")
+
+
+def test_build_rfq_workbook_without_project_omits_letterhead_lines():
+    """No project context (or no due date) still yields a valid sheet."""
+    flat = [str(c) for r in rx.rows_for_preview(rx.build_rfq_workbook("Gear", ITEMS)) for c in r]
+    assert "REQUEST FOR QUOTE" in flat
+    assert not any(c.startswith("QUOTES DUE") for c in flat)

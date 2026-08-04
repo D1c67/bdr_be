@@ -63,11 +63,21 @@ def _valid_extracted_amount(result: dict) -> bool:
     return True
 
 
+def _pipeline_tick() -> None:
+    """One poll tick with LLM calls tagged as pipeline tier: quote extractions
+    ride the background lane of the concurrency gate (and the call log) rather
+    than the reserved interactive slots."""
+    from app.services import llm_gate
+
+    with llm_gate.tier(llm_gate.TIER_PIPELINE):
+        poll_once()
+
+
 async def polling_loop() -> None:
     while True:
         started = time.monotonic()
         try:
-            await asyncio.to_thread(poll_once)
+            await asyncio.to_thread(_pipeline_tick)
         except Exception:  # noqa: BLE001 — the loop must survive any tick failure
             logger.exception("RFQ inbox poll failed")
         # Sleep the REMAINDER of the interval, not a full one: a slow tick
@@ -527,7 +537,24 @@ def _run_extraction(
         attempts += 1
         try:
             result = extract_quote_from_pdf(content, file_row["filename"], context)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            from app.services.llm_gate import LlmBusy
+
+            if isinstance(exc, LlmBusy):
+                # AI capacity gate saturated (no tokens were spent). Record an
+                # actionable note; "Fetch linked files" or manual entry cover
+                # the PE, and link-carrying replies can be re-fetched later.
+                sb.table("rfq_messages").update(
+                    {
+                        "extraction_status": "failed",
+                        "extraction_error": (
+                            "AI capacity was busy when this reply arrived, so the "
+                            "price was not extracted. Enter the amount manually, "
+                            "or use Fetch linked files to retry."
+                        ),
+                    }
+                ).eq("id", message_row["id"]).execute()
+                return "failed"
             logger.exception("Quote extraction crashed for %s", file_row["filename"])
             result = None
         if result is None:

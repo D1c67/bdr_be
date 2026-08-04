@@ -3,7 +3,7 @@
 import httpx
 import pytest
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.services import office_preview
 
 
@@ -430,3 +430,44 @@ def test_extract_pdf_text_normalizes_whitespace(monkeypatch):
 
     monkeypatch.setattr("pypdf.PdfReader", _Reader)
     assert office_preview.extract_pdf_text(b"%PDF-x") == "Taylor International Corp. $82,138"
+
+
+# ── production config guard (GOTENBERG_URL) ──────────────────────────────────
+#
+# Regression: production ran for weeks with GOTENBERG_URL unset, so the API
+# dialed its own container on the localhost default and every RFQ send failed
+# with "connection refused" while the deploy looked healthy.
+
+
+def _prod(**over) -> Settings:
+    base = dict(environment="production", supabase_service_role_key="x")
+    base.update(over)
+    return Settings(_env_file=None, **base)
+
+
+def test_production_refuses_unset_gotenberg_url():
+    with pytest.raises(ValueError, match="GOTENBERG_URL is unset"):
+        _prod()
+
+
+def test_production_accepts_gotenberg_url_from_env(monkeypatch):
+    # Env-sourced values must count as explicitly set, which is what the guard
+    # keys on. Railway/Render supply the URL this way, not as a kwarg.
+    monkeypatch.setenv("GOTENBERG_URL", "http://bdr-gotenberg.railway.internal:3000")
+    s = _prod()
+    assert s.gotenberg_base_url == "http://bdr-gotenberg.railway.internal:3000"
+
+
+def test_production_allows_explicit_localhost_sidecar():
+    # The guard is on "was it set", not on the value, so a deliberate same-host
+    # sidecar is still deployable.
+    assert _prod(gotenberg_url="http://localhost:3500").gotenberg_url == "http://localhost:3500"
+
+
+@pytest.mark.parametrize("engine", ["graph", "off"])
+def test_production_guard_only_applies_to_gotenberg_engine(engine):
+    assert _prod(preview_engine=engine).preview_engine == engine
+
+
+def test_development_does_not_require_gotenberg_url():
+    assert Settings(_env_file=None, environment="development").gotenberg_url

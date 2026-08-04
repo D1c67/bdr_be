@@ -1,7 +1,8 @@
 """RFQ bulk sending — one individual email per vendor contact.
 
-Each contact gets their own Graph draft (so we capture its conversationId for
-reply matching), the category's BOM split Excel, the project drawings (or a
+Each To contact gets their own Graph draft (so we capture its conversationId
+for reply matching), optionally with coworkers from the SAME vendor company
+CC'd on it, the category's BOM split Excel, the project drawings (or a
 OneDrive link when they exceed the configured size), and — for the Trenching
 category — the estimator's markup files. From the confirm modal the PE can
 override the attachment list per category and replace the generated body. The
@@ -110,6 +111,34 @@ def _record_failed_send(sb, rfq: dict, contact: dict, subject: str, error: str, 
 def _safe_component(name: str) -> str:
     """Make a value safe to use as a single OneDrive path component."""
     return re.sub(r'[\\/:*?"<>|#%]+', "_", name).strip() or "file"
+
+
+def _resolve_cc(
+    by_id: dict[str, dict], cc_map: dict[str, list[str]] | None
+) -> dict[str, list[dict]]:
+    """CC contact rows per To-contact id, validated against the same-company
+    rule: every CC contact must exist and share the To contact's vendor_id.
+    Raises ValueError (-> 400, before anything sends) on a violation. A To id
+    that no longer resolves is skipped — no email will go to it anyway."""
+    out: dict[str, list[dict]] = {}
+    for to_id, cc_ids in (cc_map or {}).items():
+        to = by_id.get(to_id)
+        if to is None:
+            continue
+        rows = []
+        for cc_id in cc_ids:
+            cc = by_id.get(cc_id)
+            if cc is None:
+                raise ValueError(f"CC contact not found: {cc_id}")
+            if cc.get("vendor_id") != to.get("vendor_id"):
+                raise ValueError(
+                    f"{cc['name']} works at a different company than {to['name']}. "
+                    "Only contacts at the same company can be CC'd."
+                )
+            rows.append(cc)
+        if rows:
+            out[to_id] = rows
+    return out
 
 
 def _load_files(sb, project_id: str, category: str) -> list[dict]:
@@ -241,11 +270,14 @@ def bulk_send(
     """Send each group's RFQ to its selected contacts, one email per contact.
 
     `groups` = [{"rfq_id": ..., "vendor_contact_ids": [...],
-    "attachment_file_ids": [...] | None}]. A None attachment list means the
-    default set (BOM split + drawings + Trenching markup); an explicit list is
-    exactly what the PE confirmed in the modal. `email_body` is an optional
-    PE-edited template sent verbatim (see build_custom_body). Failures are
-    per-contact: one bad address never aborts the batch.
+    "attachment_file_ids": [...] | None, "cc": {to_id: [cc_ids]} | None}]. A
+    None attachment list means the default set (BOM split + drawings +
+    Trenching markup); an explicit list is exactly what the PE confirmed in the
+    modal. `cc` copies extra contacts on a To contact's email — every CC must
+    work at the same vendor company (validated up front, see _resolve_cc).
+    `email_body` is an optional PE-edited template sent verbatim (see
+    build_custom_body). Failures are per-contact: one bad address never aborts
+    the batch.
     """
     from app.core.supabase_client import get_supabase
 
@@ -261,8 +293,11 @@ def bulk_send(
     subject = build_subject(project)
     due_str = format_bid_datetime(project["due_from_vendors_at"])
 
-    # Validate every RFQ id up front so a bad group 400s before anything sends.
+    # Validate every RFQ id and CC mapping up front so a bad group 400s before
+    # anything sends.
     rfq_by_id: dict[str, dict] = {}
+    contacts_by_rfq: dict[str, list[dict]] = {}
+    cc_by_rfq: dict[str, dict[str, list[dict]]] = {}
     for group in groups:
         rows = (
             sb.table("rfqs")
@@ -274,6 +309,25 @@ def bulk_send(
         if not rows:
             raise ValueError(f"RFQ not found in this project: {group['rfq_id']}")
         rfq_by_id[group["rfq_id"]] = rows[0]
+
+        cc_map = group.get("cc") or {}
+        all_ids = list(
+            dict.fromkeys(
+                group["vendor_contact_ids"]
+                + [i for ids in cc_map.values() for i in ids]
+            )
+        )
+        contact_rows = (
+            sb.table("vendor_contacts")
+            .select("id, name, email, vendor_id")
+            .in_("id", all_ids)
+            .execute()
+        ).data or []
+        by_id = {r["id"]: r for r in contact_rows}
+        contacts_by_rfq[group["rfq_id"]] = [
+            by_id[i] for i in group["vendor_contact_ids"] if i in by_id
+        ]
+        cc_by_rfq[group["rfq_id"]] = _resolve_cc(by_id, cc_map)
 
     # Default attachment set — only assembled when some group still uses it.
     use_defaults = any(g.get("attachment_file_ids") is None for g in groups)
@@ -313,12 +367,8 @@ def bulk_send(
                 + (markup_files if _is_trenching(category_name) else [])
             )
             group_link = drawings_link
-        contacts = (
-            sb.table("vendor_contacts")
-            .select("id, name, email")
-            .in_("id", group["vendor_contact_ids"])
-            .execute()
-        ).data or []
+        contacts = contacts_by_rfq[group["rfq_id"]]
+        group_cc = cc_by_rfq[group["rfq_id"]]
 
         # Convert the BOM (any editable Office attachment) to an immutable PDF
         # before sending. A conversion failure fails only this group's contacts
@@ -346,6 +396,7 @@ def bulk_send(
                 rfq=rfq,
                 category_name=category_name,
                 contact=contact,
+                cc_contacts=group_cc.get(contact["id"], []),
                 subject=subject,
                 due_str=due_str,
                 attachments=attachments,
@@ -374,6 +425,7 @@ def _send_one(
     rfq: dict,
     category_name: str,
     contact: dict,
+    cc_contacts: list[dict] | None = None,
     subject: str,
     due_str: str,
     attachments: list[dict],
@@ -381,6 +433,15 @@ def _send_one(
     custom_body: str | None,
     user_id: str,
 ) -> dict:
+    # Same-company coworkers copied on this contact's email (validated by
+    # _resolve_cc). They share the message and its Graph conversation, so a
+    # reply-all from either lands on this send.
+    cc_contacts = cc_contacts or []
+    cc_addrs = [c["email"] for c in cc_contacts]
+    cc_snapshot = [
+        {"vendor_contact_id": c["id"], "name": c["name"], "email": c["email"]}
+        for c in cc_contacts
+    ] or None
     if custom_body is not None:
         # The PE's words go out exactly as written — no AI variation.
         body = build_custom_body(custom_body, contact["name"], drawings_link)
@@ -394,7 +455,11 @@ def _send_one(
         # The text body is what gets stored/varied/edited; the wire format is
         # the branded HTML shell with the inline-logo signature.
         draft = graph_email.create_draft(
-            contact["email"], subject, email_branding.render_vendor_email(body), html=True
+            contact["email"],
+            subject,
+            email_branding.render_vendor_email(body),
+            html=True,
+            cc=cc_addrs or None,
         )
         graph_email.add_attachment(
             draft["id"],
@@ -413,7 +478,9 @@ def _send_one(
             sb.table("email_log")
             .insert(
                 {
-                    "to_addrs": contact["email"],
+                    # CCs join the ledger cell (comma-separated, same as the
+                    # submittal packages) so the notification log shows them.
+                    "to_addrs": ", ".join([contact["email"], *cc_addrs]),
                     "subject": subject,
                     "body": body,
                     "status": "sent",
@@ -431,6 +498,7 @@ def _send_one(
                 {
                     "rfq_id": rfq["id"],
                     "vendor_contact_id": contact["id"],
+                    "cc_recipients": cc_snapshot,
                     "graph_message_id": draft.get("id"),
                     "conversation_id": draft.get("conversationId"),
                     "internet_message_id": draft.get("internetMessageId"),
@@ -462,6 +530,7 @@ def _send_one(
             send_row["id"],
             {
                 "to": contact["email"],
+                "cc": cc_addrs or None,
                 "category": category_name,
                 "conversation_id": draft.get("conversationId"),
                 "attachments": [f["filename"] for f in attachments],
@@ -482,6 +551,7 @@ def _send_one(
                 {
                     "rfq_id": rfq["id"],
                     "vendor_contact_id": contact["id"],
+                    "cc_recipients": cc_snapshot,
                     "subject": subject,
                     "body": body,
                     "status": "failed",

@@ -54,9 +54,12 @@ def test_user_message_names_model_and_it_director():
     assert "API tokens" in msg
 
 
-def test_user_message_passthrough_for_other_errors():
+def test_user_message_generic_for_unrecognized_errors():
+    # Unrecognized exception types classify as "unknown"; their raw text is
+    # not trusted to be user-safe (SDK errors can carry the endpoint URL), so
+    # the message is a fixed generic one and the raw exception is only logged.
     exc = _FakeApiError("Model response did not match the expected schema.")
-    assert (
-        llm_errors.user_message(exc, "claude-opus-4-8")
-        == "Model response did not match the expected schema."
-    )
+    msg = llm_errors.user_message(exc, "claude-opus-4-8")
+    assert "Model response" not in msg
+    assert "Something unexpected went wrong" in msg
+    assert "IT Director" in msg

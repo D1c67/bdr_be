@@ -107,7 +107,13 @@ def extract_quote_from_pdf(pdf_bytes: bytes, filename: str, context: dict) -> di
             schema_name="quote_extraction",
             settings=settings,
         )
-    except Exception:  # noqa: BLE001 — file is saved regardless; PE can enter manually
+    except Exception as exc:  # noqa: BLE001 — file is saved regardless; PE can enter manually
+        from app.services.llm_gate import LlmBusy
+
+        if isinstance(exc, LlmBusy):
+            # Gate saturation is not an extraction failure; let the caller
+            # decide how to record it (rfq_inbox stores an actionable note).
+            raise
         logger.exception("extract_quote_from_pdf failed for %s", filename)
         return None
     # A self-hosted transport may not enforce the object schema; a list/scalar

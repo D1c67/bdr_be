@@ -7,14 +7,20 @@ it on the receive-quotes step (re-run the extraction or override the figure); th
 materials breakdown at markup/verify shows it read-only.
 """
 
+import logging
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
+from app.core.config import get_settings
 from app.core.deps import CurrentUser, get_current_user, require_writer
+from app.core.ratelimit import ai_rate_limit
 from app.core.roles import INTERNAL_ROLES
 from app.core.supabase_client import get_supabase
 from app.models.schemas import GeneralMaterialIn, TaxIn
-from app.services import general_material, workflow
+from app.services import general_material, llm_queue, workflow
 from app.services.notifications import audit
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects/{project_id}/general-material", tags=["general-material"])
 _EDITOR = require_writer
@@ -35,33 +41,69 @@ def _get(project_id: str):
 def get_general_material(project_id: str, user: CurrentUser = Depends(get_current_user)):
     if user.role not in INTERNAL_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
-    return _get(project_id)
+    row = _get(project_id)
+    if row and row.get("status") in ("pending", "running"):
+        # Release rows stranded by a restart (queue-aware: live jobs are kept).
+        row = general_material.fail_if_stale(row)
+    if row and row.get("status") in ("pending", "running"):
+        # Queue detail (position, attempt count, retry state) for the panel.
+        try:
+            row["queue"] = llm_queue.poll_info(llm_queue.JOB_GENERAL_MATERIAL, project_id)
+        except Exception:  # noqa: BLE001 - detail is optional, polling must not break
+            logger.exception("General-material queue poll_info failed")
+    return row
 
 
-@router.post("/extract")
+@router.post("/extract", dependencies=[Depends(ai_rate_limit)])
 def rerun_extraction(
     project_id: str, background: BackgroundTasks, user: CurrentUser = Depends(_EDITOR)
 ):
-    """Re-run the estimate extraction in the background.
+    """Queue a re-run of the estimate extraction.
 
     Reprocessing invalidates the sales-tax attestation up front (not on
     completion): the recorded answer described the old figure, and clearing it
     here re-arms the receive-quotes gate immediately — no window where the user
     advances on a stale attestation while the extraction is still running.
     tax_rate is kept as a prefill for the re-ask."""
+    if get_settings().llm_queue_enabled:
+        # Enqueue BEFORE touching the domain row, so 'pending' is only ever
+        # written while a job demonstrably exists. A collapse onto a job that
+        # is already RUNNING is surfaced as 409 (that run predates whatever
+        # the user just changed); collapsing onto a QUEUED job is fine, it
+        # reads the latest estimate file when it starts.
+        try:
+            llm_queue.enqueue(
+                llm_queue.JOB_GENERAL_MATERIAL,
+                target_id=project_id,
+                project_id=project_id,
+                payload={"project_id": project_id},
+                created_by=user.id,
+                raise_on_active=True,
+            )
+        except llm_queue.JobAlreadyActive as exc:
+            if exc.job.get("status") == "running":
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "An extraction is already running for this project. "
+                    "Re-run it when it finishes.",
+                ) from exc
+        except Exception:  # noqa: BLE001 - queue outage degrades to inline dispatch
+            logger.exception("General-material enqueue failed; falling back to BackgroundTasks")
+            background.add_task(general_material.run_extraction, project_id)
+    else:
+        background.add_task(general_material.run_extraction, project_id)
     get_supabase().table("general_material_estimates").upsert(
         {
             "project_id": project_id,
-            "status": "running",
+            "status": "pending",
             "error": None,
             "tax_included": None,
             "updated_at": "now()",
         },
         on_conflict="project_id",
     ).execute()
-    background.add_task(general_material.run_extraction, project_id)
     audit(user.id, "general_material.extract", "project", project_id, None)
-    return {"status": "running"}
+    return {"status": "pending"}
 
 
 @router.put("")

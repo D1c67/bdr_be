@@ -7,6 +7,10 @@ No-Go (declined). Any writer role may push a project to review, go, or no_go
 regardless of its score — at the send-to-Go/No-Go step, or (for projects in
 review) with the decide endpoint. Voting is retired.
 
+A parked review is the EXECUTIVE's task (they are the sole owner of the go_no_go
+stage — see workflow.STAGES), so they are who the handoff notification reaches and
+whose to-do queue the bid waits in. Anyone with write access may still decide it.
+
 A recorded decision can be undone (see the Undo section at the foot of this
 file), which drops it and puts the project back in review at Go/No-Go.
 
@@ -299,12 +303,22 @@ def undo(project_id: str, actor_id: str | None) -> dict:
         project_id, from_task, actor_id, f"Go/No-Go undone (was {decision['outcome']})"
     )
     sb.table("go_no_go_decisions").delete().eq("project_id", project_id).execute()
-    # The "send to estimator" prompt the Go raised is stale now. Best-effort — the
-    # project is already back in review and must not roll back over a cleanup.
+    # The "send to estimator" prompt the Go raised is stale now, as is the handoff
+    # that announced the stage the undo just left. Clear both, then raise a fresh
+    # handoff: the bid is parked at the gate again, so the gate's owner is up again
+    # and is owed the same notice they got the first time (raised AFTER the sweep,
+    # which would otherwise dismiss it on the way past). Best-effort — the project
+    # is already back in review and must not roll back over a notification.
     try:
         dismiss_notifications(project_id=project_id, types=["gono_go", "stage_handoff"])
+        owner = workflow.internal_owner_role_for("go_no_go")
+        if owner:
+            notify_role(
+                owner, project_id, "stage_handoff",
+                f"Project back in {workflow.STAGES['go_no_go'].label} — decision undone",
+            )
     except Exception:  # noqa: BLE001
-        logger.exception("Notification dismissal failed after gono undo on %s", project_id)
+        logger.exception("Notification cleanup failed after gono undo on %s", project_id)
     audit(
         actor_id,
         "gono.undo",

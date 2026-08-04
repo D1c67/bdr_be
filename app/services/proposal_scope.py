@@ -195,12 +195,26 @@ def is_stale_running(draft: dict[str, Any], now: datetime | None = None) -> bool
 
 
 def fail_if_stale(draft: dict[str, Any]) -> dict[str, Any]:
-    """Called from the poll endpoint: release a row stranded by a restart."""
+    """Called from the poll endpoint: release a row stranded by a restart.
+
+    Queue-aware: while an llm_jobs row is still queued/running for this
+    draft, the row is NOT stranded even if it has sat at pending past the
+    window (it may simply be waiting out the retry backoff or a deep queue).
+    The time-based fail remains as the backstop for queue-disabled mode and
+    for rows whose job vanished."""
     if not is_stale_running(draft):
         return draft
+    if get_settings().llm_queue_enabled:
+        from app.services import llm_queue
+
+        try:
+            if llm_queue.active_job(llm_queue.JOB_PROPOSAL, str(draft.get("id"))):
+                return draft
+        except Exception:  # noqa: BLE001 - a queue lookup problem must not break polling
+            logger.exception("proposal stale-check queue lookup failed")
     fields = {
         "status": "failed",
-        "error": "Generation was interrupted (server restarted) — run it again.",
+        "error": "Generation was interrupted (server restarted). Run it again.",
     }
     _mark(draft["id"], **fields)
     return {**draft, **fields}
@@ -248,44 +262,53 @@ def _call_llm(doc_text: str) -> dict[str, Any]:
         settings=settings,
     )
     if not isinstance(result, dict) or "lines" not in result:
-        raise ValueError("Model response did not match the expected schema.")
+        # LlmBadOutput = transient: the job queue retries the generation.
+        raise llm.LlmBadOutput(
+            "Model response did not match the expected schema. Retry the generation."
+        )
     return result
 
 
-def run_generation(draft_id: str) -> None:
-    """Background entrypoint: generate scope lines for a draft."""
+def execute(draft_id: str) -> None:
+    """Generate scope lines for a draft. Raises on failure so the job queue
+    can classify the error and decide retry vs terminal fail; the queue owns
+    the failed mark. Direct callers should use run_generation."""
     settings = get_settings()
     _mark(draft_id, status="running", error=None, model=llm.active_model("proposal", settings))
+    draft = (
+        get_supabase()
+        .table("proposal_drafts")
+        .select("*")
+        .eq("id", draft_id)
+        .single()
+        .execute()
+    ).data
+    if not draft:
+        return
+    doc_text = _load_boq_text(draft)
+    result = _call_llm(doc_text)
+    lines = lines_from_result(result)
+    if not lines:
+        # Transient: a second generation usually produces usable lines.
+        raise llm.LlmBadOutput(
+            "Model returned no usable scope lines. Check the BOQ file or retry."
+        )
+    suspects = quantity_warnings(lines)
+    if suspects:
+        note = "Possible quantities slipped into: " + " | ".join(suspects[:10])
+        result["notes"] = f"{result.get('notes') or ''}\n{note}".strip()
+    _mark(draft_id, status="done", result_json=result, lines_json=lines)
+
+
+def run_generation(draft_id: str) -> None:
+    """Inline/BackgroundTasks entrypoint (queue-disabled fallback): failures
+    are terminal-marked on the row here, with no automatic retry."""
     try:
-        draft = (
-            get_supabase()
-            .table("proposal_drafts")
-            .select("*")
-            .eq("id", draft_id)
-            .single()
-            .execute()
-        ).data
-        if not draft:
-            return
-        doc_text = _load_boq_text(draft)
-        result = _call_llm(doc_text)
-        lines = lines_from_result(result)
-        if not lines:
-            _mark(
-                draft_id,
-                status="failed",
-                error="Model returned no usable scope lines — check the BOQ file.",
-            )
-            return
-        suspects = quantity_warnings(lines)
-        if suspects:
-            note = "Possible quantities slipped into: " + " | ".join(suspects[:10])
-            result["notes"] = f"{result.get('notes') or ''}\n{note}".strip()
-        _mark(draft_id, status="done", result_json=result, lines_json=lines)
+        execute(draft_id)
     except Exception as exc:  # surface the failure to the poller
         logger.exception("proposal line generation failed for draft %s", draft_id)
         _mark(
             draft_id,
             status="failed",
-            error=llm_errors.user_message(exc, llm.active_model("proposal", settings))[:500],
+            error=llm_errors.user_message(exc, llm.active_model("proposal", get_settings()))[:500],
         )

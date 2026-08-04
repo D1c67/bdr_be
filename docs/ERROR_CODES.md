@@ -33,6 +33,8 @@ response carries two headers:
 | `outbound_email` | Invites, estimator packages, proposal emails | 60 / hour | Protects the shared mailbox's reputation; ask IT if you need more. |
 | `notification_log` | Per-project notification-log reads (each assembles the view from dozens of lookups) | 30 / min | Wait for `Retry-After`; reopening the modal normally never reaches it. |
 | `report` | Bid Invitations report reads (each scans several tables across the window) | 30 / min | Wait for `Retry-After`; normal range-switching never reaches it. |
+| `model_status` | Forced AI-provider health probes ("Check now" in the Model status modal) | 12 / min | Wait for `Retry-After`; the indicator's own polling is cached and never limited. |
+| `llm_monitor` | Dev-only AI Monitor page reads and job actions (summary reads aggregate the whole call ledger) | 120 / min | Wait for `Retry-After`; the page's own polling stays far below the budget. |
 
 All budgets are configurable via environment variables (see `app/core/config.py`,
 the `*_rate_limit_*` settings). To lift a limit for a specific user, raise the

@@ -1,9 +1,9 @@
 """RFQs and vendor quotes (steps 5-6).
 
 The Estimating Engineer creates one RFQ per material category and bulk-sends it —
-one individual email per selected vendor contact (never CC'd), each tracked by
-its Graph conversationId so inbound replies and quote PDFs can be matched
-automatically. Quotes arrive via the inbox poller (AI-extracted from PDFs) or
+one individual email per selected vendor contact (optionally CC'ing coworkers at
+the same vendor company on that contact's email), each tracked by its Graph
+conversationId so inbound replies and quote PDFs can be matched automatically. Quotes arrive via the inbox poller (AI-extracted from PDFs) or
 manual entry on the receive-quotes step; every manual change to an amount is
 recorded.
 """
@@ -126,6 +126,7 @@ def bulk_send(project_id: str, body: RFQBulkSendIn, user: CurrentUser = Depends(
         {
             "sent": sum(1 for r in result["results"] if r["status"] == "sent"),
             "failed": sum(1 for r in result["results"] if r["status"] == "failed"),
+            "cc": sum(len(ids) for g in body.groups for ids in (g.cc or {}).values()),
             "custom_body": body.email_body is not None,
             "custom_attachments": any(g.attachment_file_ids is not None for g in body.groups),
         },
@@ -141,8 +142,8 @@ def list_sends(project_id: str, user: CurrentUser = Depends(get_current_user)):
         get_supabase()
         .table("rfq_sends")
         .select(
-            "id, rfq_id, vendor_contact_id, conversation_id, subject, status, error, "
-            "polling_active, quote_received_at, sent_at, created_at, "
+            "id, rfq_id, vendor_contact_id, cc_recipients, conversation_id, subject, "
+            "status, error, polling_active, quote_received_at, sent_at, created_at, "
             "rfqs!inner(project_id), vendor_contacts(name, email, vendors(name))"
         )
         .eq("rfqs.project_id", project_id)

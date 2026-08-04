@@ -97,6 +97,47 @@ class Settings(BaseSettings):
     self_hosted_email_vary_model: str = ""
     self_hosted_aliases_model: str = ""
 
+    # ── LLM health monitoring (app/services/llm_health.py) ────────────────────
+    # Feeds the sidebar's "Model status" indicator. A background poller keeps a
+    # snapshot warm per worker; each tick is one free /models catalog call per
+    # active provider — no tokens are spent. Turn the poller off and reads still
+    # work, they just probe inline when the snapshot goes stale.
+    llm_health_enabled: bool = True
+    llm_health_poll_interval_seconds: int = 120
+    # Deliberately short and independent of self_hosted_llm_timeout_seconds
+    # (which is sized for a multi-minute BOQ run) — a status check must fail
+    # fast rather than pin a worker against a stopped model server.
+    llm_health_probe_timeout_seconds: int = 8
+    # Manual "Check now" from the modal; the cached read is not limited.
+    llm_health_rate_limit_per_min: int = 12
+
+    # ── LLM job queue + concurrency gate (services/llm_queue, llm_gate) ───────
+    # Durable queue for the long AI jobs (BOQ extraction, general material,
+    # proposal lines): jobs survive restarts, transient failures retry on the
+    # schedule below, and the dev AI monitor page reads the ledger. The gate
+    # caps concurrent in-flight LLM calls per provider so a burst can never
+    # drown the self-hosted box. All limits are per uvicorn worker process
+    # (2 workers in prod, so the effective cap is 2x).
+    llm_queue_enabled: bool = True
+    llm_queue_poll_interval_seconds: int = 3   # worker tick; also the claim cadence
+    llm_queue_worker_concurrency: int = 3      # jobs running at once per worker process
+    # A running job whose lease expired is treated as interrupted (deploy /
+    # crash) and requeued. Must comfortably exceed the slowest real run.
+    llm_queue_lease_seconds: int = 900
+    # Seconds between attempts for TRANSIENT failures (comma-separated).
+    # Total attempts = 1 + number of delays. Permanent failures (scanned PDF,
+    # missing config, out of API tokens) never retry.
+    llm_queue_retry_delays: str = "10,20,45,90,180"
+    llm_call_log_retention_days: int = 90      # llm_call_log + terminal llm_jobs pruning
+    # Concurrency gate. Self-hosted default sits inside the vLLM box's
+    # measured sweet spot (8-16 concurrent) accounting for 2 prod workers.
+    llm_max_concurrent_self_hosted: int = 6
+    llm_max_concurrent_third_party: int = 16
+    llm_interactive_reserved_slots: int = 2    # held back for user-facing calls
+    llm_interactive_wait_seconds: float = 10.0   # then LlmBusy -> "try again in a moment"
+    llm_background_wait_seconds: float = 180.0   # queue/pipeline callers wait longer
+    llm_monitor_rate_limit_per_min: int = 120  # dev AI monitor page polling
+
     # Microsoft Graph
     ms_tenant_id: str = ""
     ms_client_id: str = ""
@@ -257,6 +298,27 @@ class Settings(BaseSettings):
                     "MFA enforcement is DISABLED in production (break-glass "
                     "acknowledged). Re-enable MFA_REQUIRED as soon as possible."
                 )
+            # The gotenberg_url default (localhost:3500) is a LOCAL convenience:
+            # it matches `docker run -p 3500:3000` from the README. In a real
+            # deployment Gotenberg is a separate service, so an unset var makes
+            # the API dial its own container and get refused. Keyed on
+            # model_fields_set rather than on the value, so a deliberate
+            # same-host sidecar can still be pointed at localhost explicitly.
+            if (
+                self.preview_engine == "gotenberg"
+                and "gotenberg_url" not in self.model_fields_set
+            ):
+                raise ValueError(
+                    "Refusing to boot: PREVIEW_ENGINE=gotenberg in production "
+                    "but GOTENBERG_URL is unset, so office-to-PDF conversion "
+                    "would dial the built-in localhost default and be refused. "
+                    "That silently breaks every RFQ send (the send path refuses "
+                    "to email an editable BOM) and every xlsx/docx preview. "
+                    "Point it at the Gotenberg service, e.g. "
+                    "http://bdr-gotenberg.railway.internal:3000 (container port "
+                    "3000, not the local 3500 mapping), or set "
+                    "PREVIEW_ENGINE=graph to convert via Microsoft Graph."
+                )
         return self
 
     @model_validator(mode="after")
@@ -329,6 +391,29 @@ class Settings(BaseSettings):
                     "and re-enable SELF_HOSTED_LLM_VERIFY_TLS."
                 )
         return self
+
+    @model_validator(mode="after")
+    def _validate_llm_queue(self) -> "Settings":
+        """A malformed retry schedule should refuse to boot, not silently turn
+        every transient failure terminal at runtime."""
+        try:
+            delays = self.llm_retry_delay_list
+        except ValueError as exc:
+            raise ValueError(
+                "LLM_QUEUE_RETRY_DELAYS must be comma-separated positive "
+                "integers (seconds), e.g. '10,20,45,90,180'."
+            ) from exc
+        if any(d <= 0 for d in delays):
+            raise ValueError("LLM_QUEUE_RETRY_DELAYS entries must be positive seconds.")
+        return self
+
+    @property
+    def llm_retry_delay_list(self) -> list[int]:
+        """Parsed LLM_QUEUE_RETRY_DELAYS. Empty list = no automatic retries."""
+        raw = self.llm_queue_retry_delays.strip()
+        if not raw:
+            return []
+        return [int(part.strip()) for part in raw.split(",") if part.strip()]
 
     @property
     def self_hosted_llm_base_url(self) -> str:

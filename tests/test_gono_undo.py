@@ -12,6 +12,7 @@ Reuses the in-memory Supabase fake from test_reverify.
 import pytest
 from fastapi import HTTPException
 
+from app.core.roles import Role
 from app.services import file_sends, gono, workflow
 from tests.test_reverify import FakeDB
 
@@ -71,6 +72,7 @@ def _install(monkeypatch, db):
     monkeypatch.setattr(file_sends, "get_supabase", lambda: db)
     monkeypatch.setattr(gono, "audit", lambda *a, **k: audits.append(a))
     monkeypatch.setattr(gono, "dismiss_notifications", lambda **kw: None)
+    monkeypatch.setattr(gono, "notify_role", lambda *a, **k: None)
     monkeypatch.setattr(workflow.notifications, "dismiss_notifications", lambda **kw: None)
     return audits
 
@@ -111,6 +113,46 @@ def test_undo_go_returns_intake_head_from_to_estimator(monkeypatch):
     assert db.tables["go_no_go_decisions"] == []
     back = [e for e in db.tables["stage_events"] if e["to_stage"] == "go_no_go"]
     assert back and back[0]["from_stage"] == "to_estimator"
+
+
+def test_undo_notifies_the_executive_that_the_gate_is_open_again(monkeypatch):
+    """An undo re-parks the bid at Go/No-Go, so its owner is up again.
+
+    The notice is raised AFTER the stale-notification sweep — created first, it
+    would be dismissed on the way past and nobody would hear that the decision
+    was taken back.
+    """
+    db = _db(outcome="go")
+    _install(monkeypatch, db)
+    order: list = []
+    monkeypatch.setattr(
+        gono, "dismiss_notifications", lambda **kw: order.append(("dismiss", kw["types"]))
+    )
+    monkeypatch.setattr(
+        gono, "notify_role", lambda role, pid, type_, msg: order.append(("notify", role, pid, type_))
+    )
+
+    gono.undo("p1", "u2")
+
+    assert order == [
+        ("dismiss", ["gono_go", "stage_handoff"]),
+        ("notify", Role.EXECUTIVE, "p1", "stage_handoff"),
+    ]
+
+
+def test_undo_survives_a_failed_notification_sweep(monkeypatch):
+    """Notifications are cleanup: the project is already back in review and must
+    not roll back because the bell could not be updated."""
+    db = _db(outcome="no_go")
+    _install(monkeypatch, db)
+    monkeypatch.setattr(
+        gono, "dismiss_notifications", lambda **kw: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+
+    gono.undo("p1", "u2")
+
+    assert _state(db)["intake"] == ("go_no_go", "active")
+    assert db.tables["go_no_go_decisions"] == []
 
 
 def test_undo_leaves_the_other_lanes_locked(monkeypatch):

@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
+from app.core.config import get_settings
 from app.core.deps import CurrentUser, require_writer
 from app.core.ratelimit import ai_rate_limit
 from app.core.supabase_client import get_supabase
@@ -26,6 +27,7 @@ from app.services import (
     boq_extraction,
     boq_training,
     estimator_rounds,
+    llm_queue,
     office_preview,
     rfq_excel,
     storage,
@@ -65,6 +67,18 @@ def _active_job_exists(sb, project_id: str) -> bool:
     ).data or []
     if not rows:
         return False
+    # Queue-truth first: a live llm_jobs row means the run is genuinely in
+    # flight (queued, running, or waiting out a retry), however old the
+    # analysis row's stamp is. Only consulted while the queue is on; in
+    # disabled mode the time backstop below governs so leftover job rows
+    # (released at boot anyway) can never block starts.
+    if get_settings().llm_queue_enabled:
+        try:
+            if llm_queue.active_job(llm_queue.JOB_BOQ, rows[0]["id"]):
+                return True
+        except Exception:  # noqa: BLE001 - queue lookup trouble must not block starts
+            logger.exception("BOQ active-job queue lookup failed")
+    # Time-window backstop for queue-disabled mode / rows whose job vanished.
     stamp_raw = rows[0].get("created_at") or ""
     try:
         stamp = datetime.fromisoformat(str(stamp_raw).replace("Z", "+00:00"))
@@ -104,7 +118,20 @@ def start_analysis(
         )
         .execute()
     ).data[0]
-    background.add_task(boq_extraction.run_extraction, row["id"])
+    if get_settings().llm_queue_enabled:
+        try:
+            llm_queue.enqueue(
+                llm_queue.JOB_BOQ,
+                target_id=row["id"],
+                project_id=project_id,
+                payload={"analysis_id": row["id"]},
+                created_by=user.id,
+            )
+        except Exception:  # noqa: BLE001 - queue outage degrades to inline dispatch
+            logger.exception("BOQ enqueue failed; falling back to BackgroundTasks")
+            background.add_task(boq_extraction.run_extraction, row["id"])
+    else:
+        background.add_task(boq_extraction.run_extraction, row["id"])
     audit(user.id, "boq.analyze", "boq_analysis", row["id"], {"boq_file_id": boq_file_id})
     return row
 
@@ -127,7 +154,16 @@ def latest_analysis(project_id: str, user: CurrentUser = Depends(_PE)):
         .limit(1)
         .execute()
     ).data
-    return rows[0] if rows else None
+    if not rows:
+        return None
+    row = rows[0]
+    if row.get("status") in ("pending", "running"):
+        # Queue detail (position, attempt count, retry state) for the panel.
+        try:
+            row["queue"] = llm_queue.poll_info(llm_queue.JOB_BOQ, row["id"])
+        except Exception:  # noqa: BLE001 - detail is optional, polling must not break
+            logger.exception("BOQ queue poll_info failed")
+    return row
 
 
 @router.patch("/{analysis_id}/draft")
@@ -191,6 +227,16 @@ def confirm_analysis(
     ).data or []
     names = {c["id"]: c["name"] for c in cats}
 
+    # Letterhead context for the generated RFQ workbooks (project number/name +
+    # the vendor due date). Missing fields just leave those lines off the sheet.
+    project = (
+        sb.table("projects")
+        .select("number, name, due_from_vendors_at")
+        .eq("id", project_id)
+        .single()
+        .execute()
+    ).data
+
     created = []
     for group in body.groups:
         category_id = group.material_category_id
@@ -233,7 +279,7 @@ def confirm_analysis(
 
         # Generate the per-category RFQ Excel and attach it as the split file.
         name = names[category_id]
-        xlsx = rfq_excel.build_rfq_workbook(name, items)
+        xlsx = rfq_excel.build_rfq_workbook(name, items, project)
         filename = f"{name.replace('/', '_')}_RFQ.xlsx"
         path = storage.build_object_path(project_id, "rfq_split", filename)
         storage.upload_file(path, xlsx, _XLSX_TYPE)

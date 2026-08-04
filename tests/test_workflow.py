@@ -198,6 +198,11 @@ def _cat(db, category, pid="p1"):
 
 def test_owner_roles():
     assert owner_role_for("intake") == Role.ESTIMATING_ADMIN
+    # The gate is the Executive's call and theirs alone as an owner: ownership is
+    # what routes the handoff notification and the to-do queue, and a bid sitting
+    # at Go/No-Go is not the engineers' task (deciding it stays open to any writer).
+    assert STAGES["go_no_go"].owner_roles == (Role.EXECUTIVE,)
+    assert owner_role_for("go_no_go") == Role.EXECUTIVE
     # The engineer focus split: material-lane tasks belong to the Materials
     # engineer, labor-lane + engineer-side send-out tasks to the Labor engineer.
     assert owner_role_for("rfqs") == Role.ESTIMATING_ENGINEER_MATERIALS

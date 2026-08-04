@@ -38,6 +38,8 @@ class RateLimitScope(StrEnum):
     OUTBOUND_EMAIL = "outbound_email"   # invites + package / proposal mail
     NOTIFICATION_LOG = "notification_log"  # per-project notification-log assembly
     REPORT = "report"                   # multi-table report assembly (bid invitations)
+    MODEL_STATUS = "model_status"       # forced AI provider health probe
+    LLM_MONITOR = "llm_monitor"         # dev AI monitor page reads/actions
     DEFAULT = "api"                     # generic catch-all budget
 
 
@@ -72,6 +74,17 @@ RATE_LIMIT_HELP: dict[str, str] = {
         "Caps multi-table report reads (Bid Invitations) per account per "
         "minute — each request scans several tables across the whole window. "
         "Wait for the Retry-After window."
+    ),
+    RateLimitScope.MODEL_STATUS: (
+        "Caps forced AI-provider health checks ('Check now' in the Model status "
+        "modal) per account per minute — each one reaches out to the model "
+        "provider. The indicator's own background reads are never limited."
+    ),
+    RateLimitScope.LLM_MONITOR: (
+        "Caps the dev-only AI monitor page's reads and job actions per account "
+        "per minute. The summary endpoints aggregate the whole call ledger in "
+        "memory, so runaway polling would be costly. Wait for the Retry-After "
+        "window."
     ),
     RateLimitScope.DEFAULT: "Generous catch-all request budget for other routes.",
 }

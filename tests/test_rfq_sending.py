@@ -169,6 +169,7 @@ def test_bulk_send_schema_normalizes_blank_body_and_defaults():
     )
     assert m.email_body is None
     assert m.groups[0].attachment_file_ids is None
+    assert m.groups[0].cc is None
 
     m2 = RFQBulkSendIn(
         groups=[{"rfq_id": "r", "vendor_contact_ids": ["c"], "attachment_file_ids": []}],
@@ -176,6 +177,173 @@ def test_bulk_send_schema_normalizes_blank_body_and_defaults():
     )
     assert m2.email_body == "Hello <Contact Name>"
     assert m2.groups[0].attachment_file_ids == []
+
+
+# ── CC (same-company copies) ───────────────────────────────────────────────
+
+
+def test_bulk_send_schema_cc_normalization():
+    from app.models.schemas import RFQBulkSendIn
+
+    m = RFQBulkSendIn(
+        groups=[
+            {
+                "rfq_id": "r",
+                "vendor_contact_ids": ["a", "b"],
+                # duplicates deduped; To recipients ("a", "b") never double as
+                # CC; an emptied list is pruned; an all-empty map becomes None.
+                "cc": {"a": ["x", "x", "b", "a"], "b": ["a"]},
+            }
+        ]
+    )
+    assert m.groups[0].cc == {"a": ["x"]}
+
+    m2 = RFQBulkSendIn(
+        groups=[{"rfq_id": "r", "vendor_contact_ids": ["a"], "cc": {}}]
+    )
+    assert m2.groups[0].cc is None
+
+
+def test_bulk_send_schema_cc_rejects_unknown_key_and_oversize_list():
+    from pydantic import ValidationError
+
+    from app.models.schemas import RFQBulkSendIn
+
+    with pytest.raises(ValidationError, match="recipient contact ids"):
+        RFQBulkSendIn(
+            groups=[{"rfq_id": "r", "vendor_contact_ids": ["a"], "cc": {"z": ["x"]}}]
+        )
+    with pytest.raises(ValidationError, match="At most 10"):
+        RFQBulkSendIn(
+            groups=[
+                {
+                    "rfq_id": "r",
+                    "vendor_contact_ids": ["a"],
+                    "cc": {"a": [f"c{i}" for i in range(11)]},
+                }
+            ]
+        )
+
+
+_ANN = {"id": "t1", "name": "Ann", "email": "ann@acme.com", "vendor_id": "v1"}
+_BOB = {"id": "c1", "name": "Bob", "email": "bob@acme.com", "vendor_id": "v1"}
+_EVE = {"id": "c2", "name": "Eve", "email": "eve@other.com", "vendor_id": "v2"}
+
+
+def test_resolve_cc_same_company_ok_and_missing_to_skipped():
+    out = rs._resolve_cc({"t1": _ANN, "c1": _BOB}, {"t1": ["c1"], "gone": ["c1"]})
+    assert out == {"t1": [_BOB]}
+    assert rs._resolve_cc({"t1": _ANN}, None) == {}
+
+
+def test_resolve_cc_rejects_cross_company():
+    with pytest.raises(ValueError, match="same company"):
+        rs._resolve_cc({"t1": _ANN, "c2": _EVE}, {"t1": ["c2"]})
+
+
+def test_resolve_cc_rejects_unknown_cc_contact():
+    with pytest.raises(ValueError, match="not found"):
+        rs._resolve_cc({"t1": _ANN}, {"t1": ["nope"]})
+
+
+class _FakeSB:
+    """Captures inserts/upserts per table; every execute returns one row."""
+
+    def __init__(self):
+        self.inserts: dict[str, list[dict]] = {}
+        self.upserts: dict[str, list[dict]] = {}
+
+    def table(self, name):
+        fake = self
+
+        class _T:
+            def insert(self, row):
+                fake.inserts.setdefault(name, []).append(row)
+                return self
+
+            def upsert(self, row, on_conflict=None):
+                fake.upserts.setdefault(name, []).append(row)
+                return self
+
+            def execute(self):
+                return type("R", (), {"data": [{"id": f"{name}-1"}]})()
+
+        return _T()
+
+
+def test_send_one_ccs_same_company_contacts(monkeypatch):
+    captured: dict = {}
+    monkeypatch.setattr(
+        rs.graph_email,
+        "create_draft",
+        lambda to, subject, body, html=False, cc=None, sender=None: (
+            captured.update(to=to, cc=cc)
+            or {"id": "d1", "conversationId": "cv1", "internetMessageId": "im1"}
+        ),
+    )
+    monkeypatch.setattr(rs.graph_email, "add_attachment", lambda *a, **k: None)
+    monkeypatch.setattr(rs.graph_email, "send_draft", lambda _id: None)
+    monkeypatch.setattr(rs, "vary_email_body", lambda base, must_contain: base)
+    monkeypatch.setattr(rs, "audit", lambda *a, **k: None)
+    sb = _FakeSB()
+
+    res = rs._send_one(
+        sb,
+        project={"id": "p1"},
+        rfq={"id": "r1"},
+        category_name="Switchgear",
+        contact=_ANN,
+        cc_contacts=[_BOB],
+        subject="subj",
+        due_str="Friday, June 19th 2:00 PM",
+        attachments=[],
+        drawings_link=None,
+        custom_body=None,
+        user_id="u1",
+    )
+    assert res["status"] == "sent"
+    assert captured["to"] == "ann@acme.com"
+    assert captured["cc"] == ["bob@acme.com"]
+    # The ledger row carries both addresses; the send row snapshots the CC.
+    assert sb.inserts["email_log"][0]["to_addrs"] == "ann@acme.com, bob@acme.com"
+    assert sb.inserts["rfq_sends"][0]["cc_recipients"] == [
+        {"vendor_contact_id": "c1", "name": "Bob", "email": "bob@acme.com"}
+    ]
+
+
+def test_send_one_without_cc_keeps_single_recipient(monkeypatch):
+    captured: dict = {}
+    monkeypatch.setattr(
+        rs.graph_email,
+        "create_draft",
+        lambda to, subject, body, html=False, cc=None, sender=None: (
+            captured.update(to=to, cc=cc)
+            or {"id": "d1", "conversationId": "cv1", "internetMessageId": "im1"}
+        ),
+    )
+    monkeypatch.setattr(rs.graph_email, "add_attachment", lambda *a, **k: None)
+    monkeypatch.setattr(rs.graph_email, "send_draft", lambda _id: None)
+    monkeypatch.setattr(rs, "vary_email_body", lambda base, must_contain: base)
+    monkeypatch.setattr(rs, "audit", lambda *a, **k: None)
+    sb = _FakeSB()
+
+    res = rs._send_one(
+        sb,
+        project={"id": "p1"},
+        rfq={"id": "r1"},
+        category_name="Switchgear",
+        contact=_ANN,
+        subject="subj",
+        due_str="Friday, June 19th 2:00 PM",
+        attachments=[],
+        drawings_link=None,
+        custom_body=None,
+        user_id="u1",
+    )
+    assert res["status"] == "sent"
+    assert captured["cc"] is None
+    assert sb.inserts["email_log"][0]["to_addrs"] == "ann@acme.com"
+    assert sb.inserts["rfq_sends"][0]["cc_recipients"] is None
 
 
 # ── OpenAI rewrite guardrails ──────────────────────────────────────────────

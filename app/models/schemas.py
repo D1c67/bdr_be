@@ -546,7 +546,15 @@ class VendorContactIn(BaseModel):
     name: str
     email: EmailStr
     phone: str | None = None
-    material_category_id: str | None = None
+    # A contact may quote several trades at their company (0095), so the picker
+    # always submits the full set. Empty list = uncategorized.
+    material_category_ids: list[str] = Field(default_factory=list)
+
+
+class VendorContactUpdate(BaseModel):
+    """Replace a contact's category set (the picker submits the whole set)."""
+
+    material_category_ids: list[str] = Field(default_factory=list)
 
 
 # ── RFQs / quotes ─────────────────────────────────────────────────────────
@@ -567,10 +575,33 @@ class RFQBulkSendGroup(BaseModel):
     # explicit list (possibly empty) is exactly what the PE left in the confirm
     # modal after adding/removing files — what they saw is what gets sent.
     attachment_file_ids: list[str] | None = Field(default=None, max_length=50)
+    # Optional CC lists keyed by To-contact id: each CC contact is copied on
+    # that one email instead of getting their own. The send layer enforces that
+    # every CC works at the same vendor company as its To contact.
+    cc: dict[str, list[str]] | None = None
+
+    @model_validator(mode="after")
+    def _normalize_cc(self):
+        if not self.cc:
+            self.cc = None
+            return self
+        to_ids = set(self.vendor_contact_ids)
+        cleaned: dict[str, list[str]] = {}
+        for to_id, cc_ids in self.cc.items():
+            if to_id not in to_ids:
+                raise ValueError("cc keys must be selected recipient contact ids")
+            # A contact already getting their own email never doubles as a CC.
+            ids = [c for c in dict.fromkeys(cc_ids) if c not in to_ids]
+            if len(ids) > 10:
+                raise ValueError("At most 10 CC contacts per email")
+            if ids:
+                cleaned[to_id] = ids
+        self.cc = cleaned or None
+        return self
 
 
 class RFQBulkSendIn(BaseModel):
-    # One email per contact per group — recipients are never CC'd together.
+    # One email per To contact per group; same-company CCs ride on that email.
     groups: list[RFQBulkSendGroup] = Field(..., min_length=1, max_length=100)
     # PE-edited body template: "<Contact Name>" is replaced per recipient and
     # the text is sent verbatim (no AI variation). None = generated default.

@@ -290,7 +290,7 @@ def _install_confirm(monkeypatch, db):
     monkeypatch.setattr(
         boq_router.workflow, "maybe_reopen_verify_after_edit", lambda *a, **k: None
     )
-    monkeypatch.setattr(rfq_excel, "build_rfq_workbook", lambda name, items: b"xlsx")
+    monkeypatch.setattr(rfq_excel, "build_rfq_workbook", lambda name, items, project=None: b"xlsx")
     monkeypatch.setattr(storage, "build_object_path", lambda pid, cat, fn: f"{pid}/{cat}/{fn}")
     monkeypatch.setattr(storage, "upload_file", lambda *a, **k: None)
     monkeypatch.setattr(office_preview, "is_convertible", lambda *a: False)

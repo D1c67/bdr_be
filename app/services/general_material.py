@@ -12,11 +12,20 @@ number by hand. Runs as a background job (mirrors `boq_extraction`).
 """
 
 import io
+import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.core.config import get_settings
 from app.core.supabase_client import get_supabase
 from app.services import boq_extraction, llm, llm_errors, storage
+
+logger = logging.getLogger(__name__)
+
+# A pending/running row untouched for this long, with no live queue job, was
+# stranded (crash in queue-disabled mode, or its job vanished). Mirrors
+# proposal_scope.STALE_GENERATION_MINUTES.
+STALE_EXTRACTION_MINUTES = 15
 
 # The JSON the model must emit. `found` is the explicit signal — a null cost with
 # found=false maps to status `not_found`.
@@ -104,7 +113,10 @@ Find the "wiring" row's material cost and return the structured JSON response.""
 
 def _validate(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict) or "wiring_material_cost" not in data:
-        raise ValueError("Model response did not match the expected schema.")
+        # LlmBadOutput = transient: the job queue retries the generation.
+        raise llm.LlmBadOutput(
+            "Model response did not match the expected schema. Retry the extraction."
+        )
     return data
 
 
@@ -201,68 +213,109 @@ def _maybe_bounce(project_id: str, prior: Any, new: Any) -> None:
     workflow.maybe_reopen_verify_after_edit(project_id, None, "General material re-extracted")
 
 
-def run_extraction(project_id: str) -> None:
+def execute(project_id: str) -> None:
     """Extract the wiring material cost from the project's latest estimate file.
-    Background-task safe — failures are recorded on the row, never raised."""
+    Raises on failure so the job queue can classify the error and decide retry
+    vs terminal fail; "no estimate file" and "model found nothing" are normal
+    outcomes (not_found), not failures. Direct callers use run_extraction."""
     settings = get_settings()
     prior = _current_row(project_id)
     prior_amount = prior["amount"] if prior else None
     _save(project_id, status="running", error=None, model=llm.active_model("estimate", settings))
-    try:
-        est = _latest_estimate_file(project_id)
-        if not est:
-            _save(
-                project_id,
-                status="not_found",
-                amount=None,
-                error="No estimate file is uploaded for this project.",
-                **_tax_reset(prior, None, None),
-            )
-            _maybe_bounce(project_id, prior_amount, None)
-            return
-        size = est.get("size_bytes") or 0
-        if size > settings.boq_max_bytes:
-            _save(
-                project_id,
-                status="failed",
-                amount=None,
-                error=(
-                    f"Estimate file is too large to analyze ({size // (1024 * 1024)}MB; "
-                    f"limit {settings.boq_max_bytes // (1024 * 1024)}MB)."
-                ),
-            )
-            return
-        doc_text = _bid_recap_text(
-            storage.download_file(est["storage_path"]), settings.boq_max_text_chars
+    est = _latest_estimate_file(project_id)
+    if not est:
+        _save(
+            project_id,
+            status="not_found",
+            amount=None,
+            error="No estimate file is uploaded for this project.",
+            **_tax_reset(prior, None, None),
         )
-        result = _call_llm(build_system_prompt(), build_user_prompt(doc_text))
-        cost = result.get("wiring_material_cost")
-        if result.get("found") and cost is not None:
-            _save(
-                project_id,
-                status="done",
-                source="extracted",
-                amount=cost,
-                estimate_file_id=est["id"],
-                raw_extraction=result,
-                error=None,
-                **_tax_reset(prior, est["id"], cost),
-            )
-            _maybe_bounce(project_id, prior_amount, cost)
-        else:
-            _save(
-                project_id,
-                status="not_found",
-                amount=None,
-                estimate_file_id=est["id"],
-                raw_extraction=result,
-                error=result.get("notes"),
-                **_tax_reset(prior, est["id"], None),
-            )
-            _maybe_bounce(project_id, prior_amount, None)
+        _maybe_bounce(project_id, prior_amount, None)
+        return
+    size = est.get("size_bytes") or 0
+    if size > settings.boq_max_bytes:
+        # Permanent: the file can never fit. Blank the figure first (the old
+        # amount described a superseded estimate); ValueError classifies as
+        # bad_input, so the queue fails it immediately with this message.
+        _save(project_id, amount=None)
+        raise ValueError(
+            f"Estimate file is too large to analyze ({size // (1024 * 1024)}MB; "
+            f"limit {settings.boq_max_bytes // (1024 * 1024)}MB)."
+        )
+    doc_text = _bid_recap_text(
+        storage.download_file(est["storage_path"]), settings.boq_max_text_chars
+    )
+    result = _call_llm(build_system_prompt(), build_user_prompt(doc_text))
+    cost = result.get("wiring_material_cost")
+    if result.get("found") and cost is not None:
+        _save(
+            project_id,
+            status="done",
+            source="extracted",
+            amount=cost,
+            estimate_file_id=est["id"],
+            raw_extraction=result,
+            error=None,
+            **_tax_reset(prior, est["id"], cost),
+        )
+        _maybe_bounce(project_id, prior_amount, cost)
+    else:
+        _save(
+            project_id,
+            status="not_found",
+            amount=None,
+            estimate_file_id=est["id"],
+            raw_extraction=result,
+            error=result.get("notes"),
+            **_tax_reset(prior, est["id"], None),
+        )
+        _maybe_bounce(project_id, prior_amount, None)
+
+
+def is_stale_running(row: dict[str, Any], now: datetime | None = None) -> bool:
+    if row.get("status") not in ("pending", "running"):
+        return False
+    stamp_raw = row.get("updated_at") or row.get("created_at") or ""
+    try:
+        stamp = datetime.fromisoformat(str(stamp_raw).replace("Z", "+00:00"))
+    except ValueError:
+        return True  # unparseable timestamp on an in-flight row: treat as stuck
+    now = now or datetime.now(timezone.utc)
+    return now - stamp > timedelta(minutes=STALE_EXTRACTION_MINUTES)
+
+
+def fail_if_stale(row: dict[str, Any]) -> dict[str, Any]:
+    """Called from the read endpoint: release a row stranded by a restart.
+
+    Queue-aware like proposal_scope.fail_if_stale: while a live llm_jobs row
+    exists the row is merely queued or waiting out a retry, not stranded."""
+    if not is_stale_running(row):
+        return row
+    if get_settings().llm_queue_enabled:
+        from app.services import llm_queue
+
+        try:
+            if llm_queue.active_job(llm_queue.JOB_GENERAL_MATERIAL, str(row["project_id"])):
+                return row
+        except Exception:  # noqa: BLE001 - a queue lookup problem must not break reads
+            logger.exception("general-material stale-check queue lookup failed")
+    fields = {
+        "status": "failed",
+        "error": "Extraction was interrupted (server restarted). Run it again.",
+    }
+    _save(row["project_id"], **fields)
+    return {**row, **fields}
+
+
+def run_extraction(project_id: str) -> None:
+    """Inline/BackgroundTasks entrypoint (queue-disabled fallback): failures
+    are recorded on the row here, never raised, with no automatic retry."""
+    try:
+        execute(project_id)
     except Exception as exc:  # surface to the poller / UI
         _save(
             project_id,
             status="failed",
-            error=llm_errors.user_message(exc, llm.active_model("estimate", settings)),
+            error=llm_errors.user_message(exc, llm.active_model("estimate", get_settings())),
         )

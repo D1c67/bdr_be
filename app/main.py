@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import logging
 
 from fastapi import Depends, FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -48,8 +49,38 @@ async def lifespan(_: FastAPI):
         from app.services import email_ingest
 
         email_task = asyncio.create_task(email_ingest.polling_loop())
+    # AI model health — keeps the sidebar's Model status indicator warm by
+    # probing the active LLM pool (see services/llm_health). No sub-app gate:
+    # the features it covers span Bidding and PM. Each worker polls its own
+    # snapshot; the probe is a free /models call, so that costs nothing worth
+    # coordinating. LLM_HEALTH_ENABLED=false stops the polling — reads then
+    # probe on demand instead.
+    llm_health_task: asyncio.Task | None = None
+    if settings.llm_health_enabled:
+        from app.services import llm_health
+
+        llm_health_task = asyncio.create_task(llm_health.polling_loop())
+    # Durable LLM job queue (BOQ / general material / proposal lines). Runs in
+    # EVERY worker on purpose: claims are atomic (claim_llm_jobs RPC, FOR
+    # UPDATE SKIP LOCKED), so more workers just mean more job throughput.
+    # LLM_QUEUE_ENABLED=false reverts dispatch to in-process BackgroundTasks.
+    llm_queue_task: asyncio.Task | None = None
+    if settings.llm_queue_enabled and settings.supabase_url:
+        from app.services import llm_queue
+
+        llm_queue_task = asyncio.create_task(llm_queue.worker_loop())
+    elif settings.supabase_url:
+        # Queue switched off: with no worker loop, leftover queued/running
+        # jobs would strand their domain rows (pending forever, new starts
+        # blocked). Release them once so users can re-run inline.
+        from app.services import llm_queue
+
+        try:
+            await asyncio.to_thread(llm_queue.release_stranded_for_disabled_mode)
+        except Exception:  # noqa: BLE001 - cleanup must never block boot
+            logging.getLogger(__name__).exception("llm queue disabled-mode cleanup failed")
     yield
-    for task in (poll_task, reminder_task, email_task):
+    for task in (poll_task, reminder_task, email_task, llm_health_task, llm_queue_task):
         if task:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -181,6 +212,8 @@ from app.routers import (  # noqa: E402
     files,
     general_material,
     gono,
+    llm_monitor,
+    llm_status,
     notes,
     notification_log,
     notifications,
@@ -244,6 +277,12 @@ app.include_router(projects.router)
 app.include_router(notification_log.router)
 app.include_router(submittals.router)
 app.include_router(todos.router)
+# AI model status — the sidebar indicator. Shared: the AI features it reports on
+# belong to Bidding and PM alike, so it must survive either being switched off.
+app.include_router(llm_status.router)
+# Dev AI monitor (queue, failures, retries). Shared for the same reason; every
+# route requires a dev account (require_dev) on top of auth.
+app.include_router(llm_monitor.router)
 
 # Bidding — the bid pipeline, its files/notes, and the external estimator portal.
 app.include_router(workflow.router, dependencies=_BIDDING)

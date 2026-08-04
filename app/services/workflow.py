@@ -50,10 +50,15 @@ class StageDef:
 # anymore; gating is per-category (CATEGORY_TASKS) + the DAG (CATEGORY_PREREQS).
 STAGES: dict[str, StageDef] = {
     "intake":            StageDef("intake",            1, (Role.ESTIMATING_ADMIN,), "Intake"),
+    # Whether to chase a bid is the Executive's call, so they are its sole OWNER:
+    # ownership decides who the handoff notification wakes and whose to-do queue a
+    # parked bid sits in, and neither belongs to the engineers. Deciding it is still
+    # open to any writer (see routers/gono.decide) — like every head except verify,
+    # the owner is "whose task", not "who may act".
+    "go_no_go":          StageDef("go_no_go",          2, (Role.EXECUTIVE,), "Go / No-Go"),
     # The engineer role is split by focus: the Materials engineer owns the
     # material_numbers lane, the Labor engineer owns the labor_numbers lane AND
     # the engineer side of send_out. Shared intake tasks keep both engineers.
-    "go_no_go":          StageDef("go_no_go",          2, (Role.ESTIMATING_ENGINEER_MATERIALS, Role.ESTIMATING_ENGINEER_LABOR, Role.ESTIMATING_ADMIN, Role.EXECUTIVE), "Go / No-Go"),
     "to_estimator":      StageDef("to_estimator",      3, (Role.ESTIMATING_ADMIN, Role.ESTIMATING_ENGINEER_MATERIALS, Role.ESTIMATING_ENGINEER_LABOR), "To Estimator"),
     "estimate_received": StageDef("estimate_received", 4, (Role.ESTIMATOR, Role.ESTIMATING_ENGINEER_MATERIALS), "Estimate Received"),
     "rfqs":              StageDef("rfqs",              5, (Role.ESTIMATING_ENGINEER_MATERIALS,), "RFQs"),

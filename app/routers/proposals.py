@@ -8,8 +8,11 @@ role; reads are any internal role (incl. the read-only accountant). The
 estimator never reaches these routes (_internal) and never sees 'proposal' files
 (files.py whitelists)."""
 
+import logging
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
+from app.core.config import get_settings
 from app.core.deps import CurrentUser, get_current_user, require_writer
 from app.core.ratelimit import ai_rate_limit, outbound_email_rate_limit
 from app.core.roles import INTERNAL_ROLES
@@ -21,9 +24,17 @@ from app.models.schemas import (
     ProposalMarkSubmittedIn,
     ProposalSendIn,
 )
-from app.services import estimator_rounds, office_preview, proposal_scope, proposal_send
+from app.services import (
+    estimator_rounds,
+    llm_queue,
+    office_preview,
+    proposal_scope,
+    proposal_send,
+)
 from app.services.notifications import audit
 from app.services.proposal_send import ProposalSendError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["proposals"])
 # Send Out logistics and the per-GC bid numbers (GC Pricing step) are both open
@@ -75,8 +86,9 @@ def start_lines_generation(
 ):
     sb = get_supabase()
     # One paid generation at a time per project (each fires a paid OpenAI call).
-    # A row stranded by a restart is released via fail_if_stale on poll, and
-    # is_stale_running lets us ignore such rows here so they can't block forever.
+    # fail_if_stale is queue-aware: it keeps rows with a live queue job (even
+    # ones waiting out a retry backoff) and releases genuinely stranded ones,
+    # so a stale row can never block new starts forever.
     active = (
         sb.table("proposal_drafts")
         .select("*")
@@ -86,7 +98,7 @@ def start_lines_generation(
         .limit(1)
         .execute()
     ).data or []
-    if active and not proposal_scope.is_stale_running(active[0]):
+    if active and proposal_scope.fail_if_stale(active[0])["status"] in ("pending", "running"):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "Proposal-line generation is already in progress for this project.",
@@ -107,7 +119,20 @@ def start_lines_generation(
         )
         .execute()
     ).data[0]
-    background.add_task(proposal_scope.run_generation, row["id"])
+    if get_settings().llm_queue_enabled:
+        try:
+            llm_queue.enqueue(
+                llm_queue.JOB_PROPOSAL,
+                target_id=row["id"],
+                project_id=project_id,
+                payload={"draft_id": row["id"]},
+                created_by=user.id,
+            )
+        except Exception:  # noqa: BLE001 - queue outage degrades to inline dispatch
+            logger.exception("Proposal enqueue failed; falling back to BackgroundTasks")
+            background.add_task(proposal_scope.run_generation, row["id"])
+    else:
+        background.add_task(proposal_scope.run_generation, row["id"])
     audit(user.id, "proposal.lines_generate", "proposal_draft", row["id"],
           {"boq_file_id": boq_file_id})
     return _wire_shape(row)
@@ -128,8 +153,16 @@ def latest_draft(project_id: str, user: CurrentUser = Depends(get_current_user))
     if not rows:
         return None
     # A server restart mid-generation strands rows at pending/running; release
-    # them here so the UI's generate button comes back.
-    return _wire_shape(proposal_scope.fail_if_stale(rows[0]))
+    # them here so the UI's generate button comes back (queue-aware: rows with
+    # a live job are kept, the queue requeues interrupted runs itself).
+    draft = proposal_scope.fail_if_stale(rows[0])
+    if draft.get("status") in ("pending", "running"):
+        # Queue detail (position, attempt count, retry state) for the panel.
+        try:
+            draft["queue"] = llm_queue.poll_info(llm_queue.JOB_PROPOSAL, draft["id"])
+        except Exception:  # noqa: BLE001 - detail is optional, polling must not break
+            logger.exception("Proposal queue poll_info failed")
+    return _wire_shape(draft)
 
 
 @router.put("/proposal-lines/{draft_id}/lines")

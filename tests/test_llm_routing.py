@@ -287,6 +287,8 @@ def test_production_refuses_plain_http_unless_acknowledged():
     prod = dict(
         environment="production",
         supabase_service_role_key="k",
+        # Incidental: production also refuses to boot without a Gotenberg URL.
+        gotenberg_url="http://bdr-gotenberg:3000",
         full_self_hosted_llms_enabled=True,
         self_hosted_llm_local_base_url="http://10.0.0.5:8000/v1",
     )

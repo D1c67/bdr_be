@@ -147,7 +147,12 @@ def _active_material_category_names() -> list[str]:
 
 def _validate(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict) or "sites" not in data:
-        raise ValueError("Model response did not match the expected schema (missing 'sites').")
+        # LlmBadOutput = transient: regenerating usually fixes a shape miss,
+        # so the job queue retries it instead of failing terminally.
+        raise llm.LlmBadOutput(
+            "Model response did not match the expected schema (missing 'sites'). "
+            "Retry the analysis."
+        )
     return data
 
 
@@ -204,27 +209,35 @@ def _mark(analysis_id: str, **fields: Any) -> None:
 # ── Background entrypoints ─────────────────────────────────────────────────
 
 
-def run_extraction(analysis_id: str) -> None:
-    """Fresh extraction of a BOQ into categorized JSON. Background-task safe."""
+def execute(analysis_id: str) -> None:
+    """Fresh extraction of a BOQ into categorized JSON. Raises on failure so
+    the job queue can classify the error and decide retry vs terminal fail;
+    the queue owns the failed mark. Direct callers should use run_extraction."""
     settings = get_settings()
     _mark(analysis_id, status="running", error=None, model=llm.active_model("boq", settings))
+    analysis = (
+        get_supabase().table("boq_analyses").select("*").eq("id", analysis_id).single().execute()
+    ).data
+    if not analysis:
+        return
+    doc_text = _load_boq_text(analysis)
+    system_prompt = build_system_prompt(_active_material_category_names())
+    user_prompt = build_user_prompt(doc_text)
+    # Snapshot the exact model input before the call — the dev Training page
+    # replays it verbatim, and even a failed run keeps what it was asked.
+    _mark(analysis_id, input_snapshot={"system": system_prompt, "user": user_prompt})
+    result = _call_llm(system_prompt, [{"role": "user", "content": user_prompt}])
+    _mark(analysis_id, status="done", result_json=result)
+
+
+def run_extraction(analysis_id: str) -> None:
+    """Inline/BackgroundTasks entrypoint (queue-disabled fallback): failures
+    are terminal-marked on the row here, with no automatic retry."""
     try:
-        analysis = (
-            get_supabase().table("boq_analyses").select("*").eq("id", analysis_id).single().execute()
-        ).data
-        if not analysis:
-            return
-        doc_text = _load_boq_text(analysis)
-        system_prompt = build_system_prompt(_active_material_category_names())
-        user_prompt = build_user_prompt(doc_text)
-        # Snapshot the exact model input before the call — the dev Training page
-        # replays it verbatim, and even a failed run keeps what it was asked.
-        _mark(analysis_id, input_snapshot={"system": system_prompt, "user": user_prompt})
-        result = _call_llm(system_prompt, [{"role": "user", "content": user_prompt}])
-        _mark(analysis_id, status="done", result_json=result)
+        execute(analysis_id)
     except Exception as exc:  # surface the failure to the poller
         _mark(
             analysis_id,
             status="failed",
-            error=llm_errors.user_message(exc, llm.active_model("boq", settings)),
+            error=llm_errors.user_message(exc, llm.active_model("boq", get_settings())),
         )

@@ -101,11 +101,21 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _pipeline_tick() -> None:
+    """One poll tick with LLM calls tagged as pipeline tier: R3 matcher calls
+    ride the background lane of the concurrency gate (and the call log) rather
+    than the reserved interactive slots."""
+    from app.services import llm_gate
+
+    with llm_gate.tier(llm_gate.TIER_PIPELINE):
+        poll_once()
+
+
 async def polling_loop() -> None:
     interval = get_settings().email_ingest_poll_interval_seconds
     while True:
         try:
-            await asyncio.to_thread(poll_once)
+            await asyncio.to_thread(_pipeline_tick)
         except Exception:  # noqa: BLE001 — the loop must survive any tick failure
             logger.exception("Email ingest poll failed")
         await asyncio.sleep(interval)
@@ -970,7 +980,10 @@ def rescan_unknown_for_project(project_id: str) -> None:
     project book, so the ambiguity guardrail still applies); capped
     single-candidate LLM confirms for recent emails. Never raises."""
     try:
-        _rescan_unknown_for_project(project_id)
+        from app.services import llm_gate
+
+        with llm_gate.tier(llm_gate.TIER_PIPELINE):
+            _rescan_unknown_for_project(project_id)
     except Exception:  # noqa: BLE001 — a rescan failure must never surface anywhere
         logger.exception("Unknown-email rescan failed for project %s", project_id)
 
