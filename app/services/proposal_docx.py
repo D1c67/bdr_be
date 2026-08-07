@@ -64,14 +64,42 @@ class ProposalContext:
     date_str: str        # MM/DD/YYYY
     labor_time: str      # "DAY" | "NIGHT"
     wage_text: str       # "Prevailing Wage" | "Non-prevailing wage"
-    material_amount: str  # pre-formatted, e.g. "$41,188"
+    material_amount: str  # pre-formatted, e.g. "$41,188" (residual materials)
     labor_amount: str
     total_amount: str
     scope_lines: tuple[str, ...]
+    # Section breakouts (defaults keep existing constructors working). None
+    # means the section is not on the project: its whole pricing-box row is
+    # removed before placeholder replacement.
+    gear_amount: str | None = None
+    underground_amount: str | None = None
+    low_voltage_amount: str | None = None
+    includes_generator: bool = False  # renders the caption in the gear row
+
+
+# Section breakout rows in the pricing box, keyed by the backend section keys.
+# The template asset always carries all three rows; remove_absent_section_rows
+# deletes the ones whose ProposalContext amount is None.
+SECTION_TOKENS = {
+    "gear": "<Gear Amount>",
+    "underground": "<Underground Amount>",
+    "low_voltage": "<Low Voltage Amount>",
+}
+SECTION_LABELS = {
+    "gear": "Gear and Power Distribution Equipment",
+    "underground": "Underground",
+    "low_voltage": "Low Voltage",
+}
+# Small italic caption paragraph inside the gear label cell.
+GENERATOR_CAPTION = "*Includes Generator/s"
 
 
 def placeholder_map(ctx: ProposalContext) -> dict[str, str]:
-    return {
+    """Placeholder -> value. Section tokens are included only when the section
+    is on the project (value not None): their rows are removed pre-replacement
+    otherwise, which also makes render_proposal's expected-placeholder check
+    dynamic for free."""
+    mapping = {
         "<Project Number>": ctx.project_number,
         "<Project Name>": ctx.project_name,
         "< Date XX/XX/XXXX>": ctx.date_str,
@@ -83,6 +111,11 @@ def placeholder_map(ctx: ProposalContext) -> dict[str, str]:
         "<Labor Amount>": ctx.labor_amount,
         "<Total Amount>": ctx.total_amount,
     }
+    for key, token in SECTION_TOKENS.items():
+        value = getattr(ctx, f"{key}_amount")
+        if value is not None:
+            mapping[token] = value
+    return mapping
 
 
 ALL_PLACEHOLDERS = (
@@ -94,6 +127,9 @@ ALL_PLACEHOLDERS = (
     "<LABOR TIME>",
     "<Prevailing Wage or Non-prevailing wage>",
     "<Material Amount>",
+    "<Gear Amount>",
+    "<Underground Amount>",
+    "<Low Voltage Amount>",
     "<Labor Amount>",
     "<Total Amount>",
 )
@@ -312,11 +348,55 @@ def insert_scope_lines(doc, lines: tuple[str, ...] | list[str]) -> None:
             anchor_p.addprevious(clone)
 
 
+# ── section-row removal (runs BEFORE placeholder replacement) ──────────────
+
+
+def _pricing_table(doc):
+    """The pricing box: the body table that carries '<Material Amount>'."""
+    for tbl in doc.element.body.iter(qn("w:tbl")):
+        if "<Material Amount>" in "".join(t.text or "" for t in tbl.iter(qn("w:t"))):
+            return tbl
+    raise ProposalRenderError(
+        "Pricing table not found (no table contains '<Material Amount>'): "
+        "the template asset has drifted; re-run its patch script / tests."
+    )
+
+
+def remove_absent_section_rows(doc, ctx: ProposalContext) -> None:
+    """Delete the pricing-box row of every section whose ctx amount is None,
+    and the generator caption paragraph when it does not apply. Rows are
+    matched by their amount token, so a row this pass should have removed but
+    did not still carries its token and dies on the placeholder/bracket
+    guards. Whole w:tr / w:p nodes are removed; nothing else is edited."""
+    if ctx.includes_generator and ctx.gear_amount is None:
+        raise ProposalRenderError(
+            "includes_generator is set but gear_amount is None: the caption "
+            "lives in the gear row, so this context is contradictory."
+        )
+    tbl = _pricing_table(doc)
+    for tr in list(tbl.findall(qn("w:tr"))):
+        tr_text = "".join(t.text or "" for t in tr.iter(qn("w:t")))
+        for key, token in SECTION_TOKENS.items():
+            if token in tr_text and getattr(ctx, f"{key}_amount") is None:
+                tbl.remove(tr)
+                break
+    if not ctx.includes_generator:
+        # When the gear row survived but the project has no generator, the
+        # caption paragraph inside its label cell must go too.
+        for p in list(tbl.iter(qn("w:p"))):
+            text = " ".join("".join(t.text or "" for t in p.iter(qn("w:t"))).split())
+            if text == GENERATOR_CAPTION:
+                p.getparent().remove(p)
+
+
 # ── render ─────────────────────────────────────────────────────────────────
 
 
 def render_proposal(template_bytes: bytes, ctx: ProposalContext) -> bytes:
     doc = Document(io.BytesIO(template_bytes))
+    remove_absent_section_rows(doc, ctx)
+    # placeholder_map excludes tokens for absent sections (their rows were
+    # just removed), so this missing check is the DYNAMIC expected set.
     counts = replace_placeholders(doc, placeholder_map(ctx))
     missing = [ph for ph, n in counts.items() if n == 0]
     if missing:
@@ -372,8 +452,15 @@ def validate_output(
     scope_lines: tuple[str, ...] | list[str],
     other_gc_names: tuple[str, ...] | list[str] = (),
     amounts: tuple[str, ...] | list[str] = (),
+    includes_generator: bool = False,
+    removed_sections: tuple[str, ...] | list[str] = (),
 ) -> None:
     """Prove the rendered bytes are complete and belong to exactly one GC.
+
+    `amounts` is the list of non-None formatted figures (material, present
+    sections, labor, total). `removed_sections` names the section keys whose
+    rows were removed ('gear', 'underground', 'low_voltage'): their labels
+    must not appear. The generator caption must appear iff includes_generator.
     Raises ProposalRenderError with a precise message on any failure."""
     parts = _visible_parts(docx_bytes)
     if "word/document.xml" not in parts:
@@ -415,6 +502,31 @@ def validate_output(
                 f"Amount {amount!r} is missing from the document — stale or wrong render."
             )
 
+    # The generator caption is part of the document's identity too: it must
+    # be present exactly when the project's gear section includes a generator.
+    if includes_generator:
+        if GENERATOR_CAPTION not in body:
+            raise ProposalRenderError(
+                f"Generator caption {GENERATOR_CAPTION!r} is missing from the "
+                "document: stale or wrong render."
+            )
+    elif GENERATOR_CAPTION in body:
+        raise ProposalRenderError(
+            f"Generator caption {GENERATOR_CAPTION!r} appears but this project "
+            "has no generator: stale or wrong render."
+        )
+
+    # A section whose row was removed must leave no trace of its label.
+    for key in removed_sections:
+        label = SECTION_LABELS.get(key)
+        if label is None:
+            raise ProposalRenderError(f"Unknown pricing section key {key!r}.")
+        if label in body:
+            raise ProposalRenderError(
+                f"Removed section label {label!r} still appears in the "
+                "document: stale or wrong render."
+            )
+
     pos = 0
     for line in scope_lines:
         idx = body.find(line, pos)
@@ -452,6 +564,8 @@ def validate_pdf_isolation(
     gc_name: str,
     other_gc_names: tuple[str, ...] | list[str] = (),
     amounts: tuple[str, ...] | list[str] = (),
+    includes_generator: bool = False,
+    removed_sections: tuple[str, ...] | list[str] = (),
 ) -> None:
     """Re-prove isolation on the RENDERED PDF text that is actually emailed.
 
@@ -474,6 +588,30 @@ def validate_pdf_isolation(
         if _norm_ws(amount) not in norm:
             raise ProposalRenderError(
                 f"Amount {amount!r} is missing from the rendered PDF — stale or wrong render."
+            )
+
+    # Same section checks as validate_output, on the outbound artifact: the
+    # generator caption iff includes_generator, and no removed section's label
+    # (case-sensitive, so scope prose mentioning 'low voltage' never blocks).
+    if includes_generator:
+        if _norm_ws(GENERATOR_CAPTION) not in norm:
+            raise ProposalRenderError(
+                f"Generator caption {GENERATOR_CAPTION!r} is missing from the "
+                "rendered PDF: stale or wrong render."
+            )
+    elif _norm_ws(GENERATOR_CAPTION) in norm:
+        raise ProposalRenderError(
+            f"Generator caption {GENERATOR_CAPTION!r} appears in the rendered "
+            "PDF but this project has no generator: stale or wrong render."
+        )
+    for key in removed_sections:
+        label = SECTION_LABELS.get(key)
+        if label is None:
+            raise ProposalRenderError(f"Unknown pricing section key {key!r}.")
+        if _norm_ws(label) in norm:
+            raise ProposalRenderError(
+                f"Removed section label {label!r} still appears in the "
+                "rendered PDF: stale or wrong render."
             )
 
     # Negative isolation: no OTHER bidding GC's name may appear. Same contain-pair

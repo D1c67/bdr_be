@@ -74,6 +74,33 @@ class RoleSwitchIn(BaseModel):
     role: Role
 
 
+class AdminUpdateUserIn(BaseModel):
+    """An admin's edits to ANOTHER user's account (IT Admin / Executive).
+
+    Every field is optional so the caller PATCHes only what changed. Name and
+    email are the fields the user cannot fix themselves (`UpdateMeIn` covers
+    self-service name and locale, never email). Changing the email rewrites the
+    Supabase Auth login address as well as the profile row, so it is deliberately
+    admin-only.
+    """
+
+    full_name: str | None = Field(default=None, min_length=1, max_length=120)
+    email: EmailStr | None = None
+    role: Role | None = None
+    is_active: bool | None = None
+    is_dev: bool | None = None
+
+    @field_validator("full_name")
+    @classmethod
+    def _strip_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            raise ValueError("full_name must not be blank")
+        return v
+
+
 class UpdateMeIn(BaseModel):
     """Self-service profile edits — display name and UI language. Each field is
     optional so the caller can PATCH just the name or just the locale; email and
@@ -580,9 +607,11 @@ class RFQBulkSendGroup(BaseModel):
     # request can't be turned into a mass-mail amplifier.
     vendor_contact_ids: list[str] = Field(..., min_length=1, max_length=100)
     # None = the default set: BOM split + Electrical Drawings (falling back to
-    # General Drawings/Plans when no electrical set exists) + Trenching markup.
-    # An explicit list (possibly empty) is exactly what the PE left in the
-    # confirm modal after adding/removing files — what they saw is what gets sent.
+    # General Drawings/Plans when no electrical set exists). Trenching swaps
+    # the BOM split for the estimator's markup files (vendors price trenching
+    # from the markup, not counts). An explicit list (possibly empty) is
+    # exactly what the PE left in the Modify Files / confirm modals after
+    # adding/removing files — what they saw is what gets sent.
     attachment_file_ids: list[str] | None = Field(default=None, max_length=50)
     # Optional CC lists keyed by To-contact id: each CC contact is copied on
     # that one email instead of getting their own. The send layer enforces that
@@ -642,8 +671,63 @@ class QuoteOverrideIn(BaseModel):
     note: str | None = None
 
 
+class ManualQuoteIn(BaseModel):
+    """A hand-entered candidate on a category (quotes.origin = 'manual'): a
+    number the estimator already has in hand that never came through the
+    mailbox, e.g. a price given over the phone or carried across from another
+    job. It has no vendor behind it and no priority whatsoever: it is one more
+    quote competing to be picked on Select Vendors, and a category may hold as
+    many of them as the estimator enters.
+
+    tax_included answers the sales-tax question for this figure at the moment it
+    is typed, which is exactly what a quote approval attests to.
+    """
+
+    amount: Decimal = Field(**_AMOUNT_BOUNDS)
+    # Does the figure already include sales tax? When it does not, tax_rate (a
+    # percent) is applied on top, as it is for any vendor quote.
+    tax_included: bool
+    tax_rate: Decimal = Field(Decimal("8.375"), ge=0, le=Decimal("100"), decimal_places=3)
+    # Shown beside the figure so the team can see where the number came from.
+    notes: str | None = Field(None, max_length=2_000)
+
+
+class ReplyManualQuoteIn(BaseModel):
+    """Manual entry for a quote that ARRIVED on a vendor reply but never became
+    a number (extraction failed, found no amount, or needs review). Unlike
+    ManualQuoteIn this figure has a vendor behind it (the contact the RFQ send
+    went to), so the quote lands as origin 'vendor' bound to the reply, the
+    reply is marked resolved, and the send stops polling. It still has to be
+    approved on the table like any emailed quote; the optional tax answer here
+    just saves the second trip to the row.
+    """
+
+    amount: Decimal = Field(**_AMOUNT_BOUNDS)
+    # Null = leave the sales-tax question for the approval pass.
+    tax_included: bool | None = None
+    tax_rate: Decimal = Field(Decimal("8.375"), ge=0, le=Decimal("100"), decimal_places=3)
+    notes: str | None = Field(None, max_length=2_000)
+    # One of the reply's quote files to carry as the quote's file (what Select
+    # Vendors offers as the preview).
+    quote_file_id: str | None = None
+
+
+class QuoteApprovalIn(BaseModel):
+    """Receive-quotes sign-off on ONE quote: a human confirms the amount on the
+    row is the amount the vendor actually quoted, and that its sales-tax
+    question has been answered. Only an approved quote may be picked as a
+    category's winner; withdrawing approval from the quote that currently wins
+    withdraws the selection with it."""
+
+    approved: bool
+
+
 class RfqCustomPriceIn(BaseModel):
-    """Custom category price on the receive-quotes step; null clears it."""
+    """RETIRED: the hand-entered category price that used to outrank every
+    vendor quote. Selection is now the only thing that prices a category, so a
+    hand-entered figure is entered as a quote instead (see ManualQuoteIn) and no
+    route builds this model. Kept only because tests/test_pricing.py still
+    imports it to exercise the shared amount bounds."""
 
     amount: Decimal | None = Field(None, **_AMOUNT_BOUNDS)
     note: str | None = None
@@ -805,6 +889,14 @@ class MarkupIn(BaseModel):
     labor_markup_amount: Decimal | None = None
     materials_markup_pct: Decimal | None = None
     materials_markup_amount: Decimal | None = None
+    # Section breakouts (gear / underground / low voltage): same pct/amount pair
+    # per section; only sections present on the project are shown in the UI.
+    gear_markup_pct: Decimal | None = None
+    gear_markup_amount: Decimal | None = None
+    underground_markup_pct: Decimal | None = None
+    underground_markup_amount: Decimal | None = None
+    low_voltage_markup_pct: Decimal | None = None
+    low_voltage_markup_amount: Decimal | None = None
     notes: str | None = None
 
 
@@ -817,11 +909,19 @@ class GeneralMaterialIn(BaseModel):
 class VerifyOverrideIn(BaseModel):
     # The final figures the Executive/PM commit at the verify step (9). Stored as
     # a snapshot on `verifications` so the upstream tables stay untouched and the
-    # delta from the original numbers remains computable.
+    # delta from the original numbers remains computable. materials_amount is the
+    # RESIDUAL materials figure (section breakouts excluded); the commit stores
+    # NULL for the section fields of sections not on the project.
     labor_amount: Decimal | None = None
     materials_amount: Decimal | None = None
+    gear_amount: Decimal | None = None
+    underground_amount: Decimal | None = None
+    low_voltage_amount: Decimal | None = None
     labor_markup_amount: Decimal | None = None
     materials_markup_amount: Decimal | None = None
+    gear_markup_amount: Decimal | None = None
+    underground_markup_amount: Decimal | None = None
+    low_voltage_markup_amount: Decimal | None = None
     notes: str | None = None
 
 
@@ -855,19 +955,28 @@ class ProposalLinesIn(BaseModel):
 
 class ProposalAmountsIn(BaseModel):
     # One GC's proposal figures (GC Pricing step editor). None clears the
-    # override back to the pricing base; the total is never stored — it is
-    # always material + labor.
+    # override back to the pricing base; the total is never stored, it is
+    # always the sum of the present-section figures plus labor. A non-null
+    # value for a section not on the project is a 409 downstream.
     material_amount: Decimal | None = Field(None, **_AMOUNT_BOUNDS)
+    gear_amount: Decimal | None = Field(None, **_AMOUNT_BOUNDS)
+    underground_amount: Decimal | None = Field(None, **_AMOUNT_BOUNDS)
+    low_voltage_amount: Decimal | None = Field(None, **_AMOUNT_BOUNDS)
     labor_amount: Decimal | None = Field(None, **_AMOUNT_BOUNDS)
 
 
-class ProposalSendIn(BaseModel):
+class ProposalDispatchIn(BaseModel):
+    # Shared wire shape of the two per-GC email paths (send, re-send): which
+    # proposal rows, who at each GC, and the cover note.
     proposal_ids: list[str] = Field(..., min_length=1, max_length=100)
     # proposal_id → gc_contact ids chosen in the confirm dialog. Missing key =
     # all contacts with an email (legacy clients / tests).
     contacts: dict[str, list[str]] | None = None
     email_body: str | None = None  # None = generated cover note
-    force: bool = False  # required to retry an outcome-unknown failure
+    # Extra project files the PA picked in the Modify Files modal. They ride on
+    # EVERY email in this dispatch alongside each GC's own proposal PDF (which
+    # is always attached and never part of this list). None/empty = none.
+    extra_attachment_file_ids: list[str] | None = Field(default=None, max_length=25)
 
     @field_validator("email_body")
     @classmethod
@@ -882,6 +991,18 @@ class ProposalSendIn(BaseModel):
         if v is not None and (len(v) > 100 or any(len(ids) > 50 for ids in v.values())):
             raise ValueError("Too many recipient selections")
         return v
+
+
+class ProposalSendIn(ProposalDispatchIn):
+    force: bool = False  # required to retry an outcome-unknown failure
+
+
+class ProposalResendIn(ProposalDispatchIn):
+    # Email an already-sent proposal to its GC again (bounced address, GC lost
+    # the mail). No `force`: that flag exists to unblock a first send whose
+    # outcome is unknown, and a re-send leaves proposal_sends at 'sent' whatever
+    # happens, so there is no ambiguous state for it to unlock.
+    pass
 
 
 class ProposalMarkSubmittedIn(BaseModel):

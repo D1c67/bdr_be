@@ -337,8 +337,13 @@ def _materials_amounts(
     pid: str,
 ) -> list[Decimal | None]:
     """Per-category price basis for a project (mirrors pricing._materials_rows):
-    custom > selected > lowest per RFQ, with General Material priced from the
-    estimate. Returns one amount per category (None where unpriced)."""
+    the SELECTED quote per RFQ and nothing else — no lowest-received fallback, no
+    hand-entered override outranking it, and General Material priced by its own
+    selected candidate like every other category. Returns one amount per category
+    (None where no winner has been picked).
+
+    The estimate figure is still used for the one edge pricing keeps: a project that
+    has a general estimate but never had a General Material RFQ to attach it to."""
     amounts: list[Decimal | None] = []
     gen = gen_by_proj.get(pid)
     # The general figure carries its own tax answer — taxed like a quote.
@@ -346,24 +351,11 @@ def _materials_amounts(
     saw_general = False
     for r in rfqs_by_proj.get(pid, []):
         cat = r.get("material_categories") or {}
-        if cat.get("is_general"):
-            saw_general = True
-            amounts.append(gen_amount)
-            continue
-        lowest: Decimal | None = None
-        selected: Decimal | None = None
-        for q in quotes_by_rfq.get(r["id"], []):
-            # Tax-inclusive, like pricing — raw amounts would flatter vendors
-            # whose quotes don't yet carry sales tax.
-            amt = taxed_amount(q)
-            if lowest is None or amt < lowest:
-                lowest = amt
-            if q.get("is_selected"):
-                selected = amt
-        custom = r.get("custom_amount")
-        amt, _ = pick_material_amount(
-            Decimal(str(custom)) if custom is not None else None, selected, lowest
+        saw_general = saw_general or bool(cat.get("is_general"))
+        selected = next(
+            (q for q in quotes_by_rfq.get(r["id"], []) if q.get("is_selected")), None
         )
+        amt, _ = pick_material_amount(selected)
         amounts.append(amt)
     if not saw_general and gen_amount is not None:
         amounts.append(gen_amount)
@@ -377,7 +369,7 @@ def _load_pricing(pids: list[str]) -> dict[str, dict]:
     sb = get_supabase()
     rfqs = (
         sb.table("rfqs")
-        .select("id, project_id, custom_amount, material_categories(is_general)")
+        .select("id, project_id, material_categories(is_general)")
         .in_("project_id", pids)
         .execute()
     ).data or []
@@ -389,7 +381,7 @@ def _load_pricing(pids: list[str]) -> dict[str, dict]:
     quotes = (
         (
             sb.table("quotes")
-            .select("rfq_id, amount, is_selected, tax_included, tax_rate")
+            .select("rfq_id, amount, is_selected, tax_included, tax_rate, origin")
             .in_("rfq_id", rfq_ids)
             .execute()
         ).data
@@ -420,7 +412,11 @@ def _load_pricing(pids: list[str]) -> dict[str, dict]:
         x["project_id"]: x
         for x in (
             sb.table("markups")
-            .select("project_id, labor_markup_amount, materials_markup_amount")
+            .select(
+                "project_id, labor_markup_amount, materials_markup_amount,"
+                " gear_markup_amount, underground_markup_amount,"
+                " low_voltage_markup_amount"
+            )
             .in_("project_id", pids)
             .execute()
         ).data
@@ -440,9 +436,20 @@ def _load_pricing(pids: list[str]) -> dict[str, dict]:
         markup = markup_by_proj.get(pid)
         originals = {
             "labor_amount": _num(labor_by_proj.get(pid), "labor_amount"),
+            # The TOTAL across every category (sections included), matching the
+            # project summary box's aggregate semantics.
             "materials_amount": sum(mats, Decimal(0)) if mats else None,
+            # Live section amounts are deliberately None here: bid_price only
+            # exists once committed, and a committed snapshot is read as-is
+            # (the section resolution rule), so the live figures never feed it.
+            "gear_amount": None,
+            "underground_amount": None,
+            "low_voltage_amount": None,
             "labor_markup_amount": _num(markup, "labor_markup_amount"),
             "materials_markup_amount": _num(markup, "materials_markup_amount"),
+            "gear_markup_amount": _num(markup, "gear_markup_amount"),
+            "underground_markup_amount": _num(markup, "underground_markup_amount"),
+            "low_voltage_markup_amount": _num(markup, "low_voltage_markup_amount"),
         }
         out[pid] = pricing_summary_numbers(originals, verif_by_proj.get(pid))
     return out
@@ -571,7 +578,7 @@ def _quotes_data(w: WindowData) -> dict:
         (
             sb.table("rfqs")
             .select(
-                "id, project_id, due_date, custom_amount, material_categories(is_general)"
+                "id, project_id, due_date, material_categories(is_general)"
             )
             .in_("project_id", pids)
             .execute()
@@ -593,7 +600,7 @@ def _quotes_data(w: WindowData) -> dict:
         (
             sb.table("quotes")
             # tax fields so _materials_amounts prices by tax-inclusive totals.
-            .select("rfq_id, amount, is_selected, received_at, source, tax_included, tax_rate")
+            .select("rfq_id, amount, is_selected, received_at, source, tax_included, tax_rate, origin")
             .in_("rfq_id", rfq_ids)
             .execute()
         ).data
@@ -1115,7 +1122,10 @@ def gc_spread(w: WindowData, range_: str) -> dict:
         rows = (
             get_supabase()
             .table("proposal_sends")
-            .select("project_id, gc_id, gc_name, material_amount, labor_amount")
+            .select(
+                "project_id, gc_id, gc_name, material_amount, gear_amount,"
+                " underground_amount, low_voltage_amount, labor_amount"
+            )
             .in_("project_id", cohort)
             .eq("status", "sent")
             .execute()
@@ -1123,7 +1133,7 @@ def gc_spread(w: WindowData, range_: str) -> dict:
 
     sends_by_project: dict[str, list[tuple[str, str, float]]] = defaultdict(list)
     for r in rows:
-        amt = our_amount_of(r.get("material_amount"), r.get("labor_amount"))
+        amt = our_amount_of(r)
         if amt is None:
             continue
         sends_by_project[r["project_id"]].append((r["gc_id"], r["gc_name"], float(amt)))

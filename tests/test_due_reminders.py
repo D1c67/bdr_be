@@ -106,9 +106,28 @@ def test_is_complete_vendors_kind():
                               False, False, ["draft", "quotes_in"])
     # All quotes in/closed → done regardless of the head…
     assert dr.is_complete("due_from_vendors", at_rq, False, False, ["quotes_in", "closed"])
-    # …or once the MATERIAL category passes Receive Quotes.
-    assert dr.is_complete("due_from_vendors", _cs(material_numbers=("receive_quotes", "complete")),
+    # …or once SELECT VENDORS completes (a winner picked in every category).
+    assert dr.is_complete("due_from_vendors",
+                          _cs(select_vendors=("select_vendors", "complete")),
                           False, False, [])
+
+
+def test_is_complete_vendors_not_keyed_to_receive_quotes():
+    # Receive Quotes may legitimately never complete now (winners are picked from
+    # the quotes that did arrive), so the material lane must NOT be what silences
+    # this reminder — and the reverse: a completed material lane on its own leaves
+    # the reminder live until a winner is actually chosen.
+    material_done = _cs(
+        intake=("to_estimator", "complete"),
+        material_numbers=("receive_quotes", "complete"),
+    )
+    assert not dr.is_complete("due_from_vendors", material_done, False, False, [])
+    # Select Vendors completing off a still-active material lane does silence it.
+    picked = _cs(
+        material_numbers=("receive_quotes", "active"),
+        select_vendors=("select_vendors", "complete"),
+    )
+    assert dr.is_complete("due_from_vendors", picked, False, False, [])
 
 
 def test_is_complete_vendors_independent_of_labor():

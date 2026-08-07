@@ -85,7 +85,10 @@ def _winning_bid_amount(project_id: str, winning_gc_id: str | None) -> Decimal |
         return Decimal(str(rows[0]["our_amount"]))
     sent = (
         sb.table("proposal_sends")
-        .select("material_amount, labor_amount")
+        .select(
+            "material_amount, gear_amount, underground_amount,"
+            " low_voltage_amount, labor_amount"
+        )
         .eq("project_id", project_id)
         .eq("gc_id", winning_gc_id)
         .eq("status", "sent")
@@ -94,7 +97,7 @@ def _winning_bid_amount(project_id: str, winning_gc_id: str | None) -> Decimal |
     if sent:
         from app.services.outcome import our_amount_of  # lazy: outcome imports pm
 
-        return our_amount_of(sent[0].get("material_amount"), sent[0].get("labor_amount"))
+        return our_amount_of(sent[0])
     return None
 
 

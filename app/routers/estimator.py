@@ -1169,11 +1169,28 @@ def my_assigned_projects(user: CurrentUser = Depends(get_current_user)):
 
 
 def _before_receive_quotes(project_id: str) -> bool:
-    """True while nothing downstream has consumed the estimate figure yet —
-    the window where a revised estimate may silently refresh the extraction
-    (no badge, no human step) instead of demanding a manual reprocess. Keyed to
-    the MATERIAL category (independent of labor): true until material reaches
-    Receive Quotes."""
+    """True while nothing downstream has consumed the estimate figure yet, the
+    window where a revised estimate may silently refresh the general-material
+    extraction (no badge, no human step) instead of demanding a manual reprocess.
+    Keyed to the MATERIAL category (independent of labor): true until material
+    reaches Receive Quotes.
+
+    The boundary DELIBERATELY stays at Receive Quotes under the selection model.
+    Receive Quotes is where a human approves each candidate: they confirm the
+    figure is right and answer its sales-tax question, and the wiring figure off
+    the estimate is now just another candidate approved there. A silent
+    re-extraction re-anchors that figure and clears the tax attestation
+    (services/general_material._tax_reset), so past this point it would be quietly
+    invalidating an answer somebody already gave, and possibly the winner they
+    picked off the back of it. Moving the boundary later, to Select Vendors, would
+    only widen the window in which an approved number can be yanked out from under
+    the person who approved it.
+
+    Note this asks `category_reached`, not lane completion: only whether the
+    material lane's head has ARRIVED at Receive Quotes. So unlike the vendor-due
+    reminder (services/due_reminders), it cannot get stuck on a lane that now
+    legitimately never completes, and no repoint is warranted.
+    """
     from app.services import workflow
 
     state = workflow.load_category_state(project_id)
@@ -1257,7 +1274,7 @@ def submit_deliverables(
 
     # A revised estimate before anything consumed the figure just refreshes the
     # extraction silently; at/after Receive Quotes the team reprocesses
-    # deliberately via the stale-file badge (never yank verified numbers).
+    # deliberately via the stale-file badge (never yank an approved number).
     if counts.get("estimate") and _before_receive_quotes(project_id):
         _queue_general_material(project_id, user.id, background)
     return {"submitted": True, "round": round_no, "counts": counts}

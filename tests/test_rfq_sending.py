@@ -464,3 +464,110 @@ def test_record_failed_send_inserts_and_returns_result():
     assert inserted["error"] == "boom"
     assert inserted["rfq_id"] == "r1"
     assert inserted["vendor_contact_id"] == "c1"
+
+
+# ── Trenching default set (markup + drawings, no BOM split) ────────────────
+
+
+def test_build_base_body_trenching_wording():
+    body = rs.build_base_body("Jane", "Friday, June 19th 2:00 PM", None, trenching=True)
+    assert "the attached trench markup and drawings" in body
+    assert "BOM" not in body
+    assert "—" not in body and body.isascii()
+    # The default wording is unchanged for every other category.
+    assert "the attached BOM" in rs.build_base_body("Jane", "Friday, June 19th 2:00 PM", None)
+
+
+class _Exec:
+    def __init__(self, data):
+        self.data = data
+
+
+class _RecordingQuery:
+    """Chainable stand-in: records every call, answers from a handler."""
+
+    def __init__(self, handler):
+        self._handler = handler
+        self._calls = []
+
+    def __getattr__(self, name):
+        def method(*args, **kwargs):
+            self._calls.append((name, args))
+            return self
+
+        return method
+
+    def execute(self):
+        return _Exec(self._handler(self._calls))
+
+
+def _eq_arg(calls, column):
+    return next(a[1] for n, a in calls if n == "eq" and a and a[0] == column)
+
+
+def test_bulk_send_trenching_default_swaps_split_for_markup(monkeypatch):
+    """The default attachment set for a Trenching group is markup + drawings;
+    the BOM split is neither fetched nor attached. Other categories keep
+    split + drawings and no markup."""
+    project = {"id": "p1", "number": "26-104", "name": "X", "due_from_vendors_at": "2026-08-10T17:00:00Z", "actual_bid_at": None}
+    rfqs_by_id = {
+        "r-trench": {"id": "r-trench", "split_file_id": "f-trench-split", "material_categories": {"name": "Trenching"}},
+        "r-light": {"id": "r-light", "split_file_id": "f-light-split", "material_categories": {"name": "Lighting"}},
+    }
+    split_rows = {"f-light-split": {"filename": "bom.xlsx", "storage_path": "s/bom.xlsx"}}
+    fetched_split_ids = []
+
+    def handler_for(table):
+        def handle(calls):
+            if table == "projects":
+                return project
+            if table == "rfqs":
+                if any(n == "update" for n, _ in calls):
+                    return []
+                return [rfqs_by_id[_eq_arg(calls, "id")]]
+            if table == "vendor_contacts":
+                return [{"id": "c1", "name": "Jane", "email": "j@x.com", "vendor_id": "v1"}]
+            if table == "project_files":
+                fid = _eq_arg(calls, "id")
+                fetched_split_ids.append(fid)
+                return split_rows[fid]
+            raise AssertionError(f"unexpected table {table}")
+
+        return handle
+
+    class _SB:
+        def table(self, name):
+            return _RecordingQuery(handler_for(name))
+
+    import app.core.supabase_client as sbc
+
+    monkeypatch.setattr(sbc, "get_supabase", lambda: _SB())
+    monkeypatch.setattr(rs.storage, "download_file", lambda path: b"bytes:" + path.encode())
+    monkeypatch.setattr(rs, "_prepare_drawings", lambda sb, p: ([{"filename": "plan.pdf", "content": b"d"}], None))
+    monkeypatch.setattr(rs, "_load_files", lambda sb, pid, cat: [{"filename": "Trench Markup.pdf", "content": b"m"}] if cat == "markup" else [])
+    monkeypatch.setattr(rs, "_as_immutable_pdf", lambda f: f)
+    monkeypatch.setattr(rs.time, "sleep", lambda s: None)
+
+    sent = []
+
+    def fake_send_one(sb, **kw):
+        sent.append(kw)
+        return {"rfq_id": kw["rfq"]["id"], "vendor_contact_id": kw["contact"]["id"], "status": "sent"}
+
+    monkeypatch.setattr(rs, "_send_one", fake_send_one)
+
+    result = rs.bulk_send(
+        "p1",
+        [
+            {"rfq_id": "r-trench", "vendor_contact_ids": ["c1"], "attachment_file_ids": None},
+            {"rfq_id": "r-light", "vendor_contact_ids": ["c1"], "attachment_file_ids": None},
+        ],
+        "u1",
+    )
+
+    by_rfq = {kw["rfq"]["id"]: [f["filename"] for f in kw["attachments"]] for kw in sent}
+    assert by_rfq["r-trench"] == ["plan.pdf", "Trench Markup.pdf"]
+    assert by_rfq["r-light"] == ["bom.xlsx", "plan.pdf"]
+    # The Trenching split was never even fetched from storage.
+    assert fetched_split_ids == ["f-light-split"]
+    assert all(r["status"] == "sent" for r in result["results"])

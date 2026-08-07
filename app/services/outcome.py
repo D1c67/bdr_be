@@ -7,8 +7,8 @@ G3's overall result (won/lost/no_award), the winning GC, and a free-text note li
 on the project-level `bid_outcomes` row.
 
 "Which GCs we bid to" is the set of `proposal_sends` rows with status='sent' — the
-same definition Send Out uses. Each carries the number we bid that GC
-(material_amount + labor_amount); we snapshot it onto the per-GC outcome at record
+same definition Send Out uses. Each carries the number we bid that GC (the sum of
+its stamped section figures); we snapshot it onto the per-GC outcome at record
 time so "how far off our number was" stays correct even if pricing later changes.
 """
 
@@ -43,12 +43,26 @@ def _s(v: Decimal | None) -> str | None:
     return str(v) if v is not None else None
 
 
-def our_amount_of(material, labor) -> Decimal | None:
-    """The number we bid a GC = material + labor. None only when both are absent
-    (legacy proposal_sends rows generated before per-GC amounts existed)."""
-    if material is None and labor is None:
+# The proposal_sends stamp columns that make up the number we bid a GC.
+_STAMP_COLUMNS = (
+    "material_amount",
+    "gear_amount",
+    "underground_amount",
+    "low_voltage_amount",
+    "labor_amount",
+)
+
+
+def our_amount_of(row: dict) -> Decimal | None:
+    """The number we bid a GC = the sum of the five stamped section figures on
+    its proposal_sends row, treating NULL as 0 (legacy two-column rows stamped
+    the full materials figure on material_amount, so they still sum correctly).
+    None only when every stamp is absent (rows generated before per-GC amounts
+    existed)."""
+    values = [_dec(row.get(col)) for col in _STAMP_COLUMNS]
+    if all(v is None for v in values):
         return None
-    return (_dec(material) or Decimal(0)) + (_dec(labor) or Decimal(0))
+    return sum((v for v in values if v is not None), Decimal(0))
 
 
 def won_via_us(gc_rows: list[dict]) -> bool:
@@ -92,7 +106,8 @@ def _sent_gcs(project_id: str) -> list[dict]:
         get_supabase()
         .table("proposal_sends")
         .select(
-            "gc_id, gc_name, material_amount, labor_amount,"
+            "gc_id, gc_name, material_amount, gear_amount, underground_amount,"
+            " low_voltage_amount, labor_amount,"
             " general_contractors(gc_contacts(email))"
         )
         .eq("project_id", project_id)
@@ -109,7 +124,7 @@ def _sent_gcs(project_id: str) -> list[dict]:
             {
                 "gc_id": r["gc_id"],
                 "gc_name": r["gc_name"],
-                "our_amount": our_amount_of(r.get("material_amount"), r.get("labor_amount")),
+                "our_amount": our_amount_of(r),
                 "emails": emails,
             }
         )

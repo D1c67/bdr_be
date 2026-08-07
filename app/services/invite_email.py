@@ -1,4 +1,4 @@
-"""Branded Microsoft Graph send for user invites.
+"""Branded Microsoft Graph send for user invites and admin password resets.
 
 Gives invites the same G3 look as every other app email (navy/silver header, the
 inline logo, the office-phone signature) and greets the invitee by name — using
@@ -66,6 +66,35 @@ def send_invite_email(
     graph_email.send_mail(
         to=[to],
         subject="G3 BDR · You've been invited",
+        body_html=html,
+        inline_images=[(LOGO_CONTENT_ID, LOGO_FILENAME, logo_bytes(), "image/jpeg")],
+        sent_by=sent_by,
+    )
+
+
+def send_password_reset_email(
+    *, to: str, full_name: str, cta_url: str, sent_by: str | None
+) -> None:
+    """Render and send one branded G3 password-reset email (admin-initiated).
+
+    Same recipe as the invite above. The copy says an admin asked for this, so a
+    reset the user did not request themselves reads as expected rather than as a
+    phishing attempt. Raises on send failure; the caller surfaces a 502.
+    """
+    html = render_notification_email(
+        recipient_name=full_name,
+        heading="Reset your BDR password",
+        message=(
+            "An administrator has started a password reset for your BDR account. "
+            "Use the link below to set a new password. If you weren't expecting "
+            "this, you can ignore this email and your password will stay as it is."
+        ),
+        cta_label="Set a new password",
+        cta_url=cta_url,
+    )
+    graph_email.send_mail(
+        to=[to],
+        subject="G3 BDR · Reset your password",
         body_html=html,
         inline_images=[(LOGO_CONTENT_ID, LOGO_FILENAME, logo_bytes(), "image/jpeg")],
         sent_by=sent_by,

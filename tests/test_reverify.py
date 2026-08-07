@@ -338,6 +338,98 @@ def test_second_edit_does_not_overwrite_return_stage(monkeypatch):
     assert len(db.tables["stage_events"]) == events_after_first
 
 
+# ── Legacy (pre-sections) snapshots are cleared on bounce ──────────────────────
+
+
+def _legacy_verification(committed=True):
+    """A snapshot committed before the pricing-sections release: the four legacy
+    figures populated (materials holds the FULL figure), every section column NULL."""
+    return {
+        **_verification(committed),
+        "labor_amount": "40000",
+        "materials_amount": "40000",
+        "labor_markup_amount": "950",
+        "materials_markup_amount": "1188",
+        "gear_amount": None,
+        "gear_markup_amount": None,
+        "underground_amount": None,
+        "underground_markup_amount": None,
+        "low_voltage_amount": None,
+        "low_voltage_markup_amount": None,
+    }
+
+
+def _breakout_rfq(section="gear"):
+    return {"id": "r1", "project_id": "p1",
+            "material_categories": {"pricing_section": section}}
+
+
+def test_bounce_clears_legacy_snapshot_when_breakouts_are_live(monkeypatch):
+    db = FakeDB({
+        "projects": [_project("send_out")],
+        "verifications": [_legacy_verification()],
+        "rfqs": [_breakout_rfq()],
+        "stage_events": [],
+        "project_category_state": _cat_rows(send_out=("send_out", "active")),
+    })
+    _install(monkeypatch, db)
+    assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Markup edited") is True
+    v = db.tables["verifications"][0]
+    # The stale full-materials draft would double count the live breakout
+    # sections, so the bounce clears all four legacy figures.
+    for col in ("labor_amount", "materials_amount",
+                "labor_markup_amount", "materials_markup_amount"):
+        assert v[col] is None
+    assert v["committed_at"] is None and v["verified_by"] is None
+
+
+def test_bounce_keeps_sectioned_snapshot_as_draft(monkeypatch):
+    db = FakeDB({
+        "projects": [_project("send_out")],
+        "verifications": [{**_legacy_verification(), "gear_amount": "10000",
+                           "gear_markup_amount": "500"}],
+        "rfqs": [_breakout_rfq()],
+        "stage_events": [],
+        "project_category_state": _cat_rows(send_out=("send_out", "active")),
+    })
+    _install(monkeypatch, db)
+    assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Markup edited") is True
+    v = db.tables["verifications"][0]
+    assert v["materials_amount"] == "40000"  # post-release snapshot survives as a draft
+    assert v["gear_amount"] == "10000"
+
+
+def test_bounce_keeps_legacy_snapshot_without_breakouts(monkeypatch):
+    db = FakeDB({
+        "projects": [_project("send_out")],
+        "verifications": [_legacy_verification()],
+        "rfqs": [{"id": "r1", "project_id": "p1",
+                  "material_categories": {"pricing_section": "materials"}}],
+        "stage_events": [],
+        "project_category_state": _cat_rows(send_out=("send_out", "active")),
+    })
+    _install(monkeypatch, db)
+    assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Markup edited") is True
+    v = db.tables["verifications"][0]
+    # No breakout categories on the project: nothing can double count, so the
+    # draft figures stay for the re-verify form.
+    assert v["materials_amount"] == "40000"
+
+
+def test_legacy_snapshot_reset_needed_predicate():
+    legacy = _legacy_verification()
+    breakout = [_breakout_rfq()]
+    materials_only = [{"material_categories": {"pricing_section": "materials"}}]
+    assert workflow.legacy_snapshot_reset_needed(legacy, breakout) is True
+    assert workflow.legacy_snapshot_reset_needed(legacy, materials_only) is False
+    assert workflow.legacy_snapshot_reset_needed(legacy, []) is False
+    assert workflow.legacy_snapshot_reset_needed(None, breakout) is False
+    sectioned = {**legacy, "underground_amount": "500"}
+    assert workflow.legacy_snapshot_reset_needed(sectioned, breakout) is False
+    # An embed that failed to join is not a breakout.
+    assert workflow.legacy_snapshot_reset_needed(legacy, [{"material_categories": None}]) is False
+
+
 # ── The return move ────────────────────────────────────────────────────────────
 
 

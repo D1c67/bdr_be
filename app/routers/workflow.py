@@ -19,7 +19,7 @@ from app.core.roles import INTERNAL_ROLES, WRITER_ROLES
 from app.core.supabase_client import get_supabase
 from app.models.schemas import TransitionIn
 from app.routers.projects import redact_for_role
-from app.services import gono, workflow
+from app.services import gono, vendor_selection, workflow
 from app.services.notifications import notify_role
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["workflow"])
@@ -105,28 +105,24 @@ def advance(
                 "Upload at least one General or Electrical drawing/plan before completing Intake",
             )
 
-    # Receive Quotes (last material task) can't be left until every non-general RFQ
-    # category is confirmed quoted-in-full — server-side so a direct call can't bypass it.
-    if category == "material_numbers" and head == "receive_quotes":
-        rows = (
-            get_supabase()
-            .table("rfqs")
-            .select("id, material_categories(name, is_general)")
-            .eq("project_id", project_id)
-            .eq("quotes_confirmed", False)
-            .execute()
-        ).data or []
-        unconfirmed = [
-            r for r in rows if not (r.get("material_categories") or {}).get("is_general")
-        ]
-        if unconfirmed:
-            names = ", ".join(
-                (r.get("material_categories") or {}).get("name") or "a category"
-                for r in unconfirmed
-            )
+    # Select Vendors can't be left until EVERY category has a price behind it. This is
+    # the gate that used to sit on Receive Quotes, and moving it here is the whole
+    # point of the restructure: waiting on the last vendor to reply is optional, but
+    # a bid cannot be priced with a category that has no number.
+    #
+    # A category is satisfied by any of:
+    #   • a hand-entered custom price (covers an RFQ never sent, or whose sends all
+    #     failed — no vendor ever quoted it, so someone types the number in),
+    #   • a selected vendor quote, or
+    #   • for General Material, the estimate's wiring figure, which is its default
+    #     price when no vendor quote is chosen instead.
+    if category == "select_vendors" and head == "select_vendors":
+        unpriced = vendor_selection.categories_without_a_price(project_id)
+        if unpriced:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
-                f"Confirm the quotes are complete for every category before advancing: {names}",
+                "Select a winning vendor or enter a price for every category before "
+                f"advancing: {', '.join(unpriced)}",
             )
 
     # Any writer role may advance any (non-panel-owned) category head; verify is the

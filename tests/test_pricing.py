@@ -15,41 +15,66 @@ from app.models.schemas import (
 )
 from app.routers.pricing import (
     DEFAULT_TAX_RATE,
+    SECTION_KEYS,
     VERIFY_NUMBERS,
+    VERIFY_SECTION_NUMBERS,
     apply_tax,
     pick_material_amount,
     pricing_summary_numbers,
+    section_summary,
     taxed_amount,
     verify_delta_pairs,
 )
 
 
-# ── pick_material_amount: custom > selected > lowest ──────────────────────
+# ── pick_material_amount: the selected quote IS the price ─────────────────
+# There is no precedence chain. A category is priced by the quote a human picked
+# on Select Vendors, or it is not priced at all.
 
 
-def test_custom_price_beats_selected_and_lowest():
-    amount, source = pick_material_amount(Decimal("900"), Decimal("1000"), Decimal("800"))
+def _quote(amount, *, origin="vendor", tax_included=True, tax_rate=None):
+    return {
+        "amount": amount,
+        "origin": origin,
+        "tax_included": tax_included,
+        "tax_rate": tax_rate,
+    }
+
+
+def test_selected_quote_is_the_price():
+    amount, source = pick_material_amount(_quote("1200"))
+    assert (amount, source) == (Decimal("1200"), "vendor")
+
+
+def test_hand_entered_quote_has_no_special_standing():
+    # A manual candidate prices the category the same way a vendor's does — it wins
+    # only because it was selected, never because of what it is.
+    amount, source = pick_material_amount(_quote("900", origin="manual"))
     assert (amount, source) == (Decimal("900"), "manual")
 
 
-def test_selected_quote_beats_lowest():
-    amount, source = pick_material_amount(None, Decimal("1200"), Decimal("1000"))
-    assert (amount, source) == (Decimal("1200"), "quote")
+def test_general_material_estimate_is_just_another_candidate():
+    amount, source = pick_material_amount(_quote("450", origin="estimate"))
+    assert (amount, source) == (Decimal("450"), "estimate")
 
 
-def test_lowest_quote_is_the_default():
-    amount, source = pick_material_amount(None, None, Decimal("1000"))
-    assert (amount, source) == (Decimal("1000"), "quote")
+def test_nothing_selected_means_no_price():
+    # Not "fall back to the cheapest" — unpriced, which is what holds Select Vendors
+    # open until someone decides.
+    assert pick_material_amount(None) == (None, "none")
 
 
-def test_no_quotes_means_no_price():
-    assert pick_material_amount(None, None, None) == (None, "none")
+def test_price_is_tax_inclusive():
+    # The winner's own tax answer applies; an unanswered question is treated as
+    # "tax not yet included" so the figure is never understated.
+    amount, _ = pick_material_amount(_quote("1000", tax_included=False, tax_rate="10"))
+    assert amount == Decimal("1100.00")
+    amount, _ = pick_material_amount(_quote("1000", tax_included=None, tax_rate="10"))
+    assert amount == Decimal("1100.00")
 
 
-def test_zero_amounts_are_real_values_not_missing():
-    # Decimal("0") must not be treated as falsy/absent at any precedence level.
-    assert pick_material_amount(Decimal("0"), Decimal("5"), Decimal("3")) == (Decimal("0"), "manual")
-    assert pick_material_amount(None, Decimal("0"), Decimal("3")) == (Decimal("0"), "quote")
+def test_zero_is_a_real_price_not_a_missing_one():
+    assert pick_material_amount(_quote("0")) == (Decimal("0"), "vendor")
 
 
 # ── apply_tax: tax-inclusive quote cost (the true cost incurred) ──────────
@@ -176,24 +201,31 @@ def test_delta_records_changed_number():
     assert pairs["labor_amount"] == {"from": "1000.00", "to": "1200.00"}
 
 
-def test_delta_covers_all_four_numbers():
+def test_delta_covers_all_ten_numbers():
     originals = {
         "labor_amount": Decimal("100"),
         "materials_amount": Decimal("200"),
+        "gear_amount": Decimal("50"),
         "labor_markup_amount": Decimal("10"),
         "materials_markup_amount": Decimal("20"),
     }
     body = VerifyOverrideIn(
         labor_amount=Decimal("100"),
         materials_amount=Decimal("250"),
+        gear_amount=Decimal("75"),
         labor_markup_amount=Decimal("10"),
         materials_markup_amount=Decimal("20"),
     )
     pairs = verify_delta_pairs(originals, body)
     assert set(pairs) == set(VERIFY_NUMBERS)
-    # Only materials changed; the rest carry equal from/to.
+    assert len(VERIFY_NUMBERS) == 10
+    # Only materials and gear changed; the rest carry equal from/to.
     assert pairs["materials_amount"] == {"from": "200", "to": "250"}
+    assert pairs["gear_amount"] == {"from": "50", "to": "75"}
     assert pairs["labor_amount"]["from"] == pairs["labor_amount"]["to"]
+    # Absent sections carry null on both sides: no spurious change recorded.
+    assert pairs["underground_amount"] == {"from": None, "to": None}
+    assert pairs["low_voltage_markup_amount"] == {"from": None, "to": None}
 
 
 def test_delta_handles_missing_original_and_final():
@@ -236,12 +268,15 @@ def test_summary_fields_fill_in_independently():
     assert summary["bid_price"] is None  # nothing committed yet
 
 
-def test_summary_markup_sums_both_sides():
+def test_summary_markup_sums_all_five_parts():
     originals = {
         "labor_markup_amount": Decimal("100"),
         "materials_markup_amount": Decimal("250.50"),
+        "gear_markup_amount": Decimal("40"),
+        "underground_markup_amount": None,  # section absent, never a 0
+        "low_voltage_markup_amount": Decimal("9.50"),
     }
-    assert pricing_summary_numbers(originals, None)["markup_amount"] == "350.50"
+    assert pricing_summary_numbers(originals, None)["markup_amount"] == "400.00"
 
 
 def test_summary_bid_price_requires_commit():
@@ -255,14 +290,149 @@ def test_summary_bid_price_requires_commit():
     uncommitted = {"committed_at": None, "labor_amount": "1100"}
     assert pricing_summary_numbers(originals, uncommitted)["bid_price"] is None
 
-    committed = {"committed_at": "2026-06-10T00:00:00Z", "labor_amount": "1100"}
+    # A committed snapshot is read as-is (the commit stored every resolved
+    # number); the live originals never feed the bid price again.
+    committed = {
+        "committed_at": "2026-06-10T00:00:00Z",
+        "labor_amount": "1100",
+        "materials_amount": "2000",
+        "labor_markup_amount": "100",
+        "materials_markup_amount": "200",
+    }
     summary = pricing_summary_numbers(originals, committed)
-    # Override wins for labor; the rest fall back to the upstream originals.
     assert summary["bid_price"] == "3400"
+
+
+def test_summary_bid_price_sums_committed_sections():
+    committed = {
+        "committed_at": "2026-06-10T00:00:00Z",
+        "labor_amount": "1000",
+        "materials_amount": "500",
+        "gear_amount": "300",
+        "underground_amount": "150",
+        "low_voltage_amount": None,  # section not on the project
+        "labor_markup_amount": "100",
+        "materials_markup_amount": "50",
+        "gear_markup_amount": "30",
+        "underground_markup_amount": "0",
+        "low_voltage_markup_amount": None,
+    }
+    assert pricing_summary_numbers({}, committed)["bid_price"] == "2130"
+
+
+def test_summary_bid_price_legacy_committed_snapshot_is_unchanged():
+    # A pre-sections snapshot: materials_amount carries the FULL figure and all
+    # six section columns are NULL. The bid price must be exactly the old
+    # four-number sum; NULL sections resolve to "not part of the
+    # decomposition", never to a live figure that would double count.
+    originals = {"gear_amount": Decimal("99999")}  # live figure must be ignored
+    committed = {
+        "committed_at": "2025-12-01T00:00:00Z",
+        "labor_amount": "1000",
+        "materials_amount": "2300",
+        "labor_markup_amount": "100",
+        "materials_markup_amount": "200",
+    }
+    assert pricing_summary_numbers(originals, committed)["bid_price"] == "3600"
 
 
 def test_summary_bid_price_handles_zero_override():
     # Decimal("0") in the committed snapshot is a real figure, not "unset".
-    originals = {"labor_amount": Decimal("1000"), "materials_amount": Decimal("2000")}
-    committed = {"committed_at": "2026-06-10T00:00:00Z", "labor_amount": "0"}
-    assert pricing_summary_numbers(originals, committed)["bid_price"] == "2000"
+    committed = {
+        "committed_at": "2026-06-10T00:00:00Z",
+        "labor_amount": "0",
+        "materials_amount": "2000",
+    }
+    assert pricing_summary_numbers({}, committed)["bid_price"] == "2000"
+
+
+# ── section_summary: the per-section materials partition ───────────────────
+
+
+def _row(name, section, amount, sort_order=0):
+    return {
+        "category_name": name,
+        "pricing_section": section,
+        "category_sort_order": sort_order,
+        "amount": amount,
+    }
+
+
+SECTION_ROWS = [
+    _row("General Material", "materials", "1000.00", 10),
+    _row("Switchgear", "gear", "500.00", 20),
+    _row("Generator & Equipment", "gear", "250.00", 30),
+    _row("Lighting", "materials", "300.00", 40),
+    _row("Low Voltage", "low_voltage", "120.00", 50),
+    _row("Trenching", "underground", None, 55),  # on the project, unpriced
+]
+
+
+def test_sections_partition_the_materials_total():
+    # Every row lands in exactly one section, so the section amounts must sum
+    # to the sum over ALL rows (the old _materials_total): nothing counted
+    # twice, nothing dropped.
+    sections = section_summary(SECTION_ROWS)
+    total_of_rows = sum(
+        (Decimal(r["amount"]) for r in SECTION_ROWS if r["amount"] is not None),
+        Decimal(0),
+    )
+    total_of_sections = sum(
+        (s["amount"] for s in sections.values() if s["amount"] is not None),
+        Decimal(0),
+    )
+    assert total_of_sections == total_of_rows == Decimal("2170.00")
+    # And the residual excludes the breakouts.
+    assert sections["materials"]["amount"] == Decimal("1300.00")
+    assert sections["gear"]["amount"] == Decimal("750.00")
+    assert sections["low_voltage"]["amount"] == Decimal("120.00")
+
+
+def test_section_present_but_unpriced_is_zero_not_none():
+    sections = section_summary(SECTION_ROWS)
+    assert sections["underground"]["present"] is True
+    assert sections["underground"]["amount"] == Decimal("0")
+    assert sections["underground"]["categories"] == ["Trenching"]
+
+
+def test_absent_section_is_none_and_materials_always_present():
+    sections = section_summary([])
+    assert set(sections) == set(SECTION_KEYS)
+    assert sections["materials"]["present"] is True
+    assert sections["materials"]["amount"] == Decimal("0")
+    for key in ("gear", "underground", "low_voltage"):
+        assert sections[key]["present"] is False
+        assert sections[key]["amount"] is None
+        assert sections[key]["categories"] == []
+
+
+def test_rows_without_section_flag_fall_into_the_residual():
+    # Defensive: a row missing pricing_section (older cache, synthesized row)
+    # counts as residual materials rather than vanishing.
+    sections = section_summary([{"category_name": "Custom", "amount": "10"}])
+    assert sections["materials"]["amount"] == Decimal("10")
+    assert sections["materials"]["categories"] == ["Custom"]
+
+
+def test_gear_includes_generator_flag():
+    assert section_summary(SECTION_ROWS)["gear"]["includes_generator"] is True
+    no_gen = [_row("Switchgear", "gear", "500.00", 20)]
+    assert section_summary(no_gen)["gear"]["includes_generator"] is False
+    # A generator category NOT on the project (no row) never sets the flag.
+    assert section_summary([])["gear"]["includes_generator"] is False
+
+
+def test_section_categories_listed_in_sort_order():
+    rows = [
+        _row("Generator & Equipment", "gear", "1", 30),
+        _row("Switchgear", "gear", "1", 20),
+    ]
+    assert section_summary(rows)["gear"]["categories"] == [
+        "Switchgear",
+        "Generator & Equipment",
+    ]
+
+
+def test_verify_section_numbers_are_the_six_section_keys():
+    assert set(VERIFY_SECTION_NUMBERS) <= set(VERIFY_NUMBERS)
+    assert len(VERIFY_SECTION_NUMBERS) == 6

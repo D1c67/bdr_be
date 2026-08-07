@@ -1,10 +1,18 @@
-"""Inbound RFQ reply polling.
+"""Inbound RFQ reply ingestion.
 
-A background loop watches the bids@ inbox via Graph delta queries while any RFQ
-send is still "active" (sent, no quote yet, younger than the polling window).
-Messages whose conversationId matches a send are stored, their file attachments
-saved as quote files, and PDF attachments run through OpenAI to extract the
-quoted price — which auto-creates a `quotes` row the PE can override.
+Two entry points, one downstream path:
+
+* `poll_once()` (background loop) watches the bids@ inbox via Graph DELTA
+  queries while any RFQ send is still "active" (sent, no quote yet, younger
+  than the polling window). It reads and advances one global cursor.
+* `check_project_quotes()` ("Check for quotes now") targets ONE project's
+  Graph CONVERSATIONS by id. It never touches the delta cursor.
+
+Either way, a message whose conversation matches an RFQ send is stored, its
+file attachments and cloud-share links saved as quote files, and its PDFs run
+through the extractor to pull the quoted price, which creates a `quotes` row.
+That row is a candidate, not a price: it has to be approved on Receive Quotes
+and then picked as the winner on Select Vendors before it prices anything.
 """
 
 import asyncio
@@ -15,10 +23,18 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlparse
 
+import httpx
+
 from app.core.config import get_settings
 from app.core.roles import Role
 from app.core.supabase_client import get_supabase
-from app.services import cloud_links, graph_inbox, office_preview, storage
+from app.services import (
+    cloud_links,
+    graph_email,
+    graph_inbox,
+    office_preview,
+    storage,
+)
 from app.services.notifications import audit, notify_role
 from app.services.openai_text import extract_quote_from_pdf
 
@@ -38,8 +54,9 @@ _QUOTE_ATTACHMENT_EXTS = {
     "pdf", "xlsx", "xls", "xlsm", "csv", "docx", "doc", "png", "jpg", "jpeg",
 }
 # Extracted-quote sanity band. A vendor-controlled PDF is fed to an LLM, so a
-# prompt-injected or garbled amount must not silently become the winning quote
-# (pricing selects the lowest — a negative/zero value would always "win").
+# prompt-injected or garbled amount must not silently land in the candidate list
+# a human then picks the winner from (a nonsense figure sitting next to real
+# quotes is exactly the kind of thing that gets clicked by mistake).
 _QUOTE_MAX_AMOUNT = Decimal("100000000")   # $100M ceiling
 _QUOTE_MIN_CONFIDENCE = 0.5
 
@@ -228,29 +245,65 @@ def _active_sends(sb) -> list[dict]:
     ).data or []
 
 
-def _ingest_message(sb, msg: dict, by_conversation: dict[str, dict]) -> None:
+def _is_duplicate_key(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "23505" in text or "duplicate key" in text
+
+
+def _ingest_message(
+    sb,
+    msg: dict,
+    by_conversation: dict[str, dict],
+    *,
+    allow_sender_mismatch: bool = False,
+    max_attachments: int | None = None,
+) -> str | None:
+    """Turn one Graph message into a stored reply: files, cloud links, and the
+    extracted quote. Shared by the background poller and the on-demand check.
+
+    Returns the reply's final extraction status, or None when nothing was
+    ingested (our own outbound copy, no matching send, a refused sender, or a
+    message already stored).
+
+    `allow_sender_mismatch` accepts a reply that came from a different address
+    than the contact we mailed. The conversation id is the match, so a forward
+    or a colleague answering for the vendor still belongs to this RFQ. The
+    poller leaves it off (it sweeps the whole mailbox, so the address is its
+    only other signal); the project-scoped check turns it on, and the actual
+    sender is recorded on the message row and audited either way.
+
+    `max_attachments` tightens the per-message attachment cap below the
+    configured inbound limit.
+    """
     settings = get_settings()
     from_addr = ((msg.get("from") or {}).get("emailAddress") or {}).get("address", "")
     if not from_addr or from_addr.lower() == settings.ms_sender.lower():
-        return
+        return None
     send = by_conversation.get(msg.get("conversationId"))
     if not send:
-        return
+        return None
 
     contact = send["vendor_contacts"]
     if from_addr.lower() != (contact.get("email") or "").lower():
-        # A reply in the right conversation from an unexpected address — don't
-        # ingest, but leave a trace so the PE can spot forwarded replies.
+        # A reply in the right conversation from an unexpected address. Always
+        # leave a trace so the PE can spot forwarded replies; whether it is also
+        # ingested is the caller's call (see allow_sender_mismatch above).
         audit(
             None,
             "rfq.reply_sender_mismatch",
             "rfq_send",
             send["id"],
-            {"from": from_addr, "expected": contact.get("email")},
+            {
+                "from": from_addr,
+                "expected": contact.get("email"),
+                "ingested": allow_sender_mismatch,
+            },
         )
-        return
+        if not allow_sender_mismatch:
+            return None
 
-    # Idempotency: the poller may see the same message again after a delta reset.
+    # Idempotency: the poller may see the same message again after a delta reset,
+    # and the on-demand check re-reads whole conversations by design.
     existing = (
         sb.table("rfq_messages")
         .select("id")
@@ -258,30 +311,41 @@ def _ingest_message(sb, msg: dict, by_conversation: dict[str, dict]) -> None:
         .execute()
     ).data
     if existing:
-        return
+        return None
 
     full = graph_inbox.get_message(msg["id"])
-    row = (
-        sb.table("rfq_messages")
-        .insert(
-            {
-                "rfq_send_id": send["id"],
-                "graph_message_id": msg["id"],
-                "from_addr": from_addr,
-                "subject": msg.get("subject"),
-                "body_preview": msg.get("bodyPreview"),
-                "body": (full.get("body") or {}).get("content"),
-                "received_at": msg.get("receivedDateTime"),
-                "has_attachments": bool(msg.get("hasAttachments")),
-            }
-        )
-        .execute()
-    ).data[0]
+    try:
+        row = (
+            sb.table("rfq_messages")
+            .insert(
+                {
+                    "rfq_send_id": send["id"],
+                    "graph_message_id": msg["id"],
+                    "from_addr": from_addr,
+                    "subject": msg.get("subject"),
+                    "body_preview": msg.get("bodyPreview"),
+                    "body": (full.get("body") or {}).get("content"),
+                    "received_at": msg.get("receivedDateTime"),
+                    "has_attachments": bool(msg.get("hasAttachments")),
+                }
+            )
+            .execute()
+        ).data[0]
+    except Exception as exc:  # noqa: BLE001
+        if _is_duplicate_key(exc):
+            # rfq_messages.graph_message_id is UNIQUE, so this insert is the real
+            # claim on the message: the lookup above only saves the wasted work.
+            # A rival runner (the poller, or a check on another worker) got there
+            # between the two statements and now owns every downstream side
+            # effect, including the paid extraction. Stand down.
+            logger.info("Message %s was claimed by another runner", msg["id"])
+            return None
+        raise
 
     pdf_files: list[tuple[dict, bytes]] = []
     ref_links: list[cloud_links.CloudLink] = []
     if msg.get("hasAttachments"):
-        pdf_files = _ingest_attachments(sb, send, row)
+        pdf_files = _ingest_attachments(sb, send, row, max_attachments=max_attachments)
         ref_links = _reference_links(row["graph_message_id"])
     links = cloud_links.merge_links(
         ref_links,
@@ -291,9 +355,11 @@ def _ingest_message(sb, msg: dict, by_conversation: dict[str, dict]) -> None:
         sb.table("rfq_messages").update({"cloud_link_count": len(links)}).eq(
             "id", row["id"]
         ).execute()
-    link_pdfs, link_failures = _ingest_cloud_links(sb, send, links)
+    link_pdfs, link_failures = _ingest_cloud_links(
+        sb, send, links, rfq_message_id=row["id"]
+    )
     pdf_files.extend(link_pdfs)
-    _run_extraction(sb, send, row, pdf_files, link_failures)
+    status = _run_extraction(sb, send, row, pdf_files, link_failures)
 
     rfq = send["rfqs"]
     notify_role(
@@ -304,16 +370,19 @@ def _ingest_message(sb, msg: dict, by_conversation: dict[str, dict]) -> None:
         f"for {rfq['projects']['name']}",
         rfq_id=rfq["id"],
     )
+    return status
 
 
 def _store_quote_file(
     sb, send: dict, filename: str, content: bytes, content_type: str | None,
-    *, reuse_existing: bool = False,
+    *, rfq_message_id: str | None = None, reuse_existing: bool = False,
 ) -> dict:
     """Store bytes as a quote file for the send's category (storage object +
     project_files row + preview), shared by the attachment and link paths.
-    `reuse_existing` (retry flows) returns the already-ingested row for the
-    same filename instead of duplicating it."""
+    `rfq_message_id` records WHICH reply the file arrived on, so the reply
+    review modal can show that reply's own files. `reuse_existing` (retry
+    flows) returns the already-ingested row for the same filename instead of
+    duplicating it."""
     rfq = send["rfqs"]
     project = rfq["projects"]
     if reuse_existing:
@@ -328,7 +397,7 @@ def _store_quote_file(
         # file they can't see. On no match we fall through and store fresh below.
         existing = (
             sb.table("project_files")
-            .select("id, filename")
+            .select("id, filename, rfq_message_id")
             .eq("project_id", project["id"])
             .eq("category", "quote")
             .eq("material_category_id", rfq["material_category_id"])
@@ -337,7 +406,16 @@ def _store_quote_file(
             .execute()
         ).data
         if existing:
-            return existing[0]
+            # A pre-0105 row (or one stored by an older worker) has no reply
+            # link yet; the retry that re-fetched it knows the reply, so claim
+            # it. Never overwrite an existing link: byte-size dedupe can hand
+            # back another reply's identical file.
+            row = existing[0]
+            if rfq_message_id and not row.get("rfq_message_id"):
+                sb.table("project_files").update(
+                    {"rfq_message_id": rfq_message_id}
+                ).eq("id", row["id"]).is_("rfq_message_id", "null").execute()
+            return row
     path = storage.build_object_path(project["id"], "quote", filename)
     storage.upload_file(path, content, content_type or "application/octet-stream")
     convertible = office_preview.is_convertible(filename, "quote")
@@ -350,6 +428,7 @@ def _store_quote_file(
                 "storage_path": path,
                 "filename": filename,
                 "material_category_id": rfq["material_category_id"],
+                "rfq_message_id": rfq_message_id,
                 "mime_type": content_type,
                 "size_bytes": len(content),
                 "preview_status": "pending" if convertible else "none",
@@ -371,17 +450,25 @@ def _is_pdf(filename: str, content_type: str | None) -> bool:
     return (content_type or "").lower().startswith("application/pdf") or filename.lower().endswith(".pdf")
 
 
-def _ingest_attachments(sb, send: dict, message_row: dict) -> list[tuple[dict, bytes]]:
+def _ingest_attachments(
+    sb, send: dict, message_row: dict, *, max_attachments: int | None = None
+) -> list[tuple[dict, bytes]]:
     """Store the reply's file attachments; returns (project_files row, bytes)
-    for the PDFs among them so the caller can run extraction."""
+    for the PDFs among them so the caller can run extraction.
+
+    `max_attachments` only ever tightens the configured cap (the on-demand check
+    passes a smaller one so a single click cannot pull dozens of files)."""
     import base64
 
     settings = get_settings()
 
+    max_count = settings.inbound_attachment_max_count
+    if max_attachments is not None:
+        max_count = min(max_count, max_attachments)
     # Cap count + skip oversized attachments before their bytes are fetched.
     attachments, _ = graph_inbox.list_attachments(
         message_row["graph_message_id"],
-        max_count=settings.inbound_attachment_max_count,
+        max_count=max_count,
         max_bytes=settings.inbound_attachment_max_bytes,
     )
     pdf_files: list[tuple[dict, bytes]] = []  # (project_files row, content)
@@ -395,7 +482,10 @@ def _ingest_attachments(sb, send: dict, message_row: dict) -> list[tuple[dict, b
                   {"name": name, "reason": "disallowed_type"})
             continue
         content = base64.b64decode(att["contentBytes"])
-        file_row = _store_quote_file(sb, send, att["name"], content, att.get("contentType"))
+        file_row = _store_quote_file(
+            sb, send, att["name"], content, att.get("contentType"),
+            rfq_message_id=message_row["id"],
+        )
         if _is_pdf(att["name"], att.get("contentType")):
             pdf_files.append((file_row, content))
     return pdf_files
@@ -441,7 +531,8 @@ def _link_failure_note(failures: list[tuple[cloud_links.CloudLink, str]]) -> str
 
 
 def _ingest_cloud_links(
-    sb, send: dict, links: list[cloud_links.CloudLink], *, reuse_existing: bool = False
+    sb, send: dict, links: list[cloud_links.CloudLink],
+    *, rfq_message_id: str | None = None, reuse_existing: bool = False,
 ) -> tuple[list[tuple[dict, bytes]], list[tuple[cloud_links.CloudLink, str]]]:
     """Download + store each detected share link as a quote file. Returns the
     PDFs (for extraction) and per-link failures (for the PE's reply notice)."""
@@ -479,7 +570,7 @@ def _ingest_cloud_links(
             continue
         file_row = _store_quote_file(
             sb, send, fetched.filename, fetched.content, fetched.content_type,
-            reuse_existing=reuse_existing,
+            rfq_message_id=rfq_message_id, reuse_existing=reuse_existing,
         )
         audit(None, "rfq.link_file_ingested", "rfq_send", send["id"],
               {"file_id": file_row["id"], "name": fetched.filename, "url": link.url[:500]})
@@ -642,8 +733,8 @@ def refetch_link_files(project_id: str, message_id: str) -> dict:
     send = row.get("rfq_sends") or {}
     if ((send.get("rfqs") or {}).get("project_id")) != project_id:
         raise LookupError("message not found")
-    if row.get("extraction_status") == "done":
-        raise ValueError("A quote was already extracted from this reply.")
+    if row.get("extraction_status") in ("done", "manual"):
+        raise ValueError("A quote was already recorded for this reply.")
 
     links = cloud_links.find_cloud_links(row.get("body") or "")
     if row.get("has_attachments"):
@@ -654,7 +745,9 @@ def refetch_link_files(project_id: str, message_id: str) -> dict:
         "id", row["id"]
     ).execute()
 
-    pdfs, failures = _ingest_cloud_links(sb, send, links, reuse_existing=True)
+    pdfs, failures = _ingest_cloud_links(
+        sb, send, links, rfq_message_id=row["id"], reuse_existing=True
+    )
     status = _run_extraction(sb, send, row, pdfs, failures)
     attempted = min(len(links), get_settings().inbound_link_max_count)
     return {
@@ -666,3 +759,322 @@ def refetch_link_files(project_id: str, message_id: str) -> dict:
         ],
         "extraction_status": status,
     }
+
+
+# ── "Check for quotes now" (one project, one click) ───────────────────────────
+#
+# Conversation-targeted, NOT a mailbox poll. For each of this project's RFQ
+# sends we ask Graph for the messages in THAT conversationId and push the new
+# ones through _ingest_message, the same path the poller uses.
+#
+# WHY THE DELTA CURSOR IS NEVER TOUCHED
+# -------------------------------------
+# graph_sync_state['inbox:{ms_sender}'].delta_link is a single, mailbox-wide,
+# CONSUMING cursor: Graph hands back each message once per token and the next
+# token starts after it. It is shared by every project.
+#
+# If this function read that cursor it would receive every project's unprocessed
+# vendor replies, not just this one's. _ingest_message drops anything whose
+# conversation is not in the map it was handed, so those replies would be
+# silently discarded, and because the poller advances the cursor past them they
+# would never be offered again. One person clicking a button on project A would
+# quietly destroy project B's inbound quotes.
+#
+# So this section calls graph_request directly (never delta_inbox), matches on
+# conversation id instead of a cursor, and keeps its lease under its own
+# per-project key writing only lease_until/holder. The word delta_link does not
+# appear below, and re-reading a conversation is harmless: rfq_messages
+# .graph_message_id is UNIQUE, so an already-ingested message is simply skipped.
+
+
+class CheckAlreadyRunning(RuntimeError):
+    """A quote check is already in flight for this project. The router turns
+    this into a 409 so a double-click cannot double-charge the extractor."""
+
+
+_CHECK_LEASE_PREFIX = "quote-check"      # its own id namespace in graph_sync_state
+_CHECK_LEASE_TTL_SECONDS = 120           # crash bound; renewed as the run proceeds
+
+# Bounds. One click must never run for minutes or spend unbounded LLM money.
+_CHECK_MAX_SENDS = 60                    # RFQ conversations inspected per click
+_CHECK_MAX_MESSAGES_PER_CONVERSATION = 15
+_CHECK_MAX_INGESTS = 12                  # NEW replies processed per click; each one
+                                         # costs up to inbound_pdf_extract_max calls
+_CHECK_MAX_ATTACHMENTS = 5               # files pulled per new reply
+_CHECK_TIME_BUDGET_SECONDS = 90          # wall clock, checked between conversations
+_CHECK_MAX_GRAPH_FAILURES = 3            # consecutive thread lookups before giving up
+_CHECK_MAX_NOTES = 8
+
+# Mirrors graph_inbox's delta $select so _ingest_message sees the same shape.
+_CONVERSATION_SELECT = (
+    "id,conversationId,from,subject,bodyPreview,receivedDateTime,hasAttachments"
+)
+
+
+def _check_lease_key(project_id: str) -> str:
+    return f"{_CHECK_LEASE_PREFIX}:{project_id}"
+
+
+def _check_lease_until() -> str:
+    return (_now() + timedelta(seconds=_CHECK_LEASE_TTL_SECONDS)).isoformat()
+
+
+def _acquire_check_lease(sb, key: str, token: str) -> bool:
+    """Project-scoped mutual exclusion, taken only when the lease is free or
+    expired. Deliberately WITHOUT the poller's `holder.eq.<runner>` escape: the
+    token is generated per CALL, not per process, because _RUNNER_TOKEN is
+    shared by every request on a worker (and prod runs two of them), so a
+    process-wide token would let two simultaneous clicks on the same worker both
+    "re-acquire" the same lease and ingest in parallel."""
+    now_iso = _now().isoformat()
+    rows = (sb.table("graph_sync_state").select("id").eq("id", key).execute()).data
+    if not rows:
+        try:
+            sb.table("graph_sync_state").insert(
+                {"id": key, "lease_until": _check_lease_until(), "holder": token}
+            ).execute()
+            return True
+        except Exception as exc:  # noqa: BLE001
+            if _is_duplicate_key(exc):
+                return False  # another check created the row first
+            raise
+    resp = (
+        sb.table("graph_sync_state")
+        .update(
+            {"lease_until": _check_lease_until(), "holder": token,
+             "updated_at": now_iso}
+        )
+        .eq("id", key)
+        .or_(f"lease_until.is.null,lease_until.lt.{now_iso}")
+        .execute()
+    )
+    return bool(resp.data)
+
+
+def _renew_check_lease(sb, key: str, token: str) -> bool:
+    """Push the TTL out mid-run so a slow check never outlives its own lease.
+    Fenced on our token: False means someone else owns it now and we must stop."""
+    resp = (
+        sb.table("graph_sync_state")
+        .update({"lease_until": _check_lease_until(), "updated_at": _now().isoformat()})
+        .eq("id", key)
+        .eq("holder", token)
+        .execute()
+    )
+    return bool(resp.data)
+
+
+def _release_check_lease(sb, key: str, token: str) -> None:
+    """Free the lease immediately so the button works again on the next click.
+    Fenced on our token, and it writes lease_until only: no cursor, ever."""
+    try:
+        sb.table("graph_sync_state").update(
+            {"lease_until": None, "updated_at": _now().isoformat()}
+        ).eq("id", key).eq("holder", token).execute()
+    except Exception:  # noqa: BLE001 — the TTL frees it anyway
+        logger.exception("Could not release quote-check lease %s", key)
+
+
+def _conversation_messages(conversation_id: str) -> list[dict]:
+    """Messages in one Graph conversation, newest first, hard-capped.
+
+    Searches the whole mailbox rather than the Inbox folder the poller watches:
+    a reply filed away by an Outlook rule, or landed in Junk, is precisely the
+    one this button exists to go and find. Our own outbound copies come back too
+    and are dropped by the caller.
+    """
+    settings = get_settings()
+    # OData string literals escape a quote by doubling it. Graph conversation ids
+    # are base64-ish so this is belt and braces, but the filter is built by
+    # concatenation and must not be breakable by its input.
+    literal = conversation_id.replace("'", "''")
+    params = {
+        "$select": _CONVERSATION_SELECT,
+        "$filter": f"conversationId eq '{literal}'",
+        "$top": str(_CHECK_MAX_MESSAGES_PER_CONVERSATION),
+        "$orderby": "receivedDateTime desc",
+    }
+    path = f"/users/{settings.ms_sender}/messages"
+    try:
+        page = graph_email.graph_request("GET", path, params=params).json()
+    except httpx.HTTPStatusError as exc:
+        # Exchange refuses some $filter + $orderby pairings as "too complex".
+        # Drop the sort and order the page ourselves rather than lose the check.
+        if exc.response.status_code not in (400, 501):
+            raise
+        params.pop("$orderby")
+        page = graph_email.graph_request("GET", path, params=params).json()
+    messages = page.get("value", [])[:_CHECK_MAX_MESSAGES_PER_CONVERSATION]
+    messages.sort(key=lambda m: m.get("receivedDateTime") or "", reverse=True)
+    return messages
+
+
+def _project_check_sends(sb, project_id: str) -> list[dict]:
+    """Every RFQ email this project has actually sent that has a conversation to
+    look in, newest first.
+
+    polling_active is deliberately NOT a filter. A send that already produced a
+    quote has polling_active false and the background poller has stopped
+    watching it, which is exactly the case this button is for: the vendor's
+    revised or second quote arrives on the same thread days later.
+    """
+    return (
+        sb.table("rfq_sends")
+        .select(
+            "id, conversation_id, sent_at, polling_active, quote_received_at, "
+            "vendor_contact_id, rfq_id, "
+            "vendor_contacts(id, name, email, vendor_id, vendors(name)), "
+            "rfqs!inner(id, project_id, material_category_id, "
+            "material_categories(name), projects(id, name, number))"
+        )
+        .eq("rfqs.project_id", project_id)
+        .eq("status", "sent")
+        .not_.is_("conversation_id", "null")
+        .order("sent_at", desc=True)
+        .limit(_CHECK_MAX_SENDS)
+        .execute()
+    ).data or []
+
+
+def _send_label(send: dict) -> str:
+    contact = send.get("vendor_contacts") or {}
+    vendor = (
+        (contact.get("vendors") or {}).get("name") or contact.get("name") or "a vendor"
+    )
+    category = (
+        ((send.get("rfqs") or {}).get("material_categories") or {}).get("name")
+        or "an RFQ"
+    )
+    return f"{vendor} ({category})"
+
+
+def _add_note(notes: list[str], text: str) -> None:
+    """One line per distinct problem, capped: the caller renders these."""
+    if text not in notes and len(notes) < _CHECK_MAX_NOTES:
+        notes.append(text)
+
+
+def check_project_quotes(project_id: str) -> dict:
+    """Check this project's RFQ conversations for vendor replies, right now.
+
+    Returns {"sends_checked", "messages_seen", "quotes_created", "errors"};
+    `errors` is a list of short human-readable notices (a thread that could not
+    be read, a cap that cut the run short). Raises CheckAlreadyRunning when a
+    check for this project is already in flight, so the router can answer 409.
+
+    Plain def on purpose: the Supabase SDK, Graph and the extractor all block,
+    so this belongs on the threadpool, never inside an `async def`.
+    """
+    from app.services import llm_gate
+
+    sb = get_supabase()
+    key = _check_lease_key(project_id)
+    token = uuid.uuid4().hex  # per call, see _acquire_check_lease
+    if not _acquire_check_lease(sb, key, token):
+        raise CheckAlreadyRunning(
+            "A check is already running for this project. Give it a moment."
+        )
+    try:
+        # Pipeline tier: one click can queue a dozen extractions, and they must
+        # not eat the slots the gate reserves for calls a user is waiting on.
+        # It also means a saturated gate is recorded on the reply as an
+        # actionable note instead of blowing up the whole check.
+        with llm_gate.tier(llm_gate.TIER_PIPELINE):
+            return _run_project_check(sb, project_id, key, token)
+    finally:
+        _release_check_lease(sb, key, token)
+
+
+def _run_project_check(sb, project_id: str, key: str, token: str) -> dict:
+    sender = get_settings().ms_sender.lower()
+    notes: list[str] = []
+    result: dict = {
+        "sends_checked": 0,
+        "messages_seen": 0,
+        "quotes_created": 0,
+        "errors": notes,
+    }
+    sends = _project_check_sends(sb, project_id)
+    if len(sends) >= _CHECK_MAX_SENDS:
+        _add_note(
+            notes,
+            f"Only the {_CHECK_MAX_SENDS} most recent RFQ emails were checked.",
+        )
+
+    deadline = time.monotonic() + _CHECK_TIME_BUDGET_SECONDS
+    seen_conversations: set[str] = set()
+    ingested = 0
+    graph_failures = 0
+    stop = False
+
+    for send in sends:
+        conversation_id = send.get("conversation_id")
+        # Two sends can share a thread (a resend into the same conversation);
+        # one lookup covers both, and the second send's messages are already in.
+        if not conversation_id or conversation_id in seen_conversations:
+            continue
+        seen_conversations.add(conversation_id)
+        if time.monotonic() > deadline:
+            _add_note(
+                notes,
+                "Time ran out before every RFQ email was checked. "
+                "Run it again to pick up the rest.",
+            )
+            break
+        if not _renew_check_lease(sb, key, token):
+            _add_note(notes, "Another check took over partway through this one.")
+            break
+
+        try:
+            messages = _conversation_messages(conversation_id)
+        except Exception:  # noqa: BLE001 — one bad thread must not sink the run
+            logger.exception("Conversation lookup failed for rfq_send %s", send["id"])
+            graph_failures += 1
+            _add_note(notes, f"Could not read the email thread for {_send_label(send)}.")
+            if graph_failures >= _CHECK_MAX_GRAPH_FAILURES:
+                _add_note(notes, "The mailbox stopped responding, so the check stopped early.")
+                break
+            continue
+        graph_failures = 0
+        result["sends_checked"] += 1
+
+        for msg in messages:
+            from_addr = ((msg.get("from") or {}).get("emailAddress") or {}).get(
+                "address", ""
+            )
+            if not from_addr or from_addr.lower() == sender:
+                continue  # our own copy of the RFQ we sent, not a reply
+            result["messages_seen"] += 1
+            if ingested >= _CHECK_MAX_INGESTS:
+                _add_note(
+                    notes,
+                    f"Stopped after {_CHECK_MAX_INGESTS} new replies. "
+                    "Run it again to pick up the rest.",
+                )
+                stop = True
+                break
+            try:
+                # allow_sender_mismatch: the conversation id already proves this
+                # message belongs to the send, so a reply from the vendor's
+                # colleague or a forwarded address counts. from_addr is stored on
+                # the message row and the mismatch is audited, so it stays visible.
+                status = _ingest_message(
+                    sb,
+                    msg,
+                    {conversation_id: send},
+                    allow_sender_mismatch=True,
+                    max_attachments=_CHECK_MAX_ATTACHMENTS,
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to ingest checked message %s", msg.get("id"))
+                _add_note(notes, f"A reply from {_send_label(send)} could not be read in.")
+                continue
+            if status is None:
+                continue  # already stored, or claimed by another runner
+            ingested += 1
+            if status == "done":
+                result["quotes_created"] += 1
+        if stop:
+            break
+
+    return result

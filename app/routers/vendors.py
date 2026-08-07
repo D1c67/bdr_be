@@ -15,6 +15,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.core.deps import CurrentUser, require_internal, require_writer
 from app.core.supabase_client import get_supabase
 from app.models.schemas import VendorContactIn, VendorContactUpdate, VendorIn
+from app.services.directory import (
+    clean_company_name,
+    duplicate_company_message,
+    find_duplicate_company,
+)
 
 router = APIRouter(tags=["vendors"])
 
@@ -102,7 +107,24 @@ def list_vendors(_: CurrentUser = Depends(require_internal)):
 
 @router.post("/vendors", status_code=201)
 def create_vendor(body: VendorIn, _: CurrentUser = Depends(require_writer)):
-    row = (get_supabase().table("vendors").insert(body.model_dump()).execute()).data[0]
+    """Add a vendor company. Refuses a name the directory already holds.
+
+    Reached from the Vendors page, the Contacts page, and the "new company"
+    option inside a project's RFQ step; the duplicate check sits here so all
+    three are covered. A twin vendor would scatter one supplier's reps across
+    two rows, so an RFQ would reach only the half filed under whichever twin
+    the sender happened to pick. See app/services/directory.py.
+    """
+    sb = get_supabase()
+    name = clean_company_name(body.name)
+    if not name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Company name is required")
+    dupe = find_duplicate_company(sb, "vendors", name)
+    if dupe:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, duplicate_company_message("vendor", dupe["name"])
+        )
+    row = (sb.table("vendors").insert({**body.model_dump(), "name": name}).execute()).data[0]
     # A brand-new company has no contacts yet, so its category union is empty.
     # Stated explicitly so the shape matches GET /vendors.
     row["material_category_ids"] = []

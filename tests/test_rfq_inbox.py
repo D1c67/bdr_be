@@ -2,8 +2,12 @@
 plus the single-runner lease, against the in-memory fake Supabase."""
 
 import pytest
+from fastapi import HTTPException
 
 from app.core.config import Settings
+from app.core.deps import CurrentUser
+from app.core.roles import Role
+from app.routers import rfqs as rfqs_router
 from app.services import cloud_links, graph_inbox, rfq_inbox
 from tests.test_email_ingest import FakeDB
 
@@ -377,3 +381,245 @@ def test_refetch_already_extracted_refuses(db, refetch_env):
     db.tables["rfq_messages"] = [_stored_message(extraction_status="done")]
     with pytest.raises(ValueError):
         rfq_inbox.refetch_link_files("p1", "m-1")
+
+
+# ── On-demand quote check (the Receive Quotes button) ──────────────────────────
+# check_project_quotes goes and reads THIS project's RFQ conversations right now,
+# instead of waiting for the poller's next pass. Two things must hold or it does
+# real damage:
+#
+#   • it must never touch the delta cursor. That cursor is a single mailbox-wide
+#     CONSUMING position: reading from it would hand this project every other
+#     project's unprocessed vendor replies, which _ingest_message would then drop
+#     on the floor (wrong conversation) while the poller advanced past them for
+#     good. One click on project A would destroy project B's inbound quotes.
+#   • it must serialise. Each new reply costs paid extraction calls, so a
+#     double-click has to be refused, not run twice.
+
+
+@pytest.fixture
+def check_db():
+    """One sent RFQ with a conversation to look in, plus the poller's cursor
+    sitting in graph_sync_state where the check must leave it."""
+    return FakeDB(
+        {
+            "rfq_sends": [
+                {
+                    "id": "send-1",
+                    "conversation_id": "conv-1",
+                    "status": "sent",
+                    # A send the poller has already stopped watching: the button
+                    # exists for exactly this case (a revised quote days later).
+                    "polling_active": False,
+                    "quote_received_at": "2026-06-01T00:00:00+00:00",
+                    "sent_at": "2026-05-01T00:00:00+00:00",
+                    # The fake matches embedded filters literally, as PostgREST
+                    # does with rfqs!inner(...).eq("rfqs.project_id", ...).
+                    "rfqs.project_id": "p1",
+                    "vendor_contacts": SEND["vendor_contacts"],
+                    "rfqs": SEND["rfqs"],
+                }
+            ],
+            "graph_sync_state": [
+                {
+                    "id": LEASE_ROW,
+                    "delta_link": "cursor-1",
+                    "holder": rfq_inbox._RUNNER_TOKEN,
+                    "lease_until": None,
+                }
+            ],
+        }
+    )
+
+
+@pytest.fixture
+def check_env(monkeypatch, check_db):
+    """check_project_quotes wired to the fake, with one vendor reply waiting in
+    the conversation and every side effect past the DB stubbed out. Returns the
+    list of delta_inbox calls, which must stay empty."""
+    monkeypatch.setattr(
+        rfq_inbox, "get_settings", lambda: Settings(_env_file=None, ms_sender=SENDER)
+    )
+    monkeypatch.setattr(rfq_inbox, "get_supabase", lambda: check_db)
+    monkeypatch.setattr(
+        rfq_inbox, "_conversation_messages",
+        lambda conversation_id: [_msg("jane@vendor.com", hasAttachments=False)],
+    )
+    monkeypatch.setattr(
+        graph_inbox, "get_message", lambda mid, **k: {"body": {"content": "<p>quote coming</p>"}}
+    )
+    monkeypatch.setattr(rfq_inbox, "audit", lambda *a, **k: None)
+    monkeypatch.setattr(rfq_inbox, "notify_role", lambda *a, **k: None)
+    delta_calls = []
+    monkeypatch.setattr(
+        graph_inbox, "delta_inbox",
+        lambda link: delta_calls.append(link) or ([], "cursor-2"),
+    )
+    return delta_calls
+
+
+def _sync_row(db, row_id):
+    return next(r for r in db.tables["graph_sync_state"] if r["id"] == row_id)
+
+
+def test_check_ingests_the_reply_the_poller_stopped_watching(check_db, check_env):
+    result = rfq_inbox.check_project_quotes("p1")
+
+    assert result["sends_checked"] == 1
+    assert result["messages_seen"] == 1
+    assert result["errors"] == []
+    [message] = check_db.tables["rfq_messages"]
+    assert message["graph_message_id"] == "msg-1"
+    assert message["from_addr"] == "jane@vendor.com"
+
+
+def test_check_never_touches_the_delta_cursor(check_db, check_env):
+    rfq_inbox.check_project_quotes("p1")
+
+    assert check_env == []  # delta_inbox was never called
+    poller = _sync_row(check_db, LEASE_ROW)
+    assert poller["delta_link"] == "cursor-1"          # cursor stands untouched
+    assert poller["holder"] == rfq_inbox._RUNNER_TOKEN  # poller's lease untouched
+    # And the check's own lease row is cursor-free: it only ever writes the lease.
+    own = _sync_row(check_db, "quote-check:p1")
+    assert "delta_link" not in own
+
+
+def test_check_releases_its_lease_so_the_next_click_works(check_db, check_env):
+    rfq_inbox.check_project_quotes("p1")
+    assert _sync_row(check_db, "quote-check:p1")["lease_until"] is None
+    # A second click runs; the reply is already stored, so nothing is re-ingested
+    # and the extractor is not charged again.
+    second = rfq_inbox.check_project_quotes("p1")
+    assert second["messages_seen"] == 1
+    assert second["quotes_created"] == 0
+    assert len(check_db.tables["rfq_messages"]) == 1
+
+
+def test_a_second_check_while_one_is_running_is_refused(check_db, check_env, monkeypatch):
+    """Re-entrancy proven from INSIDE a live run rather than by planting a row:
+    the second call has to see the first one's lease, which is what stops a
+    double-click paying for the same extraction twice."""
+    refusals: list[Exception] = []
+
+    def _reenter(conversation_id):
+        with pytest.raises(rfq_inbox.CheckAlreadyRunning) as exc:
+            rfq_inbox.check_project_quotes("p1")
+        refusals.append(exc.value)
+        return []
+
+    monkeypatch.setattr(rfq_inbox, "_conversation_messages", _reenter)
+    outer = rfq_inbox.check_project_quotes("p1")
+
+    assert len(refusals) == 1
+    assert "already running" in str(refusals[0])
+    # The refused re-entry stands down before doing anything, so it can neither
+    # steal nor release the lease the outer run is still holding.
+    assert outer["sends_checked"] == 1
+    assert outer["errors"] == []
+
+
+def test_check_refuses_while_another_holds_the_lease(check_db, check_env):
+    check_db.tables["graph_sync_state"].append(
+        {
+            "id": "quote-check:p1",
+            "holder": "another-worker",
+            "lease_until": "2099-01-01T00:00:00+00:00",
+        }
+    )
+    with pytest.raises(rfq_inbox.CheckAlreadyRunning):
+        rfq_inbox.check_project_quotes("p1")
+
+    assert check_db.tables.get("rfq_messages", []) == []  # nothing was ingested
+    # The refused caller must not release or steal the rival's lease on its way out.
+    rival = _sync_row(check_db, "quote-check:p1")
+    assert rival["holder"] == "another-worker"
+    assert rival["lease_until"] == "2099-01-01T00:00:00+00:00"
+
+
+def test_a_lease_orphaned_by_a_dead_worker_is_reclaimed(check_db, check_env):
+    check_db.tables["graph_sync_state"].append(
+        {
+            "id": "quote-check:p1",
+            "holder": "dead-worker",
+            "lease_until": "2000-01-01T00:00:00+00:00",
+        }
+    )
+    assert rfq_inbox.check_project_quotes("p1")["sends_checked"] == 1
+
+
+def test_a_thread_that_cannot_be_read_is_reported_not_raised(check_db, check_env, monkeypatch):
+    def _boom(conversation_id):
+        raise RuntimeError("graph down")
+
+    monkeypatch.setattr(rfq_inbox, "_conversation_messages", _boom)
+    result = rfq_inbox.check_project_quotes("p1")
+
+    # A partial run is still a success: the notice is user-facing text, not a 500.
+    assert result["sends_checked"] == 0
+    assert result["errors"] == ["Could not read the email thread for Jane (Switchgear)."]
+    assert _sync_row(check_db, "quote-check:p1")["lease_until"] is None  # still released
+    assert _sync_row(check_db, LEASE_ROW)["delta_link"] == "cursor-1"
+
+
+def test_our_own_outbound_copy_is_not_counted_as_a_reply(check_db, check_env, monkeypatch):
+    monkeypatch.setattr(
+        rfq_inbox, "_conversation_messages", lambda cid: [_msg(SENDER)]
+    )
+    result = rfq_inbox.check_project_quotes("p1")
+    assert result["messages_seen"] == 0
+    assert check_db.tables.get("rfq_messages", []) == []
+
+
+# ── POST /projects/{id}/rfqs/check-quotes (the route in front of it) ───────────
+
+
+def _writer():
+    return CurrentUser(
+        id="u1", email="mats@g3.com", role=Role.ESTIMATING_ENGINEER_MATERIALS,
+        is_active=True,
+    )
+
+
+@pytest.fixture
+def check_route(monkeypatch):
+    monkeypatch.setattr(rfqs_router, "audit", lambda *a, **k: None)
+
+
+def test_check_quotes_route_hands_back_the_service_result(monkeypatch, check_route):
+    payload = {"sends_checked": 3, "messages_seen": 5, "quotes_created": 2, "errors": []}
+    monkeypatch.setattr(
+        rfqs_router.rfq_inbox, "check_project_quotes", lambda pid: payload
+    )
+    assert rfqs_router.check_quotes("p1", _writer()) == payload
+
+
+def test_check_quotes_route_reports_a_busy_check_as_409(monkeypatch, check_route):
+    """A second click is a "try again in a moment", not a failure, and the
+    message the service raises is already what the user should read."""
+    def _busy(pid):
+        raise rfq_inbox.CheckAlreadyRunning(
+            "A check is already running for this project. Give it a moment."
+        )
+
+    monkeypatch.setattr(rfqs_router.rfq_inbox, "check_project_quotes", _busy)
+    with pytest.raises(HTTPException) as exc:
+        rfqs_router.check_quotes("p1", _writer())
+
+    assert exc.value.status_code == 409
+    assert "already running" in exc.value.detail
+
+
+def test_check_quotes_route_passes_partial_run_notices_through(monkeypatch, check_route):
+    # A thread that could not be read is reported in the body, NOT as an error
+    # status: the replies that did come in are already stored.
+    payload = {
+        "sends_checked": 1,
+        "messages_seen": 1,
+        "quotes_created": 0,
+        "errors": ["Could not read the email thread for Jane (Switchgear)."],
+    }
+    monkeypatch.setattr(
+        rfqs_router.rfq_inbox, "check_project_quotes", lambda pid: payload
+    )
+    assert rfqs_router.check_quotes("p1", _writer())["errors"] == payload["errors"]

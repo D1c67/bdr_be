@@ -38,6 +38,28 @@ CTX = ProposalContext(
     ),
 )
 
+# CTX has no section breakouts (all None): it renders the legacy 3-row box.
+# CTX_FULL turns every section on, including the generator caption.
+CTX_FULL = replace(
+    CTX,
+    gear_amount="$12,500",
+    underground_amount="$9,750",
+    low_voltage_amount="$6,400",
+    includes_generator=True,
+)
+
+ALL_AMOUNTS = ("$41,188", "$12,500", "$9,750", "$6,400", "$40,950", "$82,138")
+
+
+def _pricing_table(doc: Document):
+    return next(t for t in doc.tables if t.rows[0].cells[0].text.strip() == "Description")
+
+
+def _pricing_labels(docx_bytes: bytes) -> list[str]:
+    """First-paragraph label of each pricing-box row, top to bottom."""
+    doc = Document(io.BytesIO(docx_bytes))
+    return [r.cells[0].text.strip().splitlines()[0] for r in _pricing_table(doc).rows]
+
 
 # ── filenames ──────────────────────────────────────────────────────────────
 
@@ -281,11 +303,212 @@ def test_template_asset_has_expected_anchors_and_placeholders():
     text = pdx.extract_document_text(raw)
     for ph in pdx.ALL_PLACEHOLDERS:
         assert ph in text, f"template lost placeholder {ph!r}"
+    assert pdx.GENERATOR_CAPTION in text
     doc = Document(io.BytesIO(raw))
     _, mode = pdx.find_scope_anchor(doc)
     assert mode == "after"
     # the green chart OLE object must be gone (replaced by the native table)
     assert all(p._p.find(".//" + qn("w:object")) is None for p in doc.paragraphs)
+
+    # the sectioned pricing box: 7 rows, in the agreed order
+    assert _pricing_labels(raw) == [
+        "Description",
+        "Material",
+        "Gear and Power Distribution Equipment",
+        "Underground",
+        "Low Voltage",
+        "Labor",
+        "TOTAL",
+    ]
+    # the generator caption is a second paragraph inside the gear label cell
+    gear_cell = _pricing_table(doc).rows[2].cells[0]
+    assert gear_cell.text.strip().splitlines() == [
+        "Gear and Power Distribution Equipment",
+        pdx.GENERATOR_CAPTION,
+    ]
+    # every money token is a single-run paragraph so plain replacement works
+    money_tokens = {
+        "<Material Amount>",
+        *pdx.SECTION_TOKENS.values(),
+        "<Labor Amount>",
+        "<Total Amount>",
+    }
+    seen = set()
+    for p in _pricing_table(doc)._tbl.iter(qn("w:p")):
+        p_text = "".join(t.text or "" for t in p.iter(qn("w:t")))
+        if p_text in money_tokens:
+            assert len(p.findall(qn("w:r"))) == 1, f"{p_text!r} spans multiple runs"
+            seen.add(p_text)
+    assert seen == money_tokens
+
+
+# ── sectioned pricing box (row removal + caption) ──────────────────────────
+
+
+@needs_template
+def test_render_all_sections():
+    out = pdx.render_proposal(pdx.TEMPLATE_PATH.read_bytes(), CTX_FULL)
+    text = pdx.extract_document_text(out)
+    for amount in ALL_AMOUNTS:
+        assert amount in text
+    for label in pdx.SECTION_LABELS.values():
+        assert label in text
+    assert pdx.GENERATOR_CAPTION in text
+    for ph in pdx.ALL_PLACEHOLDERS:
+        assert ph not in text
+    assert _pricing_labels(out) == [
+        "Description",
+        "Material",
+        "Gear and Power Distribution Equipment",
+        "Underground",
+        "Low Voltage",
+        "Labor",
+        "TOTAL",
+    ]
+    pdx.validate_output(
+        out,
+        gc_name=CTX_FULL.gc_name,
+        scope_lines=CTX_FULL.scope_lines,
+        amounts=ALL_AMOUNTS,
+        includes_generator=True,
+    )
+
+
+@needs_template
+def test_render_gear_without_generator_caption():
+    ctx = replace(CTX_FULL, includes_generator=False)
+    out = pdx.render_proposal(pdx.TEMPLATE_PATH.read_bytes(), ctx)
+    text = pdx.extract_document_text(out)
+    assert "Gear and Power Distribution Equipment" in text
+    assert pdx.GENERATOR_CAPTION not in text
+    # the gear label cell kept its row but lost the caption paragraph
+    doc = Document(io.BytesIO(out))
+    assert _pricing_table(doc).rows[2].cells[0].text.strip() == (
+        "Gear and Power Distribution Equipment"
+    )
+    pdx.validate_output(
+        out,
+        gc_name=ctx.gc_name,
+        scope_lines=ctx.scope_lines,
+        amounts=ALL_AMOUNTS,
+        includes_generator=False,
+    )
+
+
+@needs_template
+def test_render_without_gear():
+    ctx = replace(CTX_FULL, gear_amount=None, includes_generator=False)
+    out = pdx.render_proposal(pdx.TEMPLATE_PATH.read_bytes(), ctx)
+    text = pdx.extract_document_text(out)
+    assert "Gear and Power Distribution Equipment" not in text
+    assert pdx.GENERATOR_CAPTION not in text
+    assert "Underground" in text and "Low Voltage" in text
+    assert _pricing_labels(out) == [
+        "Description",
+        "Material",
+        "Underground",
+        "Low Voltage",
+        "Labor",
+        "TOTAL",
+    ]
+    pdx.validate_output(
+        out,
+        gc_name=ctx.gc_name,
+        scope_lines=ctx.scope_lines,
+        amounts=("$41,188", "$9,750", "$6,400", "$40,950", "$82,138"),
+        removed_sections=("gear",),
+    )
+
+
+@needs_template
+def test_render_legacy_three_row_shape():
+    """No breakouts at all (CTX): the box collapses to the pre-release shape."""
+    out = pdx.render_proposal(pdx.TEMPLATE_PATH.read_bytes(), CTX)
+    text = pdx.extract_document_text(out)
+    for label in pdx.SECTION_LABELS.values():
+        assert label not in text
+    assert pdx.GENERATOR_CAPTION not in text
+    assert _pricing_labels(out) == ["Description", "Material", "Labor", "TOTAL"]
+    pdx.validate_output(
+        out,
+        gc_name=CTX.gc_name,
+        scope_lines=CTX.scope_lines,
+        amounts=("$41,188", "$40,950", "$82,138"),
+        removed_sections=("gear", "underground", "low_voltage"),
+    )
+
+
+@needs_template
+def test_render_contradictory_generator_flag_raises():
+    ctx = replace(CTX, includes_generator=True)  # gear_amount is None
+    with pytest.raises(ProposalRenderError, match="contradictory"):
+        pdx.render_proposal(pdx.TEMPLATE_PATH.read_bytes(), ctx)
+
+
+@needs_template
+def test_validate_output_leftover_section_token():
+    """A row the removal pass should have deleted still carries its token and
+    must fail validation (placeholder guard)."""
+    doc = Document(io.BytesIO(pdx.TEMPLATE_PATH.read_bytes()))
+    mapping = pdx.placeholder_map(CTX_FULL)
+    mapping.pop("<Gear Amount>")
+    pdx.replace_placeholders(doc, mapping)
+    pdx.insert_scope_lines(doc, CTX_FULL.scope_lines)
+    buf = io.BytesIO()
+    doc.save(buf)
+    with pytest.raises(ProposalRenderError, match="Unreplaced placeholder"):
+        pdx.validate_output(
+            buf.getvalue(),
+            gc_name=CTX_FULL.gc_name,
+            scope_lines=CTX_FULL.scope_lines,
+            includes_generator=True,
+        )
+
+
+@needs_template
+def test_validate_output_caption_iff_generator():
+    template = pdx.TEMPLATE_PATH.read_bytes()
+    with_caption = pdx.render_proposal(template, CTX_FULL)
+    without_caption = pdx.render_proposal(template, replace(CTX_FULL, includes_generator=False))
+
+    # caption expected but absent
+    with pytest.raises(ProposalRenderError, match="Generator caption"):
+        pdx.validate_output(
+            without_caption,
+            gc_name=CTX_FULL.gc_name,
+            scope_lines=CTX_FULL.scope_lines,
+            includes_generator=True,
+        )
+    # caption present but not expected
+    with pytest.raises(ProposalRenderError, match="no generator"):
+        pdx.validate_output(
+            with_caption,
+            gc_name=CTX_FULL.gc_name,
+            scope_lines=CTX_FULL.scope_lines,
+            includes_generator=False,
+        )
+
+
+@needs_template
+def test_validate_output_removed_label_still_present():
+    out = pdx.render_proposal(pdx.TEMPLATE_PATH.read_bytes(), CTX_FULL)
+    # claiming underground was removed while its row is rendered must fail
+    with pytest.raises(ProposalRenderError, match="Removed section label"):
+        pdx.validate_output(
+            out,
+            gc_name=CTX_FULL.gc_name,
+            scope_lines=CTX_FULL.scope_lines,
+            includes_generator=True,
+            removed_sections=("underground",),
+        )
+    with pytest.raises(ProposalRenderError, match="Unknown pricing section"):
+        pdx.validate_output(
+            out,
+            gc_name=CTX_FULL.gc_name,
+            scope_lines=CTX_FULL.scope_lines,
+            includes_generator=True,
+            removed_sections=("bogus",),
+        )
 
 
 # ── PDF leak re-scan (validate_pdf_isolation) ───────────────────────────────
@@ -296,6 +519,14 @@ def test_template_asset_has_expected_anchors_and_placeholders():
 PDF_OK = (
     "Proposal for Taylor International Corp. "
     "Material $41,188 Labor $40,950 Total $82,138"
+)
+
+PDF_SECTIONS = (
+    "Proposal for Taylor International Corp. "
+    "Material $41,188 "
+    "Gear and Power Distribution Equipment *Includes Generator/s $12,500 "
+    "Underground $9,750 Low Voltage $6,400 "
+    "Labor $40,950 Total $82,138"
 )
 
 
@@ -346,4 +577,57 @@ def test_validate_pdf_isolation_normalizes_wrapped_name():
     pdx.validate_pdf_isolation(
         "Proposal for Taylor International Corp. see attached",
         gc_name="Taylor   International\nCorp.",
+    )
+
+
+def test_validate_pdf_isolation_with_sections_passes():
+    pdx.validate_pdf_isolation(
+        PDF_SECTIONS,
+        gc_name="Taylor International Corp.",
+        other_gc_names=("Turner Construction",),
+        amounts=ALL_AMOUNTS,
+        includes_generator=True,
+    )
+
+
+def test_validate_pdf_isolation_legacy_shape_passes_with_removed_sections():
+    pdx.validate_pdf_isolation(
+        PDF_OK,
+        gc_name="Taylor International Corp.",
+        amounts=("$41,188", "$40,950", "$82,138"),
+        removed_sections=("gear", "underground", "low_voltage"),
+    )
+
+
+def test_validate_pdf_isolation_missing_caption_raises():
+    with pytest.raises(ProposalRenderError, match="Generator caption"):
+        pdx.validate_pdf_isolation(
+            PDF_OK, gc_name="Taylor International Corp.", includes_generator=True
+        )
+
+
+def test_validate_pdf_isolation_unexpected_caption_raises():
+    with pytest.raises(ProposalRenderError, match="no generator"):
+        pdx.validate_pdf_isolation(
+            PDF_SECTIONS, gc_name="Taylor International Corp.", includes_generator=False
+        )
+
+
+def test_validate_pdf_isolation_removed_label_raises():
+    with pytest.raises(ProposalRenderError, match="Removed section label"):
+        pdx.validate_pdf_isolation(
+            PDF_SECTIONS,
+            gc_name="Taylor International Corp.",
+            includes_generator=True,
+            removed_sections=("low_voltage",),
+        )
+
+
+def test_validate_pdf_isolation_removed_label_is_case_sensitive():
+    # Scope prose mentioning 'low voltage' in lowercase must never block a
+    # send whose Low Voltage section row was legitimately removed.
+    pdx.validate_pdf_isolation(
+        PDF_OK + " Furnish and install low voltage rough-in.",
+        gc_name="Taylor International Corp.",
+        removed_sections=("low_voltage",),
     )

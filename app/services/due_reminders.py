@@ -145,8 +145,24 @@ def is_complete(
         # exists — independent of labor/material progress.
         return workflow.category_past(cat_state, "to_estimator") or has_deliverables
     if kind == "due_from_vendors":
-        # Done once the MATERIAL category passes Receive Quotes, independent of labor.
-        return workflow.category_past(cat_state, "receive_quotes") or (
+        # Done once the SELECT VENDORS lane completes, i.e. a winner is picked in
+        # every category, independent of labor.
+        #
+        # Deliberately NOT the material lane passing Receive Quotes any more. A
+        # winner is picked from the quotes that did arrive, so Receive Quotes may
+        # legitimately never be completed, which would leave this reminder firing
+        # for the rest of the project's life. Select Vendors is the lane that
+        # actually ends the wait for vendor quotes, and it is the same lane
+        # workflow._STAGE_DISMISS_PREFIXES clears the already-sent
+        # "due.due_from_vendors." notices on, so firing and dismissal agree.
+        #
+        # `is_category_complete` rather than `category_past`: select_vendors holds a
+        # single task, so "past it" IS "lane complete", and this form cannot raise
+        # on a state map that is missing the lane.
+        #
+        # The RFQ-status arm still short-circuits it earlier, when every RFQ on the
+        # project has actually landed there is nothing left to chase.
+        return workflow.is_category_complete(cat_state, "select_vendors") or (
             bool(rfq_statuses)
             and all(s in ("quotes_in", "closed") for s in rfq_statuses)
         )

@@ -22,6 +22,7 @@ from app.models.schemas import (
     ProposalGenerateIn,
     ProposalLinesIn,
     ProposalMarkSubmittedIn,
+    ProposalResendIn,
     ProposalSendIn,
 )
 from app.services import (
@@ -249,12 +250,29 @@ def _proposal_rows(project_id: str) -> list[dict]:
         .order("gc_name")
         .execute()
     ).data or []
+    events = proposal_send.send_events_by_proposal(project_id)
     out = []
     for r in rows:
         file = r.pop("project_files", None) or {}
         gc = r.pop("general_contractors", None) or None
         if gc:
             gc = {"id": gc["id"], "name": gc["name"], "contacts": _sorted_contacts(gc)}
+        # Every transmission of this GC's bid, oldest first. proposal_sends
+        # records the submission; these record the deliveries, so a re-send is
+        # visible without disturbing the row the outcome grid reads.
+        history = [
+            {
+                "id": e["id"],
+                "kind": e["kind"],
+                "via": e["via"],
+                "status": e["status"],
+                "recipients": e.get("recipients"),
+                "sent_at": e.get("sent_at"),
+                "error": e.get("error"),
+            }
+            for e in events.get(r["id"], [])
+        ]
+        resends = [e for e in history if e["kind"] == "resend" and e["status"] == "sent"]
         out.append(
             {
                 **r,
@@ -271,6 +289,13 @@ def _proposal_rows(project_id: str) -> list[dict]:
                     "sent": "sent",
                     "failed": "failed",
                 }[r["status"]],
+                "history": history,
+                "resend_count": len(resends),
+                "last_sent_at": (resends[-1]["sent_at"] if resends else r.get("sent_at")),
+                "resending": any(e["status"] == "sending" for e in history),
+                # A re-send needs the exact document that went out; without a
+                # file row there is nothing to re-attach.
+                "can_resend": r["status"] == "sent" and r.get("file_id") is not None,
             }
         )
     return out
@@ -302,7 +327,16 @@ def set_proposal_amounts(
 ):
     try:
         return proposal_send.set_gc_amounts(
-            project_id, gc_id, body.material_amount, body.labor_amount, user.id
+            project_id,
+            gc_id,
+            {
+                "material": body.material_amount,
+                "gear": body.gear_amount,
+                "underground": body.underground_amount,
+                "low_voltage": body.low_voltage_amount,
+                "labor": body.labor_amount,
+            },
+            user.id,
         )
     except ProposalSendError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
@@ -346,7 +380,14 @@ def email_preview(project_id: str, user: CurrentUser = Depends(get_current_user)
     if not project:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
     subject, body = proposal_send.build_cover_email(project)
-    return {"subject": subject, "body": body, "gc_name_token": proposal_send.GC_NAME_TOKEN}
+    return {
+        "subject": subject,
+        "body": body,
+        "gc_name_token": proposal_send.GC_NAME_TOKEN,
+        # Per-GC To lines are not known until send time; this is the standing
+        # internal CC so the confirm dialog can show who else is copied.
+        "cc": proposal_send.cc_recipients([]),
+    }
 
 
 @router.post("/proposals/send", dependencies=[Depends(outbound_email_rate_limit)])
@@ -363,6 +404,30 @@ def send_proposals(
             body.email_body,
             body.force,
             body.contacts,
+            body.extra_attachment_file_ids,
+        )
+    except ProposalSendError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+
+
+@router.post("/proposals/resend", dependencies=[Depends(outbound_email_rate_limit)])
+def resend_proposals(
+    project_id: str,
+    body: ProposalResendIn,
+    user: CurrentUser = Depends(_PA_PM),
+):
+    """Email an already-sent proposal to its GC again. Re-attaches the exact
+    document that went out (nothing is regenerated), leaves the submission
+    record on proposal_sends untouched, and logs the delivery to
+    proposal_send_events. Available from Send Out through Bid Outcome."""
+    try:
+        return proposal_send.resend_proposals(
+            project_id,
+            user.id,
+            body.proposal_ids,
+            body.email_body,
+            body.contacts,
+            body.extra_attachment_file_ids,
         )
     except ProposalSendError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc

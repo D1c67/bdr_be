@@ -1,17 +1,35 @@
 """Workflow state machine — the spine of the bidding pipeline.
 
-The pipeline is no longer one linear pointer. The same tasks are grouped into FOUR
+The pipeline is no longer one linear pointer. The same tasks are grouped into SIX
 CATEGORIES that progress in parallel under a DAG:
 
     intake            [intake, go_no_go, to_estimator]
     material_numbers  [estimate_received, rfqs, receive_quotes]   unlock: intake complete
-    labor_numbers     [labor_numbers, markup]                     unlock: intake complete
+    labor_numbers     [labor_numbers]                             unlock: intake complete
+    select_vendors    [select_vendors]                            unlock: material_numbers
+    markup            [markup]                                    unlock: select_vendors+labor
     send_out          [gc_pricing, verify, send_out, submitted, bid_outcome]
-                                                                  unlock: intake+material+labor complete
+                                                                  unlock: intake+labor+select+markup
 
 `material_numbers` and `labor_numbers` run concurrently once intake completes (both
 auto-activate). Within a category tasks are strictly sequential — no skipping.
 `declined` (Go/No-Go "No") is a project-global kill.
+
+TWO KINDS OF UNLOCK. `select_vendors` and `markup` are workable well before their
+prerequisites finish, so they carry a SOFT trigger as well as the hard DAG edge
+(CATEGORY_SOFT_PREREQS): they open as soon as an upstream lane is merely ACTIVE.
+That is deliberate and load-bearing —
+
+  • a winner can be picked from the quotes that HAVE come in, so `receive_quotes`
+    never has to be completed at all (Select Vendors, not Material Numbers, is what
+    gates Send Out — note material_numbers is absent from send_out's prereqs), and
+  • Markup opens while labor is still outstanding, with its per-section boxes
+    locked individually by the UI rather than the whole step being unreachable.
+
+A soft-opened lane is a real `active` lane — it can be advanced and completed. It is
+excluded from the HEADLINE only (see `_lane_is_current`), so a lane someone opened
+early cannot drag `projects.current_stage` forward and move the bid between work
+queues.
 
 The source of truth is the `project_category_state` table (4 rows/project). A project
 still carries a denormalized `current_stage` / `current_owner_role` "headline" pointer
@@ -63,13 +81,16 @@ STAGES: dict[str, StageDef] = {
     "estimate_received": StageDef("estimate_received", 4, (Role.ESTIMATOR, Role.ESTIMATING_ENGINEER_MATERIALS), "Estimate Received"),
     "rfqs":              StageDef("rfqs",              5, (Role.ESTIMATING_ENGINEER_MATERIALS,), "RFQs"),
     "receive_quotes":    StageDef("receive_quotes",    6, (Role.ESTIMATING_ENGINEER_MATERIALS,), "Receive Quotes"),
-    "labor_numbers":     StageDef("labor_numbers",     7, (Role.ESTIMATING_ENGINEER_LABOR,), "Labor Numbers"),
-    "markup":            StageDef("markup",            8, (Role.ESTIMATING_ENGINEER_LABOR,), "Markup"),
-    "gc_pricing":        StageDef("gc_pricing",        9, (Role.ESTIMATING_ENGINEER_LABOR, Role.EXECUTIVE), "GC Pricing"),
-    "verify":            StageDef("verify",            10, (Role.EXECUTIVE,), "Verify"),
-    "send_out":          StageDef("send_out",          11, (Role.ESTIMATING_ADMIN, Role.ESTIMATING_ENGINEER_LABOR), "Send Out"),
-    "submitted":         StageDef("submitted",         12, (Role.ESTIMATING_ADMIN,), "Submitted"),
-    "bid_outcome":       StageDef("bid_outcome",       13, (Role.ESTIMATING_ADMIN,), "Win / Loss"),
+    # Picking the winning vendor per category. Material-side work, so it keeps the
+    # Materials engineer that owned it back when it lived on Receive Quotes.
+    "select_vendors":    StageDef("select_vendors",    7, (Role.ESTIMATING_ENGINEER_MATERIALS,), "Select Vendors"),
+    "labor_numbers":     StageDef("labor_numbers",     8, (Role.ESTIMATING_ENGINEER_LABOR,), "Labor Numbers"),
+    "markup":            StageDef("markup",            9, (Role.ESTIMATING_ENGINEER_LABOR,), "Markup"),
+    "gc_pricing":        StageDef("gc_pricing",        10, (Role.ESTIMATING_ENGINEER_LABOR, Role.EXECUTIVE), "GC Pricing"),
+    "verify":            StageDef("verify",            11, (Role.EXECUTIVE,), "Verify"),
+    "send_out":          StageDef("send_out",          12, (Role.ESTIMATING_ADMIN, Role.ESTIMATING_ENGINEER_LABOR), "Send Out"),
+    "submitted":         StageDef("submitted",         13, (Role.ESTIMATING_ADMIN,), "Submitted"),
+    "bid_outcome":       StageDef("bid_outcome",       14, (Role.ESTIMATING_ADMIN,), "Win / Loss"),
     "declined":          StageDef("declined",          99, (), "Declined"),
     # Placeholder for projects created directly in Project Management (never bid).
     # Terminal by construction: no TRANSITIONS edge leads into or out of it, so
@@ -88,22 +109,45 @@ STAGES: dict[str, StageDef] = {
 CATEGORY_TASKS: dict[str, list[str]] = {
     "intake":           ["intake", "go_no_go", "to_estimator"],
     "material_numbers": ["estimate_received", "rfqs", "receive_quotes"],
-    "labor_numbers":    ["labor_numbers", "markup"],
+    "labor_numbers":    ["labor_numbers"],
+    "select_vendors":   ["select_vendors"],
+    "markup":           ["markup"],
     "send_out":         ["gc_pricing", "verify", "send_out", "submitted", "bid_outcome"],
 }
-CATEGORY_ORDER: list[str] = ["intake", "material_numbers", "labor_numbers", "send_out"]
+# Fan-out order matters: _run_fanout resolves soft triggers in ONE pass over this
+# list, so a lane must come after any lane that can soft-open it (material_numbers
+# opens select_vendors, which in turn opens markup).
+CATEGORY_ORDER: list[str] = [
+    "intake", "material_numbers", "labor_numbers", "select_vendors", "markup", "send_out",
+]
 CATEGORY_LABELS: dict[str, str] = {
     "intake": "Intake",
     "material_numbers": "Material Numbers",
     "labor_numbers": "Labor Numbers",
+    "select_vendors": "Select Vendors",
+    "markup": "Markup",
     "send_out": "Send Out",
 }
-# The DAG: which categories must be COMPLETE before a category may start.
+# The HARD DAG: which categories must be COMPLETE before a category properly starts.
+#
+# `material_numbers` is deliberately NOT a prerequisite of `send_out`. Receiving every
+# last quote is optional — what a bid actually needs before it can be priced is a
+# chosen winner in every category, which is `select_vendors`.
 CATEGORY_PREREQS: dict[str, list[str]] = {
     "intake": [],
     "material_numbers": ["intake"],
     "labor_numbers": ["intake"],
-    "send_out": ["intake", "material_numbers", "labor_numbers"],
+    "select_vendors": ["material_numbers"],
+    "markup": ["select_vendors", "labor_numbers"],
+    "send_out": ["intake", "labor_numbers", "select_vendors", "markup"],
+}
+# The SOFT trigger: a lane listed here opens as soon as ANY of the named lanes is
+# merely ACTIVE, without waiting for it to complete. This is what lets a user pick
+# winners from the quotes already in, and work Markup while labor is outstanding.
+# Only these two lanes open early; everything else obeys CATEGORY_PREREQS alone.
+CATEGORY_SOFT_PREREQS: dict[str, list[str]] = {
+    "select_vendors": ["material_numbers"],
+    "markup": ["select_vendors", "labor_numbers"],
 }
 STAGE_TO_CATEGORY: dict[str, str] = {
     task: cat for cat, tasks in CATEGORY_TASKS.items() for task in tasks
@@ -255,7 +299,10 @@ _STAGE_DISMISS_TYPES: dict[str, str] = {
 }
 _STAGE_DISMISS_PREFIXES: dict[str, str] = {
     "due.due_from_estimator.":  "to_estimator",
-    "due.due_from_vendors.":    "receive_quotes",
+    # Keyed on Select Vendors, NOT receive_quotes: quotes stop being due when a winner
+    # is chosen, and the material lane may legitimately never complete now, which would
+    # leave these reminders pending forever.
+    "due.due_from_vendors.":    "select_vendors",
     "due.internal_bid.":        "send_out",
     "due.actual_bid.":          "send_out",
 }
@@ -299,11 +346,24 @@ def _recompute_headline(project_id: str) -> str:
     if so.get("status") in ("active", "complete"):
         head = so["current_task"]
     else:
+        # Only lanes whose HARD prerequisites are done count as "where the bid is".
+        # A soft-opened lane (Select Vendors / Markup, workable early) is real work a
+        # user can do, but it is not the bid's position — letting Markup become the
+        # headline the moment Intake finished would move every project into the wrong
+        # ?stage= work queue and wreck time-in-stage analytics.
         actives = [
             (STAGES[cs["current_task"]].order, cs["current_task"])
-            for cs in state.values()
-            if cs.get("status") == "active"
+            for cat, cs in state.items()
+            if cs.get("status") == "active" and hard_prereqs_met(state, cat)
         ]
+        if not actives:
+            # Everything in play is running ahead of schedule — fall back to any
+            # active lane so the headline is never empty.
+            actives = [
+                (STAGES[cs["current_task"]].order, cs["current_task"])
+                for cs in state.values()
+                if cs.get("status") == "active"
+            ]
         if actives:
             head = max(actives, key=lambda t: t[0])[1]
         else:
@@ -352,15 +412,37 @@ def _emit_event(
     ).execute()
 
 
+def hard_prereqs_met(state: dict[str, dict], category: str) -> bool:
+    """Every lane `category` hard-depends on is complete."""
+    return all(
+        state.get(pr, {}).get("status") == "complete" for pr in CATEGORY_PREREQS[category]
+    )
+
+
+def _should_activate(state: dict[str, dict], category: str) -> bool:
+    """Whether a locked lane may open now — the hard DAG, OR the soft trigger for the
+    two lanes that are workable ahead of their prerequisites."""
+    if hard_prereqs_met(state, category):
+        return True
+    return any(
+        state.get(pr, {}).get("status") == "active"
+        for pr in CATEGORY_SOFT_PREREQS.get(category, ())
+    )
+
+
 def _run_fanout(project_id: str, actor_id: str | None) -> None:
-    """Activate any locked category whose prerequisites are now all complete. Emits an
-    activation event (from=None -> first task) so analytics sees each category start."""
+    """Activate any locked category whose prerequisites are now met. Emits an
+    activation event (from=None -> first task) so analytics sees each category start.
+
+    One pass suffices because CATEGORY_ORDER is topologically sorted and `state` is
+    updated in place as lanes open, so a lane soft-opened here can soft-open the next
+    one in the same pass."""
     state = load_category_state(project_id)
     for cat in CATEGORY_ORDER:
         cs = state.get(cat, {})
         if cs.get("status") != "locked":
             continue
-        if all(state.get(pr, {}).get("status") == "complete" for pr in CATEGORY_PREREQS[cat]):
+        if _should_activate(state, cat):
             first = CATEGORY_TASKS[cat][0]
             _upsert_head(project_id, cat, first, "active")
             _emit_event(project_id, cat, None, first, actor_id, "Category unlocked")
@@ -389,9 +471,14 @@ def advance_category(
         _emit_event(project_id, category, head, nxt, actor_id, note)
     else:
         # Last task done → the category completes (no self-loop event; completed_at
-        # records it). Fan-out may then unlock dependent categories.
+        # records it).
         _upsert_head(project_id, category, head, "complete")
-        _run_fanout(project_id, actor_id)
+
+    # Fan out on EVERY advance, not just on completion. A soft trigger fires on a lane
+    # being ACTIVE, so the dependent lane can become openable at a point where nothing
+    # completed at all. Activating is idempotent and only ever touches locked lanes, so
+    # running it unconditionally also self-heals a lane left locked by a state edit.
+    _run_fanout(project_id, actor_id)
 
     _recompute_headline(project_id)
     _dismiss_stale_notifications(project_id, category, load_category_state(project_id))
@@ -451,6 +538,39 @@ def _project_row(project_id: str) -> dict:
 # for a re-commit, WITHOUT disturbing the (already-complete) material/labor categories.
 _PAST_VERIFY_HEADS = ("send_out", "submitted", "bid_outcome")
 
+_SECTION_SNAPSHOT_COLUMNS = (
+    "gear_amount",
+    "gear_markup_amount",
+    "underground_amount",
+    "underground_markup_amount",
+    "low_voltage_amount",
+    "low_voltage_markup_amount",
+)
+_LEGACY_SNAPSHOT_COLUMNS = (
+    "labor_amount",
+    "materials_amount",
+    "labor_markup_amount",
+    "materials_markup_amount",
+)
+
+
+def legacy_snapshot_reset_needed(verification: dict | None, rfq_rows: list[dict]) -> bool:
+    """A snapshot committed before the pricing-sections release carries the FULL
+    materials figure with every section column NULL. If the live partition has
+    breakout categories, keeping those figures as drafts after a bounce would
+    double count every breakout (stale full materials plus live sections), so the
+    bounce must clear them and let the re-verify form seed from the live figures
+    (mirrors the 0100 migration's data fix for the projects it bounced)."""
+    if not verification:
+        return False
+    if any(verification.get(c) is not None for c in _SECTION_SNAPSHOT_COLUMNS):
+        return False
+    return any(
+        (r.get("material_categories") or {}).get("pricing_section")
+        not in (None, "materials")
+        for r in rfq_rows
+    )
+
 
 def reopen_verify(
     project_id: str, actor_id: str | None, reason: str
@@ -499,9 +619,24 @@ def reopen_verify(
         sb.table("projects").update({"reverify_return_stage": head}).eq(
             "id", project_id
         ).execute()
-    sb.table("verifications").update(
-        {"committed_at": None, "verified_by": None, "updated_at": "now()"}
-    ).eq("project_id", project_id).execute()
+    reset = {"committed_at": None, "verified_by": None, "updated_at": "now()"}
+    ver_rows = (
+        sb.table("verifications")
+        .select("project_id, " + ", ".join(_SECTION_SNAPSHOT_COLUMNS))
+        .eq("project_id", project_id)
+        .limit(1)
+        .execute()
+    ).data
+    if ver_rows:
+        rfq_rows = (
+            sb.table("rfqs")
+            .select("id, material_categories(pricing_section)")
+            .eq("project_id", project_id)
+            .execute()
+        ).data or []
+        if legacy_snapshot_reset_needed(ver_rows[0], rfq_rows):
+            reset.update({c: None for c in _LEGACY_SNAPSHOT_COLUMNS})
+    sb.table("verifications").update(reset).eq("project_id", project_id).execute()
     _recompute_headline(project_id)
     return _project_row(project_id), True
 

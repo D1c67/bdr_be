@@ -18,6 +18,11 @@ from app.core.deps import CurrentUser, require_internal, require_role, require_w
 from app.core.roles import CATEGORY_ADMIN_ROLES
 from app.core.supabase_client import get_supabase
 from app.models.schemas import GCContactIn, GCContactOut, GCIn, GCOut, MaterialCategoryUpdate
+from app.services.directory import (
+    clean_company_name,
+    duplicate_company_message,
+    find_duplicate_company,
+)
 
 router = APIRouter(tags=["reference"])
 
@@ -32,12 +37,25 @@ def list_gcs(_: CurrentUser = Depends(require_internal)):
 
 @router.post("/gcs", response_model=GCOut, status_code=status.HTTP_201_CREATED)
 def create_gc(body: GCIn, _: CurrentUser = Depends(require_writer)):
-    return (
-        get_supabase()
-        .table("general_contractors")
-        .insert(body.model_dump(mode="json"))
-        .execute()
-    ).data[0]
+    """Add a GC company. Refuses a name the directory already holds.
+
+    Reached from the Contacts page, the New Bid modal, and a project's GC
+    panel; the duplicate check sits here so all three are covered. A twin GC
+    would split one customer's bids across two rows and double-count them in
+    the bid-invitations report. See app/services/directory.py.
+    """
+    sb = get_supabase()
+    name = clean_company_name(body.name)
+    if not name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Company name is required")
+    dupe = find_duplicate_company(sb, "general_contractors", name)
+    if dupe:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            duplicate_company_message("general contractor", dupe["name"]),
+        )
+    payload = {**body.model_dump(mode="json"), "name": name}
+    return (sb.table("general_contractors").insert(payload).execute()).data[0]
 
 
 @router.get("/gc-contacts", response_model=list[GCContactOut])

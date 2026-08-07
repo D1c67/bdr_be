@@ -143,6 +143,10 @@ class Settings(BaseSettings):
     ms_client_id: str = ""
     ms_client_secret: str = ""
     ms_sender: str = "bids@g3electrical.com"
+    # CC'd on every proposal email sent out to a GC, so the bids desk sees the
+    # outgoing bid on the thread itself (and GCs reply-all back to it) rather
+    # than only in the sending mailbox's Sent Items. Empty disables the CC.
+    proposal_cc: str = "bids@g3electrical.com"
 
     # Per-feature models — 3rd party (OpenAI side)
     openai_email_model: str = "gpt-5.4-nano"    # RFQ email wording variation

@@ -1,7 +1,18 @@
-"""User management — IT Admin and the Executive invite users and assign roles.
+"""User management: IT Admin and the Executive own the full account lifecycle.
 
 Invites go through Supabase Auth (admin API, service-role). A `profiles` row is
-created with the assigned role.
+created with the assigned role. From there an admin can correct a name, move the
+login email, change the role, enable/disable the account, resend a pending
+invite, reset a locked-out user's 2FA, send a password-reset link, and (last
+resort) delete the account outright.
+
+Two guardrails run across the destructive edits, since the same admins hold the
+only keys to this surface:
+
+* an admin may not delete or disable their OWN account, and
+* the last active account that can manage users may not be deleted, disabled or
+  demoted, otherwise the deployment locks itself out of user management with
+  no in-app recovery path.
 """
 
 import logging
@@ -17,6 +28,7 @@ from app.core.roles import INTERNAL_ROLES, Role
 from app.core.supabase_client import get_supabase
 from app.services import invite_email
 from app.models.schemas import (
+    AdminUpdateUserIn,
     InviteUserIn,
     NotificationPrefsOut,
     ProfileOut,
@@ -32,7 +44,10 @@ from app.services.due_reminder_prefs import (
 from app.services.notifications import audit
 
 router = APIRouter(prefix="/users", tags=["users"])
-_MANAGE_USERS = require_role(Role.IT_ADMIN, Role.EXECUTIVE)
+# The roles that may administer accounts. Kept as a tuple so the auth gate and
+# the "don't strand the deployment without an admin" guard below can never drift.
+MANAGE_USER_ROLES = (Role.IT_ADMIN, Role.EXECUTIVE)
+_MANAGE_USERS = require_role(*MANAGE_USER_ROLES)
 
 # Supabase verifies the invite link, then redirects the user here. The /auth/confirm
 # route handler establishes the session cookie and forwards to `next` — the
@@ -41,26 +56,30 @@ _MANAGE_USERS = require_role(Role.IT_ADMIN, Role.EXECUTIVE)
 # the Site URL (which would drop the user on /login with no session — the bug).
 _ACCEPT_INVITE_PATH = "/auth/accept-invite"
 _INVITE_REDIRECT_PATH = f"/auth/confirm?next={_ACCEPT_INVITE_PATH}"
+# Where an admin-sent password reset lands: the same confirm handler (it already
+# knows the `recovery` OTP type), forwarding to the set-a-new-password screen.
+_RESET_PASSWORD_PATH = "/auth/reset-password"
+_RECOVERY_REDIRECT_PATH = f"/auth/confirm?next={_RESET_PASSWORD_PATH}"
 
 
 def _invite_options() -> dict:
     return {"redirect_to": f"{get_settings().frontend_url}{_INVITE_REDIRECT_PATH}"}
 
 
-def _confirm_url(props) -> str:
-    """Build the frontend link we email for an admin-minted invite/magiclink.
+def _confirm_url(props, next_path: str = _ACCEPT_INVITE_PATH) -> str:
+    """Build the frontend link we email for an admin-minted invite/magiclink/recovery.
 
     Points at our own ``/auth/confirm`` carrying the verified server-side
     ``token_hash`` — NOT GoTrue's ``action_link``, whose verify response comes
     back in a URL *fragment* that a server route handler cannot read. The confirm
-    route runs ``verifyOtp({type, token_hash})`` and forwards to the accept-invite
-    page, so both ``invite`` and ``magiclink`` types flow through unchanged.
+    route runs ``verifyOtp({type, token_hash})`` and forwards to ``next_path``, so
+    ``invite``, ``magiclink`` and ``recovery`` all flow through unchanged.
     """
     qs = urlencode(
         {
             "token_hash": props.hashed_token,
             "type": props.verification_type,
-            "next": _ACCEPT_INVITE_PATH,
+            "next": next_path,
         }
     )
     return f"{get_settings().frontend_url}/auth/confirm?{qs}"
@@ -73,6 +92,63 @@ def _refuse_while_impersonating(user: CurrentUser) -> None:
     if user.impersonated_by:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "Not available while viewing as an estimator"
+        )
+
+
+def _load_profile(user_id: str) -> dict:
+    """Fetch one profile or 404: the read every admin write starts from."""
+    rows = (
+        get_supabase().table("profiles").select("*").eq("id", user_id).limit(1).execute()
+    ).data
+    if not rows:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    return rows[0]
+
+
+def _another_admin_remains(user_id: str) -> bool:
+    """True when some OTHER enabled account can still manage users."""
+    return bool(
+        (
+            get_supabase()
+            .table("profiles")
+            .select("id")
+            .in_("role", [r.value for r in MANAGE_USER_ROLES])
+            .eq("is_active", True)
+            .neq("id", user_id)
+            .limit(1)
+            .execute()
+        ).data
+    )
+
+
+def _guard_admin_coverage(
+    target: dict,
+    *,
+    role: Role | None = None,
+    is_active: bool | None = None,
+    deleting: bool = False,
+) -> None:
+    """Refuse an edit that would leave nobody able to manage users.
+
+    Only bites when `target` is currently a *working* admin (enabled and holding
+    a manage role) and the edit takes that away: deleting them, disabling them,
+    or moving them to a role that cannot administer accounts. Losing the last one
+    is unrecoverable from inside the app, since the Settings > Users page 403s for
+    everyone, and the only fix left is a hand-written SQL update against the
+    database.
+    """
+    if not target.get("is_active") or Role(target["role"]) not in MANAGE_USER_ROLES:
+        return
+    losing_admin = (
+        deleting
+        or is_active is False
+        or (role is not None and role not in MANAGE_USER_ROLES)
+    )
+    if losing_admin and not _another_admin_remains(target["id"]):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This is the last account that can manage users. Promote another "
+            "IT Admin or Executive first.",
         )
 
 
@@ -322,10 +398,7 @@ def reinvite_user(
 ):
     """Resend the invite email to a user who hasn't accepted yet."""
     sb = get_supabase()
-    rows = sb.table("profiles").select("*").eq("id", user_id).limit(1).execute().data
-    if not rows:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
-    profile = rows[0]
+    profile = _load_profile(user_id)
     if profile.get("invite_accepted_at") is not None:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "User has already accepted their invite"
@@ -391,15 +464,81 @@ def reset_user_mfa(
     valid up to its ~1h TTL); enforcement re-applies once that token expires and
     the next sign-in finds no factor.
     """
-    rows = (
-        get_supabase().table("profiles").select("id").eq("id", user_id).limit(1).execute().data
-    )
-    if not rows:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    _load_profile(user_id)
     _delete_user_factors(user_id)
     updated = sb_update(user_id, {"mfa_enrolled": False})
     audit(admin.id, "user.mfa.admin_reset", "profile", user_id, {})
     return updated
+
+
+@router.post(
+    "/{user_id}/reset-password",
+    response_model=ProfileOut,
+    dependencies=[Depends(outbound_email_rate_limit)],
+)
+def reset_user_password(user_id: str, admin: CurrentUser = Depends(_MANAGE_USERS)):
+    """Email a user a password-reset link on their behalf.
+
+    The self-service route is /auth/forgot-password; this is for the user who
+    cannot get that far: wrong address on file, mail never arrived, or they are
+    simply locked out and on the phone with an admin. The link carries a
+    `recovery` token through the same /auth/confirm handler as invites and lands
+    on /auth/reset-password.
+
+    Sending to a not-yet-accepted invite is refused: a recovery link would drop
+    that user into the set-a-password screen without ever stamping
+    `invite_accepted_at`, leaving the admin list showing "Invited" forever. Resend
+    the invite instead.
+    """
+    profile = _load_profile(user_id)
+    if profile.get("invite_accepted_at") is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "User hasn't accepted their invite yet. Resend the invite instead.",
+        )
+
+    redirect_to = f"{get_settings().frontend_url}{_RECOVERY_REDIRECT_PATH}"
+    if invite_email.graph_configured():
+        try:
+            link = get_supabase().auth.admin.generate_link(
+                {
+                    "type": "recovery",
+                    "email": profile["email"],
+                    "options": {"redirect_to": redirect_to},
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger("bdr.users").exception("Recovery link generation failed")
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, "Password reset failed. Try again."
+            ) from exc
+        try:
+            invite_email.send_password_reset_email(
+                to=profile["email"],
+                full_name=profile["full_name"],
+                cta_url=_confirm_url(link.properties, _RESET_PASSWORD_PATH),
+                sent_by=admin.id,
+            )
+        except Exception as exc:  # noqa: BLE001 (nothing to roll back; admin retries)
+            logging.getLogger("bdr.users").exception("Password reset send failed")
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                "Reset email could not be sent. Check Graph configuration.",
+            ) from exc
+    else:
+        # Local/test fallback: Supabase sends its own (unbranded) recovery email.
+        try:
+            get_supabase().auth.reset_password_email(
+                profile["email"], {"redirect_to": redirect_to}
+            )
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger("bdr.users").exception("Password reset send failed")
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY, "Reset email could not be sent."
+            ) from exc
+
+    audit(admin.id, "user.password_reset_sent", "profile", user_id, {})
+    return profile
 
 
 @router.patch("/me/role", response_model=ProfileOut)
@@ -421,11 +560,31 @@ def switch_own_role(
 @router.patch("/{user_id}", response_model=ProfileOut)
 def update_user(
     user_id: str,
+    body: AdminUpdateUserIn | None = None,
     role: Role | None = None,
     is_active: bool | None = None,
     is_dev: bool | None = None,
     admin: CurrentUser = Depends(_MANAGE_USERS),
 ):
+    """Edit another user's account: name, login email, role, enabled, dev flag.
+
+    Role/is_active/is_dev are accepted BOTH as query params (the original wire
+    format, still used by older callers) and in the JSON body; the body wins when
+    a field appears in both. Name and email are body-only, since an email does not
+    belong in a query string that lands in access logs.
+    """
+    edit = body or AdminUpdateUserIn()
+    role = edit.role if edit.role is not None else role
+    is_active = edit.is_active if edit.is_active is not None else is_active
+    is_dev = edit.is_dev if edit.is_dev is not None else is_dev
+
+    target = _load_profile(user_id)
+    if user_id == admin.id and is_active is False:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "You cannot disable your own account"
+        )
+    _guard_admin_coverage(target, role=role, is_active=is_active)
+
     patch: dict = {}
     if role is not None:
         patch["role"] = role.value
@@ -435,11 +594,124 @@ def update_user(
     # revocation path here means a stray is_dev can be cleared without a DB edit.
     if is_dev is not None:
         patch["is_dev"] = is_dev
-    if not patch:
+    if edit.full_name is not None:
+        patch["full_name"] = edit.full_name
+
+    # GoTrue stores addresses lowercased; normalize to match so the profile row
+    # and the auth identity can never drift apart (the email-ingest matcher and
+    # the login lookup both key off the address).
+    new_email: str | None = None
+    if edit.email is not None:
+        candidate = edit.email.strip().lower()
+        if candidate != (target.get("email") or "").strip().lower():
+            new_email = candidate
+
+    if not patch and new_email is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nothing to update")
-    updated = sb_update(user_id, patch)
+
+    if new_email is not None:
+        _assert_email_available(new_email, user_id)
+        _set_auth_email(user_id, new_email)
+        patch["email"] = new_email
+
+    try:
+        updated = sb_update(user_id, patch)
+    except Exception:
+        # The auth identity already moved; put it back rather than leave the user
+        # signing in with an address their profile doesn't know about.
+        if new_email is not None:
+            _set_auth_email(user_id, target["email"], best_effort=True)
+        raise
+
     audit(admin.id, "user.update", "profile", user_id, patch)
     return updated
+
+
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(user_id: str, admin: CurrentUser = Depends(_MANAGE_USERS)):
+    """Permanently delete an account: the last resort behind Disable.
+
+    Deleting the Supabase Auth user cascades the `profiles` row (migration 0002),
+    and migration 0012 already shaped every actor FK for this: nullable "who did
+    it" columns go NULL and NOT NULL ownership rows cascade, so project history,
+    emails sent and the audit trail all outlive the account. What does NOT
+    survive is the person's go/no-go votes and estimator assignments, which is
+    why disabling remains the recommended action for someone who has left.
+    """
+    if user_id == admin.id:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "You cannot delete your own account"
+        )
+    target = _load_profile(user_id)
+    _guard_admin_coverage(target, deleting=True)
+
+    sb = get_supabase()
+    try:
+        sb.auth.admin.delete_user(user_id)
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger("bdr.users").exception("User deletion failed")
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, "Could not delete the account. Try again."
+        ) from exc
+    # The auth delete cascades the profile; this covers a profile row that has
+    # somehow outlived its auth user, and is a no-op in the normal case.
+    sb.table("profiles").delete().eq("id", user_id).execute()
+
+    # Recorded after the fact so a failed delete leaves no misleading entry. The
+    # email and role go into the metadata because the row they came from is gone.
+    audit(
+        admin.id,
+        "user.delete",
+        "profile",
+        user_id,
+        {"email": target.get("email"), "role": target.get("role")},
+    )
+
+
+def _assert_email_available(email: str, user_id: str) -> None:
+    """409 if another profile already holds this address (profiles.email is unique).
+
+    Checked before touching Supabase Auth so the common typo (retyping a
+    teammate's address) fails cleanly instead of half-applying.
+    """
+    taken = (
+        get_supabase()
+        .table("profiles")
+        .select("id")
+        .eq("email", email)
+        .neq("id", user_id)
+        .limit(1)
+        .execute()
+    ).data
+    if taken:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "That email is already used by another user"
+        )
+
+
+def _set_auth_email(user_id: str, email: str, *, best_effort: bool = False) -> None:
+    """Move the Supabase Auth login address for a user.
+
+    `email_confirm` marks the new address verified on the spot: an admin typing a
+    colleague's corrected address IS the verification, and without it the user
+    would be unable to sign in until they clicked a confirmation mail sent to the
+    address that was wrong in the first place.
+
+    `best_effort` is for the rollback path, where raising would mask the original
+    error that triggered it.
+    """
+    try:
+        get_supabase().auth.admin.update_user_by_id(
+            user_id, {"email": email, "email_confirm": True}
+        )
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger("bdr.users").exception("Auth email change failed")
+        if best_effort:
+            return
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Could not change the email address. It may already be in use.",
+        ) from exc
 
 
 def sb_update(user_id: str, patch: dict) -> dict:

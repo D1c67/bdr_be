@@ -14,18 +14,47 @@ from app.services.workflow import STAGES, owner_role_for
 # ── our_amount_of ────────────────────────────────────────────────────────────
 
 
-def test_our_amount_sums_material_and_labor():
-    assert outcome.our_amount_of("40000", "41950") == Decimal("81950")
+def test_our_amount_sums_all_five_stamps():
+    assert outcome.our_amount_of(
+        {
+            "material_amount": "30688",
+            "gear_amount": "10500",
+            "underground_amount": "1500",
+            "low_voltage_amount": "300",
+            "labor_amount": "41950",
+        }
+    ) == Decimal("84938")
 
 
-def test_our_amount_treats_missing_half_as_zero():
-    assert outcome.our_amount_of("40000", None) == Decimal("40000")
-    assert outcome.our_amount_of(None, "950") == Decimal("950")
+def test_our_amount_legacy_two_column_rows_sum_null_safe():
+    # Legacy rows stamped the FULL materials figure on material_amount and NULL
+    # on every section column; the sum must be exactly the pre-release figure.
+    assert outcome.our_amount_of(
+        {"material_amount": "40000", "labor_amount": "41950"}
+    ) == Decimal("81950")
+    assert outcome.our_amount_of(
+        {
+            "material_amount": "40000",
+            "gear_amount": None,
+            "underground_amount": None,
+            "low_voltage_amount": None,
+            "labor_amount": "41950",
+        }
+    ) == Decimal("81950")
 
 
-def test_our_amount_is_none_only_when_both_absent():
+def test_our_amount_treats_missing_stamps_as_zero():
+    assert outcome.our_amount_of({"material_amount": "40000"}) == Decimal("40000")
+    assert outcome.our_amount_of({"labor_amount": "950"}) == Decimal("950")
+    assert outcome.our_amount_of(
+        {"material_amount": None, "gear_amount": "5000", "labor_amount": None}
+    ) == Decimal("5000")
+
+
+def test_our_amount_is_none_only_when_every_stamp_absent():
     # Legacy proposal_sends rows generated before per-GC amounts existed.
-    assert outcome.our_amount_of(None, None) is None
+    assert outcome.our_amount_of({}) is None
+    assert outcome.our_amount_of({"material_amount": None, "labor_amount": None}) is None
 
 
 # ── won_via_us ───────────────────────────────────────────────────────────────

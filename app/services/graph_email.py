@@ -262,6 +262,7 @@ def send_mail(
     to: list[str],
     subject: str,
     body_html: str,
+    cc: list[str] | None = None,
     attachments: list[tuple[str, bytes]] | None = None,
     inline_images: list[tuple[str, str, bytes, str]] | None = None,
     project_id: str | None = None,
@@ -274,13 +275,18 @@ def send_mail(
     `attachments` is a list of (filename, content_bytes). `inline_images` is a
     list of (content_id, filename, content_bytes, content_type) for images the
     HTML body references via `<img src="cid:content_id">` (e.g. the G3 logo).
-    `importance` maps to Graph's message importance ("low"/"normal"/"high") —
-    omit for normal mail; "high" shows the red "!" marker in Outlook.
-    Returns the email_log row.
+    `cc` is a list of plain addresses copied on the same message (same shape as
+    `create_draft`). `importance` maps to Graph's message importance
+    ("low"/"normal"/"high") — omit for normal mail; "high" shows the red "!"
+    marker in Outlook. Returns the email_log row.
     """
     settings = get_settings()
     sb = get_supabase()
 
+    # to_addrs records the To line ONLY, never the CC. proposal_send proves a
+    # crashed send actually delivered by comparing proposal_sends.gc_email to
+    # this string for exact equality (see its join_recipients docstring), so
+    # folding CC addresses in here would break crash recovery.
     log = (
         sb.table("email_log")
         .insert(
@@ -302,6 +308,8 @@ def send_mail(
         "body": {"contentType": "HTML", "content": body_html},
         "toRecipients": [{"emailAddress": {"address": a}} for a in to],
     }
+    if cc:
+        message["ccRecipients"] = [{"emailAddress": {"address": a}} for a in cc]
     if importance:
         message["importance"] = importance
     msg_attachments: list[dict] = []

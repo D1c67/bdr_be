@@ -2,10 +2,12 @@
 
 Each To contact gets their own Graph draft (so we capture its conversationId
 for reply matching), optionally with coworkers from the SAME vendor company
-CC'd on it, the category's BOM split Excel, the project drawings (or a
-OneDrive link when they exceed the configured size), and — for the Trenching
-category — the estimator's markup files. From the confirm modal the PE can
-override the attachment list per category and replace the generated body. The
+CC'd on it, plus the category's default attachment set: the BOM split Excel
+and the project drawings (or a OneDrive link when they exceed the configured
+size). The Trenching category is the exception: its vendors price from the
+estimator's markup, so its default set swaps the BOM split for the markup
+files and keeps the drawings. From the Modify Files / confirm modals the PE
+can override the attachment list per category and replace the generated body. The
 generated body is lightly varied per email by OpenAI, falling back to the base
 template on any failure; an edited body is sent exactly as written. Every body
 goes out wrapped in the branded HTML shell (see email_branding) with the G3
@@ -39,13 +41,22 @@ def build_subject(project: dict) -> str:
     )
 
 
-def build_base_body(contact_name: str, due_str: str, drawings_link: str | None) -> str:
+def build_base_body(
+    contact_name: str,
+    due_str: str,
+    drawings_link: str | None,
+    *,
+    trenching: bool = False,
+) -> str:
     drawings_line = (
         f"The drawings are available here: {drawings_link}\n\n" if drawings_link else ""
     )
+    # Trenching emails carry the markup + drawings, not a BOM. Say so, or the
+    # vendor goes hunting for a counts workbook that isn't attached.
+    quoted_what = "the attached trench markup and drawings" if trenching else "the attached BOM"
     return (
         f"Hello {contact_name},\n\n"
-        f"Can you please get me quotes for the attached BOM, we need them by {due_str}?\n\n"
+        f"Can you please get me quotes for {quoted_what}, we need them by {due_str}?\n\n"
         f"{drawings_line}"
         "If there are any other attachments/drawings, please review them as well.\n\n"
         "Please also let me know what you are not able to quote.\n\n"
@@ -280,9 +291,9 @@ def bulk_send(
 
     `groups` = [{"rfq_id": ..., "vendor_contact_ids": [...],
     "attachment_file_ids": [...] | None, "cc": {to_id: [cc_ids]} | None}]. A
-    None attachment list means the default set (BOM split + drawings +
-    Trenching markup); an explicit list is exactly what the PE confirmed in the
-    modal. `cc` copies extra contacts on a To contact's email — every CC must
+    None attachment list means the default set (BOM split + drawings; for
+    Trenching, markup + drawings and no BOM split); an explicit list is
+    exactly what the PE confirmed in the modal. `cc` copies extra contacts on a To contact's email — every CC must
     work at the same vendor company (validated up front, see _resolve_cc).
     `email_body` is an optional PE-edited template sent verbatim (see
     build_custom_body). Failures are per-contact: one bad address never aborts
@@ -360,8 +371,11 @@ def bulk_send(
         if group.get("attachment_file_ids") is not None:
             attachments, group_link = explicit_plans[group["rfq_id"]]
         else:
+            # Trenching vendors price from the estimator's markup, not counts:
+            # its default set is markup + drawings, the BOM split stays home.
+            trenching = _is_trenching(category_name)
             split = None
-            if rfq.get("split_file_id"):
+            if rfq.get("split_file_id") and not trenching:
                 sf = (
                     sb.table("project_files")
                     .select("filename, storage_path")
@@ -373,7 +387,7 @@ def bulk_send(
             attachments = (
                 ([split] if split else [])
                 + drawings
-                + (markup_files if _is_trenching(category_name) else [])
+                + (markup_files if trenching else [])
             )
             group_link = drawings_link
         contacts = contacts_by_rfq[group["rfq_id"]]
@@ -455,10 +469,19 @@ def _send_one(
         # The PE's words go out exactly as written — no AI variation.
         body = build_custom_body(custom_body, contact["name"], drawings_link)
     else:
-        base_body = build_base_body(contact["name"], due_str, drawings_link)
+        trenching = _is_trenching(category_name)
+        base_body = build_base_body(
+            contact["name"], due_str, drawings_link, trenching=trenching
+        )
         # The link is the vendor's only route to the drawings when they were
-        # too big to attach — a rewrite must never drop it.
-        tokens = [contact["name"], due_str, SIGNOFF] + ([drawings_link] if drawings_link else [])
+        # too big to attach — a rewrite must never drop it. Same for the
+        # trenching phrase: the vendor must be pointed at the markup, not sent
+        # hunting for a BOM that isn't attached.
+        tokens = (
+            [contact["name"], due_str, SIGNOFF]
+            + ([drawings_link] if drawings_link else [])
+            + (["trench markup"] if trenching else [])
+        )
         body = vary_email_body(base_body, must_contain=tokens)
     try:
         # The text body is what gets stored/varied/edited; the wire format is

@@ -1,11 +1,17 @@
 """Unit tests for the category workflow state machine.
 
-The pipeline is no longer one linear pointer: the 12 tasks are grouped into four
-CATEGORIES (intake / material_numbers / labor_numbers / send_out) that progress
-under a DAG. material_numbers + labor_numbers run in parallel once intake
-completes; send_out is locked until all three finish. `declined` is a global
-kill. The source of truth is the `project_category_state` table (4 rows/project);
-`projects.current_stage` is a recomputed headline.
+The pipeline is no longer one linear pointer: the tasks are grouped into six
+CATEGORIES (intake / material_numbers / labor_numbers / select_vendors / markup /
+send_out) that progress under a DAG. material_numbers + labor_numbers run in
+parallel once intake completes. `declined` is a global kill. The source of truth
+is the `project_category_state` table (6 rows/project); `projects.current_stage`
+is a recomputed headline.
+
+select_vendors and markup additionally carry a SOFT trigger — they open as soon as
+an upstream lane is merely ACTIVE, so a winner can be picked from the quotes that
+have arrived and Markup can be worked while labor is outstanding. Because of that,
+material_numbers is NOT a prerequisite of send_out: what gates the bid is having
+chosen a price everywhere (select_vendors), not having heard from every vendor.
 
 The pure helpers (category_of / next_task_in_category / category_reached / … /
 is_category_complete) are tested against hand-built state dicts. The mutations
@@ -158,12 +164,14 @@ _DEFAULTS = {
     "intake": ("intake", "active"),
     "material_numbers": ("estimate_received", "locked"),
     "labor_numbers": ("labor_numbers", "locked"),
+    "select_vendors": ("select_vendors", "locked"),
+    "markup": ("markup", "locked"),
     "send_out": ("gc_pricing", "locked"),
 }
 
 
 def _rows(pid="p1", **overrides):
-    """4 project_category_state rows; override a category with (task, status)."""
+    """6 project_category_state rows; override a category with (task, status)."""
     spec = {**_DEFAULTS, **overrides}
     out = []
     for cat, (task, status) in spec.items():
@@ -255,12 +263,18 @@ def test_category_task_partition_is_total_and_disjoint():
 def test_category_of_and_next_task():
     assert category_of("intake") == "intake"
     assert category_of("estimate_received") == "material_numbers"
-    assert category_of("markup") == "labor_numbers"
+    # markup and select_vendors are now single-task lanes of their own.
+    assert category_of("markup") == "markup"
+    assert category_of("select_vendors") == "select_vendors"
+    assert category_of("labor_numbers") == "labor_numbers"
     assert category_of("bid_outcome") == "send_out"
     assert next_task_in_category("intake") == "go_no_go"
     assert next_task_in_category("go_no_go") == "to_estimator"
     assert next_task_in_category("to_estimator") is None  # last in intake
-    assert next_task_in_category("markup") is None  # last in labor
+    assert next_task_in_category("markup") is None  # lane of one
+    assert next_task_in_category("select_vendors") is None  # lane of one
+    assert next_task_in_category("labor_numbers") is None  # lane of one
+    assert next_task_in_category("receive_quotes") is None  # last in material
     assert next_task_in_category("gc_pricing") == "verify"
 
 
@@ -340,11 +354,20 @@ def test_intake_completion_fans_out_material_and_labor(monkeypatch):
     mat, lab = _cat(db, "material_numbers"), _cat(db, "labor_numbers")
     assert (mat["status"], mat["current_task"]) == ("active", "estimate_received")
     assert (lab["status"], lab["current_task"]) == ("active", "labor_numbers")
-    assert _cat(db, "send_out")["status"] == "locked"  # still gated on the two lanes
+    # The soft trigger chains in the SAME fan-out pass: material going active opens
+    # select_vendors, which in turn opens markup. Both are workable immediately —
+    # their individual boxes are what lock, not the step.
+    assert _cat(db, "select_vendors")["status"] == "active"
+    assert _cat(db, "markup")["status"] == "active"
+    assert _cat(db, "send_out")["status"] == "locked"  # still gated on real completion
     # An activation event was emitted for each unlocked lane (from=None).
     acts = [e for e in db.tables["stage_events"] if e["from_stage"] is None]
-    assert {e["category"] for e in acts} == {"material_numbers", "labor_numbers"}
-    # Headline = furthest-along active head = labor_numbers (order 7 > estimate_received 4).
+    assert {e["category"] for e in acts} == {
+        "material_numbers", "labor_numbers", "select_vendors", "markup",
+    }
+    # Headline = furthest active head among lanes whose HARD prereqs are met, so the
+    # two soft-opened lanes are ignored: labor_numbers (8) beats estimate_received (4).
+    # Without that filter markup (9) would hijack the headline the instant intake ended.
     assert db.tables["projects"][0]["current_stage"] == "labor_numbers"
 
 
@@ -368,25 +391,71 @@ def test_send_out_locked_until_material_and_labor_complete(monkeypatch):
     assert db.tables["projects"][0]["current_stage"] == "labor_numbers"
 
 
-def test_completing_both_lanes_opens_send_out(monkeypatch):
-    # material already done, labor on its last task; finishing labor opens send_out.
+def test_completing_markup_opens_send_out(monkeypatch):
+    # Markup is the merge point: everything else done, finishing it opens send_out.
     db = FakeDB({
         "project_category_state": _rows(
             intake=("to_estimator", "complete"),
             material_numbers=("receive_quotes", "complete"),
-            labor_numbers=("markup", "active"),
+            labor_numbers=("labor_numbers", "complete"),
+            select_vendors=("select_vendors", "complete"),
+            markup=("markup", "active"),
         ),
         "projects": [{"id": "p1", "current_stage": "markup"}],
         "stage_events": [],
     })
     _install(monkeypatch, db)
-    workflow.advance_category("p1", "labor_numbers", "u1")
+    workflow.advance_category("p1", "markup", "u1")
 
-    assert _cat(db, "labor_numbers")["status"] == "complete"
+    assert _cat(db, "markup")["status"] == "complete"
     so = _cat(db, "send_out")
     assert (so["status"], so["current_task"]) == ("active", "gc_pricing")
     # send_out active → it owns the headline.
     assert db.tables["projects"][0]["current_stage"] == "gc_pricing"
+
+
+def test_send_out_opens_with_material_lane_never_completed(monkeypatch):
+    """The core promise of the restructure: a bid reaches pricing on chosen prices,
+    not on every vendor having replied. Receive Quotes is still mid-flight here and
+    stays that way — material_numbers is deliberately absent from send_out's
+    prerequisites."""
+    db = FakeDB({
+        "project_category_state": _rows(
+            intake=("to_estimator", "complete"),
+            material_numbers=("receive_quotes", "active"),   # never finished
+            labor_numbers=("labor_numbers", "complete"),
+            select_vendors=("select_vendors", "complete"),
+            markup=("markup", "active"),
+        ),
+        "projects": [{"id": "p1", "current_stage": "markup"}],
+        "stage_events": [],
+    })
+    _install(monkeypatch, db)
+    workflow.advance_category("p1", "markup", "u1")
+
+    assert _cat(db, "material_numbers")["status"] == "active"  # still taking quotes
+    assert _cat(db, "send_out")["status"] == "active"
+
+
+def test_select_vendors_opens_while_quotes_still_coming_in(monkeypatch):
+    """Soft trigger: the material lane only has to be ACTIVE, not complete."""
+    db = FakeDB({
+        "project_category_state": _rows(
+            intake=("to_estimator", "complete"),
+            material_numbers=("rfqs", "active"),
+            labor_numbers=("labor_numbers", "active"),
+        ),
+        "projects": [{"id": "p1", "current_stage": "labor_numbers"}],
+        "stage_events": [],
+    })
+    _install(monkeypatch, db)
+    workflow.advance_category("p1", "material_numbers", "u1")  # rfqs -> receive_quotes
+
+    assert _cat(db, "material_numbers")["current_task"] == "receive_quotes"
+    assert _cat(db, "select_vendors")["status"] == "active"
+    assert _cat(db, "markup")["status"] == "active"
+    # Neither soft-opened lane may claim the headline.
+    assert db.tables["projects"][0]["current_stage"] == "labor_numbers"
 
 
 def test_advance_inactive_category_is_409(monkeypatch):
@@ -473,13 +542,22 @@ def _sweep(monkeypatch, advanced_category, state):
     return captured
 
 
-def test_dismiss_material_advance_clears_vendor_reminders(monkeypatch):
+def test_dismiss_material_advance_clears_estimate_reminders(monkeypatch):
     st = _state(material_numbers=("receive_quotes", "complete"))
     cap = _sweep(monkeypatch, "material_numbers", st)
-    assert "due.due_from_vendors." in cap["type_prefixes"]
     assert "stage_handoff" in cap["types"]
-    # estimate_received notifications (same category) also clear once past them.
+    # estimate_received notifications (same category) clear once past them.
     assert "assigned" in cap["types"]
+    # But NOT the vendor-due reminders: quotes can still be genuinely outstanding
+    # after the material lane closes, so those now hang off Select Vendors.
+    assert "due.due_from_vendors." not in (cap.get("type_prefixes") or [])
+
+
+def test_dismiss_select_vendors_clears_vendor_reminders(monkeypatch):
+    """Choosing the winners is what makes an outstanding quote irrelevant."""
+    st = _state(select_vendors=("select_vendors", "complete"))
+    cap = _sweep(monkeypatch, "select_vendors", st)
+    assert "due.due_from_vendors." in cap["type_prefixes"]
 
 
 def test_dismiss_labor_advance_does_not_touch_vendor_reminders(monkeypatch):
