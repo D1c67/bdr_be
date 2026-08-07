@@ -460,6 +460,10 @@ def advance_category(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown category '{category}'")
     state = load_category_state(project_id)
     cs = state.get(category, {})
+    if cs.get("status") == "complete":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, f"Category '{category}' is already complete"
+        )
     if cs.get("status") != "active":
         raise HTTPException(
             status.HTTP_409_CONFLICT, f"Category '{category}' is not active"

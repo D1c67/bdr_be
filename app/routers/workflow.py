@@ -74,6 +74,13 @@ def advance(
 
     state = workflow.load_category_state(project_id)
     cs = state.get(category, {})
+    # A complete lane means the click raced a teammate (or another tab) that already
+    # finished it - say so, rather than the misleading "not active yet".
+    if cs.get("status") == "complete":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"The {workflow.CATEGORY_LABELS[category]} category is already complete",
+        )
     if cs.get("status") != "active":
         raise HTTPException(
             status.HTTP_409_CONFLICT,

@@ -791,7 +791,9 @@ def test_sweep_prunes_only_terminal_rows_past_retention(monkeypatch):
         },
     )
     monkeypatch.setattr(lq, "_now", lambda: NOW)
-    monkeypatch.setattr(lq, "_last_prune", 0.0)
+    # A negative sentinel, not 0.0: time.monotonic() counts from boot, so on a
+    # recently-woken host 0.0 can be within the prune interval and skip the prune.
+    monkeypatch.setattr(lq, "_last_prune", -lq._PRUNE_EVERY_SECONDS)
     lq._sweep(_settings())
     assert [r["id"] for r in db.tables["llm_call_log"]] == ["c-new"]
     kept = {r["id"] for r in db.tables["llm_jobs"]}
