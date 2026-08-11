@@ -204,6 +204,31 @@ async def _storage_exception_handler(_: Request, exc: StorageException) -> JSONR
     )
 
 
+# Same CORS rationale as StorageException above, for the transport layer: a
+# dropped Supabase connection surfaces as httpx.TransportError (seen in prod as
+# RemoteProtocolError "ConnectionTerminated" when an HTTP/2 GOAWAY killed the
+# shared connection mid-upload, taking unrelated in-flight requests with it).
+# The supabase client now runs HTTP/1.1 (see core/supabase_client.py) which
+# removes the shared-connection blast radius, but any residual connection drop
+# is a transient upstream fault: answer 502 + retry guidance, never a bare 500.
+import httpx  # noqa: E402
+
+
+@app.exception_handler(httpx.TransportError)
+async def _upstream_transport_error_handler(
+    _: Request, exc: httpx.TransportError
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        content={
+            "detail": (
+                "A backend connection dropped while handling this request. "
+                "Please try again."
+            )
+        },
+    )
+
+
 @app.get("/health", tags=["meta"])
 async def health() -> dict[str, str]:
     return {"status": "ok", "environment": settings.environment}
