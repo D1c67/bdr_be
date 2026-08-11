@@ -209,11 +209,11 @@ class Settings(BaseSettings):
     # ── Abuse / resource limits (security hardening) ──────────────────────────
     # Max size of a single uploaded file. upload_file enforces this while reading
     # (streamed, so an oversized body is rejected instead of fully buffered).
-    upload_max_bytes: int = 100 * 1024 * 1024          # 100 MB
+    upload_max_bytes: int = 300 * 1024 * 1024          # 300 MB
     # Global backstop: any request body larger than this is refused by middleware
     # before a handler can buffer it. Sits just above a max upload + multipart
     # overhead so nothing legitimate is blocked.
-    max_request_body_bytes: int = 110 * 1024 * 1024    # 110 MB
+    max_request_body_bytes: int = 310 * 1024 * 1024    # 310 MB
     # Estimate/BOQ workbook guard, shared by boq_extraction / proposal_scope /
     # general_material: reject files above this before parsing, and cap the text
     # handed to the LLM (bounds both token spend and in-memory render size).
