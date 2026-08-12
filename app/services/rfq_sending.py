@@ -9,9 +9,11 @@ estimator's markup, so its default set swaps the BOM split for the markup
 files and keeps the drawings. From the Modify Files / confirm modals the PE
 can override the attachment list per category and replace the generated body. The
 generated body is lightly varied per email by OpenAI, falling back to the base
-template on any failure; an edited body is sent exactly as written. Every body
-goes out wrapped in the branded HTML shell (see email_branding) with the G3
-logo + office-phone signature; the plain text remains what is stored and edited.
+template on any failure; an edited body is sent as written. Either way the body
+carries the ask for the quote to come back as a reply on this thread, which is
+what binds the quote to its send. Every body goes out wrapped in the branded
+HTML shell (see email_branding) with the G3 logo + office-phone signature; the
+plain text remains what is stored and edited.
 """
 
 import hashlib
@@ -32,6 +34,18 @@ logger = logging.getLogger(__name__)
 # Token in the editable body template, replaced per recipient. Must match what
 # the email-preview endpoint emits (build_base_body("<Contact Name>", ...)).
 CONTACT_NAME_PLACEHOLDER = "<Contact Name>"
+
+# Quotes must come back on the same Graph conversation: that is what binds a
+# reply to its rfq_send (see rfq_inbox). A quote sent to someone's personal
+# mailbox or as a fresh message never lands on the project.
+REPLY_NOTICE = (
+    "Please send your quote as a reply to this email so it stays on this "
+    "thread for our documentation."
+)
+# Short substring of REPLY_NOTICE pinned through the AI rewrite. Pinning the
+# whole sentence would reject most rewrites; this keeps the instruction intact
+# while still allowing the wording around it to vary.
+REPLY_NOTICE_TOKEN = "reply to this email"
 
 
 def build_subject(project: dict) -> str:
@@ -60,6 +74,7 @@ def build_base_body(
         f"{drawings_line}"
         "If there are any other attachments/drawings, please review them as well.\n\n"
         "Please also let me know what you are not able to quote.\n\n"
+        f"{REPLY_NOTICE}\n\n"
         "Thank you,\n"
         f"{SIGNOFF}"
     )
@@ -67,10 +82,15 @@ def build_base_body(
 
 def build_custom_body(template: str, contact_name: str, drawings_link: str | None) -> str:
     """Personalize a PE-edited body: substitute the contact-name placeholder and
-    make sure an over-size drawings link is never silently dropped."""
+    make sure neither an over-size drawings link nor the reply-in-thread ask is
+    silently dropped."""
     body = template.replace(CONTACT_NAME_PLACEHOLDER, contact_name)
     if drawings_link and drawings_link not in body:
         body += f"\n\nThe drawings are available here: {drawings_link}"
+    # Every outgoing RFQ must ask for the quote on this thread. Loose check so a
+    # PE who worded the ask themselves does not get a duplicate sentence.
+    if "reply" not in body.lower() and "this thread" not in body.lower():
+        body += f"\n\n{REPLY_NOTICE}"
     return body
 
 
@@ -152,6 +172,21 @@ def _resolve_cc(
     return out
 
 
+def internal_cc(addresses: list[str]) -> list[str]:
+    """The internal bids desk, copied on every RFQ that goes out to a vendor, so
+    the desk sees the outgoing request on the vendor's thread (and a reply-all
+    lands there) rather than only in the sending mailbox's Sent Items. Kept
+    separate from the vendor CCs: those are same-company coworkers snapshotted
+    on the send row, this one is standing config (RFQ_CC; empty disables it).
+    Dropped when the address is already on the message so nobody is copied
+    twice."""
+    addr = (get_settings().rfq_cc or "").strip()
+    if not addr:
+        return []
+    lowered = {a.lower() for a in addresses}
+    return [] if addr.lower() in lowered else [addr]
+
+
 def _load_files(sb, project_id: str, category: str) -> list[dict]:
     """[{filename, content}] for all project files in a storage category.
     Unsent estimator drafts are excluded — a vendor email must never carry a
@@ -182,6 +217,12 @@ def _prepare_drawings(sb, project: dict) -> tuple[list[dict], str | None]:
     if not drawings:
         drawings = _load_files(sb, project["id"], "drawing")
     total = sum(len(d["content"]) for d in drawings)
+    if total > settings.rfq_attachments_total_limit_mb * 1024 * 1024:
+        raise ValueError(
+            f"The project drawings total {total // (1024 * 1024)} MB, over the "
+            f"{settings.rfq_attachments_total_limit_mb} MB limit for one send. "
+            "Use Modify Files to pick a smaller set."
+        )
     if total <= settings.rfq_drawings_inline_limit_mb * 1024 * 1024:
         return drawings, None
     folder = f"BDR/{_safe_component(str(project.get('number') or project['id']))}/drawings"
@@ -194,43 +235,65 @@ def _prepare_drawings(sb, project: dict) -> tuple[list[dict], str | None]:
 class _ExplicitAttachments:
     """Pre-downloaded files for groups that customized their attachment list.
 
-    The oversize-drawings decision is per group — the inline limit is a
-    per-email constraint. When one group's chosen drawings exceed it, only that
-    group's drawings are uploaded, into a OneDrive folder unique to that exact
-    selection, so a vendor's link never exposes files the PE removed from their
-    category. Identical selections share one upload/link.
+    The oversize decision is per group — the inline limit is a per-email
+    constraint — and it counts EVERY selected file, not just drawings: Exchange
+    rejects the whole message on total size, so a big markup or spec that
+    slipped past a drawings-only check would sink the send. When one group's
+    files exceed the limit, that group's non-Office files are uploaded into a
+    OneDrive folder unique to that exact selection, so a vendor's link never
+    exposes files the PE removed from their category. Office files (the BOM
+    split) always stay inline — they must go out converted to an immutable
+    PDF, which a OneDrive copy would not be. Identical selections share one
+    upload/link.
     """
 
     def __init__(self, files: dict[str, dict], project: dict):
         self._files = files  # file_id -> {filename, content, category}
         self._project = project
-        self._links: dict[frozenset[str], str] = {}  # drawing selection -> folder link
+        self._links: dict[frozenset[str], str] = {}  # linked selection -> folder link
         self.used_link = False
 
     def for_group(self, file_ids: list[str]) -> tuple[list[dict], str | None]:
         """(attachments, drawings_link) for one group's chosen file ids."""
+        settings = get_settings()
         ids = list(dict.fromkeys(file_ids))  # dedupe, keep the PE's order
-        drawing_ids = [
+        total = sum(len(self._files[i]["content"]) for i in ids)
+        total_limit = settings.rfq_attachments_total_limit_mb * 1024 * 1024
+        if total > total_limit:
+            raise ValueError(
+                f"The files selected for one category total {total // (1024 * 1024)} MB, "
+                f"over the {settings.rfq_attachments_total_limit_mb} MB limit. "
+                "Remove some files in Modify Files."
+            )
+        limit = settings.rfq_drawings_inline_limit_mb * 1024 * 1024
+        if total <= limit:
+            return [self._files[i] for i in ids], None
+        link_ids = [
             i
             for i in ids
-            if self._files[i]["category"] in ("drawing", "electrical_drawing")
+            if not office_preview.is_office_file(self._files[i]["filename"])
         ]
-        total = sum(len(self._files[i]["content"]) for i in drawing_ids)
-        limit = get_settings().rfq_drawings_inline_limit_mb * 1024 * 1024
-        if not drawing_ids or total <= limit:
-            return [self._files[i] for i in ids], None
-        link = self._link_for(drawing_ids)
+        inline = [i for i in ids if i not in set(link_ids)]
+        if sum(len(self._files[i]["content"]) for i in inline) > limit:
+            # Only Office files (which cannot ride the link) are left and they
+            # alone bust the email budget — sending would just bounce off
+            # Exchange after the vendor emails start going out.
+            raise ValueError(
+                "The BOM/Office files selected for one category are too large "
+                f"to email (over {settings.rfq_drawings_inline_limit_mb} MB "
+                "together). Remove some files in Modify Files."
+            )
+        link = self._link_for(link_ids)
         self.used_link = True
-        inline = [i for i in ids if i not in set(drawing_ids)]
         return [self._files[i] for i in inline], link
 
-    def _link_for(self, drawing_ids: list[str]) -> str:
-        key = frozenset(drawing_ids)
+    def _link_for(self, link_ids: list[str]) -> str:
+        key = frozenset(link_ids)
         if key not in self._links:
             digest = hashlib.sha1("|".join(sorted(key)).encode()).hexdigest()[:12]
             number = _safe_component(str(self._project.get("number") or self._project["id"]))
             folder = f"BDR/{number}/rfq-drawings/{digest}"
-            for i in drawing_ids:
+            for i in link_ids:
                 graph_email.drive_upload(
                     f"{folder}/{_safe_component(self._files[i]['filename'])}",
                     self._files[i]["content"],
@@ -465,6 +528,12 @@ def _send_one(
         {"vendor_contact_id": c["id"], "name": c["name"], "email": c["email"]}
         for c in cc_contacts
     ] or None
+    # The standing internal CC rides alongside the vendor ones on the wire only:
+    # it has no vendor_contact_id, so it stays out of cc_snapshot (a vendor-
+    # contact snapshot) and out of the ledger's recipient cell, and is recorded
+    # on the audit entry instead.
+    desk_cc = internal_cc([contact["email"], *cc_addrs])
+    wire_cc = [*cc_addrs, *desk_cc]
     if custom_body is not None:
         # The PE's words go out exactly as written — no AI variation.
         body = build_custom_body(custom_body, contact["name"], drawings_link)
@@ -476,9 +545,10 @@ def _send_one(
         # The link is the vendor's only route to the drawings when they were
         # too big to attach — a rewrite must never drop it. Same for the
         # trenching phrase: the vendor must be pointed at the markup, not sent
-        # hunting for a BOM that isn't attached.
+        # hunting for a BOM that isn't attached. And the reply-in-thread ask is
+        # what keeps quotes attached to this send, so it is pinned too.
         tokens = (
-            [contact["name"], due_str, SIGNOFF]
+            [contact["name"], due_str, SIGNOFF, REPLY_NOTICE_TOKEN]
             + ([drawings_link] if drawings_link else [])
             + (["trench markup"] if trenching else [])
         )
@@ -491,7 +561,7 @@ def _send_one(
             subject,
             email_branding.render_vendor_email(body),
             html=True,
-            cc=cc_addrs or None,
+            cc=wire_cc or None,
         )
         graph_email.add_attachment(
             draft["id"],
@@ -563,6 +633,7 @@ def _send_one(
             {
                 "to": contact["email"],
                 "cc": cc_addrs or None,
+                "internal_cc": desk_cc or None,
                 "category": category_name,
                 "conversation_id": draft.get("conversationId"),
                 "attachments": [f["filename"] for f in attachments],

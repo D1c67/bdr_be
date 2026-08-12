@@ -68,6 +68,10 @@ class _Query:
         self._op, self._payload, self._conflict = "upsert", payload, on_conflict
         return self
 
+    def delete(self):
+        self._op = "delete"
+        return self
+
     def eq(self, col, val):
         self._filters.append(("eq", col, val))
         return self
@@ -126,6 +130,13 @@ class _Query:
                     r.update(self._payload)
                     out.append(dict(r))
             return SimpleNamespace(data=out)
+        if self._op == "delete":
+            # Real Postgres cascades; nothing here does. A test that cares about
+            # a child row (or about a row the deleted one merely referenced,
+            # like a quote's file) asserts on that table itself.
+            gone = [r for r in rows if self._matches(r)]
+            rows[:] = [r for r in rows if not self._matches(r)]
+            return SimpleNamespace(data=[dict(r) for r in gone])
         if self._op == "upsert":
             payloads = self._payload if isinstance(self._payload, list) else [self._payload]
             out = []

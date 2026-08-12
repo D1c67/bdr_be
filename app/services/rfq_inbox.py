@@ -262,8 +262,8 @@ def _ingest_message(
     extracted quote. Shared by the background poller and the on-demand check.
 
     Returns the reply's final extraction status, or None when nothing was
-    ingested (our own outbound copy, no matching send, a refused sender, or a
-    message already stored).
+    ingested (our own outbound copy, a nudge we sent, no matching send, a
+    refused sender, or a message already stored).
 
     `allow_sender_mismatch` accepts a reply that came from a different address
     than the contact we mailed. The conversation id is the match, so a forward
@@ -282,6 +282,26 @@ def _ingest_message(
     send = by_conversation.get(msg.get("conversationId"))
     if not send:
         return None
+
+    # Belt-and-suspenders on top of the From check above: a nudge is our own
+    # reply-all on this very conversation, recorded (at draft time, BEFORE the
+    # send) in rfq_nudges.internet_message_id. Refuse to ingest one as a
+    # vendor reply whatever address it appears to come from - this covers both
+    # the poller and check_project_quotes, which funnel through here. Only
+    # runs after the conversation match, so the (indexed) lookup is spent on
+    # RFQ-thread messages alone; a message without internetMessageId is a
+    # no-match.
+    internet_message_id = msg.get("internetMessageId")
+    if internet_message_id:
+        nudges = (
+            sb.table("rfq_nudges")
+            .select("id")
+            .eq("internet_message_id", internet_message_id)
+            .limit(1)
+            .execute()
+        ).data
+        if nudges:
+            return None
 
     contact = send["vendor_contacts"]
     if from_addr.lower() != (contact.get("email") or "").lower():
@@ -805,9 +825,11 @@ _CHECK_TIME_BUDGET_SECONDS = 90          # wall clock, checked between conversat
 _CHECK_MAX_GRAPH_FAILURES = 3            # consecutive thread lookups before giving up
 _CHECK_MAX_NOTES = 8
 
-# Mirrors graph_inbox's delta $select so _ingest_message sees the same shape.
+# Mirrors graph_inbox's delta $select so _ingest_message sees the same shape
+# (internetMessageId included: the nudge guard matches on it).
 _CONVERSATION_SELECT = (
-    "id,conversationId,from,subject,bodyPreview,receivedDateTime,hasAttachments"
+    "id,conversationId,internetMessageId,from,subject,bodyPreview,"
+    "receivedDateTime,hasAttachments"
 )
 
 

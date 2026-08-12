@@ -229,6 +229,42 @@ async def _upstream_transport_error_handler(
     )
 
 
+# An upstream service can also ANSWER with an HTTP error that raise_for_status()
+# turns into httpx.HTTPStatusError — a sibling of TransportError under
+# HTTPError, not a subclass, so the handler above never sees it. Seen in prod on
+# the RFQ bulk-send OneDrive path (a drawing set over the inline limit is
+# uploaded to OneDrive before any email goes out): a Graph 429/5xx there escaped
+# as an unhandled 500 that lost its CORS headers and reached the browser as a
+# bare "Failed to fetch". Same treatment: 502, CORS-safe, retry guidance. The
+# request URL is deliberately not echoed to the client — Graph upload URLs embed
+# pre-authenticated tokens — and the full detail is logged here instead, because
+# a registered handler bypasses ServerErrorMiddleware's traceback logging.
+_upstream_logger = logging.getLogger("app.upstream")
+
+
+@app.exception_handler(httpx.HTTPStatusError)
+async def _upstream_http_status_error_handler(
+    request: Request, exc: httpx.HTTPStatusError
+) -> JSONResponse:
+    _upstream_logger.exception(
+        "Upstream HTTP %s from %s while handling %s %s",
+        exc.response.status_code,
+        exc.request.url.host,
+        request.method,
+        request.url.path,
+    )
+    return JSONResponse(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        content={
+            "detail": (
+                "An upstream service rejected a request "
+                f"(HTTP {exc.response.status_code}) while handling this one. "
+                "Please try again."
+            )
+        },
+    )
+
+
 @app.get("/health", tags=["meta"])
 async def health() -> dict[str, str]:
     return {"status": "ok", "environment": settings.environment}
@@ -254,6 +290,7 @@ def features(_: CurrentUser = Depends(get_current_user)) -> dict[str, bool]:
 # Routers are mounted as each domain is implemented.
 from app.routers import (  # noqa: E402
     analytics,
+    bid_drafts,
     boq_analysis,
     change_review,
     emails,
@@ -336,6 +373,8 @@ app.include_router(llm_monitor.router)
 # Bidding — the bid pipeline, its files/notes, and the external estimator portal.
 app.include_router(workflow.router, dependencies=_BIDDING)
 app.include_router(gono.router, dependencies=_BIDDING)
+# Saved New Bid drafts - the intake form parked before any project row exists.
+app.include_router(bid_drafts.router, dependencies=_BIDDING)
 app.include_router(estimator.router, dependencies=_BIDDING)
 app.include_router(rfqs.router, dependencies=_BIDDING)
 app.include_router(boq_analysis.router, dependencies=_BIDDING)

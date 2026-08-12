@@ -19,7 +19,10 @@ import httpx
 from app.core.config import get_settings
 from app.services.graph_email import graph_request
 
-_DELTA_SELECT = "id,conversationId,from,subject,bodyPreview,receivedDateTime,hasAttachments"
+_DELTA_SELECT = (
+    "id,conversationId,internetMessageId,from,subject,bodyPreview,"
+    "receivedDateTime,hasAttachments"
+)
 _MESSAGE_SELECT = (
     "id,conversationId,from,subject,body,bodyPreview,receivedDateTime,hasAttachments"
 )

@@ -30,6 +30,7 @@ response carries two headers:
 | `file_upload` | File uploads | 20 / min | Wait; consider uploading fewer files at once. |
 | `file_export` | Project ZIP exports (also serialized: one build at a time) | 5 / min | Wait for `Retry-After`; an export already in progress returns this too. |
 | `bulk_send` | RFQ email fan-out | 3 / min | Wait between bulk sends. |
+| `rfq_nudge` | RFQ nudge reminder batches (vendor follow-up emails) | 3 / min | Wait between nudge batches. |
 | `outbound_email` | Invites, estimator packages, proposal emails | 60 / hour | Protects the shared mailbox's reputation; ask IT if you need more. |
 | `notification_log` | Per-project notification-log reads (each assembles the view from dozens of lookups) | 30 / min | Wait for `Retry-After`; reopening the modal normally never reaches it. |
 | `report` | Bid Invitations report reads (each scans several tables across the window) | 30 / min | Wait for `Retry-After`; normal range-switching never reaches it. |

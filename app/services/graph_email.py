@@ -195,13 +195,58 @@ def send_draft(message_id: str, *, sender: str | None = None) -> None:
     graph_request("POST", f"/users/{sender}/messages/{message_id}/send")
 
 
+def create_reply_all_draft(message_id: str, *, sender: str | None = None) -> dict:
+    """Create a reply-all draft on an existing message; returns the draft's
+    Graph message resource including `id`, `conversationId`,
+    `internetMessageId`, the recipients, the "RE: ..." subject, and a `body`
+    carrying the quoted thread history.
+
+    Works on the id stored at the original send: graph_request always asks for
+    immutable ids, so `rfq_sends.graph_message_id` stays valid after the sent
+    message moved to Sent Items."""
+    sender = sender or get_settings().ms_sender
+    resp = graph_request(
+        "POST", f"/users/{sender}/messages/{message_id}/createReplyAll"
+    )
+    return resp.json()
+
+
+def update_message_body(
+    message_id: str, html: str, *, cc: list[str] | None = None, sender: str | None = None
+) -> None:
+    """Replace a draft's body with HTML content - used to swap a reply draft's
+    plain body for the branded shell (with the quoted trail spliced back in by
+    the caller) before sending it.
+
+    `cc` (when given) replaces the draft's whole CC line in the same PATCH:
+    createReplyAll strips the replying mailbox's own address from the
+    recipients it builds, so a caller that needs the mailbox copied back onto
+    its own reply (RFQ nudges) rewrites the full CC list here. None leaves the
+    draft's CC untouched."""
+    sender = sender or get_settings().ms_sender
+    payload: dict = {"body": {"contentType": "HTML", "content": html}}
+    if cc is not None:
+        payload["ccRecipients"] = [{"emailAddress": {"address": a}} for a in cc]
+    graph_request(
+        "PATCH",
+        f"/users/{sender}/messages/{message_id}",
+        json=payload,
+    )
+
+
 # ── OneDrive (fallback when drawings are too large to attach) ────────────────
 
 
 def drive_upload(path: str, content: bytes, *, sender: str | None = None) -> str:
-    """Upload a file to the sender's OneDrive via an upload session; returns the
-    drive item id. `path` is relative to the drive root, e.g. 'BDR/123/drawings/a.pdf'."""
-    sender = sender or get_settings().ms_sender
+    """Upload a file to a OneDrive via an upload session; returns the drive
+    item id. `path` is relative to the drive root, e.g. 'BDR/123/drawings/a.pdf'.
+
+    The drive owner is MS_DRIVE_OWNER when configured - it overrides even an
+    explicit `sender`, because the send mailbox (a shared mailbox) has no
+    OneDrive at all and drive calls against it 404. All three drive_* helpers
+    resolve the owner the same way so an upload, its item lookup, and its share
+    link always land on the same drive."""
+    sender = get_settings().ms_drive_owner or sender or get_settings().ms_sender
     session = graph_request(
         "POST",
         f"/users/{sender}/drive/root:/{path}:/createUploadSession",
@@ -229,7 +274,7 @@ def drive_upload(path: str, content: bytes, *, sender: str | None = None) -> str
 
 
 def drive_get_item_id(path: str, *, sender: str | None = None) -> str:
-    sender = sender or get_settings().ms_sender
+    sender = get_settings().ms_drive_owner or sender or get_settings().ms_sender
     return graph_request("GET", f"/users/{sender}/drive/root:/{path}").json()["id"]
 
 
@@ -245,7 +290,7 @@ def drive_create_link(item_id: str, *, sender: str | None = None) -> str:
     from datetime import datetime, timedelta, timezone
 
     settings = get_settings()
-    sender = sender or settings.ms_sender
+    sender = settings.ms_drive_owner or sender or settings.ms_sender
     expiry = (
         datetime.now(timezone.utc) + timedelta(days=settings.rfq_drawings_link_ttl_days)
     ).isoformat()

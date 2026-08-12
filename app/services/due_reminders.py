@@ -255,8 +255,8 @@ def poll_once() -> None:
     projects = _page_all(
         lambda lo, hi: sb.table("projects")
         .select(
-            "id, name, number, current_stage, internal_bid_at, actual_bid_at, "
-            "due_from_estimator_at, due_from_vendors_at"
+            "id, name, number, current_stage, created_at, internal_bid_at, "
+            "actual_bid_at, due_from_estimator_at, due_from_vendors_at"
         )
         .not_.in_("current_stage", list(TERMINAL_STAGES))
         .is_("abandoned_at", "null")
@@ -267,10 +267,25 @@ def poll_once() -> None:
     if not projects:
         return
 
+    # Just-created projects get a grace period: the New Project modal commits
+    # the row before its staged files finish uploading (many minutes, for large
+    # rate-limited batches), and reminding the team about a project mid-creation
+    # reads as the system announcing it before the creator ever finished. Only
+    # kinds with an expired notice are skipped — for them the grace can only
+    # DELAY a reminder (a missed pre-due window degrades to "expired"), never
+    # lose it. actual_bid has no expired fallback, so a deadline inside the
+    # grace window would otherwise never be announced at all; it keeps firing
+    # (its audience is the Estimating Admin — typically the creator).
+    grace_cutoff = now - timedelta(seconds=settings.due_reminder_min_project_age_seconds)
+
     # 1. Window pass (pure) before touching any other table.
     candidates: list[tuple[dict, KindDef, str, str]] = []
     for project in projects:
+        created_raw = project.get("created_at")
+        in_grace = bool(created_raw) and _parse_ts(created_raw) > grace_cutoff
         for kind_def in KINDS.values():
+            if in_grace and kind_def.has_expired:
+                continue
             due_raw = project.get(kind_def.column)
             if not due_raw:
                 continue

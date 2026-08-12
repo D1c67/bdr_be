@@ -1275,6 +1275,7 @@ ACTIVITY_ACTION_LABELS: dict[str, str] = {
     "quote.select": "Selected a quote",
     "quote.custom_price": "Set a custom quote price",
     "quote.override": "Overrode a quote",
+    "quote.delete": "Removed a quote",
     "quote.received": "Recorded a quote received",
     "quote.tax": "Set quote tax",
     "note.create": "Posted a note",

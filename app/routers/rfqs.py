@@ -32,7 +32,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.core.config import get_settings
 from app.core.deps import CurrentUser, get_current_user, require_writer
 from app.core.error_codes import RateLimitScope
-from app.core.ratelimit import ai_rate_limit, bulk_send_rate_limit, rate_limit
+from app.core.ratelimit import (
+    ai_rate_limit,
+    bulk_send_rate_limit,
+    rate_limit,
+    rfq_nudge_rate_limit,
+)
 from app.core.roles import INTERNAL_ROLES
 from app.core.supabase_client import get_supabase
 from app.models.schemas import (
@@ -43,11 +48,14 @@ from app.models.schemas import (
     ReplyManualQuoteIn,
     RFQBulkSendIn,
     RFQCreate,
+    RFQNudgeIn,
+    RFQNudgeOut,
+    RFQRecipientsOut,
     RfqQuotesConfirmIn,
     TaxIn,
 )
 from app.routers.pricing import tax_info, taxed_amount
-from app.services import rfq_inbox, rfq_sending, vendor_selection, workflow
+from app.services import rfq_inbox, rfq_nudges, rfq_sending, vendor_selection, workflow
 from app.services.notifications import audit, dismiss_notifications
 from app.services.sanitize import sanitize_rich_text
 
@@ -140,6 +148,9 @@ def email_preview(project_id: str, user: CurrentUser = Depends(get_current_user)
             rfq_sending.format_bid_datetime(due) if due else "<due from vendors date>",
             None,
         ),
+        # Per-vendor CCs are picked in the panel; this is the standing internal
+        # CC so the confirm modal can show who else is copied on every send.
+        "cc": rfq_sending.internal_cc([]),
     }
 
 
@@ -266,6 +277,25 @@ def _message_in_project(sb, project_id: str, message_id: str) -> dict:
     return row
 
 
+def _quote_file_in_category(
+    sb, project_id: str, material_category_id: str, quote_file_id: str
+) -> None:
+    """404 unless the file a quote wants to carry is one of this project's
+    quote files for this category, so a stray id can't attach another
+    project's (or another category's) document."""
+    files = (
+        sb.table("project_files")
+        .select("id")
+        .eq("id", quote_file_id)
+        .eq("project_id", project_id)
+        .eq("category", "quote")
+        .eq("material_category_id", material_category_id)
+        .execute()
+    ).data
+    if not files:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Quote file not found")
+
+
 @rfq_router.get("/messages/{message_id}")
 def get_message(project_id: str, message_id: str, user: CurrentUser = Depends(get_current_user)):
     """One vendor reply in full, for the reply review modal: the email body
@@ -343,19 +373,9 @@ def add_reply_manual_quote(
     rfq = send["rfqs"]
 
     if body.quote_file_id:
-        # The bound file must be one of this project's quote files for this
-        # category, so a stray id can't attach another project's document.
-        files = (
-            sb.table("project_files")
-            .select("id")
-            .eq("id", body.quote_file_id)
-            .eq("project_id", project_id)
-            .eq("category", "quote")
-            .eq("material_category_id", rfq["material_category_id"])
-            .execute()
-        ).data
-        if not files:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Quote file not found")
+        _quote_file_in_category(
+            sb, project_id, rfq["material_category_id"], body.quote_file_id
+        )
 
     payload: dict = {
         "rfq_id": send["rfq_id"],
@@ -431,6 +451,57 @@ def check_quotes(project_id: str, user: CurrentUser = Depends(_PE)):
     return result
 
 
+# ── Nudges (vendor reminders on the RFQ thread) ────────────────────────────
+
+
+@rfq_router.get("/{rfq_id}/recipients", response_model=RFQRecipientsOut)
+def list_rfq_recipients(
+    project_id: str, rfq_id: str, user: CurrentUser = Depends(get_current_user)
+):
+    """Per-contact reply status for one RFQ: who quoted, who replied without a
+    quote, who never answered - and which send a nudge would reply on. A
+    contact's re-sends collapse onto their latest send (see rfq_nudges)."""
+    _internal(user)
+    sb = get_supabase()
+    _rfq_in_project(sb, project_id, rfq_id)
+    return {"recipients": rfq_nudges.recipients_status(sb, rfq_id)}
+
+
+@rfq_router.post(
+    "/{rfq_id}/nudges",
+    response_model=RFQNudgeOut,
+    dependencies=[Depends(rfq_nudge_rate_limit)],
+)
+def send_rfq_nudges(
+    project_id: str, rfq_id: str, body: RFQNudgeIn, user: CurrentUser = Depends(_PE)
+):
+    """Email reminder "nudges" as reply-alls on the selected sends' existing
+    Graph threads. Each target carries its FINAL message text (the frontend
+    already substituted the template tokens). Per-target failures are reported
+    in `results`, not raised, and a contact whose quote arrived in the
+    meantime is skipped, never emailed."""
+    sb = get_supabase()
+    _rfq_in_project(sb, project_id, rfq_id)
+    results = rfq_nudges.send_nudges(
+        sb, project_id, rfq_id, [t.model_dump() for t in body.targets], user.id
+    )
+    audit(
+        user.id,
+        "rfq.nudge_batch",
+        "rfq",
+        rfq_id,
+        {
+            "targets": len(results),
+            "sent": sum(1 for r in results if r["status"] == "sent"),
+            "failed": sum(1 for r in results if r["status"] == "failed"),
+            "skipped": sum(
+                1 for r in results if r["status"] == "skipped_quote_received"
+            ),
+        },
+    )
+    return {"results": results}
+
+
 # ── Quotes ────────────────────────────────────────────────────────────────
 
 
@@ -492,15 +563,27 @@ def add_quote(project_id: str, rfq_id: str, body: QuoteIn, user: CurrentUser = D
     """Type in a quote that a VENDOR gave (origin stays 'vendor' — the number
     came from them, it just didn't arrive through the mailbox). It lands
     unapproved with its tax question unanswered, exactly like an extracted one,
-    so Receive Quotes still has to sign it off before it can win."""
+    so Receive Quotes still has to sign it off before it can win. An optional
+    quote_file_id binds an already-uploaded quote document to the row; the file
+    is reference only, never extracted."""
     sb = get_supabase()
-    _rfq_in_project(sb, project_id, rfq_id)
+    rfq = _rfq_in_project(sb, project_id, rfq_id)
+    if body.quote_file_id:
+        _quote_file_in_category(
+            sb, project_id, rfq["material_category_id"], body.quote_file_id
+        )
     payload = body.model_dump(mode="json")
     payload["rfq_id"] = rfq_id
     payload["source"] = "manual"
     row = sb.table("quotes").insert(payload).execute().data[0]
     sb.table("rfqs").update({"status": "quotes_in"}).eq("id", rfq_id).execute()
-    audit(user.id, "quote.add", "quote", row["id"], {"amount": str(body.amount)})
+    audit(
+        user.id,
+        "quote.add",
+        "quote",
+        row["id"],
+        {"amount": str(body.amount), "quote_file_id": body.quote_file_id},
+    )
     return row
 
 
@@ -521,10 +604,16 @@ def add_manual_quote(
 
     The row is created APPROVED: the person typing it is the human who attests
     both to the amount and to the sales-tax answer the payload carries, which is
-    the whole content of an approval.
+    the whole content of an approval. An optional quote_file_id binds an
+    already-uploaded quote document to the row; the file is reference only,
+    never extracted — the typed amount is the quote.
     """
     sb = get_supabase()
-    _rfq_in_project(sb, project_id, rfq_id)
+    rfq = _rfq_in_project(sb, project_id, rfq_id)
+    if body.quote_file_id:
+        _quote_file_in_category(
+            sb, project_id, rfq["material_category_id"], body.quote_file_id
+        )
     row = (
         sb.table("quotes")
         .insert(
@@ -536,6 +625,7 @@ def add_manual_quote(
                 "origin": "manual",
                 "source": "manual",
                 "notes": body.notes,
+                "quote_file_id": body.quote_file_id,
                 "tax_included": body.tax_included,
                 "tax_rate": str(body.tax_rate),
                 "is_approved": True,
@@ -555,6 +645,7 @@ def add_manual_quote(
             "amount": str(body.amount),
             "tax_included": body.tax_included,
             "note": body.notes,
+            "quote_file_id": body.quote_file_id,
         },
     )
     # No re-verify bounce here: adding a candidate changes no price. The category
@@ -567,34 +658,83 @@ def add_manual_quote(
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(quote_write_rate_limit)],
 )
-def delete_manual_quote(
+def delete_quote(
     project_id: str, rfq_id: str, quote_id: str, user: CurrentUser = Depends(_PE)
 ):
-    """Remove a hand-entered candidate (a typo, a figure that turned out to be
-    wrong). ONLY origin 'manual' rows: a vendor's quote and General Material's
-    estimate row are records of something that happened and stay put — correct
-    those with PATCH instead."""
+    """Take a candidate back off the table on Receive Quotes: a typo, a figure
+    that turned out to be wrong, a duplicate of a quote that also arrived by
+    email, a number logged against the wrong vendor.
+
+    THE FILE STAYS. quotes.quote_file_id is a plain reference with no cascade, so
+    the vendor's PDF, and the reply it arrived on, remain in the project's files
+    exactly as they were. This removes the number, not the paperwork, which is
+    also what keeps the removal recoverable: the document the figure came from is
+    still there to re-read.
+
+    An emailed quote's reply is reopened for manual entry (see below), so the
+    estimator who removes a mis-extracted figure can type the right one straight
+    back in against the same vendor and the same file.
+
+    General Material's estimate row is the one candidate that cannot go: it is
+    not a quote, it is the wiring figure the estimate extraction wrote, and it
+    belongs to general_material_estimates. Correct that figure on the General
+    Material line instead, where the edit keeps the two records in step.
+    """
     sb = get_supabase()
-    _rfq_in_project(sb, project_id, rfq_id)
+    rfq = _rfq_in_project(sb, project_id, rfq_id)
     quote = _quote_in_rfq(sb, rfq_id, quote_id)
-    if (quote.get("origin") or "vendor") != "manual":
+    origin = quote.get("origin") or "vendor"
+    if origin == "estimate":
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "Only a hand-entered quote can be deleted. Correct the amount instead.",
+            "The estimate's figure can't be removed. Correct the amount instead.",
         )
     was_selected = bool(quote.get("is_selected"))
     sb.table("quotes").delete().eq("id", quote_id).eq("rfq_id", rfq_id).execute()
     audit(
         user.id,
-        "quote.manual_delete",
+        "quote.delete",
         "quote",
         quote_id,
-        {"rfq_id": rfq_id, "amount": str(quote["amount"]), "was_selected": was_selected},
+        {
+            "rfq_id": rfq_id,
+            "amount": str(quote["amount"]),
+            "origin": origin,
+            "vendor_id": quote.get("vendor_id"),
+            "quote_file_id": quote.get("quote_file_id"),
+            "was_selected": was_selected,
+        },
     )
-    # Deleting the winner leaves the category with no price at all.
+    # A quote that came in on a reply marked that reply answered, and an answered
+    # reply refuses manual entry (add_reply_manual_quote 409s on 'done'/'manual').
+    # Removing the number without reopening the reply would therefore be a dead
+    # end: the estimator could no longer enter the correct figure from the email
+    # it actually arrived on. Back to needs_review, which is exactly what the
+    # reply is now, and it reappears in the panel's notices ready to be reviewed.
+    message_id = quote.get("rfq_message_id")
+    if message_id:
+        sb.table("rfq_messages").update(
+            {
+                "extraction_status": "needs_review",
+                "extraction_error": "The quote recorded for this reply was removed",
+            }
+        ).eq("id", message_id).execute()
+    # An RFQ with nothing left on it is back to waiting on vendors rather than
+    # sitting on quotes: left at 'quotes_in' it would keep suppressing its due
+    # reminders (see due_reminders) over numbers that no longer exist. 'closed'
+    # is a deliberate end state and is left alone. The send's polling_active
+    # stays off; "Check for new quotes" re-reads answered sends anyway, which is
+    # how a vendor's revised quote gets in.
+    if rfq.get("status") == "quotes_in":
+        remaining = (
+            sb.table("quotes").select("id").eq("rfq_id", rfq_id).execute()
+        ).data or []
+        if not remaining:
+            sb.table("rfqs").update({"status": "sent"}).eq("id", rfq_id).execute()
+    # Removing the winner leaves the category with no price at all.
     if was_selected:
         workflow.maybe_reopen_verify_after_edit(
-            project_id, user.id, "Winning hand-entered quote deleted"
+            project_id, user.id, "Winning quote removed"
         )
 
 
@@ -869,6 +1009,11 @@ def _candidate(quote: dict) -> dict:
         "is_approved": bool(quote.get("is_approved")),
         "is_selected": bool(quote.get("is_selected")),
         "origin": quote.get("origin") or "vendor",
+        # How the AMOUNT got onto the row, which is a different question from
+        # where the number came from: a vendor's quote typed in by hand, or an
+        # extracted one a person has since corrected, both read 'manual' here.
+        # Provenance only, like origin: it confers no priority either.
+        "source": quote.get("source") or "manual",
         "notes": quote.get("notes"),
         "quote_file_id": quote.get("quote_file_id"),
         # Resolved so the row can open a preview without a second lookup.
@@ -912,7 +1057,7 @@ def get_vendor_selection(
             sb.table("quotes")
             .select(
                 "id, rfq_id, amount, tax_included, tax_rate, is_approved, is_selected,"
-                " origin, notes, quote_file_id, received_at,"
+                " origin, source, notes, quote_file_id, received_at,"
                 " vendors(name), vendor_contacts(name), project_files(filename)"
             )
             .in_("rfq_id", rfq_ids)

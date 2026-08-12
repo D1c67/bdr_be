@@ -119,6 +119,9 @@ export_rate_limit = rate_limit(
 bulk_send_rate_limit = rate_limit(
     RateLimitScope.BULK_SEND, lambda: get_settings().bulk_send_rate_limit_per_min
 )
+rfq_nudge_rate_limit = rate_limit(
+    RateLimitScope.RFQ_NUDGE, lambda: get_settings().rfq_nudge_rate_limit_per_min
+)
 outbound_email_rate_limit = rate_limit(
     RateLimitScope.OUTBOUND_EMAIL,
     lambda: get_settings().outbound_email_rate_limit_per_hour,

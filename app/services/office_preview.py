@@ -101,7 +101,9 @@ class GraphConverter:
         if _ext(filename) not in CONVERTIBLE_EXTS:
             raise ConversionError(f"not an office file: {filename}")
 
-        sender = get_settings().ms_sender
+        # Must match drive_upload's owner resolution (MS_DRIVE_OWNER override)
+        # so the content/DELETE calls hit the same drive the scratch upload did.
+        sender = get_settings().ms_drive_owner or get_settings().ms_sender
         # The scratch path is interpolated into a Graph URL — restrict the
         # untrusted filename to URL-safe characters (cf. rfq_sending's
         # _safe_component) so '#', '?' or ':' can't break the request path.

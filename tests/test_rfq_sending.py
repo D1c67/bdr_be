@@ -2,8 +2,14 @@
 
 import pytest
 
+from app.core.config import Settings
 from app.services import openai_text
 from app.services import rfq_sending as rs
+
+
+def _rfq_cc(monkeypatch, addr):
+    """Pin RFQ_CC so the internal-CC assertions do not depend on the env."""
+    monkeypatch.setattr(rs, "get_settings", lambda: Settings(_env_file=None, rfq_cc=addr))
 
 
 # ── Date formatting ────────────────────────────────────────────────────────
@@ -61,8 +67,15 @@ def test_build_base_body_template():
     assert body.startswith("Hello Jane Smith,")
     assert "we need them by Friday, June 19th 2:00 PM?" in body
     assert "Please also let me know what you are not able to quote." in body
+    assert rs.REPLY_NOTICE in body
     assert body.endswith("Thank you,\nThe G3 Estimating Team")
     assert "—" not in body and body.isascii()
+
+
+def test_reply_notice_token_is_a_substring_of_the_notice():
+    # The pinned rewrite token must actually appear in the sentence it guards,
+    # or every AI-varied body gets rejected.
+    assert rs.REPLY_NOTICE_TOKEN in rs.REPLY_NOTICE
 
 
 def test_build_base_body_with_drawings_link():
@@ -82,12 +95,23 @@ def test_is_trenching():
 
 def test_build_custom_body_substitutes_contact_name():
     out = rs.build_custom_body("Hello <Contact Name>,\n\nPlease quote.", "Jane Smith", None)
-    assert out == "Hello Jane Smith,\n\nPlease quote."
+    assert out.startswith("Hello Jane Smith,\n\nPlease quote.")
+
+
+def test_build_custom_body_appends_missing_reply_notice():
+    out = rs.build_custom_body("Hello <Contact Name>,\n\nPlease quote.", "Jane", None)
+    assert out.endswith(rs.REPLY_NOTICE)
+
+
+def test_build_custom_body_keeps_pes_own_reply_wording():
+    template = "Hi <Contact Name>, send your quote by replying on this thread."
+    out = rs.build_custom_body(template, "Jane", None)
+    assert rs.REPLY_NOTICE not in out
 
 
 def test_build_custom_body_appends_missing_drawings_link():
     out = rs.build_custom_body("Hi <Contact Name>", "Jane", "https://1drv.ms/x")
-    assert out.endswith("The drawings are available here: https://1drv.ms/x")
+    assert "The drawings are available here: https://1drv.ms/x" in out
 
 
 def test_build_custom_body_keeps_existing_drawings_link():
@@ -120,7 +144,9 @@ def test_explicit_attachments_small_drawings_stay_inline():
 
 def test_explicit_attachments_oversize_decision_is_per_group(monkeypatch):
     monkeypatch.setattr(
-        rs, "get_settings", lambda: type("S", (), {"rfq_drawings_inline_limit_mb": 1})()
+        rs,
+        "get_settings",
+        lambda: Settings(_env_file=None, rfq_drawings_inline_limit_mb=1),
     )
     uploads: list[str] = []
     monkeypatch.setattr(rs.graph_email, "drive_upload", lambda p, c: uploads.append(p))
@@ -154,6 +180,96 @@ def test_explicit_attachments_oversize_decision_is_per_group(monkeypatch):
     # No drawings selected -> nothing to link.
     _, link3 = ex.for_group(["a"])
     assert link3 is None
+
+
+def test_explicit_attachments_counts_every_file_toward_the_limit(monkeypatch):
+    # A big NON-drawing file (markup, spec) must count against the email
+    # budget too - Exchange rejects on total message size, not drawing size -
+    # and ride the OneDrive link when the selection is over. The BOM split
+    # (an Office file) stays inline so it still goes out as an immutable PDF.
+    monkeypatch.setattr(
+        rs,
+        "get_settings",
+        lambda: Settings(_env_file=None, rfq_drawings_inline_limit_mb=1),
+    )
+    uploads: list[str] = []
+    monkeypatch.setattr(rs.graph_email, "drive_upload", lambda p, c: uploads.append(p))
+    monkeypatch.setattr(rs.graph_email, "drive_get_item_id", lambda folder: folder)
+    monkeypatch.setattr(rs.graph_email, "drive_create_link", lambda item: f"link:{item}")
+    files = {
+        "a": _FILES["a"],
+        "markup": {
+            "filename": "trench-markup.pdf",
+            "content": b"m" * (2 * 1024 * 1024),
+            "category": "markup",
+        },
+    }
+    atts, link = rs._ExplicitAttachments(files, _PROJECT).for_group(["a", "markup"])
+    assert [f["filename"] for f in atts] == ["bom.xlsx"]
+    assert link and link.startswith("link:BDR/26-104/rfq-drawings/")
+    assert any("trench-markup" in p for p in uploads)
+
+
+def test_explicit_attachments_total_cap_rejects_before_any_upload(monkeypatch):
+    monkeypatch.setattr(
+        rs,
+        "get_settings",
+        lambda: Settings(
+            _env_file=None,
+            rfq_drawings_inline_limit_mb=1,
+            rfq_attachments_total_limit_mb=3,
+        ),
+    )
+
+    def _boom(*a, **k):
+        raise AssertionError("an over-cap selection must never reach OneDrive")
+
+    monkeypatch.setattr(rs.graph_email, "drive_upload", _boom)
+    files = {
+        "big": {
+            "filename": "full-set.pdf",
+            "content": b"x" * (4 * 1024 * 1024),
+            "category": "drawing",
+        },
+    }
+    with pytest.raises(ValueError, match="Remove some files"):
+        rs._ExplicitAttachments(files, _PROJECT).for_group(["big"])
+
+
+def test_explicit_attachments_office_only_overflow_rejected(monkeypatch):
+    # Office files cannot ride the link (they must go out as immutable PDFs);
+    # when they alone bust the email budget the send is refused up front with
+    # an actionable message instead of bouncing off Exchange mid-batch.
+    monkeypatch.setattr(
+        rs,
+        "get_settings",
+        lambda: Settings(_env_file=None, rfq_drawings_inline_limit_mb=1),
+    )
+    files = {
+        "bom": {
+            "filename": "bom.xlsx",
+            "content": b"x" * (2 * 1024 * 1024),
+            "category": "rfq_split",
+        },
+    }
+    with pytest.raises(ValueError, match="too large to email"):
+        rs._ExplicitAttachments(files, _PROJECT).for_group(["bom"])
+
+
+def test_prepare_drawings_total_cap(monkeypatch):
+    monkeypatch.setattr(
+        rs,
+        "get_settings",
+        lambda: Settings(
+            _env_file=None,
+            rfq_drawings_inline_limit_mb=1,
+            rfq_attachments_total_limit_mb=3,
+        ),
+    )
+    big = [{"filename": "full-set.pdf", "content": b"x" * (4 * 1024 * 1024)}]
+    monkeypatch.setattr(rs, "_load_files", lambda sb, pid, cat: list(big) if cat == "electrical_drawing" else [])
+    with pytest.raises(ValueError, match="pick a smaller set"):
+        rs._prepare_drawings(None, _PROJECT)
 
 
 def test_safe_component_strips_path_separators():
@@ -299,6 +415,7 @@ class _FakeSB:
 
 def test_send_one_ccs_same_company_contacts(monkeypatch):
     captured: dict = {}
+    _rfq_cc(monkeypatch, "bids@g3electrical.com")
     monkeypatch.setattr(
         rs.graph_email,
         "create_draft",
@@ -329,16 +446,55 @@ def test_send_one_ccs_same_company_contacts(monkeypatch):
     )
     assert res["status"] == "sent"
     assert captured["to"] == "ann@acme.com"
-    assert captured["cc"] == ["bob@acme.com"]
-    # The ledger row carries both addresses; the send row snapshots the CC.
+    # Vendor CCs first, then the standing internal one.
+    assert captured["cc"] == ["bob@acme.com", "bids@g3electrical.com"]
+    # The ledger row carries both vendor addresses; the send row snapshots the
+    # vendor CC. Neither records the internal desk copy.
     assert sb.inserts["email_log"][0]["to_addrs"] == "ann@acme.com, bob@acme.com"
     assert sb.inserts["rfq_sends"][0]["cc_recipients"] == [
         {"vendor_contact_id": "c1", "name": "Bob", "email": "bob@acme.com"}
     ]
 
 
+def test_send_one_pins_reply_notice_through_the_rewrite(monkeypatch):
+    seen: dict = {}
+    monkeypatch.setattr(
+        rs.graph_email,
+        "create_draft",
+        lambda to, subject, body, html=False, cc=None, sender=None: (
+            seen.update(body=body)
+            or {"id": "d1", "conversationId": "cv1", "internetMessageId": "im1"}
+        ),
+    )
+    monkeypatch.setattr(rs.graph_email, "add_attachment", lambda *a, **k: None)
+    monkeypatch.setattr(rs.graph_email, "send_draft", lambda _id: None)
+    monkeypatch.setattr(
+        rs,
+        "vary_email_body",
+        lambda base, must_contain: seen.update(tokens=must_contain) or base,
+    )
+    monkeypatch.setattr(rs, "audit", lambda *a, **k: None)
+
+    rs._send_one(
+        _FakeSB(),
+        project={"id": "p1"},
+        rfq={"id": "r1"},
+        category_name="Switchgear",
+        contact=_ANN,
+        subject="subj",
+        due_str="Friday, June 19th 2:00 PM",
+        attachments=[],
+        drawings_link=None,
+        custom_body=None,
+        user_id="u1",
+    )
+    assert rs.REPLY_NOTICE_TOKEN in seen["tokens"]
+    assert rs.REPLY_NOTICE in seen["body"]
+
+
 def test_send_one_without_cc_keeps_single_recipient(monkeypatch):
     captured: dict = {}
+    _rfq_cc(monkeypatch, "")
     monkeypatch.setattr(
         rs.graph_email,
         "create_draft",
@@ -370,6 +526,57 @@ def test_send_one_without_cc_keeps_single_recipient(monkeypatch):
     assert captured["cc"] is None
     assert sb.inserts["email_log"][0]["to_addrs"] == "ann@acme.com"
     assert sb.inserts["rfq_sends"][0]["cc_recipients"] is None
+
+
+def test_send_one_ccs_the_bids_desk_with_no_vendor_ccs(monkeypatch):
+    captured: dict = {}
+    _rfq_cc(monkeypatch, "bids@g3electrical.com")
+    monkeypatch.setattr(
+        rs.graph_email,
+        "create_draft",
+        lambda to, subject, body, html=False, cc=None, sender=None: (
+            captured.update(to=to, cc=cc)
+            or {"id": "d1", "conversationId": "cv1", "internetMessageId": "im1"}
+        ),
+    )
+    monkeypatch.setattr(rs.graph_email, "add_attachment", lambda *a, **k: None)
+    monkeypatch.setattr(rs.graph_email, "send_draft", lambda _id: None)
+    monkeypatch.setattr(rs, "vary_email_body", lambda base, must_contain: base)
+    monkeypatch.setattr(rs, "audit", lambda *a, **k: None)
+    sb = _FakeSB()
+
+    rs._send_one(
+        sb,
+        project={"id": "p1"},
+        rfq={"id": "r1"},
+        category_name="Switchgear",
+        contact=_ANN,
+        subject="subj",
+        due_str="Friday, June 19th 2:00 PM",
+        attachments=[],
+        drawings_link=None,
+        custom_body=None,
+        user_id="u1",
+    )
+    assert captured["cc"] == ["bids@g3electrical.com"]
+    # The desk copy is internal: it stays off the ledger row and the snapshot.
+    assert sb.inserts["email_log"][0]["to_addrs"] == "ann@acme.com"
+    assert sb.inserts["rfq_sends"][0]["cc_recipients"] is None
+
+
+def test_internal_cc_copies_the_bids_desk(monkeypatch):
+    _rfq_cc(monkeypatch, "bids@g3electrical.com")
+    assert rs.internal_cc(["ann@acme.com"]) == ["bids@g3electrical.com"]
+
+
+def test_internal_cc_empty_setting_disables_the_cc(monkeypatch):
+    _rfq_cc(monkeypatch, "   ")
+    assert rs.internal_cc(["ann@acme.com"]) == []
+
+
+def test_internal_cc_not_duplicated_when_already_addressed(monkeypatch):
+    _rfq_cc(monkeypatch, "bids@g3electrical.com")
+    assert rs.internal_cc(["BIDS@G3Electrical.com"]) == []
 
 
 # ── OpenAI rewrite guardrails ──────────────────────────────────────────────

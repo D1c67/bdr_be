@@ -35,6 +35,7 @@ class RateLimitScope(StrEnum):
     FILE_UPLOAD = "file_upload"         # file uploads
     FILE_EXPORT = "file_export"         # ZIP export builds
     BULK_SEND = "bulk_send"             # RFQ email fan-out
+    RFQ_NUDGE = "rfq_nudge"             # RFQ nudge reminder fan-out
     OUTBOUND_EMAIL = "outbound_email"   # invites + package / proposal mail
     NOTIFICATION_LOG = "notification_log"  # per-project notification-log assembly
     REPORT = "report"                   # multi-table report assembly (bid invitations)
@@ -61,6 +62,11 @@ RATE_LIMIT_HELP: dict[str, str] = {
         "archive). Wait for the Retry-After window."
     ),
     RateLimitScope.BULK_SEND: "Caps RFQ email fan-out per account per minute.",
+    RateLimitScope.RFQ_NUDGE: (
+        "Caps RFQ nudge reminder batches per account per minute. Each batch "
+        "emails vendors on their existing RFQ threads; wait for the "
+        "Retry-After window between batches."
+    ),
     RateLimitScope.OUTBOUND_EMAIL: (
         "Caps branded outbound email (invites, packages, proposals) per account "
         "per hour to protect the shared mailbox's sending reputation."

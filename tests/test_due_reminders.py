@@ -356,6 +356,7 @@ def _setup(monkeypatch, responses, now):
         lambda: SimpleNamespace(
             due_reminder_expired_horizon_days=7,
             due_reminder_poll_interval_seconds=300,
+            due_reminder_min_project_age_seconds=1800,
         ),
     )
     return fake
@@ -366,6 +367,95 @@ def _calls(fake, table, op):
 
 
 NOW = datetime(2026, 6, 12, 15, 0, tzinfo=timezone.utc)
+
+
+def test_poll_once_grace_period_silences_task_kinds_for_new_projects(monkeypatch):
+    """A just-created project fires nothing for the task kinds: the New Project
+    modal commits the row before its staged file uploads finish, so the first
+    ticks must not email the team about a project still mid-creation. Task-kind
+    reminders are only delayed (a missed window degrades to 'expired')."""
+    due_raw = (NOW + timedelta(minutes=30)).isoformat()
+    project = {
+        "id": "p1", "name": "Acme", "number": "42", "current_stage": "receive_quotes",
+        "created_at": (NOW - timedelta(minutes=10)).isoformat(),
+        "internal_bid_at": None, "actual_bid_at": None,
+        "due_from_estimator_at": None, "due_from_vendors_at": due_raw,
+    }
+    fake = _setup(monkeypatch, {
+        ("projects", "select"): [project],
+        ("project_category_state", "select"): _cat_rows(
+            intake=("to_estimator", "complete"), material_numbers=("receive_quotes", "active")
+        ),
+        ("rfqs", "select"): [{"project_id": "p1", "status": "sent"}],
+        ("profiles", "select"): [{"id": "pe1", "role": "estimating_engineer_materials"}],
+        ("notification_prefs", "select"): [],
+        ("due_reminder_log", "upsert"): _echo_ledger,
+        ("notifications", "insert"): [],
+    }, NOW)
+
+    dr.poll_once()
+
+    assert _calls(fake, "due_reminder_log", "upsert") == []
+    assert _calls(fake, "notifications", "insert") == []
+
+
+def test_poll_once_grace_period_still_fires_actual_bid(monkeypatch):
+    """actual_bid has no 'expired' fallback, so the grace period must not apply:
+    a deadline inside the grace window would otherwise never be announced."""
+    due_raw = (NOW + timedelta(hours=5)).isoformat()  # 8h window
+    project = {
+        "id": "p1", "name": "Acme", "number": "7", "current_stage": "verify",
+        "created_at": (NOW - timedelta(minutes=10)).isoformat(),
+        "internal_bid_at": None, "actual_bid_at": due_raw,
+        "due_from_estimator_at": None, "due_from_vendors_at": None,
+    }
+    fake = _setup(monkeypatch, {
+        ("projects", "select"): [project],
+        ("project_category_state", "select"): _cat_rows(
+            intake=("to_estimator", "complete"),
+            material_numbers=("receive_quotes", "complete"),
+            labor_numbers=("markup", "complete"),
+            send_out=("verify", "active"),
+        ),
+        ("profiles", "select"): [{"id": "pa1", "role": "estimating_admin"}],
+        ("notification_prefs", "select"): [],
+        ("due_reminder_log", "upsert"): _echo_ledger,
+        ("notifications", "insert"): [],
+    }, NOW)
+
+    dr.poll_once()
+
+    [up] = _calls(fake, "due_reminder_log", "upsert")
+    assert [r["user_id"] for r in up.payload] == ["pa1"]
+    [ins] = _calls(fake, "notifications", "insert")
+    assert ins.payload[0]["type"] == "due.actual_bid.8h"
+
+
+def test_poll_once_grace_period_over_task_kinds_fire_again(monkeypatch):
+    """Once the project is older than the grace period the task kinds resume."""
+    due_raw = (NOW + timedelta(minutes=30)).isoformat()
+    project = {
+        "id": "p1", "name": "Acme", "number": "42", "current_stage": "receive_quotes",
+        "created_at": (NOW - timedelta(seconds=1801)).isoformat(),
+        "internal_bid_at": None, "actual_bid_at": None,
+        "due_from_estimator_at": None, "due_from_vendors_at": due_raw,
+    }
+    fake = _setup(monkeypatch, {
+        ("projects", "select"): [project],
+        ("project_category_state", "select"): _cat_rows(
+            intake=("to_estimator", "complete"), material_numbers=("receive_quotes", "active")
+        ),
+        ("rfqs", "select"): [{"project_id": "p1", "status": "sent"}],
+        ("profiles", "select"): [{"id": "pe1", "role": "estimating_engineer_materials"}],
+        ("notification_prefs", "select"): [],
+        ("due_reminder_log", "upsert"): _echo_ledger,
+        ("notifications", "insert"): [],
+    }, NOW)
+
+    dr.poll_once()
+
+    [up] = _calls(fake, "due_reminder_log", "upsert")
+    assert up.payload[0]["kind"] == "due_from_vendors"
 
 
 def test_poll_once_vendor_event_end_to_end(monkeypatch):

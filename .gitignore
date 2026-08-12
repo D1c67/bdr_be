@@ -14,3 +14,6 @@ __pycache__/
 
 # Office lock files
 ~$*
+
+# Next.js build artifacts (stray frontend build output)
+.next/

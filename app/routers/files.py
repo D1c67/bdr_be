@@ -452,7 +452,17 @@ async def upload_file(
             }
         )
     )
-    row = (await run_in_threadpool(insert.execute)).data[0]
+    try:
+        row = (await run_in_threadpool(insert.execute)).data[0]
+    except Exception:
+        # The object was PUT before this insert; without its row nothing would
+        # ever reclaim it (e.g. the project was discarded mid-upload, making the
+        # insert fail its FK). Best-effort — the original error is the answer.
+        try:
+            await run_in_threadpool(storage.delete_file, path)
+        except Exception:  # noqa: BLE001
+            pass
+        raise
     audit_payload = {"category": category}
     if doc_type:
         audit_payload["doc_type"] = doc_type

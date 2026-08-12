@@ -652,6 +652,81 @@ class RFQBulkSendIn(BaseModel):
         return v if v and v.strip() else None
 
 
+class RFQNudgeTarget(BaseModel):
+    """One nudge: a reminder emailed as a reply-all on this send's existing
+    Graph thread. `message` is the FINAL plain text - the frontend has already
+    substituted the {vendor name}/{contact name}/{project name}/{due date}
+    template tokens - and goes out wrapped in the branded HTML shell."""
+
+    rfq_send_id: str
+    message: str = Field(..., min_length=1, max_length=5_000)
+
+    @field_validator("message")
+    @classmethod
+    def _message_not_blank(cls, v: str) -> str:
+        # A whitespace-only reminder is a mistake, never an empty email.
+        if not v.strip():
+            raise ValueError("message must not be blank")
+        return v
+
+
+class RFQNudgeIn(BaseModel):
+    # One reminder email per target, sent sequentially; cap the fan-out like
+    # bulk-send so a single request can't be turned into a mass-mailer.
+    targets: list[RFQNudgeTarget] = Field(..., min_length=1, max_length=50)
+
+
+class RFQNudgeResult(BaseModel):
+    rfq_send_id: str
+    # Null when no rfq_nudges row was created (validation failure or skip).
+    nudge_id: str | None = None
+    status: Literal["sent", "failed", "skipped_quote_received"]
+    error: str | None = None
+
+
+class RFQNudgeOut(BaseModel):
+    results: list[RFQNudgeResult]
+
+
+class RFQRecipientCc(BaseModel):
+    """One CC'd coworker from the send's cc_recipients snapshot (0096)."""
+
+    vendor_contact_id: str
+    name: str
+    email: str
+
+
+class RFQLastNudge(BaseModel):
+    created_at: str
+    sent_at: str | None = None
+    status: Literal["pending", "sent", "failed"]
+    error: str | None = None
+
+
+class RFQRecipientStatus(BaseModel):
+    """One vendor CONTACT's standing on an RFQ. Re-sends collapse onto the
+    contact's latest send; `rfq_send_id` is the send a nudge replies on (the
+    latest one that actually went out with a Graph id)."""
+
+    rfq_send_id: str
+    vendor_contact_id: str
+    contact_name: str | None = None
+    contact_email: str | None = None
+    vendor_name: str | None = None
+    cc_recipients: list[RFQRecipientCc] | None = None
+    sent_at: str | None = None
+    send_status: Literal["pending", "sent", "failed"]
+    send_error: str | None = None
+    state: Literal["quote_received", "replied_no_quote", "no_reply", "failed", "queued"]
+    replied_at: str | None = None
+    nudgeable: bool
+    last_nudge: RFQLastNudge | None = None
+
+
+class RFQRecipientsOut(BaseModel):
+    recipients: list[RFQRecipientStatus]
+
+
 # Bounds shared by every hand-entered price: no negatives, max two decimal
 # places, and stay inside the DB's numeric(14,2) so neither an overflow nor a
 # silent round can happen at the write. (decimal_places also rejects values
@@ -664,6 +739,10 @@ class QuoteIn(BaseModel):
     vendor_contact_id: str | None = None
     amount: Decimal = Field(**_AMOUNT_BOUNDS)
     notes: str | None = None
+    # An already-uploaded quote file (category 'quote', this RFQ's category) to
+    # carry as the quote's document. Reference only: nothing is extracted from
+    # it, the typed amount IS the quote.
+    quote_file_id: str | None = None
 
 
 class QuoteOverrideIn(BaseModel):
@@ -690,6 +769,10 @@ class ManualQuoteIn(BaseModel):
     tax_rate: Decimal = Field(Decimal("8.375"), ge=0, le=Decimal("100"), decimal_places=3)
     # Shown beside the figure so the team can see where the number came from.
     notes: str | None = Field(None, max_length=2_000)
+    # An already-uploaded quote file (category 'quote', this RFQ's category) to
+    # carry as the quote's document. Reference only: nothing is extracted from
+    # it, the typed amount IS the quote.
+    quote_file_id: str | None = None
 
 
 class ReplyManualQuoteIn(BaseModel):

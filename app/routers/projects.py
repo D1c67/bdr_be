@@ -24,7 +24,14 @@ from app.models.schemas import (
     ProjectOut,
     ProjectUpdate,
 )
-from app.services import email_ingest, estimator_lifecycle, pm, proposal_send, workflow
+from app.services import (
+    email_ingest,
+    estimator_lifecycle,
+    pm,
+    proposal_send,
+    storage,
+    workflow,
+)
 from app.services.bid_invitations import REPORT_TZ, _day_start
 from app.services.notifications import (
     ESTIMATOR_NOTIFICATION_TYPES,
@@ -59,7 +66,11 @@ _BIDDING_ONLY = [Depends(require_feature(SubApp.BIDDING))]
 # The projects.number unique index (migration 0052) retires every number ever
 # used — they can't be re-used, even by an abandoned project. A collision surfaces
 # from PostgREST as a 23505; translate it into a clean 409 instead of a raw 500.
-_NUMBER_TAKEN = "That project number is already in use — numbers can't be re-used."
+_NUMBER_TAKEN = (
+    "That project number is already in use; numbers can't be re-used. "
+    "If an earlier attempt seemed to fail, the project may already exist, "
+    "so check the project list before retrying."
+)
 
 
 def _is_duplicate_number(exc: Exception) -> bool:
@@ -243,40 +254,138 @@ def create_project(
             raise HTTPException(status.HTTP_409_CONFLICT, _NUMBER_TAKEN) from exc
         raise
 
-    if body.gcs:
-        sb.table("project_gcs").insert(
+    # All-or-nothing from here: the statements below auto-commit one by one, so
+    # a failure part-way would otherwise strand a live project the client was
+    # told does NOT exist — it shows on every dashboard, its number is retired,
+    # and the due-reminder poller emails the team about it. If anything the
+    # client needs fails, delete the row (cascade cleans children) and re-raise
+    # so "creation failed" is actually true.
+    try:
+        if body.gcs:
+            sb.table("project_gcs").insert(
+                [
+                    {"project_id": created["id"], "gc_id": g.gc_id,
+                     "needs_by": g.needs_by.isoformat() if g.needs_by else None}
+                    for g in body.gcs
+                ]
+            ).execute()
+
+        # Record the initial stage event so analytics has a start timestamp.
+        sb.table("stage_events").insert(
+            {"project_id": created["id"], "from_stage": None, "to_stage": "intake",
+             "category": "intake", "actor_id": user.id}
+        ).execute()
+        # Seed the 4-category state: intake active at its first task, the rest locked.
+        sb.table("project_category_state").insert(
             [
-                {"project_id": created["id"], "gc_id": g.gc_id,
-                 "needs_by": g.needs_by.isoformat() if g.needs_by else None}
-                for g in body.gcs
+                {
+                    "project_id": created["id"],
+                    "category": cat,
+                    "current_task": workflow.CATEGORY_TASKS[cat][0],
+                    "status": "active" if cat == "intake" else "locked",
+                    "owner_role": (
+                        workflow.owner_role_for(workflow.CATEGORY_TASKS[cat][0]) or None
+                    ),
+                }
+                for cat in workflow.CATEGORY_ORDER
             ]
         ).execute()
-
-    # Record the initial stage event so analytics has a start timestamp.
-    sb.table("stage_events").insert(
-        {"project_id": created["id"], "from_stage": None, "to_stage": "intake",
-         "category": "intake", "actor_id": user.id}
-    ).execute()
-    # Seed the 4-category state: intake active at its first task, the rest locked.
-    sb.table("project_category_state").insert(
-        [
-            {
-                "project_id": created["id"],
-                "category": cat,
-                "current_task": workflow.CATEGORY_TASKS[cat][0],
-                "status": "active" if cat == "intake" else "locked",
-                "owner_role": (
-                    workflow.owner_role_for(workflow.CATEGORY_TASKS[cat][0]) or None
-                ),
-            }
-            for cat in workflow.CATEGORY_ORDER
-        ]
-    ).execute()
-    audit(user.id, "project.create", "project", created["id"], {"number": created["number"]})
+        audit(user.id, "project.create", "project", created["id"], {"number": created["number"]})
+        cat_state = workflow.load_category_state(created["id"])
+    except Exception:
+        try:
+            sb.table("projects").delete().eq("id", created["id"]).execute()
+        except Exception:  # noqa: BLE001 — the original error still propagates
+            logger.exception(
+                "Compensating delete failed; half-created project %s remains",
+                created["id"],
+            )
+        raise
     # Learn-back: re-scan Unknown emails against the new project (bid invites
     # often arrive before the project exists). Best-effort, never raises.
     background.add_task(email_ingest.rescan_unknown_for_project, created["id"])
-    return _present(created, user.role, workflow.load_category_state(created["id"]))
+    return _present(created, user.role, cat_state)
+
+
+_DISCARD_BLOCKED = (
+    "Only a just-created project that hasn't started intake can be discarded. "
+    "Use Abandon for anything further along."
+)
+
+
+@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT,
+               dependencies=_BIDDING_ONLY)
+def discard_project(project_id: str, user: CurrentUser = Depends(require_writer)):
+    """Discard a project whose creation never finished.
+
+    The New Project modal creates the row first and uploads staged files after,
+    so a failed upload can strand a live project its creator never considered
+    created — one the reminder poller will happily email the team about. This
+    is the cleanup path for exactly that window: only the creator may call it,
+    and only while the project is still at the very first intake task with
+    nothing else hanging off it. Everything further along goes through Abandon,
+    which keeps the record instead of erasing it.
+    """
+    sb = get_supabase()
+    rows = (
+        sb.table("projects")
+        .select(
+            "id, number, created_by, current_stage, pm_stage, cp_enrolled_at, "
+            "abandoned_at"
+        )
+        .eq("id", project_id)
+        .execute()
+    ).data
+    if not rows:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
+    project = rows[0]
+    if project.get("created_by") != user.id:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Only the project's creator can discard it"
+        )
+    intake = workflow.load_category_state(project_id).get("intake") or {}
+    if (
+        project["current_stage"] != "intake"
+        or project.get("pm_stage") is not None
+        or project.get("cp_enrolled_at") is not None
+        # A withdrawn project is a record Abandon exists to keep, not a
+        # creation leftover — reactivate it instead of erasing it.
+        or project.get("abandoned_at") is not None
+        or intake.get("current_task") != workflow.CATEGORY_TASKS["intake"][0]
+        or intake.get("status") != "active"
+    ):
+        raise HTTPException(status.HTTP_409_CONFLICT, _DISCARD_BLOCKED)
+    # Row first, and conditionally (the files.py estimator-delete pattern): the
+    # checks above are reads, so a teammate's transition landing between them
+    # and this statement must make the delete match nothing rather than cascade
+    # their work away. The intake-lane check can't ride along, but a transition
+    # out of the first intake task also moves current_stage off 'intake' (a
+    # separate autocommitted statement moments later), so the stage predicate
+    # shrinks that window to the gap between the two — milliseconds, the best
+    # available without transactions.
+    deleted = (
+        sb.table("projects")
+        .delete()
+        .eq("id", project_id)
+        .eq("created_by", user.id)
+        .eq("current_stage", "intake")
+        .is_("pm_stage", "null")
+        .is_("cp_enrolled_at", "null")
+        .is_("abandoned_at", "null")
+        .execute()
+    ).data
+    if not deleted:
+        raise HTTPException(status.HTTP_409_CONFLICT, _DISCARD_BLOCKED)
+    # Storage objects don't cascade with the row — sweep everything under the
+    # project's prefix (uploads + preview derivatives). AFTER the delete, so a
+    # sweep failure only orphans invisible objects instead of tearing files out
+    # of a still-live project; by prefix, not project_files rows, so an upload
+    # racing the discard can't slip an unrecorded object past the cleanup.
+    try:
+        storage.delete_project_prefix(project_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("Storage sweep failed for discarded project %s", project_id)
+    audit(user.id, "project.discard", "project", project_id, {"number": project["number"]})
 
 
 @router.get("/{project_id}", response_model=ProjectOut)

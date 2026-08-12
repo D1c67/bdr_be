@@ -143,10 +143,22 @@ class Settings(BaseSettings):
     ms_client_id: str = ""
     ms_client_secret: str = ""
     ms_sender: str = "bids@g3electrical.com"
+    # OneDrive owner for oversize-attachment uploads/links (RFQ drawing sets
+    # past rfq_drawings_inline_limit_mb, and the submittal equivalents).
+    # ms_sender is a shared mailbox, which CANNOT have a OneDrive - drive calls
+    # against it 404 - so this must name a licensed account whose OneDrive is
+    # provisioned, and the app registration needs the Files.ReadWrite.All
+    # application permission (admin-consented). Empty falls back to ms_sender.
+    ms_drive_owner: str = ""
     # CC'd on every proposal email sent out to a GC, so the bids desk sees the
     # outgoing bid on the thread itself (and GCs reply-all back to it) rather
     # than only in the sending mailbox's Sent Items. Empty disables the CC.
     proposal_cc: str = "bids@g3electrical.com"
+    # Same idea for every outgoing RFQ to a vendor. This is normally ms_sender
+    # itself: the copy lands in the bids inbox on the vendor's conversation, and
+    # the reply poller skips it (rfq_inbox._ingest_message drops anything from
+    # ms_sender as our own outbound copy). Empty disables the CC.
+    rfq_cc: str = "bids@g3electrical.com"
 
     # Per-feature models — 3rd party (OpenAI side)
     openai_email_model: str = "gpt-5.4-nano"    # RFQ email wording variation
@@ -162,6 +174,10 @@ class Settings(BaseSettings):
 
     # RFQ sending / inbound reply polling
     rfq_drawings_inline_limit_mb: int = 20   # above this → OneDrive link instead of attaching
+    # Hard cap on one category's selected files together (matches the 300 MB
+    # per-file upload cap). Past the inline limit files ride as a OneDrive
+    # link, so this bounds the link path, not the email.
+    rfq_attachments_total_limit_mb: int = 300
     rfq_poll_interval_seconds: int = 180
     rfq_poll_active_days: int = 7            # stop watching a conversation after this
     rfq_polling_enabled: bool = True         # disable on extra workers
@@ -171,6 +187,14 @@ class Settings(BaseSettings):
     due_reminders_enabled: bool = True
     due_reminder_poll_interval_seconds: int = 300   # must stay well under 1h (smallest window)
     due_reminder_expired_horizon_days: int = 7      # "expired" fires only this close to the date
+    # Grace period for just-created projects: the New Project modal creates the
+    # row first and uploads staged files after, so without it the first tick
+    # emails the team about a project whose creator is still mid-modal. Sized to
+    # the worst realistic upload session: staged folder drops ride the 20/min
+    # upload limiter, so a few hundred files is upwards of half an hour. Only
+    # delays reminders (kinds with an expired notice); actual_bid is exempt so
+    # its no-expired-fallback reminders can never be lost outright.
+    due_reminder_min_project_age_seconds: int = 3600
 
     # Branded email mirror of every in-app notification (bell ↔ inbox parity).
     # Best-effort and fire-and-forget; also requires Graph creds (ms_client_id)
@@ -229,6 +253,7 @@ class Settings(BaseSettings):
     upload_rate_limit_per_min: int = 20       # file uploads
     export_rate_limit_per_min: int = 5        # in-memory ZIP export builds
     bulk_send_rate_limit_per_min: int = 3     # RFQ email fan-out
+    rfq_nudge_rate_limit_per_min: int = 3     # RFQ nudge reminder fan-out
     outbound_email_rate_limit_per_hour: int = 60   # invites + package / proposal mail
     notification_log_rate_limit_per_min: int = 30  # per-project log assembly (query fan-out)
     report_rate_limit_per_min: int = 30       # bid-invitations report assembly

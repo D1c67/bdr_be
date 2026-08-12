@@ -71,6 +71,7 @@ def _quote(
     amount,
     *,
     origin="vendor",
+    source="manual",
     approved=True,
     selected=False,
     tax_included=True,
@@ -89,7 +90,7 @@ def _quote(
         "received_at": received_at,
         "notes": None,
         "quote_file_id": None,
-        "source": "manual",
+        "source": source,
     }
 
 
@@ -102,10 +103,11 @@ RFQS = [
 QUOTES = [
     # General Material's wiring figure off the estimate: a candidate, not an answer.
     _quote("q-gen-est", "r-gen", "500", origin="estimate"),
-    # Switchgear: the cheaper of the two has not been signed off yet.
+    # Switchgear: the cheaper of the two has not been signed off yet. One number
+    # was typed in against the vendor, the other was read off the emailed quote.
     _quote("q-gear-hi", "r-gear", "1000", tax_included=False, tax_rate="10",
            received_at="2026-07-01T00:00:00Z"),
-    _quote("q-gear-lo", "r-gear", "900", approved=False,
+    _quote("q-gear-lo", "r-gear", "900", approved=False, source="ai_extracted",
            received_at="2026-07-02T00:00:00Z"),
     # Fixtures: a price someone was given over the phone.
     _quote("q-fix-man", "r-fix", "250", origin="manual"),
@@ -377,6 +379,105 @@ def test_clearing_a_category_in_another_project_404s(db):
 def test_selecting_an_unknown_quote_404s(db):
     with pytest.raises(HTTPException) as exc:
         _select("r-gear", "no-such-quote")
+    assert exc.value.status_code == 404
+
+
+# ══ 2b. Removal ═══════════════════════════════════════════════════════════════
+# Any candidate can be taken back off the table on Receive Quotes: a typo, a
+# duplicate, a figure logged against the wrong vendor. Two things must hold every
+# time. The FILE is never touched, because the number is what was wrong, not the
+# paperwork; and an emailed quote's reply is reopened, or removing a
+# mis-extracted figure would leave nowhere to enter the right one.
+
+
+def _remove(rfq_id, quote_id, project_id=PID):
+    return rfqs_router.delete_quote(project_id, rfq_id, quote_id, _user())
+
+
+def test_a_vendor_quote_can_be_removed(db, bounces):
+    _remove("r-gear", "q-gear-lo")
+
+    assert not any(q["id"] == "q-gear-lo" for q in db.tables["quotes"])
+    # It was neither the winner nor the last quote on the RFQ, so no price moved.
+    assert bounces == []
+    assert _row(db, "rfqs", "r-gear")["status"] == "sent"
+
+
+def test_removing_a_quote_leaves_its_file_in_the_project(db):
+    db.tables["project_files"].append({"id": "f1", "project_id": PID, "category": "quote"})
+    _row(db, "quotes", "q-gear-lo")["quote_file_id"] = "f1"
+
+    _remove("r-gear", "q-gear-lo")
+
+    # The whole point of removal: the number goes, the document stays.
+    assert [f["id"] for f in db.tables["project_files"]] == ["f1"]
+
+
+def test_the_estimate_figure_cannot_be_removed(db):
+    # It is not a quote. It is the General Material record's own figure, and it
+    # is corrected on that line, where both records move together.
+    with pytest.raises(HTTPException) as exc:
+        _remove("r-gen", "q-gen-est")
+
+    assert exc.value.status_code == 409
+    assert any(q["id"] == "q-gen-est" for q in db.tables["quotes"])
+
+
+def test_removing_the_winner_un_prices_the_category(db, bounces):
+    _select("r-gear", "q-gear-hi")
+
+    _remove("r-gear", "q-gear-hi")
+
+    assert "Switchgear" in vendor_selection.categories_without_a_price(PID)
+    assert bounces == ["Quote selection changed", "Winning quote removed"]
+
+
+def test_removing_the_last_quote_puts_the_rfq_back_to_waiting(db):
+    _remove("r-gear", "q-gear-lo")
+    _remove("r-gear", "q-gear-hi")
+
+    # Left at 'quotes_in' the category would read as answered, and due reminders
+    # would stay suppressed over numbers that no longer exist.
+    assert _row(db, "rfqs", "r-gear")["status"] == "sent"
+
+
+def test_removing_an_emailed_quote_reopens_its_reply(db):
+    db.tables["rfq_messages"] = [{"id": "m1", "extraction_status": "done", "extraction_error": None}]
+    _row(db, "quotes", "q-gear-lo")["rfq_message_id"] = "m1"
+
+    _remove("r-gear", "q-gear-lo")
+
+    # A reply marked answered refuses manual entry, so leaving it 'done' would
+    # strand the estimator with no way to re-enter the figure from that email.
+    message = _row(db, "rfq_messages", "m1")
+    assert message["extraction_status"] == "needs_review"
+    assert message["extraction_error"]
+
+
+def test_removing_a_hand_entered_quote_leaves_its_reply_alone(db):
+    db.tables["rfq_messages"] = [{"id": "m1", "extraction_status": "done", "extraction_error": None}]
+
+    _remove("r-fix", "q-fix-man")  # no reply behind it
+
+    assert _row(db, "rfq_messages", "m1")["extraction_status"] == "done"
+
+
+def test_removal_cannot_reach_another_project(db):
+    db.tables["rfqs"].append(
+        {**_rfq("r-other", "Switchgear", "gear", 20), "project_id": "p2"}
+    )
+    db.tables["quotes"].append(_quote("q-other", "r-other", "10"))
+
+    with pytest.raises(HTTPException) as exc:
+        _remove("r-other", "q-other")
+
+    assert exc.value.status_code == 404
+    assert any(q["id"] == "q-other" for q in db.tables["quotes"])
+
+
+def test_removing_an_unknown_quote_404s(db):
+    with pytest.raises(HTTPException) as exc:
+        _remove("r-gear", "no-such-quote")
     assert exc.value.status_code == 404
 
 
@@ -669,6 +770,20 @@ def test_vendor_selection_labels_candidates_with_no_vendor_behind_them(db):
     assert (manual["origin"], manual["vendor_name"]) == ("manual", None)
     [estimate] = entries["General Material"]["quotes"]
     assert (estimate["origin"], estimate["vendor_name"]) == ("estimate", None)
+
+
+def test_vendor_selection_says_how_each_amount_was_entered(db):
+    # Provenance of the FIGURE, which is a separate question from provenance of
+    # the quote: both of these came from the vendor, but only one of the numbers
+    # was read off their emailed quote. Select Vendors flags the other so nobody
+    # picks a hand-typed figure believing a document is behind it.
+    gear = next(e for e in rfqs_router.get_vendor_selection(PID, _user())
+                if e["category_name"] == "Switchgear")
+    by_id = {q["id"]: q for q in gear["quotes"]}
+    assert by_id["q-gear-hi"]["source"] == "manual"
+    assert by_id["q-gear-lo"]["source"] == "ai_extracted"
+    # It ranks nothing: the hand-entered figure is still ordered on true cost.
+    assert [q["id"] for q in gear["quotes"]] == ["q-gear-lo", "q-gear-hi"]
 
 
 def test_vendor_selection_is_internal_only(db):
