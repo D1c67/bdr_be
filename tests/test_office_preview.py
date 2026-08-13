@@ -143,6 +143,13 @@ def test_graph_deletes_scratch_even_on_failure(monkeypatch):
     from app.services import graph_email
 
     requests = []
+    # Pin the drive owner so a developer's MS_DRIVE_OWNER in .env can't
+    # redirect the asserted /users/{owner}/drive paths.
+    monkeypatch.setattr(
+        office_preview,
+        "get_settings",
+        lambda: get_settings().model_copy(update={"ms_drive_owner": ""}),
+    )
     monkeypatch.setattr(graph_email, "drive_upload", lambda path, content: "item-1")
 
     def fake_graph_request(method, path, **kwargs):
