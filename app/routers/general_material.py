@@ -135,7 +135,7 @@ def set_general_material(
         project_id,
         {"amount": str(body.amount) if body.amount is not None else None},
     )
-    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "General material price changed")
+    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "General material price changed", stale="materials")
     return row
 
 
@@ -170,5 +170,5 @@ def set_general_material_tax(
     )
     # The tax-inclusive figure changes the materials price basis, so re-verify
     # if the project already passed Verify (mirrors the quote tax endpoint).
-    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "General material tax changed")
+    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "General material tax changed", stale="materials")
     return row

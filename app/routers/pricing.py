@@ -467,7 +467,7 @@ def set_labor(
         .execute()
     ).data[0]
     audit(user.id, "labor.review", "project", project_id, {"verified": body.verified})
-    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "Labor numbers edited")
+    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "Labor numbers edited", stale="labor")
     return row
 
 
@@ -494,7 +494,7 @@ def set_markup(
         .execute()
     ).data[0]
     audit(user.id, "markup.set", "project", project_id, None)
-    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "Markup edited")
+    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "Markup edited", stale="markup")
     return row
 
 

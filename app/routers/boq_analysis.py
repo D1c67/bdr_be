@@ -309,7 +309,7 @@ def confirm_analysis(
     audit(user.id, "boq.confirm", "boq_analysis", analysis_id, {"rfqs": len(created)})
     # Re-confirming reshapes the RFQ categories/line items that feed pricing, so
     # re-verify if the project already passed Verify.
-    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "BOQ re-confirmed — RFQ categories changed")
+    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "BOQ re-confirmed — RFQ categories changed", stale="materials")
 
     # Training capture — record (model output vs user-corrected output) for the
     # dev Training page. Best-effort: a capture bug must never fail the confirm.

@@ -253,7 +253,7 @@ def test_no_bounce_before_verify(monkeypatch):
         ),
     })
     notes = _install(monkeypatch, db)
-    assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Markup edited") is False
+    assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Markup edited", stale="markup") is False
     assert db.tables["projects"][0]["current_stage"] == "markup"
     assert notes == []
 
@@ -265,7 +265,7 @@ def test_no_bounce_at_verify(monkeypatch):
         "project_category_state": _cat_rows(send_out=("verify", "active")),
     })
     notes = _install(monkeypatch, db)
-    assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Markup edited") is False
+    assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Markup edited", stale="markup") is False
     assert notes == []
 
 
@@ -276,7 +276,7 @@ def test_skip_abandoned(monkeypatch):
         "project_category_state": _cat_rows(send_out=("send_out", "active")),
     })
     notes = _install(monkeypatch, db)
-    assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Markup edited") is False
+    assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Markup edited", stale="markup") is False
     assert db.tables["projects"][0]["current_stage"] == "send_out"
     assert notes == []
 
@@ -289,7 +289,7 @@ def test_bounce_from_send_out(monkeypatch):
         "project_category_state": _cat_rows(send_out=("send_out", "active")),
     })
     notes = _install(monkeypatch, db)
-    assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Labor numbers edited") is True
+    assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Labor numbers edited", stale="labor") is True
 
     proj = db.tables["projects"][0]
     assert proj["current_stage"] == "verify"
@@ -316,7 +316,7 @@ def test_bounce_from_submitted_preserves_return_and_warns_sent(monkeypatch):
         "project_category_state": _cat_rows(send_out=("submitted", "active")),
     })
     notes = _install(monkeypatch, db)
-    assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Vendor quote amount changed") is True
+    assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Vendor quote amount changed", stale="materials") is True
     assert db.tables["projects"][0]["reverify_return_stage"] == "submitted"
     assert "already sent" in notes[0][2]
 
@@ -329,11 +329,11 @@ def test_second_edit_does_not_overwrite_return_stage(monkeypatch):
         "project_category_state": _cat_rows(send_out=("send_out", "active")),
     })
     _install(monkeypatch, db)
-    assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "first") is True
+    assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "first", stale="markup") is True
     events_after_first = len(db.tables["stage_events"])
 
     # A further edit while already bounced: no-op, return stage intact, no dupes.
-    assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "second") is False
+    assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "second", stale="markup") is False
     assert db.tables["projects"][0]["reverify_return_stage"] == "send_out"
     assert len(db.tables["stage_events"]) == events_after_first
 
@@ -373,7 +373,7 @@ def test_bounce_clears_legacy_snapshot_when_breakouts_are_live(monkeypatch):
         "project_category_state": _cat_rows(send_out=("send_out", "active")),
     })
     _install(monkeypatch, db)
-    assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Markup edited") is True
+    assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Markup edited", stale="markup") is True
     v = db.tables["verifications"][0]
     # The stale full-materials draft would double count the live breakout
     # sections, so the bounce clears all four legacy figures.
@@ -393,10 +393,14 @@ def test_bounce_keeps_sectioned_snapshot_as_draft(monkeypatch):
         "project_category_state": _cat_rows(send_out=("send_out", "active")),
     })
     _install(monkeypatch, db)
-    assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Markup edited") is True
+    assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Markup edited", stale="markup") is True
     v = db.tables["verifications"][0]
     assert v["materials_amount"] == "40000"  # post-release snapshot survives as a draft
     assert v["gear_amount"] == "10000"
+    # ...except the figures the edit itself made stale: a markup edit drops the
+    # draft's markup columns so the re-verify form seeds them from the live row.
+    assert v["labor_markup_amount"] is None
+    assert v["materials_markup_amount"] is None
 
 
 def test_bounce_keeps_legacy_snapshot_without_breakouts(monkeypatch):
@@ -409,7 +413,7 @@ def test_bounce_keeps_legacy_snapshot_without_breakouts(monkeypatch):
         "project_category_state": _cat_rows(send_out=("send_out", "active")),
     })
     _install(monkeypatch, db)
-    assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Markup edited") is True
+    assert workflow.maybe_reopen_verify_after_edit("p1", "u1", "Markup edited", stale="markup") is True
     v = db.tables["verifications"][0]
     # No breakout categories on the project: nothing can double count, so the
     # draft figures stay for the re-verify form.
@@ -428,6 +432,95 @@ def test_legacy_snapshot_reset_needed_predicate():
     assert workflow.legacy_snapshot_reset_needed(sectioned, breakout) is False
     # An embed that failed to join is not a breakout.
     assert workflow.legacy_snapshot_reset_needed(legacy, [{"material_categories": None}]) is False
+
+
+# ── Stale draft figures are dropped for the edited source ──────────────────────
+
+
+def _draft_verification():
+    """An uncommitted draft carrying a copy of every figure, left behind by a
+    bounce or saved from the verify form before the upstream edit landed."""
+    return {
+        **_verification(committed=False),
+        "labor_amount": "1125000",
+        "materials_amount": "45794.94",
+        "gear_amount": "5093.63",
+        "labor_markup_amount": "950",
+        "materials_markup_amount": "10183.52",
+        "gear_markup_amount": "509.36",
+    }
+
+
+def _draft_db(**verification_overrides):
+    """A project sitting AT verify (nothing to bounce) with a saved draft."""
+    return FakeDB({
+        "projects": [_project("verify")],
+        "verifications": [{**_draft_verification(), **verification_overrides}],
+        "project_category_state": _cat_rows(send_out=("verify", "active")),
+    })
+
+
+def test_labor_edit_drops_only_labor_from_uncommitted_draft(monkeypatch):
+    # A labor correction at step 7 while an uncommitted draft still holds the
+    # old copy: the copy must not pin the stale figure as if it were an
+    # Executive override; drop it so the form re-seeds from labor_reviews.
+    db = _draft_db()
+    _install(monkeypatch, db)
+    assert (
+        workflow.maybe_reopen_verify_after_edit(
+            "p1", "u1", "Labor numbers edited", stale="labor"
+        )
+        is False  # nothing to bounce; the draft clear happens anyway
+    )
+    v = db.tables["verifications"][0]
+    assert v["labor_amount"] is None
+    # The other sources' draft figures are untouched.
+    assert v["materials_amount"] == "45794.94"
+    assert v["labor_markup_amount"] == "950"
+
+
+def test_markup_edit_drops_the_markup_columns(monkeypatch):
+    db = _draft_db()
+    _install(monkeypatch, db)
+    workflow.maybe_reopen_verify_after_edit("p1", "u1", "Markup edited", stale="markup")
+    v = db.tables["verifications"][0]
+    for col in ("labor_markup_amount", "materials_markup_amount", "gear_markup_amount"):
+        assert v[col] is None
+    assert v["labor_amount"] == "1125000"
+    assert v["gear_amount"] == "5093.63"
+
+
+def test_materials_edit_drops_the_section_amounts(monkeypatch):
+    db = _draft_db()
+    _install(monkeypatch, db)
+    workflow.maybe_reopen_verify_after_edit(
+        "p1", "u1", "Quote selection changed", stale="materials"
+    )
+    v = db.tables["verifications"][0]
+    assert v["materials_amount"] is None
+    assert v["gear_amount"] is None
+    assert v["labor_amount"] == "1125000"
+    assert v["labor_markup_amount"] == "950"
+
+
+def test_committed_snapshot_is_never_touched_by_the_drop(monkeypatch):
+    # Send-out lane still locked (no bounce possible) but the row is committed:
+    # immutability wins; the edit funnel must not null committed figures.
+    db = FakeDB({
+        "projects": [_project("markup")],
+        "verifications": [{**_draft_verification(), **_verification(committed=True)}],
+        "project_category_state": _cat_rows(
+            labor_numbers=("markup", "active"), send_out=("gc_pricing", "locked")
+        ),
+    })
+    _install(monkeypatch, db)
+    assert (
+        workflow.maybe_reopen_verify_after_edit(
+            "p1", "u1", "Labor numbers edited", stale="labor"
+        )
+        is False
+    )
+    assert db.tables["verifications"][0]["labor_amount"] == "1125000"
 
 
 # ── The return move ────────────────────────────────────────────────────────────
@@ -546,9 +639,9 @@ def test_general_material_maybe_bounce_only_on_change(monkeypatch):
     called = []
     monkeypatch.setattr(
         workflow, "maybe_reopen_verify_after_edit",
-        lambda pid, actor, reason: called.append((pid, actor, reason)),
+        lambda pid, actor, reason, stale: called.append((pid, actor, reason, stale)),
     )
     gm._maybe_bounce("p1", "100", 100)  # unchanged → no bounce
     assert called == []
     gm._maybe_bounce("p1", "100", 250)  # changed → bounce (background, no actor)
-    assert called == [("p1", None, "General material re-extracted")]
+    assert called == [("p1", None, "General material re-extracted", "materials")]

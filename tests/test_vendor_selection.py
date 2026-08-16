@@ -178,7 +178,7 @@ def bounces(monkeypatch):
     monkeypatch.setattr(
         rfqs_router.workflow,
         "maybe_reopen_verify_after_edit",
-        lambda pid, uid, reason: seen.append(reason),
+        lambda pid, uid, reason, stale: seen.append(reason),
     )
     return seen
 

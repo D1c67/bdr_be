@@ -210,7 +210,7 @@ def _maybe_bounce(project_id: str, prior: Any, new: Any) -> None:
         return
     from app.services import workflow
 
-    workflow.maybe_reopen_verify_after_edit(project_id, None, "General material re-extracted")
+    workflow.maybe_reopen_verify_after_edit(project_id, None, "General material re-extracted", stale="materials")
 
 
 def execute(project_id: str) -> None:

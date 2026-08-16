@@ -734,7 +734,7 @@ def delete_quote(
     # Removing the winner leaves the category with no price at all.
     if was_selected:
         workflow.maybe_reopen_verify_after_edit(
-            project_id, user.id, "Winning quote removed"
+            project_id, user.id, "Winning quote removed", stale="materials"
         )
 
 
@@ -775,7 +775,7 @@ def override_quote(
         {"previous_amount": str(quote["amount"]), "new_amount": str(body.amount)},
     )
     dismiss_notifications(rfq_id=rfq_id, types=_QUOTE_NOTIF_TYPES)
-    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "Vendor quote amount changed")
+    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "Vendor quote amount changed", stale="materials")
     return updated
 
 
@@ -840,7 +840,7 @@ def set_quote_approval(
     # Only the un-approval that dropped a winner moved a price.
     if cleared_selection:
         workflow.maybe_reopen_verify_after_edit(
-            project_id, user.id, "Winning quote's approval withdrawn"
+            project_id, user.id, "Winning quote's approval withdrawn", stale="materials"
         )
     return updated
 
@@ -884,7 +884,7 @@ def select_quote(
     ).data
     audit(user.id, "quote.select", "quote", quote_id, {"rfq_id": rfq_id})
     dismiss_notifications(rfq_id=rfq_id, types=_QUOTE_NOTIF_TYPES)
-    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "Quote selection changed")
+    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "Quote selection changed", stale="materials")
     return updated[0]
 
 
@@ -912,7 +912,7 @@ def clear_selected_quote(
     if cleared:
         audit(user.id, "quote.deselect", "rfq", rfq_id, {"cleared": len(cleared)})
         workflow.maybe_reopen_verify_after_edit(
-            project_id, user.id, "Winning quote cleared"
+            project_id, user.id, "Winning quote cleared", stale="materials"
         )
 
 
@@ -941,7 +941,7 @@ def set_quotes_confirmed(
         .execute()
     ).data[0]
     audit(user.id, "rfq.quotes_confirmed", "rfq", rfq_id, {"confirmed": body.confirmed})
-    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "Quotes-confirmed flag changed")
+    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "Quotes-confirmed flag changed", stale="materials")
     return updated
 
 
@@ -982,7 +982,7 @@ def set_quote_tax(
     )
     # The tax-inclusive amount changes the materials price basis whenever this
     # quote is the winner, so re-verify if the project already passed Verify.
-    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "Quote tax setting changed")
+    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "Quote tax setting changed", stale="materials")
     return updated[0]
 
 

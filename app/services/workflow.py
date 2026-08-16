@@ -557,6 +557,46 @@ _LEGACY_SNAPSHOT_COLUMNS = (
     "materials_markup_amount",
 )
 
+# The verify-draft columns each upstream pricing source feeds (the same source
+# split pricing's _verify_originals reads). A pricing edit names its source so
+# the funnel drops exactly the draft figures that edit made stale, leaving
+# genuine Executive overrides on the other figures in place.
+_VERIFY_DRAFT_SOURCES = {
+    "labor": ("labor_amount",),
+    "markup": (
+        "labor_markup_amount",
+        "materials_markup_amount",
+        "gear_markup_amount",
+        "underground_markup_amount",
+        "low_voltage_markup_amount",
+    ),
+    "materials": (
+        "materials_amount",
+        "gear_amount",
+        "underground_amount",
+        "low_voltage_amount",
+    ),
+}
+
+
+def _drop_stale_verify_draft(project_id: str, stale: str) -> None:
+    """Null the verify draft's copies of the figures a pricing edit just
+    changed, on an UNCOMMITTED verifications row only. A copy left in place reads as an
+    Executive override (the saved row value outranks the live upstream figure
+    when the verify form seeds and when commit resolves), pinning the pre-edit
+    number over the correction; dropping the column lets the form re-seed from
+    the live figure. A committed snapshot is immutable and is never touched."""
+    reset: dict = {c: None for c in _VERIFY_DRAFT_SOURCES[stale]}
+    reset["updated_at"] = "now()"
+    (
+        get_supabase()
+        .table("verifications")
+        .update(reset)
+        .eq("project_id", project_id)
+        .is_("committed_at", "null")
+        .execute()
+    )
+
 
 def legacy_snapshot_reset_needed(verification: dict | None, rfq_rows: list[dict]) -> bool:
     """A snapshot committed before the pricing-sections release carries the FULL
@@ -666,11 +706,15 @@ def return_from_reverify(
 
 
 def maybe_reopen_verify_after_edit(
-    project_id: str, actor_id: str | None, reason: str
+    project_id: str, actor_id: str | None, reason: str, stale: str
 ) -> bool:
     """If a pricing-affecting edit landed on a project whose send_out category has
     passed Verify, bounce it back to `verify` for re-commit and notify the Executive +
-    Engineer. No-op otherwise. Best-effort — the pricing write already succeeded."""
+    Engineer. Whether or not that bounce applies, drop the edited source's figures
+    (`stale`: labor / markup / materials, see _VERIFY_DRAFT_SOURCES) from an
+    uncommitted verify draft, so the verify form re-seeds them from the corrected
+    upstream numbers instead of pinning the pre-edit copy as an override.
+    Best-effort: the pricing write already succeeded."""
     try:
         proj = (
             get_supabase()
@@ -685,9 +729,9 @@ def maybe_reopen_verify_after_edit(
         state = load_category_state(project_id)
         so = state.get("send_out", {})
         head = so.get("current_task")
-        if so.get("status") != "active" or head not in _PAST_VERIFY_HEADS:
-            return False
-        _, moved = reopen_verify(project_id, actor_id, reason)
+        moved = False
+        if so.get("status") == "active" and head in _PAST_VERIFY_HEADS:
+            _, moved = reopen_verify(project_id, actor_id, reason)
         if moved:
             message = (
                 f"A pricing-affecting edit was made after Verify — re-commit required ({reason})."
@@ -702,6 +746,11 @@ def maybe_reopen_verify_after_edit(
             # ping goes to them (plus the verifying Executive).
             for role in (Role.EXECUTIVE, Role.ESTIMATING_ENGINEER_LABOR):
                 notifications.notify_role(role, project_id, "reverify_required", message)
+        # After the bounce (which un-commits the snapshot), or on a draft that
+        # never needed one, the edit just changed figures the draft may hold a
+        # stale copy of. The committed-only guard inside keeps a still-committed
+        # snapshot untouched.
+        _drop_stale_verify_draft(project_id, stale)
         return moved
     except Exception:  # noqa: BLE001 — the edit succeeded; bouncing is best-effort
         logger.exception("Re-verify bounce failed for project %s", project_id)
