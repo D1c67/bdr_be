@@ -181,7 +181,10 @@ class Settings(BaseSettings):
     rfq_poll_interval_seconds: int = 180
     rfq_poll_active_days: int = 7            # stop watching a conversation after this
     rfq_polling_enabled: bool = True         # disable on extra workers
-    display_timezone: str = "America/New_York"  # for dates in RFQ subject/body
+    # Company (Pacific) time for dates in RFQ subject/body, proposal dates, and
+    # due reminders. Must stay in lockstep with COMPANY_TZ in the frontend's
+    # lib/format.ts and NUDGE_DUE_TIMEZONE in QuotesPanel.tsx.
+    display_timezone: str = "America/Los_Angeles"
 
     # Due-date reminder notifications (in-app, via the bell)
     due_reminders_enabled: bool = True

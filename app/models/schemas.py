@@ -241,14 +241,31 @@ def _check_needs_by(v: date | None) -> date | None:
 class ProjectGCIn(BaseModel):
     gc_id: str
     needs_by: date | None = None
+    # The specific people at this GC the team intends to bid to on this
+    # project. Advisory: the Send Out dialog seeds and highlights them, but any
+    # contact of the GC may still be emailed. None/[] = no specific selection.
+    contact_ids: list[str] | None = Field(default=None, max_length=50)
 
     _needs_by_bounds = field_validator("needs_by")(_check_needs_by)
+
+    @field_validator("contact_ids")
+    @classmethod
+    def _dedupe_contacts(cls, v: list[str] | None) -> list[str] | None:
+        return list(dict.fromkeys(v)) if v is not None else None
 
 
 class ProjectGCUpdate(BaseModel):
     needs_by: date | None = None
+    # Omitted = leave the selection alone; [] = clear it. The handler tells the
+    # two apart via model_fields_set, so this None default never clears.
+    contact_ids: list[str] | None = Field(default=None, max_length=50)
 
     _needs_by_bounds = field_validator("needs_by")(_check_needs_by)
+
+    @field_validator("contact_ids")
+    @classmethod
+    def _dedupe_contacts(cls, v: list[str] | None) -> list[str] | None:
+        return list(dict.fromkeys(v)) if v is not None else None
 
 
 # The bidding-site link is rendered as an href on the project page, so the
@@ -1060,6 +1077,30 @@ class ProposalDispatchIn(BaseModel):
     # EVERY email in this dispatch alongside each GC's own proposal PDF (which
     # is always attached and never part of this list). None/empty = none.
     extra_attachment_file_ids: list[str] | None = Field(default=None, max_length=25)
+    # proposal_id → same-GC gc_contact ids to CC on that GC's one email
+    # (rfq_sends CC precedent). The send layer enforces that every CC contact
+    # belongs to that proposal's GC and has an email; anyone already on the To
+    # line is dropped there too.
+    cc: dict[str, list[str]] | None = None
+
+    @model_validator(mode="after")
+    def _normalize_cc(self):
+        if not self.cc:
+            self.cc = None
+            return self
+        if len(self.cc) > 100:
+            raise ValueError("Too many CC selections")
+        cleaned: dict[str, list[str]] = {}
+        for pid, cc_ids in self.cc.items():
+            # A contact picked as a To recipient never doubles as a CC.
+            to_ids = set((self.contacts or {}).get(pid) or [])
+            ids = [c for c in dict.fromkeys(cc_ids) if c not in to_ids]
+            if len(ids) > 10:
+                raise ValueError("At most 10 CC contacts per proposal email")
+            if ids:
+                cleaned[pid] = ids
+        self.cc = cleaned or None
+        return self
 
     @field_validator("email_body")
     @classmethod

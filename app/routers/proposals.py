@@ -251,12 +251,24 @@ def _proposal_rows(project_id: str) -> list[dict]:
         .execute()
     ).data or []
     events = proposal_send.send_events_by_proposal(project_id)
+    selected = proposal_send.selected_contacts_by_gc(project_id)
     out = []
     for r in rows:
         file = r.pop("project_files", None) or {}
         gc = r.pop("general_contractors", None) or None
         if gc:
-            gc = {"id": gc["id"], "name": gc["name"], "contacts": _sorted_contacts(gc)}
+            contacts = _sorted_contacts(gc)
+            live_ids = {c["id"] for c in contacts}
+            gc = {
+                "id": gc["id"],
+                "name": gc["name"],
+                "contacts": contacts,
+                # The project's preferred bid contacts at this GC — the confirm
+                # dialog seeds and highlights them (stale ids filtered out).
+                "selected_contact_ids": [
+                    cid for cid in selected.get(gc["id"], []) if cid in live_ids
+                ],
+            }
         # Every transmission of this GC's bid, oldest first. proposal_sends
         # records the submission; these record the deliveries, so a re-send is
         # visible without disturbing the row the outcome grid reads.
@@ -267,6 +279,7 @@ def _proposal_rows(project_id: str) -> list[dict]:
                 "via": e["via"],
                 "status": e["status"],
                 "recipients": e.get("recipients"),
+                "cc_recipients": e.get("cc_recipients"),
                 "sent_at": e.get("sent_at"),
                 "error": e.get("error"),
             }
@@ -405,6 +418,7 @@ def send_proposals(
             body.force,
             body.contacts,
             body.extra_attachment_file_ids,
+            body.cc,
         )
     except ProposalSendError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
@@ -428,6 +442,7 @@ def resend_proposals(
             body.email_body,
             body.contacts,
             body.extra_attachment_file_ids,
+            body.cc,
         )
     except ProposalSendError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc

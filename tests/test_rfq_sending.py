@@ -16,8 +16,14 @@ def _rfq_cc(monkeypatch, addr):
 
 
 def test_format_bid_datetime_matches_spec_example():
-    # 15:00 UTC on 2026-06-24 is 11:00 AM in America/New_York (EDT).
-    assert rs.format_bid_datetime("2026-06-24T15:00:00+00:00") == "Wednesday, June 24th 11:00 AM"
+    # 18:00 UTC on 2026-06-24 is 11:00 AM in America/Los_Angeles (PDT), the
+    # company timezone; the zone abbreviation is spelled out for recipients.
+    assert rs.format_bid_datetime("2026-06-24T18:00:00+00:00") == "Wednesday, June 24th 11:00 AM PDT"
+
+
+def test_format_bid_datetime_winter_is_pst():
+    # 19:00 UTC on 2026-01-14 is 11:00 AM PST (UTC-8).
+    assert rs.format_bid_datetime("2026-01-14T19:00:00+00:00") == "Wednesday, January 14th 11:00 AM PST"
 
 
 def test_format_bid_datetime_none_is_tbd():
@@ -42,8 +48,9 @@ def test_format_bid_datetime_ordinals():
 
 
 def test_format_bid_datetime_pm_and_noon():
-    assert rs.format_bid_datetime("2026-06-24T16:00:00+00:00").endswith("12:00 PM")
-    assert rs.format_bid_datetime("2026-06-24T04:00:00+00:00").endswith("12:00 AM")
+    # 19:00 UTC = noon PDT; 07:00 UTC = midnight PDT.
+    assert rs.format_bid_datetime("2026-06-24T19:00:00+00:00").endswith("12:00 PM PDT")
+    assert rs.format_bid_datetime("2026-06-24T07:00:00+00:00").endswith("12:00 AM PDT")
 
 
 # ── Subject / body templates ───────────────────────────────────────────────
@@ -53,9 +60,9 @@ def test_build_subject_format():
     proj = {
         "number": "26-104",
         "name": "Riverside Plaza",
-        "actual_bid_at": "2026-06-24T15:00:00+00:00",
+        "actual_bid_at": "2026-06-24T18:00:00+00:00",
     }
-    assert rs.build_subject(proj) == "26-104 - Riverside Plaza - BOM - Wednesday, June 24th 11:00 AM"
+    assert rs.build_subject(proj) == "26-104 - Riverside Plaza - BOM - Wednesday, June 24th 11:00 AM PDT"
 
 
 def test_build_subject_without_bid_date():

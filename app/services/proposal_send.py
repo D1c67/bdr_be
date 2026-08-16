@@ -345,6 +345,64 @@ def cc_recipients(recipients: list[str]) -> list[str]:
     return [] if addr.lower() in lowered else [addr]
 
 
+def resolve_cc(
+    live_gc: dict, cc_ids: list[str] | None, to_emails: list[str]
+) -> tuple[list[str], list[dict] | None]:
+    """Same-GC contacts the sender chose to CC on this GC's one email.
+
+    Returns (cc email addresses, jsonb snapshot for proposal_send_events).
+    Company scoping is structural: ids resolve against THIS GC's contacts only,
+    so a contact from another company can never ride along. Raises when a
+    chosen contact vanished or has no email (the sender confirmed a list that
+    no longer exists; fail closed, same contract as resolve_recipients).
+    Anyone already on the To line is dropped, not doubled. The CC stays out of
+    gc_email / email_log.to_addrs: the To line is the isolation contract."""
+    if not cc_ids:
+        return [], None
+    contacts = {c["id"]: c for c in (live_gc.get("contacts") or [])}
+    lowered_to = {e.lower() for e in to_emails}
+    seen: set[str] = set()
+    picked: list[dict] = []
+    for cid in dict.fromkeys(cc_ids):  # de-dupe, keep order
+        contact = contacts.get(cid)
+        if not contact or not contact.get("email"):
+            raise ProposalSendError(
+                f"A CC contact for {live_gc.get('name', 'this GC')} is no longer on "
+                "file (or has no email) — reopen the send dialog and review recipients."
+            )
+        email = contact["email"]
+        if email.lower() in lowered_to or email.lower() in seen:
+            continue
+        seen.add(email.lower())
+        picked.append(contact)
+    if not picked:
+        return [], None
+    snapshot = [
+        {"gc_contact_id": c["id"], "name": c.get("name"), "email": c["email"]}
+        for c in picked
+    ]
+    return [c["email"] for c in picked], snapshot
+
+
+def selected_contacts_by_gc(project_id: str) -> dict[str, list[str]]:
+    """gc_id → the project's preferred bid contact ids (project_gc_contacts).
+    Advisory: the Send Out dialog seeds and highlights these; the send path
+    itself only honors what the confirm dialog actually posts."""
+    rows = (
+        get_supabase()
+        .table("project_gcs")
+        .select("gc_id, project_gc_contacts(gc_contact_id)")
+        .eq("project_id", project_id)
+        .execute()
+    ).data or []
+    return {
+        r["gc_id"]: sorted(
+            s["gc_contact_id"] for s in (r.get("project_gc_contacts") or [])
+        )
+        for r in rows
+    }
+
+
 def align_sections_to_basis(sections: dict[str, dict], basis: dict) -> dict[str, dict]:
     """A snapshot committed before the sections release has no breakout
     decomposition: its basis cost is null even when the category is live on the
@@ -992,6 +1050,7 @@ def record_send_event(
     email_log_id: str | None,
     user_id: str,
     event_id: str | None = None,
+    cc_snapshot: list[dict] | None = None,
 ) -> dict | None:
     """Append (or complete) one transmission of this GC's bid.
 
@@ -1008,6 +1067,7 @@ def record_send_event(
         "via": via,
         "file_id": row.get("file_id"),
         "recipients": join_recipients(recipients) if recipients else None,
+        "cc_recipients": cc_snapshot,
         "status": "sent",
         "error": None,
         "email_log_id": email_log_id,
@@ -1247,6 +1307,7 @@ def send_proposals(
     force: bool = False,
     contacts: dict[str, list[str]] | None = None,
     extra_file_ids: list[str] | None = None,
+    cc: dict[str, list[str]] | None = None,
 ) -> dict:
     sb = get_supabase()
     project = sb.table("projects").select("*").eq("id", project_id).single().execute().data
@@ -1325,9 +1386,14 @@ def send_proposals(
 
         live_gc = live_gcs.get(row["gc_id"]) or {}
         recipients: list[str] = []
+        gc_cc_addrs: list[str] = []
+        cc_snapshot: list[dict] | None = None
         resolve_error: ProposalSendError | None = None
         try:
             recipients = resolve_recipients(live_gc, (contacts or {}).get(row["id"]))
+            gc_cc_addrs, cc_snapshot = resolve_cc(
+                live_gc, (cc or {}).get(row["id"]), recipients
+            )
         except ProposalSendError as exc:
             resolve_error = exc
 
@@ -1412,11 +1478,13 @@ def send_proposals(
             pdf_name = office_preview.pdf_filename(file_row["filename"])
 
             body = body_template.replace(GC_NAME_TOKEN, row["gc_name"])
-            cc = cc_recipients(recipients)
+            # User-chosen same-GC CCs first, then the standing internal desk
+            # (dropped when it's already addressed either way).
+            cc_addrs = [*gc_cc_addrs, *cc_recipients([*recipients, *gc_cc_addrs])]
             try:
                 log = graph_email.send_mail(
                     to=recipients,
-                    cc=cc,
+                    cc=cc_addrs,
                     subject=subject,
                     body_html=email_branding.render_proposal_email(body),
                     attachments=[(pdf_name, pdf_bytes), *extra_attachments],
@@ -1453,13 +1521,13 @@ def send_proposals(
             ).data[0]
             record_send_event(
                 row, kind="initial", via="email", recipients=recipients,
-                email_log_id=log["id"], user_id=user_id,
+                email_log_id=log["id"], user_id=user_id, cc_snapshot=cc_snapshot,
             )
             # email_log.to_addrs is To-only by contract, so the audit trail is
             # where the CC is recorded per send.
             audit(user_id, "proposal.send", "proposal_send", row["id"],
                   {"gc_id": row["gc_id"], "to": join_recipients(recipients),
-                   "cc": join_recipients(cc) or None,
+                   "cc": join_recipients(cc_addrs) or None,
                    "file_id": row["file_id"],
                    "extra_attachments": [n for n, _ in extra_attachments] or None})
             results.append(_result(row, "sent", None))
@@ -1601,6 +1669,7 @@ def resend_proposals(
     email_body: str | None = None,
     contacts: dict[str, list[str]] | None = None,
     extra_file_ids: list[str] | None = None,
+    cc: dict[str, list[str]] | None = None,
 ) -> dict:
     """Email an already-sent proposal to its GC again — the bounced-address /
     "the GC never got it" recovery path.
@@ -1669,6 +1738,9 @@ def resend_proposals(
         live_gc = live_gcs.get(row["gc_id"]) or {}
         try:
             recipients = resolve_recipients(live_gc, (contacts or {}).get(row["id"]))
+            gc_cc_addrs, cc_snapshot = resolve_cc(
+                live_gc, (cc or {}).get(row["id"]), recipients
+            )
         except ProposalSendError as exc:
             results.append(_result(row, "failed", str(exc)))
             continue
@@ -1692,6 +1764,7 @@ def resend_proposals(
                         "via": "email",
                         "file_id": row.get("file_id"),
                         "recipients": join_recipients(recipients),
+                        "cc_recipients": cc_snapshot,
                         "status": "sending",
                         "sent_by": user_id,
                     }
@@ -1752,11 +1825,11 @@ def resend_proposals(
             )
 
             body = body_template.replace(GC_NAME_TOKEN, row["gc_name"])
-            cc = cc_recipients(recipients)
+            cc_addrs = [*gc_cc_addrs, *cc_recipients([*recipients, *gc_cc_addrs])]
             try:
                 log = graph_email.send_mail(
                     to=recipients,
-                    cc=cc,
+                    cc=cc_addrs,
                     subject=subject,
                     body_html=email_branding.render_proposal_email(body),
                     attachments=[
@@ -1783,10 +1856,11 @@ def resend_proposals(
             record_send_event(
                 row, kind="resend", via="email", recipients=recipients,
                 email_log_id=log["id"], user_id=user_id, event_id=event["id"],
+                cc_snapshot=cc_snapshot,
             )
             audit(user_id, "proposal.resend", "proposal_send", row["id"],
                   {"gc_id": row["gc_id"], "to": join_recipients(recipients),
-                   "cc": join_recipients(cc) or None, "file_id": row["file_id"],
+                   "cc": join_recipients(cc_addrs) or None, "file_id": row["file_id"],
                    "event_id": event["id"],
                    "extra_attachments": [n for n, _ in extra_attachments] or None})
             results.append(_result(row, "sent", None))

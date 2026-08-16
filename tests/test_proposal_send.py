@@ -432,6 +432,42 @@ def test_cc_recipients_not_duplicated_when_already_on_the_to_line(monkeypatch):
     assert psend.cc_recipients(["BIDS@G3Electrical.com"]) == []
 
 
+def test_resolve_cc_none_or_empty_is_no_cc():
+    assert psend.resolve_cc(GC, None, RECIPIENTS) == ([], None)
+    assert psend.resolve_cc(GC, [], RECIPIENTS) == ([], None)
+
+
+def test_resolve_cc_returns_emails_and_snapshot():
+    emails, snapshot = psend.resolve_cc(GC, ["c-2"], ["bids@taylor.com"])
+    assert emails == ["pat@taylor.com"]
+    assert snapshot == [
+        {"gc_contact_id": "c-2", "name": "Pat Estimator", "email": "pat@taylor.com"}
+    ]
+
+
+def test_resolve_cc_drops_contacts_already_on_the_to_line():
+    # Nobody is addressed twice; a To pick sneaking into the CC list is dropped,
+    # case-insensitively, and an all-dropped list means no CC at all.
+    assert psend.resolve_cc(GC, ["c-2"], ["PAT@taylor.com"]) == ([], None)
+
+
+def test_resolve_cc_dedupes_ids():
+    emails, snapshot = psend.resolve_cc(GC, ["c-2", "c-2"], ["bids@taylor.com"])
+    assert emails == ["pat@taylor.com"]
+    assert len(snapshot) == 1
+
+
+def test_resolve_cc_stale_or_emailless_choice_fails_closed():
+    # Same contract as resolve_recipients: the sender confirmed a list that no
+    # longer exists, so make them reopen the dialog. A contact of ANOTHER GC is
+    # indistinguishable from a deleted one here, which is what scopes the CC to
+    # the same company.
+    with pytest.raises(ProposalSendError, match="CC contact"):
+        psend.resolve_cc(GC, ["c-404"], RECIPIENTS)  # deleted / other company
+    with pytest.raises(ProposalSendError, match="CC contact"):
+        psend.resolve_cc(GC, ["c-3"], RECIPIENTS)  # exists but has no email
+
+
 @needs_template
 def test_cc_stays_out_of_the_recipient_isolation_contract(monkeypatch):
     # The CC must never leak into the To line: gc_email is compared for exact

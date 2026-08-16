@@ -1,4 +1,4 @@
-"""General-material price (the estimate's "wiring" material cost).
+"""General-material price (the estimate's "wiring" + "Other Items" material costs).
 
 Unlike other material categories, General Material is not priced from vendor
 quotes — its number comes from the estimate workbook (extracted by Sonnet 4.6,

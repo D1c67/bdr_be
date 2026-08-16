@@ -262,13 +262,27 @@ def create_project(
     # so "creation failed" is actually true.
     try:
         if body.gcs:
-            sb.table("project_gcs").insert(
-                [
-                    {"project_id": created["id"], "gc_id": g.gc_id,
-                     "needs_by": g.needs_by.isoformat() if g.needs_by else None}
-                    for g in body.gcs
-                ]
-            ).execute()
+            links = (
+                sb.table("project_gcs").insert(
+                    [
+                        {"project_id": created["id"], "gc_id": g.gc_id,
+                         "needs_by": g.needs_by.isoformat() if g.needs_by else None}
+                        for g in body.gcs
+                    ]
+                ).execute()
+            ).data or []
+            link_by_gc = {r["gc_id"]: r["id"] for r in links}
+            selection_rows = []
+            for g in body.gcs:
+                if not g.contact_ids or g.gc_id not in link_by_gc:
+                    continue
+                _assert_contacts_belong_to_gc(sb, g.gc_id, g.contact_ids)
+                selection_rows.extend(
+                    {"project_gc_id": link_by_gc[g.gc_id], "gc_contact_id": cid}
+                    for cid in g.contact_ids
+                )
+            if selection_rows:
+                sb.table("project_gc_contacts").insert(selection_rows).execute()
 
         # Record the initial stage event so analytics has a start timestamp.
         sb.table("stage_events").insert(
@@ -648,11 +662,16 @@ def _project_or_404(project_id: str) -> dict:
 
 def _project_gc_rows(project_id: str) -> list[dict]:
     """Wire shape shared by the GET and returned from every membership write
-    (the panel swaps its whole list for the response)."""
+    (the panel swaps its whole list for the response). selected_contact_ids is
+    the project's preferred bid contacts at that GC: advisory, seeds and
+    highlights the Send Out recipient picker."""
     rows = (
         get_supabase()
         .table("project_gcs")
-        .select("needs_by, general_contractors(id, name, gc_contacts(id, name, email, phone))")
+        .select(
+            "needs_by, project_gc_contacts(gc_contact_id),"
+            " general_contractors(id, name, gc_contacts(id, name, email, phone))"
+        )
         .eq("project_id", project_id)
         .execute()
     ).data or []
@@ -662,11 +681,46 @@ def _project_gc_rows(project_id: str) -> list[dict]:
         if not gc:
             continue
         contacts = sorted(gc.get("gc_contacts") or [], key=lambda c: (c.get("name") or "").lower())
+        live_ids = {c["id"] for c in contacts}
+        selected = [
+            s["gc_contact_id"]
+            for s in (r.get("project_gc_contacts") or [])
+            # A selection whose contact was deleted is stale, not a recipient.
+            if s.get("gc_contact_id") in live_ids
+        ]
         out.append(
             {"id": gc["id"], "name": gc["name"], "needs_by": r.get("needs_by"),
-             "contacts": contacts}
+             "contacts": contacts, "selected_contact_ids": sorted(selected)}
         )
     return sorted(out, key=lambda g: g["name"].lower())
+
+
+def _assert_contacts_belong_to_gc(sb, gc_id: str, contact_ids: list[str]) -> None:
+    """400 unless every id is a live contact of THIS GC; the selection must
+    never smuggle in people from another company."""
+    if not contact_ids:
+        return
+    rows = (
+        sb.table("gc_contacts").select("id").eq("gc_id", gc_id)
+        .in_("id", contact_ids).execute()
+    ).data or []
+    if len(rows) != len(set(contact_ids)):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "One or more selected contacts do not belong to this GC (or no longer exist).",
+        )
+
+
+def _replace_gc_contact_selection(
+    sb, project_gc_id: str, gc_id: str, contact_ids: list[str]
+) -> None:
+    """Swap the link row's selection for the given set ([] clears it)."""
+    _assert_contacts_belong_to_gc(sb, gc_id, contact_ids)
+    sb.table("project_gc_contacts").delete().eq("project_gc_id", project_gc_id).execute()
+    if contact_ids:
+        sb.table("project_gc_contacts").insert(
+            [{"project_gc_id": project_gc_id, "gc_contact_id": cid} for cid in contact_ids]
+        ).execute()
 
 
 def _block_if_sending(project_id: str, gc_id: str) -> None:
@@ -721,13 +775,18 @@ def add_project_gc(
         raise HTTPException(
             status.HTTP_409_CONFLICT, f"{gc[0]['name']} is already on this project"
         )
-    sb.table("project_gcs").insert(
-        {"project_id": project_id, "gc_id": body.gc_id,
-         "needs_by": body.needs_by.isoformat() if body.needs_by else None}
-    ).execute()
+    link = (
+        sb.table("project_gcs").insert(
+            {"project_id": project_id, "gc_id": body.gc_id,
+             "needs_by": body.needs_by.isoformat() if body.needs_by else None}
+        ).execute()
+    ).data[0]
+    if body.contact_ids:
+        _replace_gc_contact_selection(sb, link["id"], body.gc_id, body.contact_ids)
     audit(user.id, "project.gc_add", "project", project_id,
           {"gc_id": body.gc_id, "gc_name": gc[0]["name"],
-           "needs_by": body.needs_by.isoformat() if body.needs_by else None})
+           "needs_by": body.needs_by.isoformat() if body.needs_by else None,
+           "contact_ids": body.contact_ids or None})
     return _project_gc_rows(project_id)
 
 
@@ -738,8 +797,9 @@ def update_project_gc(
     body: ProjectGCUpdate,
     user: CurrentUser = Depends(require_writer),
 ):
-    """Edit the per-GC needs-by date (the only mutable field on the link —
-    membership itself is add/remove)."""
+    """Edit the link's mutable fields: the per-GC needs-by date and/or the
+    project's preferred bid contacts at that GC. Each field only moves when its
+    key is present in the PATCH body (membership itself is add/remove)."""
     sb = get_supabase()
     _project_or_404(project_id)
     rows = (
@@ -751,12 +811,19 @@ def update_project_gc(
     ).data
     if not rows:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "GC is not on this project")
-    needs_by = body.needs_by.isoformat() if body.needs_by else None
-    sb.table("project_gcs").update({"needs_by": needs_by}).eq(
-        "project_id", project_id
-    ).eq("gc_id", gc_id).execute()
-    audit(user.id, "project.gc_update", "project", project_id,
-          {"gc_id": gc_id, "needs_by": needs_by})
+    changes: dict = {}
+    if "needs_by" in body.model_fields_set:
+        needs_by = body.needs_by.isoformat() if body.needs_by else None
+        sb.table("project_gcs").update({"needs_by": needs_by}).eq(
+            "project_id", project_id
+        ).eq("gc_id", gc_id).execute()
+        changes["needs_by"] = needs_by
+    if "contact_ids" in body.model_fields_set:
+        _replace_gc_contact_selection(sb, rows[0]["id"], gc_id, body.contact_ids or [])
+        changes["contact_ids"] = body.contact_ids or []
+    if changes:
+        audit(user.id, "project.gc_update", "project", project_id,
+              {"gc_id": gc_id, **changes})
     return _project_gc_rows(project_id)
 
 

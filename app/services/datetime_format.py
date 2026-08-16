@@ -18,12 +18,19 @@ def _parse_ts(value: datetime | str | None) -> datetime | None:
 
 
 def format_bid_datetime(value: datetime | str | None) -> str:
-    """'Wednesday, June 24th 11:00 AM' in the configured display timezone."""
+    """'Wednesday, June 24th 11:00 AM PDT' in the configured display timezone.
+
+    The zone abbreviation is spelled out so recipients in any timezone read the
+    deadline as company (Pacific) wall time; a naive input has no zone to name,
+    so it formats without one.
+    """
     dt = _parse_ts(value)
     if dt is None:
         return "TBD"
+    zone = ""
     if dt.tzinfo is not None:
         dt = dt.astimezone(ZoneInfo(get_settings().display_timezone))
+        zone = f" {dt:%Z}"
     day = dt.day
     if 11 <= day % 100 <= 13:
         suffix = "th"
@@ -31,4 +38,4 @@ def format_bid_datetime(value: datetime | str | None) -> str:
         suffix = {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
     hour = dt.hour % 12 or 12
     ampm = "AM" if dt.hour < 12 else "PM"
-    return f"{dt:%A}, {dt:%B} {day}{suffix} {hour}:{dt:%M} {ampm}"
+    return f"{dt:%A}, {dt:%B} {day}{suffix} {hour}:{dt:%M} {ampm}{zone}"

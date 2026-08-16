@@ -1,6 +1,7 @@
 """Unit tests for general-material extraction (pure, no DB / no LLM)."""
 
 import io
+from decimal import Decimal
 
 import openpyxl
 import pytest
@@ -45,9 +46,10 @@ def test_bid_recap_text_falls_back_to_whole_workbook():
     assert "Wiring\t100" in text
 
 
-def test_build_system_prompt_targets_wiring_material():
+def test_build_system_prompt_targets_both_material_rows():
     sp = gm.build_system_prompt()
     assert '"wiring_material_cost"' in sp
+    assert '"other_items_material_cost"' in sp
     assert "MATERIAL cost" in sp
     assert "<document>" in sp  # anti-injection guard preserved
 
@@ -59,14 +61,70 @@ def test_build_user_prompt_wraps_document():
 
 
 def test_parse_json_strips_fences_and_validates():
-    raw = '```json\n{"wiring_material_cost": 12500.5, "found": true, "notes": "row 3"}\n```'
+    raw = (
+        '```json\n{"wiring_material_cost": 12500.5, "other_items_material_cost": 2000,'
+        ' "found": true, "notes": "rows 3 and 7"}\n```'
+    )
     data = gm._parse_json(raw)
-    assert data["wiring_material_cost"] == 12500.5 and data["found"] is True
+    assert data["wiring_material_cost"] == 12500.5
+    assert data["other_items_material_cost"] == 2000
+    assert data["found"] is True
 
 
 def test_parse_json_rejects_off_schema():
     with pytest.raises(ValueError):
         gm._parse_json('{"unexpected": 1}')
+
+
+def test_parse_json_rejects_missing_other_items():
+    # Pre-combination shape (wiring only) is off-schema now: the job retries.
+    with pytest.raises(ValueError):
+        gm._parse_json('{"wiring_material_cost": 100, "found": true}')
+
+
+# ── extracted_total: the figure is wiring + Other Items, summed in code ─────
+
+
+def test_extracted_total_combines_both_components():
+    total = gm.extracted_total(
+        {"wiring_material_cost": 12500.5, "other_items_material_cost": 2000}
+    )
+    assert total == Decimal("14500.5")
+
+
+def test_extracted_total_survives_a_missing_component():
+    assert gm.extracted_total(
+        {"wiring_material_cost": 100, "other_items_material_cost": None}
+    ) == Decimal("100")
+    assert gm.extracted_total(
+        {"wiring_material_cost": None, "other_items_material_cost": 250}
+    ) == Decimal("250")
+
+
+def test_extracted_total_none_when_neither_found():
+    assert (
+        gm.extracted_total(
+            {"wiring_material_cost": None, "other_items_material_cost": None}
+        )
+        is None
+    )
+
+
+def test_extracted_total_coerces_currency_strings():
+    # The model is told to send plain numbers; tolerate it not listening.
+    total = gm.extracted_total(
+        {
+            "wiring_material_cost": "$12,500.50",
+            "other_items_material_cost": "2,000",
+        }
+    )
+    assert total == Decimal("14500.50")
+
+
+def test_extracted_total_ignores_unparseable_values():
+    assert gm.extracted_total(
+        {"wiring_material_cost": "n/a", "other_items_material_cost": True}
+    ) is None
 
 
 # ── _tax_reset: reprocessing invalidates the sales-tax attestation ──────────
