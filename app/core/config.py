@@ -172,6 +172,16 @@ class Settings(BaseSettings):
     due_reminder_poll_interval_seconds: int = 300   # must stay well under 1h (smallest window)
     due_reminder_expired_horizon_days: int = 7      # "expired" fires only this close to the date
 
+    # Daily "bids due today" digest email (services/due_digest): weekday
+    # mornings, America/Los_Angeles, to every active internal user except
+    # accountants. Extra workers are safe (the due_digest_log unique index
+    # dedups), and Graph creds (ms_client_id) are required to actually send.
+    due_digest_enabled: bool = True
+    due_digest_poll_interval_seconds: int = 60      # must stay well under the catch-up window
+    due_digest_send_hour: int = 6                   # 6:03 AM Pacific
+    due_digest_send_minute: int = 3
+    due_digest_catchup_hours: int = 4               # down at send time → send late until this, then skip the day
+
     # Branded email mirror of every in-app notification (bell ↔ inbox parity).
     # Best-effort and fire-and-forget; also requires Graph creds (ms_client_id)
     # to actually send. Tests force this off (see tests/conftest.py).

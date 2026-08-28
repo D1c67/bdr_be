@@ -21,6 +21,7 @@ from app.models.schemas import (
     ProjectCreate,
     ProjectGCIn,
     ProjectGCUpdate,
+    ProjectOpenIn,
     ProjectOut,
     ProjectUpdate,
 )
@@ -535,6 +536,22 @@ def _project_or_404(project_id: str) -> dict:
     if not row:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
     return row[0]
+
+
+@router.post("/{project_id}/opens", status_code=status.HTTP_204_NO_CONTENT)
+def log_project_open(
+    project_id: str,
+    body: ProjectOpenIn,
+    user: CurrentUser = Depends(require_internal),
+):
+    """Fire-and-forget page-open beacon (project page / Project Details box),
+    feeding the Estimating Engineer (Labor) analytics. The frontend throttles
+    itself, so a row reads as one visit. Internal roles only - the estimator
+    portal never reaches these surfaces."""
+    _project_or_404(project_id)
+    get_supabase().table("project_open_events").insert(
+        {"project_id": project_id, "user_id": user.id, "kind": body.kind}
+    ).execute()
 
 
 def _project_gc_rows(project_id: str) -> list[dict]:

@@ -44,14 +44,18 @@ def test_palettes_are_pinned():
 
 
 def test_defaults_internal_bid_audience():
-    # Both engineer focuses: the bid deadline drives the material AND labor lanes.
+    # Every writer role (the whole team except the read-only accountant) gets
+    # the internal-bid heads-up by default; the accountant and the external
+    # estimator do not.
     for role in (
         Role.ESTIMATING_ENGINEER_MATERIALS,
         Role.ESTIMATING_ENGINEER_LABOR,
         Role.ESTIMATING_ADMIN,
+        Role.EXECUTIVE,
+        Role.IT_ADMIN,
     ):
         assert default_prefs(role).internal_bid.enabled
-    for role in (Role.EXECUTIVE, Role.ACCOUNTANT, Role.IT_ADMIN, Role.ESTIMATOR):
+    for role in (Role.ACCOUNTANT, Role.ESTIMATOR):
         assert not default_prefs(role).internal_bid.enabled
 
 

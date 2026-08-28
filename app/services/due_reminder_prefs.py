@@ -22,7 +22,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from app.core.roles import Role
+from app.core.roles import Role, WRITER_ROLES
 
 TaskOffset = Literal["2w", "1w", "2d", "1d", "1h", "expired"]
 ActualBidOffset = Literal["24h", "8h", "1h"]
@@ -38,8 +38,12 @@ TASK_KINDS: tuple[str, ...] = ("internal_bid", "due_from_estimator", "due_from_v
 # due_from_estimator is handled by the poller's assignment path, not prefs.
 # The engineer split: the bid deadline and the estimator's return feed BOTH
 # engineer lanes; vendor quotes are material-numbers work only.
+#
+# internal_bid is WRITER_ROLES (every internal role except the read-only
+# accountant): the whole team needs the "due tomorrow" heads-up, not just the
+# estimating side. Still opt-out-able per user like every other task kind.
 _DEFAULT_AUDIENCE: dict[str, frozenset[Role]] = {
-    "internal_bid":       frozenset({Role.ESTIMATING_ENGINEER_MATERIALS, Role.ESTIMATING_ENGINEER_LABOR, Role.ESTIMATING_ADMIN}),
+    "internal_bid":       WRITER_ROLES,
     "due_from_estimator": frozenset({Role.ESTIMATING_ENGINEER_MATERIALS, Role.ESTIMATING_ENGINEER_LABOR, Role.ESTIMATING_ADMIN}),
     "due_from_vendors":   frozenset({Role.ESTIMATING_ENGINEER_MATERIALS}),
 }

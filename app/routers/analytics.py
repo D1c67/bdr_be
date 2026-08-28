@@ -18,6 +18,7 @@ from app.core.roles import INTERNAL_ROLES
 from app.core.supabase_client import get_supabase
 from app.services import analytics_metrics as metrics
 from app.services import bid_invitations as bi
+from app.services import labor_engineer_report as ler
 from app.services.analytics_metrics import WindowData
 from app.services.bid_invitations_excel import build_bid_invitations_workbook
 from app.services.workflow import STAGES
@@ -308,6 +309,23 @@ def bid_invitations_export(
             "Cache-Control": "no-store",
         },
     )
+
+
+# ── Estimating Engineer (Labor) dashboard ──────────────────────────────────
+
+
+@router.get("/labor-engineer")
+def labor_engineer(
+    search: str | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0, le=1_000_000),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Master Analytics for the labor-focused engineer: every project past its
+    internal bid date, with the quotes-in / first-open / labor-save / markup /
+    send-out timeline. See services/labor_engineer_report.py for the sources."""
+    _gate(user)
+    return ler.report(search, limit, offset, user.role)
 
 
 @router.get("/projects/{project_id}")

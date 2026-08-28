@@ -171,6 +171,27 @@ def test_build_message_without_number():
     assert "Internal bid for Acme is due within 1 hour" in msg
 
 
+def test_build_message_quote_status_for_internal_bid():
+    project = {"name": "Acme Tower", "number": "1234"}
+    all_in = dr.build_message(dr.KINDS["internal_bid"], project, "1d", DUE.isoformat(), [])
+    assert all_in.endswith("All categories have at least one vendor quote in.")
+    missing = dr.build_message(
+        dr.KINDS["internal_bid"], project, "1d", DUE.isoformat(), ["Wiring", "Fire Protection"]
+    )
+    assert missing.endswith("Still waiting on a vendor quote for: Wiring, Fire Protection.")
+
+
+def test_build_message_quote_status_omitted_when_no_rfqs_or_other_kind():
+    project = {"name": "Acme Tower", "number": "1234"}
+    # None = no RFQ categories exist yet for this project - nothing to report.
+    none_yet = dr.build_message(dr.KINDS["internal_bid"], project, "1d", DUE.isoformat(), None)
+    assert "vendor quote" not in none_yet.lower()
+    # Only internal_bid carries the quote-status suffix, even if a caller passed one.
+    other_kind = dr.build_message(dr.KINDS["due_from_vendors"], project, "1d", DUE.isoformat(), [])
+    assert "All categories have at least one vendor quote in" not in other_kind
+    assert "Still waiting on a vendor quote for" not in other_kind
+
+
 # ── Recipient resolution ──────────────────────────────────────────────────
 
 
@@ -540,3 +561,64 @@ def test_poll_once_actual_bid_goes_only_to_pa(monkeypatch):
     [ins] = _calls(fake, "notifications", "insert")
     assert ins.payload[0]["type"] == "due.actual_bid.8h"
     assert "due to the GC within 8 hours" in ins.payload[0]["message"]
+
+
+def test_poll_once_internal_bid_widened_audience_and_missing_quote(monkeypatch):
+    # 20h out lands in the "1d" window (24h-before), the case this change targets.
+    due_raw = (NOW + timedelta(hours=20)).isoformat()
+    project = {
+        "id": "p1", "name": "Acme", "number": "42", "current_stage": "rfqs",
+        "internal_bid_at": due_raw, "actual_bid_at": None,
+        "due_from_estimator_at": None, "due_from_vendors_at": None,
+    }
+    fake = _setup(monkeypatch, {
+        ("projects", "select"): [project],
+        ("project_category_state", "select"): _cat_rows(),
+        ("rfqs", "select"): [
+            {"id": "r1", "project_id": "p1", "material_categories": {"name": "Wiring"}},
+            {"id": "r2", "project_id": "p1", "material_categories": {"name": "Fire Protection"}},
+        ],
+        ("quotes", "select"): [{"rfq_id": "r1"}],  # r2 has no quote yet
+        ("profiles", "select"): [
+            {"id": "pe1", "role": "estimating_engineer_materials"},
+            {"id": "ex1", "role": "executive"},
+            {"id": "it1", "role": "it_admin"},
+            {"id": "acct1", "role": "accountant"},  # excluded: read-only, not a writer
+        ],
+        ("notification_prefs", "select"): [],
+        ("due_reminder_log", "upsert"): _echo_ledger,
+        ("notifications", "insert"): [],
+    }, NOW)
+
+    dr.poll_once()
+
+    [up] = _calls(fake, "due_reminder_log", "upsert")
+    assert sorted(r["user_id"] for r in up.payload) == ["ex1", "it1", "pe1"]
+    [ins] = _calls(fake, "notifications", "insert")
+    assert {row["user_id"] for row in ins.payload} == {"ex1", "it1", "pe1"}
+    for row in ins.payload:
+        assert "Internal bid for Acme (#42) is due within 1 day" in row["message"]
+        assert row["message"].endswith("Still waiting on a vendor quote for: Fire Protection.")
+
+
+def test_poll_once_internal_bid_no_rfqs_omits_quote_status(monkeypatch):
+    due_raw = (NOW + timedelta(hours=20)).isoformat()
+    project = {
+        "id": "p1", "name": "Acme", "number": None, "current_stage": "intake",
+        "internal_bid_at": due_raw, "actual_bid_at": None,
+        "due_from_estimator_at": None, "due_from_vendors_at": None,
+    }
+    fake = _setup(monkeypatch, {
+        ("projects", "select"): [project],
+        ("project_category_state", "select"): _cat_rows(),
+        ("rfqs", "select"): [],  # categories not split out yet
+        ("profiles", "select"): [{"id": "pe1", "role": "estimating_engineer_materials"}],
+        ("notification_prefs", "select"): [],
+        ("due_reminder_log", "upsert"): _echo_ledger,
+        ("notifications", "insert"): [],
+    }, NOW)
+
+    dr.poll_once()
+
+    [ins] = _calls(fake, "notifications", "insert")
+    assert "vendor quote" not in ins.payload[0]["message"].lower()
