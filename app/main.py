@@ -35,6 +35,21 @@ async def lifespan(_: FastAPI):
         from app.services import due_reminders
 
         reminder_task = asyncio.create_task(due_reminders.polling_loop())
+    # Daily "bids due today" digest email: weekday mornings (Pacific), to all
+    # internal users except accountants. Multi-worker safe: the due_digest_log
+    # (digest_date, user_id) unique index means only one worker's claim wins,
+    # so extra workers are harmless. Needs Graph creds to send, and is
+    # bidding-only for the same reason as the reminders above.
+    digest_task: asyncio.Task | None = None
+    if (
+        settings.bidding_enabled
+        and settings.due_digest_enabled
+        and settings.supabase_url
+        and settings.ms_client_id
+    ):
+        from app.services import due_digest
+
+        digest_task = asyncio.create_task(due_digest.polling_loop())
     # PM mailbox email ingestion — polls the configured mailbox (Inbox + Sent
     # Items) and runs the project-identification pipeline. Multi-worker safe
     # via the graph_sync_state lease. Deliberately NOT tied to PM_ENABLED: it
@@ -80,7 +95,7 @@ async def lifespan(_: FastAPI):
         except Exception:  # noqa: BLE001 - cleanup must never block boot
             logging.getLogger(__name__).exception("llm queue disabled-mode cleanup failed")
     yield
-    for task in (poll_task, reminder_task, email_task, llm_health_task, llm_queue_task):
+    for task in (poll_task, reminder_task, digest_task, email_task, llm_health_task, llm_queue_task):
         if task:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

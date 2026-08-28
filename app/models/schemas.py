@@ -268,6 +268,12 @@ class ProjectGCUpdate(BaseModel):
         return list(dict.fromkeys(v)) if v is not None else None
 
 
+class ProjectOpenIn(BaseModel):
+    """POST /projects/{id}/opens - which surface the user opened."""
+
+    kind: Literal["project", "details"]
+
+
 # The bidding-site link is rendered as an href on the project page, so the
 # scheme is allow-listed here rather than trusted: without this, `javascript:`
 # or `data:` text typed into the field would become a working XSS payload the

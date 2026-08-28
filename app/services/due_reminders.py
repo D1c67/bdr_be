@@ -169,18 +169,40 @@ def is_complete(
     raise ValueError(f"Unknown reminder kind {kind!r}")
 
 
-def build_message(kind_def: KindDef, project: dict, offset_key: str, due_raw) -> str:
-    """Self-contained text — the bell renders only `message`, never `type`."""
+def _quote_status_phrase(missing_categories: list[str]) -> str:
+    if not missing_categories:
+        return "All categories have at least one vendor quote in."
+    return "Still waiting on a vendor quote for: " + ", ".join(missing_categories) + "."
+
+
+def build_message(
+    kind_def: KindDef,
+    project: dict,
+    offset_key: str,
+    due_raw,
+    missing_quote_categories: list[str] | None = None,
+) -> str:
+    """Self-contained text — the bell renders only `message`, never `type`.
+
+    `missing_quote_categories` is internal_bid-only: None means the project has
+    no RFQ categories yet (nothing meaningful to report), a list (possibly
+    empty) names the categories still missing even one vendor quote.
+    """
     label = project["name"]
     if project.get("number"):
         label = f"{label} (#{project['number']})"
     due_str = format_bid_datetime(due_raw)
     if offset_key == "expired":
-        return f"{kind_def.label} for {label} {kind_def.verb} past due — was due {due_str}"
-    phrase = _OFFSET_PHRASES[offset_key]
-    if kind_def.key == "actual_bid":
-        return f"Bid for {label} is due to the GC within {phrase} — {due_str}"
-    return f"{kind_def.label} for {label} {kind_def.verb} due within {phrase} — {due_str}"
+        base = f"{kind_def.label} for {label} {kind_def.verb} past due — was due {due_str}"
+    else:
+        phrase = _OFFSET_PHRASES[offset_key]
+        if kind_def.key == "actual_bid":
+            base = f"Bid for {label} is due to the GC within {phrase} — {due_str}"
+        else:
+            base = f"{kind_def.label} for {label} {kind_def.verb} due within {phrase} — {due_str}"
+    if kind_def.key == "internal_bid" and missing_quote_categories is not None:
+        base = f"{base} {_quote_status_phrase(missing_quote_categories)}"
+    return base
 
 
 def _internal_recipients(
@@ -356,6 +378,45 @@ def poll_once() -> None:
     if not events:
         return
 
+    # 2b. Vendor-quote completeness for internal_bid events, message content
+    # only, never gates firing or completion. None = project has no RFQ
+    # categories yet (nothing meaningful to report); a list (possibly empty)
+    # names the categories that still lack even one vendor quote, selected or
+    # not (deliberately looser than vendor_selection.category_price_state,
+    # which only counts a SELECTED winner).
+    internal_bid_pids = sorted(
+        {p["id"] for p, k, _, _ in events if k.key == "internal_bid"}
+    )
+    missing_quotes_by_pid: dict[str, list[str] | None] = {
+        pid: None for pid in internal_bid_pids
+    }
+    if internal_bid_pids:
+        rfq_rows = _page_all(
+            lambda lo, hi: sb.table("rfqs")
+            .select("id, project_id, material_categories(name)")
+            .in_("project_id", internal_bid_pids)
+            .order("id")
+            .range(lo, hi)
+        )
+        rfq_ids = [r["id"] for r in rfq_rows]
+        quoted_rfq_ids: set[str] = set()
+        if rfq_ids:
+            quote_rows = _page_all(
+                lambda lo, hi: sb.table("quotes")
+                .select("rfq_id")
+                .in_("rfq_id", rfq_ids)
+                .order("rfq_id")
+                .range(lo, hi)
+            )
+            quoted_rfq_ids = {r["rfq_id"] for r in quote_rows}
+        for r in rfq_rows:
+            pid = r["project_id"]
+            if missing_quotes_by_pid[pid] is None:
+                missing_quotes_by_pid[pid] = []
+            if r["id"] not in quoted_rfq_ids:
+                name = (r.get("material_categories") or {}).get("name") or "a category"
+                missing_quotes_by_pid[pid].append(name)
+
     # 3. Audience data: active profiles, stored prefs, estimator assignments.
     profiles = _page_all(
         lambda lo, hi: sb.table("profiles")
@@ -430,7 +491,13 @@ def poll_once() -> None:
             ).data or []
             if not inserted:
                 continue  # every recipient already reminded for this exact due date
-            message = build_message(kind_def, project, offset_key, due_raw)
+            message = build_message(
+                kind_def,
+                project,
+                offset_key,
+                due_raw,
+                missing_quotes_by_pid.get(project["id"]),
+            )
             notif_rows = [
                 {
                     "user_id": row["user_id"],

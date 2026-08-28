@@ -13,6 +13,9 @@ os.environ["NOTIFICATION_EMAILS_ENABLED"] = "false"
 # Email ingestion defaults off, but pin it so a local .env that enables it can
 # never make the test session poll a real mailbox.
 os.environ["EMAIL_INGEST_ENABLED"] = "false"
+# The daily due digest defaults on; pin it off so no test that runs the app
+# lifespan can ever start the sender loop against real Graph creds.
+os.environ["DUE_DIGEST_ENABLED"] = "false"
 # Pin the security-critical flags the tests assert on, so the suite is
 # independent of whatever the local dev `.env` happens to set. The dev `.env`
 # ships MFA_REQUIRED=false (a break-glass convenience); without this pin the 2FA
