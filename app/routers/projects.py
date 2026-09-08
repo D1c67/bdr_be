@@ -658,6 +658,9 @@ def abandon_project(
     audit(user.id, "project.abandon", "project", project_id,
           {"stage": existing["current_stage"], "note": note})
     _sweep_estimator_notifications(project_id)
+    # A dead bid is not an Executive task: any late-GC pricing request still
+    # open drops out of the bell (the project_gcs row keeps its state).
+    dismiss_notifications(project_id=project_id, types=["gc_pricing.approval_requested"])
     # AFTER the sweep: the withdrawn notice is the one estimator-facing row that
     # must survive it — it's what explains where the rest of their bells went.
     # The reason note is written in the modal as estimator-facing text, so it
@@ -713,7 +716,7 @@ def _project_or_404(project_id: str) -> dict:
     row = (
         get_supabase()
         .table("projects")
-        .select("id, name, current_stage")
+        .select("id, name, current_stage, abandoned_at")
         .eq("id", project_id)
         .execute()
     ).data
@@ -807,7 +810,11 @@ def add_project_gc(
     user: CurrentUser = Depends(require_writer),
 ):
     sb = get_supabase()
-    _project_or_404(project_id)
+    project = _project_or_404(project_id)
+    if project.get("abandoned_at"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "This bid has been abandoned, so no GC can be added."
+        )
     gc = (
         sb.table("general_contractors").select("id, name").eq("id", body.gc_id).execute()
     ).data

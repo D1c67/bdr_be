@@ -21,7 +21,7 @@ from typing import Literal
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, model_validator
 from starlette.concurrency import run_in_threadpool
@@ -285,20 +285,32 @@ async def upload_job_file(
     return frow
 
 
+_JOB_STATUSES = ("processing", "done", "done_with_errors", "failed")
+
+
 @router.get("/jobs")
 def list_jobs(
     limit: int = 25,
     offset: int = 0,
+    status_filter: str | None = Query(default=None, alias="status"),
     _: CurrentUser = Depends(require_internal),
 ):
     """Job history, newest first, with per-status file counts and page totals
-    so the list renders without a per-row fetch."""
+    so the list renders without a per-row fetch. `status` narrows to one job
+    status: the app shell polls `?status=processing` for its in-flight
+    marker, which must stay a cheap read."""
     limit = max(1, min(limit, 100))
+    if status_filter is not None and status_filter not in _JOB_STATUSES:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"status must be one of {', '.join(_JOB_STATUSES)}",
+        )
     sb = get_supabase()
+    query = sb.table("bid_split_jobs").select("*")
+    if status_filter is not None:
+        query = query.eq("status", status_filter)
     jobs = (
-        sb.table("bid_split_jobs")
-        .select("*")
-        .order("created_at", desc=True)
+        query.order("created_at", desc=True)
         .range(offset, offset + limit - 1)
         .execute()
     ).data or []

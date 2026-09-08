@@ -41,6 +41,7 @@ class RateLimitScope(StrEnum):
     REPORT = "report"                   # multi-table report assembly (bid invitations)
     MODEL_STATUS = "model_status"       # forced AI provider health probe
     LLM_MONITOR = "llm_monitor"         # dev AI monitor page reads/actions
+    GC_PRICING_REQUEST = "gc_pricing_request"  # late-GC price-change requests (Executive fan-out)
     DEFAULT = "api"                     # generic catch-all budget
 
 
@@ -70,6 +71,10 @@ RATE_LIMIT_HELP: dict[str, str] = {
     RateLimitScope.OUTBOUND_EMAIL: (
         "Caps branded outbound email (invites, packages, proposals) per account "
         "per hour to protect the shared mailbox's sending reputation."
+    ),
+    RateLimitScope.GC_PRICING_REQUEST: (
+        "Caps per-GC pricing change requests per account per hour. Each request "
+        "notifies and emails every Executive; wait for the Retry-After window."
     ),
     RateLimitScope.NOTIFICATION_LOG: (
         "Caps per-project notification-log reads per account per minute — each "

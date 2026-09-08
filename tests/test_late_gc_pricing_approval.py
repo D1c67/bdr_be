@@ -43,6 +43,7 @@ class _Query:
         self._payload = None
         self._filters = []
         self._in_filters = []
+        self._or_filters = []
         self._single = False
 
     def select(self, *a, **k):
@@ -77,6 +78,15 @@ class _Query:
         self._filters.append((col, None if val == "null" else val))
         return self
 
+    def or_(self, expr):
+        """PostgREST or=(col.op.val,...) with op in is/eq/neq."""
+        arms = []
+        for part in expr.split(","):
+            col, op, val = part.split(".", 2)
+            arms.append((col, op, None if val == "null" else val))
+        self._or_filters.append(arms)
+        return self
+
     def like(self, col, pattern):
         self._filters.append((col, ("__like__", pattern.rstrip("%"))))
         return self
@@ -101,6 +111,12 @@ class _Query:
                 if not (got or "").startswith(v[1]):
                     return False
             elif got != v:
+                return False
+        for arms in self._or_filters:
+            if not any(
+                (_json_path(row, c) == v) if op in ("is", "eq") else (_json_path(row, c) != v)
+                for c, op, v in arms
+            ):
                 return False
         return all(_json_path(row, c) in vals for c, vals in self._in_filters)
 
@@ -832,3 +848,281 @@ def test_request_schema_carries_amounts_and_note():
 def test_generate_schema_accepts_gc_ids():
     assert ProposalGenerateIn().gc_ids is None
     assert ProposalGenerateIn(gc_ids=["g1"]).gc_ids == ["g1"]
+
+
+# ── 2026-09-08 hardening: bounce window, compare-and-set, per-row re-checks ──
+
+
+def _bounced_db(return_stage="submitted", **kw):
+    """send_out head parked at 'verify' by a post-submission re-verify bounce."""
+    db = _db(head="verify", **kw)
+    db.tables["projects"][0]["reverify_return_stage"] = return_stage
+    return db
+
+
+def test_bid_has_gone_out_sees_through_a_reverify_bounce(env):
+    db = env.install(_bounced_db())
+    assert psend.bid_has_gone_out(db, "p1", "verify") is True
+    assert psend.bid_has_gone_out(db, "p1", "submitted") is True
+    db.tables["projects"][0]["reverify_return_stage"] = None
+    assert psend.bid_has_gone_out(db, "p1", "verify") is False
+    assert psend.bid_has_gone_out(db, "p1", "send_out") is False
+
+
+def test_pending_lock_holds_while_the_head_is_bounced_to_verify(env):
+    env.install(_bounced_db(gcs=[_gc("g1", "Alpha", status="pending", requested_by="u-admin")]))
+    for role in (Role.ESTIMATING_ADMIN, Role.EXECUTIVE):
+        with pytest.raises(ProposalSendError, match="awaiting executive approval"):
+            psend.set_gc_amounts("p1", "g1", AMOUNTS, "u", role=role)
+    assert env.link("g1")["proposal_material_amount"] is None
+
+
+def test_writer_direct_edit_refused_during_a_bounce_after_send_out(env):
+    env.install(_bounced_db())
+    with pytest.raises(ProposalSendError, match="needs executive approval"):
+        psend.set_gc_amounts("p1", "g1", AMOUNTS, "u-admin", role=Role.ESTIMATING_ADMIN)
+    # The Executive (the approver) may still edit directly.
+    psend.set_gc_amounts("p1", "g1", AMOUNTS, "u-exec", role=Role.EXECUTIVE)
+    assert env.link("g1")["proposal_material_amount"] == "45000"
+
+
+def test_request_allowed_during_a_bounce_after_send_out(env):
+    env.install(_bounced_db())
+    rows = psend.request_gc_pricing_change("p1", "g1", AMOUNTS, None, "u-admin", Role.ESTIMATING_ADMIN)
+    assert next(r for r in rows if r["id"] == "g1")["pricing_approval_status"] == "pending"
+    assert env.role_notes and env.role_notes[0][1] == "gc_pricing.approval_requested"
+
+
+def test_plain_verify_head_before_send_out_is_unchanged(env):
+    # No bounce marker: the ordinary pre-send-out rules apply at Verify.
+    env.install(_bounced_db(return_stage=None))
+    psend.set_gc_amounts("p1", "g1", AMOUNTS, "u-admin", role=Role.ESTIMATING_ADMIN)
+    assert env.link("g1")["proposal_material_amount"] == "45000"
+    with pytest.raises(ProposalSendError, match="only for GCs added after the bid went out"):
+        psend.request_gc_pricing_change("p1", "g1", AMOUNTS, None, "u-admin", Role.ESTIMATING_ADMIN)
+
+
+def test_request_is_compare_and_set_against_a_racing_request(env, monkeypatch):
+    # The read said "not pending" but the row went pending before the write.
+    db = env.install(_db(gcs=[_gc("g1", "Alpha", status="pending", requested_by="u-other")]))
+    stale = dict(db.tables["project_gcs"][0], pricing_approval_status=None, gc_name="Alpha")
+    monkeypatch.setattr(psend, "_gc_link", lambda sb, pid, gid: stale)
+    with pytest.raises(ProposalSendError, match="already awaiting executive approval"):
+        psend.request_gc_pricing_change("p1", "g1", AMOUNTS, None, "u-admin", Role.ESTIMATING_ADMIN)
+    assert env.link("g1")["pricing_requested_by"] == "u-other"
+    assert env.role_notes == [] and env.audits == []
+
+
+def test_request_refused_when_the_gc_was_removed_before_the_write(env, monkeypatch):
+    db = env.install(_db())
+    stale = dict(db.tables["project_gcs"][0], gc_name="Alpha")
+    monkeypatch.setattr(psend, "_gc_link", lambda sb, pid, gid: stale)
+    db.tables["project_gcs"] = [r for r in db.tables["project_gcs"] if r["gc_id"] != "g1"]
+    with pytest.raises(ProposalSendError) as exc:
+        psend.request_gc_pricing_change("p1", "g1", AMOUNTS, None, "u-admin", Role.ESTIMATING_ADMIN)
+    assert exc.value.status_code == 404
+
+
+def test_request_backs_out_when_a_send_claimed_the_row_meanwhile(env, monkeypatch):
+    db = env.install(_db(gcs=[_gc("g1", "Alpha", overrides={"labor": "29000"})]))
+    calls = {"n": 0}
+
+    def _not_sent(sb, pid, gid):
+        calls["n"] += 1
+        if calls["n"] == 2:  # the post-write re-check sees the claim
+            db.tables["proposal_sends"].append(
+                {"id": "ps1", "project_id": "p1", "gc_id": "g1", "status": "sending"}
+            )
+            raise ProposalSendError("sent")
+
+    monkeypatch.setattr(psend, "_assert_gc_not_sent", _not_sent)
+    with pytest.raises(ProposalSendError, match="sent"):
+        psend.request_gc_pricing_change("p1", "g1", AMOUNTS, "n", "u-admin", Role.ESTIMATING_ADMIN)
+    link = env.link("g1")
+    assert link["pricing_approval_status"] is None
+    assert link["pricing_requested_by"] is None
+    assert link["proposal_labor_amount"] == "29000"
+    assert link["proposal_material_amount"] is None
+    assert env.role_notes == [] and env.audits == []
+
+
+def test_request_dismisses_its_notifications_when_the_gc_was_removed_meanwhile(env, monkeypatch):
+    db = env.install(_db())
+    real_notify = env.role_notes.append
+
+    def _notify(role, pid, type_, msg, **kw):
+        real_notify((role, type_, msg, kw.get("metadata")))
+        # The removal lands right after our notifications did.
+        db.tables["project_gcs"] = [r for r in db.tables["project_gcs"] if r["gc_id"] != "g1"]
+
+    monkeypatch.setattr(psend, "notify_role", _notify)
+    psend.request_gc_pricing_change("p1", "g1", AMOUNTS, None, "u-admin", Role.ESTIMATING_ADMIN)
+    assert env.dismissals == [
+        {"project_id": "p1", "types": ["gc_pricing.approval_requested"], "gc_id": "g1"}
+    ]
+
+
+def test_approve_and_reject_are_compare_and_set(env, monkeypatch):
+    db = env.install(_db(gcs=[_gc("g1", "Alpha", status="pending", requested_by="u-admin")]))
+    pending_link = dict(db.tables["project_gcs"][0], gc_name="Alpha")
+    monkeypatch.setattr(psend, "_pending_link_or_409", lambda sb, pid, gid: pending_link)
+    # A racing decision already closed the round.
+    db.tables["project_gcs"][0]["pricing_approval_status"] = "rejected"
+    with pytest.raises(ProposalSendError, match="No pricing change is awaiting approval"):
+        psend.approve_gc_pricing_change("p1", "g1", AMOUNTS, None, "u-exec")
+    with pytest.raises(ProposalSendError, match="No pricing change is awaiting approval"):
+        psend.reject_gc_pricing_change("p1", "g1", None, "u-exec")
+    assert env.link("g1")["pricing_approval_status"] == "rejected"
+    assert env.user_notes == [] and env.audits == [] and env.dismissals == []
+
+
+def test_direct_edit_is_compare_and_set_against_a_racing_request(env, monkeypatch):
+    db = env.install(_db(gcs=[_gc("g1", "Alpha", status="pending", requested_by="u-admin")]))
+    stale = dict(db.tables["project_gcs"][0], pricing_approval_status=None, gc_name="Alpha")
+    monkeypatch.setattr(psend, "_gc_link", lambda sb, pid, gid: stale)
+    with pytest.raises(ProposalSendError, match="awaiting executive approval"):
+        psend.set_gc_amounts("p1", "g1", AMOUNTS, "u-exec", role=Role.EXECUTIVE)
+    assert env.link("g1")["proposal_material_amount"] is None
+
+
+def _unpending_send_db(monkeypatch, env):
+    db = _send_ready_db(monkeypatch, env)
+    db.tables["project_gcs"][0]["pricing_approval_status"] = None
+    # The batch snapshot sees g1 free; a request lands before the row is claimed.
+    real = psend._project_gcs
+
+    def snapshot_then_request(pid):
+        rows = real(pid)
+        db.tables["project_gcs"][0]["pricing_approval_status"] = "pending"
+        return rows
+
+    monkeypatch.setattr(psend, "_project_gcs", snapshot_then_request)
+    return db
+
+
+def test_send_rechecks_pending_after_claiming_the_row(env, monkeypatch):
+    db = _unpending_send_db(monkeypatch, env)
+    out = psend.send_proposals("p1", "u-admin", ["ps1"])
+    assert out["results"][0]["status"] == "skipped"
+    assert out["results"][0]["error"] == PENDING_APPROVAL_MESSAGE
+    row = db.tables["proposal_sends"][0]
+    assert row["status"] == "generated" and row.get("email_log_id") is None
+
+
+def test_mark_submitted_rechecks_pending_after_claiming_the_row(env, monkeypatch):
+    db = _unpending_send_db(monkeypatch, env)
+    monkeypatch.setattr(psend, "assert_mark_ready", lambda **kw: None)
+    out = psend.mark_submitted("p1", "u-admin", ["ps1"])
+    assert out["results"][0]["status"] == "skipped"
+    assert out["results"][0]["error"] == PENDING_APPROVAL_MESSAGE
+    row = db.tables["proposal_sends"][0]
+    assert row["status"] == "generated" and row.get("sent_at") is None
+    assert not any(a[1] == "proposal.mark_submitted" for a in env.audits)
+
+
+# ── generate: compare-and-set on the row being replaced ───────────────────────
+
+
+def _generate_db(monkeypatch, env, sends):
+    db = env.install(_db(gcs=[_gc("g1", "Alpha")], sends=sends))
+    db.tables["verifications"] = [{"project_id": "p1", "committed_at": "2026-09-01T00:00:00Z"}]
+    db.tables["proposal_drafts"] = [
+        {"id": "d1", "project_id": "p1", "approved_at": "x", "lines_json": ["Scope"],
+         "created_at": "2026-09-01T00:00:00Z"}
+    ]
+    db.tables["project_files"] = []
+    import app.routers.pricing as pricing
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(pricing, "get_supabase", lambda: db)
+    monkeypatch.setattr(pricing, "_verify_originals", lambda pid: {})
+    monkeypatch.setattr(pricing, "_materials_rows", lambda pid: [])
+    monkeypatch.setattr(
+        pricing, "section_summary", lambda rows: {"gear": {"includes_generator": False}}
+    )
+    full = {**AMOUNTS, "total": Decimal("76000")}
+    monkeypatch.setattr(psend, "proposal_amounts", lambda o, v: full)
+    monkeypatch.setattr(psend, "resolve_gc_amounts", lambda a, gc: a)
+    monkeypatch.setattr(psend, "omit_zero_sections", lambda a: a)
+    monkeypatch.setattr(psend, "stamp_figures", lambda a: {})
+    monkeypatch.setattr(psend, "build_base_context", lambda *a, **k: object())
+    monkeypatch.setattr(psend, "replace", lambda ctx, **kw: SimpleNamespace(scope_lines=[], **kw))
+    monkeypatch.setattr(psend, "load_template_bytes", lambda: b"")
+    monkeypatch.setattr(psend, "render_proposal", lambda t, ctx: b"docx")
+    monkeypatch.setattr(psend, "validate_output", lambda *a, **k: None)
+    monkeypatch.setattr(psend, "lines_hash", lambda lines: "h")
+    monkeypatch.setattr(psend, "_all_project_gc_names", lambda pid: ["Alpha"])
+    monkeypatch.setattr(psend.storage, "build_object_path", lambda pid, cat, fn: f"{pid}/{fn}")
+    deleted = []
+    monkeypatch.setattr(psend, "_delete_file_row", deleted.append)
+    return db, deleted
+
+
+def test_generate_does_not_revert_a_row_sent_while_rendering(env, monkeypatch):
+    db, deleted = _generate_db(
+        monkeypatch, env,
+        [{"id": "ps1", "project_id": "p1", "gc_id": "g1", "gc_name": "Alpha",
+          "status": "generated", "file_id": "f1", "draft_id": "d1"}],
+    )
+
+    def upload_then_send(path, data, mime):
+        # A mark-submitted completes between our read and our write.
+        db.tables["proposal_sends"][0].update(
+            {"status": "sent", "sent_at": "now", "sent_via": "external"}
+        )
+
+    monkeypatch.setattr(psend.storage, "upload_file", upload_then_send)
+    with pytest.raises(ProposalSendError, match="changed while generating"):
+        psend.generate_documents("p1", "d1", "u-admin", gc_ids=["g1"])
+    row = db.tables["proposal_sends"][0]
+    assert row["status"] == "sent" and row["file_id"] == "f1"
+    # Our own upload is cleaned up; the delivered document is untouched.
+    assert deleted == [db.tables["project_files"][0]["id"]]
+
+
+def test_generate_does_not_orphan_when_another_generate_swapped_the_file(env, monkeypatch):
+    db, deleted = _generate_db(
+        monkeypatch, env,
+        [{"id": "ps1", "project_id": "p1", "gc_id": "g1", "gc_name": "Alpha",
+          "status": "generated", "file_id": "f1", "draft_id": "d1"}],
+    )
+    monkeypatch.setattr(
+        psend.storage, "upload_file",
+        lambda path, data, mime: db.tables["proposal_sends"][0].update({"file_id": "f-other"}),
+    )
+    with pytest.raises(ProposalSendError, match="changed while generating"):
+        psend.generate_documents("p1", "d1", "u-admin", gc_ids=["g1"])
+    assert db.tables["proposal_sends"][0]["file_id"] == "f-other"
+    assert deleted == [db.tables["project_files"][0]["id"]]
+
+
+def test_generate_turns_a_duplicate_insert_into_a_conflict(env, monkeypatch):
+    from postgrest.exceptions import APIError
+
+    db, deleted = _generate_db(monkeypatch, env, [])
+    monkeypatch.setattr(psend.storage, "upload_file", lambda *a, **k: None)
+    real_table = db.table
+
+    class _DupQuery(_Query):
+        def execute(self):
+            if self._op == "insert":
+                raise APIError({"message": "duplicate", "code": "23505"})
+            return super().execute()
+
+    db.table = lambda name: _DupQuery(db, name) if name == "proposal_sends" else real_table(name)
+    with pytest.raises(ProposalSendError, match="generated by another request"):
+        psend.generate_documents("p1", "d1", "u-admin", gc_ids=["g1"])
+    assert deleted == [db.tables["project_files"][0]["id"]]
+
+
+def test_generate_replaces_an_unsent_row_normally(env, monkeypatch):
+    db, deleted = _generate_db(
+        monkeypatch, env,
+        [{"id": "ps1", "project_id": "p1", "gc_id": "g1", "gc_name": "Alpha",
+          "status": "generated", "file_id": "f1", "draft_id": "d1"}],
+    )
+    monkeypatch.setattr(psend.storage, "upload_file", lambda *a, **k: None)
+    created = psend.generate_documents("p1", "d1", "u-admin", gc_ids=["g1"])
+    assert created[0]["status"] == "generated"
+    assert created[0]["file_id"] == db.tables["project_files"][0]["id"]
+    assert deleted == ["f1"]

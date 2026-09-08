@@ -30,6 +30,7 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 import httpx
+from postgrest.exceptions import APIError
 
 from app.core.config import get_settings
 from app.core.roles import VERIFY_ROLES, Role
@@ -554,6 +555,14 @@ def send_window_head(project_id: str) -> str:
     head = workflow.load_category_state(project_id).get("send_out", {}).get("current_task")
     if head not in SEND_WINDOW_HEADS:
         raise ProposalSendError("Project has not reached the Send Out stage.")
+    # An abandoned bid keeps its lane head, so the window would otherwise stay
+    # open forever: no late GC, pricing request, document or email for it.
+    rows = (
+        get_supabase().table("projects").select("abandoned_at").eq("id", project_id)
+        .limit(1).execute()
+    ).data or []
+    if rows and rows[0].get("abandoned_at"):
+        raise ProposalSendError("This bid has been abandoned, so proposal work is closed.")
     return head
 
 
@@ -564,6 +573,50 @@ def send_window_head(project_id: str) -> str:
 # stage throughout: this is a per-GC lock, never a re-verify bounce.
 PRICING_APPROVAL_HEADS = frozenset({"submitted", "bid_outcome"})
 PENDING_APPROVAL_MESSAGE = "This GC's pricing change is awaiting executive approval."
+
+
+def _not_pending(query):
+    """PostgREST filter for "this link is not awaiting an Executive". A plain
+    neq drops NULL rows (NULL <> 'pending' is not true), so both arms are
+    spelled out. Applied to the UPDATE itself, it is the compare-and-set that
+    makes request / direct-edit transitions atomic across workers."""
+    return query.or_("pricing_approval_status.is.null,pricing_approval_status.neq.pending")
+
+
+def bid_has_gone_out(sb, project_id: str, head: str | None) -> bool:
+    """Whether the bid already went out to GCs, independent of a re-verify
+    bounce. A post-submission pricing edit parks the send_out head at 'verify'
+    (workflow.reopen_verify) and records where to return; the post-send-out
+    rules (0118) must keep holding through that window, otherwise a writer
+    could price a late GC with no approval and the figures would ship on the
+    re-commit."""
+    if head in PRICING_APPROVAL_HEADS:
+        return True
+    if head != "verify":
+        return False
+    rows = (
+        sb.table("projects").select("reverify_return_stage").eq("id", project_id)
+        .limit(1).execute()
+    ).data or []
+    return bool(rows) and rows[0].get("reverify_return_stage") in PRICING_APPROVAL_HEADS
+
+
+def _gc_pending_now(sb, project_id: str, gc_id: str) -> bool:
+    """Live read of one link's approval state (the per-row re-check a send or
+    mark-submitted runs right after claiming that GC's row)."""
+    rows = (
+        sb.table("project_gcs").select("pricing_approval_status")
+        .eq("project_id", project_id).eq("gc_id", gc_id).limit(1).execute()
+    ).data or []
+    return bool(rows) and rows[0].get("pricing_approval_status") == "pending"
+
+
+def _gc_on_project(sb, project_id: str, gc_id: str) -> bool:
+    rows = (
+        sb.table("project_gcs").select("id").eq("project_id", project_id)
+        .eq("gc_id", gc_id).limit(1).execute()
+    ).data or []
+    return bool(rows)
 _OVERRIDE_COLUMNS = (
     ("material", "proposal_material_amount"),
     ("gear", "proposal_gear_amount"),
@@ -633,7 +686,8 @@ def _gc_link(sb, project_id: str, gc_id: str) -> dict:
         sb.table("project_gcs")
         .select(
             "id, pricing_approval_status, pricing_requested_by, pricing_requested_at,"
-            " pricing_request_note, proposal_material_amount, proposal_gear_amount,"
+            " pricing_request_note, pricing_decided_by, pricing_decided_at,"
+            " pricing_decision_note, proposal_material_amount, proposal_gear_amount,"
             " proposal_underground_amount, proposal_low_voltage_amount,"
             " proposal_labor_amount, general_contractors(id, name)"
         )
@@ -797,19 +851,26 @@ def set_gc_amounts(
     assert_gc_amounts_editable(head)
     link = _gc_link(sb, project_id, gc_id)
     _assert_gc_not_sent(sb, project_id, gc_id)
-    if head in PRICING_APPROVAL_HEADS:
-        if link.get("pricing_approval_status") == "pending":
-            raise ProposalSendError(PENDING_APPROVAL_MESSAGE)
-        if role not in VERIFY_ROLES:
-            raise ProposalSendError(
-                "Pricing for a GC added after the bid went out needs executive approval. "
-                "Use Send proposal in the GC list."
-            )
+    # Pending = locked at EVERY head: a re-verify bounce parks the head at
+    # 'verify' but must not reopen a change an Executive has yet to decide.
+    if link.get("pricing_approval_status") == "pending":
+        raise ProposalSendError(PENDING_APPROVAL_MESSAGE)
+    if bid_has_gone_out(sb, project_id, head) and role not in VERIFY_ROLES:
+        raise ProposalSendError(
+            "Pricing for a GC added after the bid went out needs executive approval. "
+            "Use Send proposal in the GC list."
+        )
     basis = _pricing_basis_for(project_id)
     assert_section_overrides_allowed(basis, amounts)
-    sb.table("project_gcs").update(_override_columns(amounts)).eq(
-        "project_id", project_id
-    ).eq("gc_id", gc_id).execute()
+    written = (
+        _not_pending(
+            sb.table("project_gcs").update(_override_columns(amounts))
+            .eq("project_id", project_id).eq("gc_id", gc_id)
+        ).execute()
+    ).data
+    if not written:
+        # A request landed between our read and this write.
+        raise ProposalSendError(PENDING_APPROVAL_MESSAGE)
     # Audit the change as what it is: a markup adjustment. The shared cost
     # basis is untouched by design; what moved is this GC's effective markup
     # per section (negative when the GC is now bid below cost).
@@ -872,7 +933,7 @@ def request_gc_pricing_change(
     if not project:
         raise ProposalSendError("Project not found", status_code=404)
     head = send_window_head(project_id)
-    if head not in PRICING_APPROVAL_HEADS:
+    if not bid_has_gone_out(sb, project_id, head):
         raise ProposalSendError(
             "Pricing changes with approval are only for GCs added after the bid went out. "
             "Use Change GC pricing on the active step."
@@ -887,18 +948,40 @@ def request_gc_pricing_change(
 
     auto_approved = role in VERIFY_ROLES
     now = datetime.now(timezone.utc).isoformat()
-    sb.table("project_gcs").update(
-        {
-            **_override_columns(amounts),
-            "pricing_approval_status": "approved" if auto_approved else "pending",
-            "pricing_requested_by": user_id,
-            "pricing_requested_at": now,
-            "pricing_request_note": note or None,
-            "pricing_decided_by": user_id if auto_approved else None,
-            "pricing_decided_at": now if auto_approved else None,
-            "pricing_decision_note": None,
-        }
-    ).eq("project_id", project_id).eq("gc_id", gc_id).execute()
+    new_columns = {
+        **_override_columns(amounts),
+        "pricing_approval_status": "approved" if auto_approved else "pending",
+        "pricing_requested_by": user_id,
+        "pricing_requested_at": now,
+        "pricing_request_note": note or None,
+        "pricing_decided_by": user_id if auto_approved else None,
+        "pricing_decided_at": now if auto_approved else None,
+        "pricing_decision_note": None,
+    }
+    # Compare-and-set: only a link that is not already pending takes the
+    # write, so two simultaneous requests cannot both open a round.
+    written = (
+        _not_pending(
+            sb.table("project_gcs").update(new_columns)
+            .eq("project_id", project_id).eq("gc_id", gc_id)
+        ).execute()
+    ).data
+    if not written:
+        if not _gc_on_project(sb, project_id, gc_id):
+            raise ProposalSendError("GC is not on this project", status_code=404)
+        raise ProposalSendError(
+            "A pricing change for this GC is already awaiting executive approval."
+        )
+    # Second phase of the send/request handshake: a send that claimed this
+    # GC's row in the same instant re-checks the link after its claim, and we
+    # re-check the row after our write, so at most one of the two stands.
+    try:
+        _assert_gc_not_sent(sb, project_id, gc_id)
+    except ProposalSendError:
+        sb.table("project_gcs").update({k: link.get(k) for k in new_columns}).eq(
+            "project_id", project_id
+        ).eq("gc_id", gc_id).execute()
+        raise
     audit(
         user_id, "proposal.amounts_change_requested", "project", project_id,
         {
@@ -920,6 +1003,12 @@ def request_gc_pricing_change(
             Role.EXECUTIVE, project_id, "gc_pricing.approval_requested", message,
             metadata={"gc_id": gc_id},
         )
+        # A removal racing this request dismisses BEFORE our rows landed; make
+        # sure no Executive is asked to approve pricing for a GC that is gone.
+        if not _gc_on_project(sb, project_id, gc_id):
+            dismiss_notifications(
+                project_id=project_id, types=["gc_pricing.approval_requested"], gc_id=gc_id
+            )
     return project_gc_rows(project_id)
 
 
@@ -955,15 +1044,22 @@ def approve_gc_pricing_change(
     requested = _link_overrides(link)
     written = _override_columns(amounts)
     changed = any(_dec(requested.get(key)) != amounts.get(key) for key, _col in _OVERRIDE_COLUMNS)
-    sb.table("project_gcs").update(
-        {
-            **written,
-            "pricing_approval_status": "approved",
-            "pricing_decided_by": user_id,
-            "pricing_decided_at": datetime.now(timezone.utc).isoformat(),
-            "pricing_decision_note": note or None,
-        }
-    ).eq("project_id", project_id).eq("gc_id", gc_id).execute()
+    decided = (
+        sb.table("project_gcs").update(
+            {
+                **written,
+                "pricing_approval_status": "approved",
+                "pricing_decided_by": user_id,
+                "pricing_decided_at": datetime.now(timezone.utc).isoformat(),
+                "pricing_decision_note": note or None,
+            }
+        ).eq("project_id", project_id).eq("gc_id", gc_id)
+        # Compare-and-set on 'pending': a decision racing another decision
+        # (or a removal) finds nothing to decide and stops here.
+        .eq("pricing_approval_status", "pending").execute()
+    ).data
+    if not decided:
+        raise ProposalSendError("No pricing change is awaiting approval for this GC.")
     audit(
         user_id, "proposal.amounts_change_approved", "project", project_id,
         {
@@ -1014,15 +1110,20 @@ def reject_gc_pricing_change(
     head = send_window_head(project_id)
     link = _pending_link_or_409(sb, project_id, gc_id)
     requested = _link_overrides(link)
-    sb.table("project_gcs").update(
-        {
-            **{col: None for _key, col in _OVERRIDE_COLUMNS},
-            "pricing_approval_status": "rejected",
-            "pricing_decided_by": user_id,
-            "pricing_decided_at": datetime.now(timezone.utc).isoformat(),
-            "pricing_decision_note": note or None,
-        }
-    ).eq("project_id", project_id).eq("gc_id", gc_id).execute()
+    decided = (
+        sb.table("project_gcs").update(
+            {
+                **{col: None for _key, col in _OVERRIDE_COLUMNS},
+                "pricing_approval_status": "rejected",
+                "pricing_decided_by": user_id,
+                "pricing_decided_at": datetime.now(timezone.utc).isoformat(),
+                "pricing_decision_note": note or None,
+            }
+        ).eq("project_id", project_id).eq("gc_id", gc_id)
+        .eq("pricing_approval_status", "pending").execute()
+    ).data
+    if not decided:
+        raise ProposalSendError("No pricing change is awaiting approval for this GC.")
     audit(
         user_id, "proposal.amounts_change_rejected", "project", project_id,
         {
@@ -1451,18 +1552,48 @@ def generate_documents(
             "email_log_id": None,
         }
         if prior:
-            row = (
-                sb.table("proposal_sends").update(fields).eq("id", prior["id"]).execute()
-            ).data[0]
+            # Compare-and-set on the row we read: it must still be unsent AND
+            # still carry the document we are replacing. A send or mark that
+            # claimed it meanwhile, or another generate that already swapped
+            # the file, leaves nothing to update, so the delivered (or newer)
+            # document is never reverted or orphaned.
+            query = (
+                sb.table("proposal_sends").update(fields).eq("id", prior["id"])
+                .in_("status", ["generated", "failed"])
+            )
+            query = (
+                query.eq("file_id", prior["file_id"])
+                if prior.get("file_id")
+                else query.is_("file_id", "null")
+            )
+            replaced = query.execute().data
+            if not replaced:
+                _delete_file_row(file_row["id"])
+                raise ProposalSendError(
+                    f"{gc['name']}'s proposal changed while generating (it was sent, or "
+                    "regenerated by another request). Refresh and try again."
+                )
+            row = replaced[0]
             # The replaced (never-sent) document is now unreachable — clean it up.
             if prior.get("file_id") and prior["file_id"] != file_row["id"]:
                 _delete_file_row(prior["file_id"])
         else:
-            row = (
-                sb.table("proposal_sends")
-                .insert({"project_id": project_id, "gc_id": gc["id"], **fields})
-                .execute()
-            ).data[0]
+            try:
+                row = (
+                    sb.table("proposal_sends")
+                    .insert({"project_id": project_id, "gc_id": gc["id"], **fields})
+                    .execute()
+                ).data[0]
+            except APIError as exc:
+                # unique (project_id, gc_id): another generate for this GC won
+                # the insert in the same instant.
+                if getattr(exc, "code", None) != "23505":
+                    raise
+                _delete_file_row(file_row["id"])
+                raise ProposalSendError(
+                    f"{gc['name']}'s proposal was generated by another request at the "
+                    "same time. Refresh and try again."
+                ) from exc
         audit(user_id, "proposal.generate", "project_file", file_row["id"],
               {"gc_id": gc["id"], "filename": filename, "draft_id": draft_id})
         created.append({**row, "_file": file_row})
@@ -1908,7 +2039,17 @@ def send_proposals(
         if not claimed:
             results.append(_result(row, "skipped", "claimed by another request"))
             continue
+        before_claim = row
         row = claimed[0]
+        # The pending set above is a batch-level snapshot; a request can land
+        # while earlier rows are being emailed. Re-check THIS GC now that its
+        # row is claimed (a request that sees 'sending' backs itself out).
+        if _gc_pending_now(sb, project_id, row["gc_id"]):
+            sb.table("proposal_sends").update(
+                {"status": before_claim["status"], "gc_email": before_claim.get("gc_email")}
+            ).eq("id", row["id"]).eq("status", "sending").execute()
+            results.append(_result(before_claim, "skipped", PENDING_APPROVAL_MESSAGE))
+            continue
 
         try:
             if resolve_error is not None:
@@ -2517,7 +2658,22 @@ def mark_submitted(project_id: str, user_id: str, proposal_ids: list[str]) -> di
         if not claimed:
             results.append(_result(row, "skipped", "claimed by another request"))
             continue
+        before_claim = row
         row = claimed[0]
+        # Same per-row re-check as send_proposals: the pending snapshot is
+        # batch-level, the claim is not.
+        if _gc_pending_now(sb, project_id, row["gc_id"]):
+            sb.table("proposal_sends").update(
+                {
+                    "status": before_claim["status"],
+                    "sent_via": before_claim.get("sent_via"),
+                    "sent_at": None,
+                    "sent_by": None,
+                    "error": before_claim.get("error"),
+                }
+            ).eq("id", row["id"]).eq("status", "sent").is_("email_log_id", "null").execute()
+            results.append(_result(before_claim, "skipped", PENDING_APPROVAL_MESSAGE))
+            continue
         record_send_event(
             row, kind="initial", via="external", recipients=None,
             email_log_id=None, user_id=user_id,

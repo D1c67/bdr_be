@@ -941,3 +941,196 @@ def test_export_job_streams_the_whole_nested_tree(monkeypatch):
         "SPECS/Specifications/SPECS.pdf",
         "MANIFEST.txt",
     }
+
+
+# ── refresh_job: completion notification fires once, on the way out ──────
+
+
+class _JobRefreshSb:
+    """Fake supabase for refresh_job: bid_split_files select returns the
+    given statuses; bid_split_jobs update returns `job_rows` only when the
+    conditional `.eq("status", "processing")` was applied (the write that
+    takes a job out of processing), or the plain row otherwise. Every update
+    payload is recorded."""
+
+    def __init__(self, statuses, job_row, currently_processing=True):
+        self.statuses = statuses
+        self.job_row = job_row
+        self.currently_processing = currently_processing
+        self.updates = []
+        self._table = None
+        self._filters = []
+        self._payload = None
+
+    def table(self, name):
+        self._table = name
+        self._filters = []
+        self._payload = None
+        return self
+
+    def select(self, *_a, **_k):
+        return self
+
+    def update(self, payload):
+        self._payload = payload
+        return self
+
+    def eq(self, col, val):
+        self._filters.append((col, val))
+        return self
+
+    def execute(self):
+        import types
+
+        if self._table == "bid_split_files":
+            return types.SimpleNamespace(data=[{"status": s} for s in self.statuses])
+        self.updates.append(dict(self._payload))
+        conditional = ("status", "processing") in self._filters
+        if conditional and not self.currently_processing:
+            return types.SimpleNamespace(data=[])
+        return types.SimpleNamespace(data=[self.job_row])
+
+
+def _refresh_with(monkeypatch, statuses, currently_processing=True):
+    sb = _JobRefreshSb(statuses, {"id": "j1", "created_by": "u1"}, currently_processing)
+    sent = []
+    monkeypatch.setattr(bid_split, "get_supabase", lambda: sb)
+    monkeypatch.setattr(
+        bid_split.notifications, "notify_user", lambda *a, **k: sent.append((a, k))
+    )
+    bid_split.refresh_job("j1")
+    return sb, sent
+
+
+def test_refresh_job_notifies_creator_when_every_file_is_done(monkeypatch):
+    sb, sent = _refresh_with(monkeypatch, ["done", "done", "done"])
+    assert sb.updates[-1]["status"] == "done"
+    assert len(sent) == 1
+    args, kwargs = sent[0]
+    assert args[0] == "u1"
+    assert args[1] is None  # no project
+    assert args[2] == bid_split.JOB_FINISHED_NOTIFICATION
+    assert "all 3 files are ready" in args[3]
+    assert kwargs["mirror_email"] is False
+    assert kwargs["metadata"] == {"job_id": "j1", "status": "done"}
+
+
+def test_refresh_job_reports_partial_failure_counts(monkeypatch):
+    _, sent = _refresh_with(monkeypatch, ["done", "failed", "done"])
+    assert len(sent) == 1
+    args, kwargs = sent[0]
+    assert "2 of 3 files are ready, 1 failed" in args[3]
+    assert kwargs["metadata"]["status"] == "done_with_errors"
+
+
+def test_refresh_job_stays_quiet_while_files_are_still_running(monkeypatch):
+    sb, sent = _refresh_with(monkeypatch, ["done", "running"])
+    assert sb.updates[-1]["status"] == "processing"
+    assert sent == []
+
+
+def test_refresh_job_does_not_notify_twice_for_one_completion(monkeypatch):
+    # The conditional write finds the job already out of processing (another
+    # worker's terminal write landed first): no rows back, no second bell row.
+    sb, sent = _refresh_with(monkeypatch, ["done", "done"], currently_processing=False)
+    assert sb.updates[-1]["status"] == "done"
+    assert sent == []
+
+
+def test_refresh_job_notification_failure_never_breaks_the_mark(monkeypatch):
+    sb = _JobRefreshSb(["done"], {"id": "j1", "created_by": "u1"})
+    monkeypatch.setattr(bid_split, "get_supabase", lambda: sb)
+
+    def boom(*_a, **_k):
+        raise RuntimeError("notifications down")
+
+    monkeypatch.setattr(bid_split.notifications, "notify_user", boom)
+    bid_split.refresh_job("j1")  # must not raise
+    assert sb.updates[-1]["status"] == "done"
+
+
+def test_refresh_job_skips_the_bell_for_a_job_with_no_creator(monkeypatch):
+    sb = _JobRefreshSb(["done"], {"id": "j1", "created_by": None})
+    sent = []
+    monkeypatch.setattr(bid_split, "get_supabase", lambda: sb)
+    monkeypatch.setattr(
+        bid_split.notifications, "notify_user", lambda *a, **k: sent.append(a)
+    )
+    bid_split.refresh_job("j1")
+    assert sent == []
+
+
+def test_refresh_job_recheck_lands_terminal_after_a_stale_processing_write(monkeypatch):
+    """First read sees a running file; by the time the processing write lands
+    the other worker has finished it. The recheck re-derives and the job
+    ends up done (with the bell row) instead of stuck at processing."""
+    sb = _JobRefreshSb(["done", "running"], {"id": "j1", "created_by": "u1"})
+    reads = {"n": 0}
+    original_execute = sb.execute
+
+    def execute():
+        if sb._table == "bid_split_files":
+            reads["n"] += 1
+            if reads["n"] >= 2:
+                sb.statuses = ["done", "done"]
+        return original_execute()
+
+    sb.execute = execute
+    sent = []
+    monkeypatch.setattr(bid_split, "get_supabase", lambda: sb)
+    monkeypatch.setattr(
+        bid_split.notifications, "notify_user", lambda *a, **k: sent.append(a)
+    )
+    bid_split.refresh_job("j1")
+    assert [u["status"] for u in sb.updates] == ["processing", "done"]
+    assert len(sent) == 1
+
+
+# ── GET /jobs?status= narrows the history read ───────────────────────────
+
+
+def test_list_jobs_status_filter_rejects_unknown_values():
+    with pytest.raises(HTTPException) as exc:
+        bs.list_jobs(limit=10, offset=0, status_filter="cooking", _=None)
+    assert exc.value.status_code == 422
+
+
+def test_list_jobs_status_filter_applies_eq(monkeypatch):
+    class _Sb:
+        def __init__(self):
+            self.filters = []
+            self.table_name = None
+
+        def table(self, name):
+            self.table_name = name
+            return self
+
+        def select(self, *_a, **_k):
+            return self
+
+        def eq(self, col, val):
+            self.filters.append((self.table_name, col, val))
+            return self
+
+        def in_(self, *_a, **_k):
+            return self
+
+        def order(self, *_a, **_k):
+            return self
+
+        def range(self, *_a, **_k):
+            return self
+
+        def execute(self):
+            import types
+
+            return types.SimpleNamespace(data=[])
+
+    sb = _Sb()
+    monkeypatch.setattr(bs, "get_supabase", lambda: sb)
+    assert bs.list_jobs(limit=10, offset=0, status_filter="processing", _=None) == []
+    assert ("bid_split_jobs", "status", "processing") in sb.filters
+    sb2 = _Sb()
+    monkeypatch.setattr(bs, "get_supabase", lambda: sb2)
+    bs.list_jobs(limit=10, offset=0, status_filter=None, _=None)
+    assert sb2.filters == []

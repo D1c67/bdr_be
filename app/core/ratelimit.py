@@ -127,6 +127,12 @@ outbound_email_rate_limit = rate_limit(
     lambda: get_settings().outbound_email_rate_limit_per_hour,
     window_seconds=3600,
 )
+# Every late-GC price-change request notifies and emails every Executive.
+gc_pricing_request_rate_limit = rate_limit(
+    RateLimitScope.GC_PRICING_REQUEST,
+    lambda: get_settings().gc_pricing_request_rate_limit_per_hour,
+    window_seconds=3600,
+)
 # The notification log is the app's most query-amplifying read: one request
 # assembles the event view from dozens of project-scoped lookups.
 notification_log_rate_limit = rate_limit(

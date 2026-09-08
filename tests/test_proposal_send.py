@@ -392,6 +392,22 @@ def test_send_window_covers_send_out_through_bid_outcome(monkeypatch):
             wf, "load_category_state", lambda _pid, h=head: {"send_out": {"current_task": h}}
         )
 
+    project = {"abandoned_at": None}
+
+    class _ProjQuery:
+        def __getattr__(self, _name):
+            return lambda *a, **k: self
+
+        def execute(self):
+            return _ExtraExec([project])
+
+    class _ProjSB:
+        def table(self, name):
+            assert name == "projects"
+            return _ProjQuery()
+
+    monkeypatch.setattr(psend, "get_supabase", lambda: _ProjSB())
+
     for head in ("gc_pricing", "verify", "send_out", "submitted", "bid_outcome"):
         _head(head)
         assert psend.send_window_head("p1") == head
@@ -399,6 +415,11 @@ def test_send_window_covers_send_out_through_bid_outcome(monkeypatch):
         _head(head)
         with pytest.raises(ProposalSendError, match="has not reached the Send Out stage"):
             psend.send_window_head("p1")
+    # An abandoned bid keeps its lane head but the window is closed for it.
+    project["abandoned_at"] = "2026-09-08T00:00:00+00:00"
+    _head("submitted")
+    with pytest.raises(ProposalSendError, match="abandoned"):
+        psend.send_window_head("p1")
 
 
 def test_stamped_amounts_none_only_for_prefeature_rows():

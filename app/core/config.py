@@ -126,7 +126,7 @@ class Settings(BaseSettings):
     bid_split_render_long_side: int = 1568
     bid_split_render_jpeg_quality: int = 70
     bid_split_max_pages_per_file: int = 600
-    bid_split_max_files_per_job: int = 20
+    bid_split_max_files_per_job: int = 100
     # File triage (stage 1): one vision call over a sample of pages decides
     # what the FILE is before any per-page work. Specifications, RFP and
     # addendum files are identified and left intact (never split, never
@@ -312,6 +312,7 @@ class Settings(BaseSettings):
     bulk_send_rate_limit_per_min: int = 3     # RFQ email fan-out
     rfq_nudge_rate_limit_per_min: int = 3     # RFQ nudge reminder fan-out
     outbound_email_rate_limit_per_hour: int = 60   # invites + package / proposal mail
+    gc_pricing_request_rate_limit_per_hour: int = 20  # late-GC price-change requests (Executive fan-out)
     notification_log_rate_limit_per_min: int = 30  # per-project log assembly (query fan-out)
     report_rate_limit_per_min: int = 30       # bid-invitations report assembly
     default_rate_limit_per_min: int = 240     # generous catch-all for all other routes

@@ -58,7 +58,7 @@ import httpx
 
 from app.core.config import Settings, get_settings
 from app.core.supabase_client import get_supabase
-from app.services import llm, llm_errors, pdf_split, storage
+from app.services import llm, llm_errors, notifications, pdf_split, storage
 from app.services.llm import LlmBadOutput
 
 logger = logging.getLogger(__name__)
@@ -260,10 +260,18 @@ def _mark(file_id: str, **fields) -> None:
         refresh_job(rows[0]["job_id"])
 
 
-def refresh_job(job_id: str) -> None:
+def refresh_job(job_id: str, _recheck: bool = True) -> None:
     """Derive the job's aggregate status from its files. Called after every
     file transition; last writer wins and all inputs are re-read, so
-    concurrent per-file workers converge on the right answer."""
+    concurrent per-file workers converge on the right answer.
+
+    The write that takes a job OUT of processing is conditional on the row
+    still reading processing, so the completion notification below fires
+    exactly once per run even when two workers finish their files together.
+    A processing write re-reads the files afterwards: if every file has
+    already settled (the other worker's terminal write raced ahead of this
+    stale one), one more pass re-derives and lands the terminal status, so
+    the job cannot stick at processing with nothing left to do."""
     sb = get_supabase()
     files = (
         sb.table("bid_split_files").select("status").eq("job_id", job_id).execute()
@@ -272,16 +280,69 @@ def refresh_job(job_id: str) -> None:
         return
     statuses = {f["status"] for f in files}
     if statuses & {"pending", "running"}:
-        status, completed_at = "processing", None
-    elif statuses == {"done"}:
-        status, completed_at = "done", _now_iso()
+        sb.table("bid_split_jobs").update(
+            {"status": "processing", "completed_at": None}
+        ).eq("id", job_id).execute()
+        if _recheck:
+            again = (
+                sb.table("bid_split_files").select("status").eq("job_id", job_id).execute()
+            ).data or []
+            if again and not ({f["status"] for f in again} & {"pending", "running"}):
+                refresh_job(job_id, _recheck=False)
+        return
+    if statuses == {"done"}:
+        status = "done"
     elif statuses == {"failed"}:
-        status, completed_at = "failed", _now_iso()
+        status = "failed"
     else:
-        status, completed_at = "done_with_errors", _now_iso()
-    sb.table("bid_split_jobs").update(
-        {"status": status, "completed_at": completed_at}
-    ).eq("id", job_id).execute()
+        status = "done_with_errors"
+    rows = (
+        sb.table("bid_split_jobs")
+        .update({"status": status, "completed_at": _now_iso()})
+        .eq("id", job_id)
+        .eq("status", "processing")
+        .execute()
+    ).data or []
+    if rows:
+        _notify_job_finished(rows[0], status, files)
+
+
+# In-app notification type for a finished run. The bell deep-links it to
+# /bid-splitter?job=<id> (metadata carries the job id; there is no project).
+JOB_FINISHED_NOTIFICATION = "bid_split.finished"
+
+
+def _notify_job_finished(job: dict, status: str, files: list[dict]) -> None:
+    """Tell whoever started the job that it has settled. The run continues on
+    the server after they leave the page, so the bell is how they learn it
+    finished; no email mirror (a split is a workbench action, not a task
+    hand-off). Best-effort: a notification failure never fails the mark."""
+    user_id = job.get("created_by")
+    if not user_id:
+        return
+    total = len(files)
+    done = sum(1 for f in files if f["status"] == "done")
+    failed = total - done
+    if status == "done":
+        message = f"Bid splitter finished: all {total} file{'s' if total != 1 else ''} are ready."
+    elif status == "failed":
+        message = f"Bid splitter finished: all {total} file{'s' if total != 1 else ''} failed."
+    else:
+        message = (
+            f"Bid splitter finished: {done} of {total} files are ready, "
+            f"{failed} failed."
+        )
+    try:
+        notifications.notify_user(
+            user_id,
+            None,
+            JOB_FINISHED_NOTIFICATION,
+            message,
+            mirror_email=False,
+            metadata={"job_id": job["id"], "status": status},
+        )
+    except Exception:  # noqa: BLE001 — the status write stands; the bell is best-effort
+        logger.exception("bid_split: completion notification failed for job %s", job["id"])
 
 
 def _delete_segments(file_id: str, keep_paths: set[str] | frozenset[str] = frozenset()) -> None:

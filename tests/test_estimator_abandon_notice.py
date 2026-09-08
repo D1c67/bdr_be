@@ -280,6 +280,7 @@ def endpoint(monkeypatch):
     calls: list[tuple] = []
     monkeypatch.setattr(proj_mod, "audit", lambda *a, **k: calls.append(("audit", a[1], a[4])))
     monkeypatch.setattr(proj_mod, "notify_role", lambda *a, **k: calls.append(("notify_role",)))
+    monkeypatch.setattr(proj_mod, "dismiss_notifications", lambda **kw: calls.append(("dismiss", kw)))
     monkeypatch.setattr(
         proj_mod, "_sweep_estimator_notifications", lambda pid: calls.append(("sweep", pid))
     )

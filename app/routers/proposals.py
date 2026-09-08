@@ -14,7 +14,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from app.core.config import get_settings
 from app.core.deps import CurrentUser, get_current_user, require_role, require_writer
-from app.core.ratelimit import ai_rate_limit, outbound_email_rate_limit
+from app.core.ratelimit import (
+    ai_rate_limit,
+    gc_pricing_request_rate_limit,
+    outbound_email_rate_limit,
+)
 from app.core.roles import INTERNAL_ROLES, VERIFY_ROLES
 from app.core.supabase_client import get_supabase
 from app.models.schemas import (
@@ -364,7 +368,10 @@ def set_proposal_amounts(
 # list for the response.
 
 
-@router.post("/proposals/amounts/{gc_id}/request")
+@router.post(
+    "/proposals/amounts/{gc_id}/request",
+    dependencies=[Depends(gc_pricing_request_rate_limit)],
+)
 def request_proposal_amounts_change(
     project_id: str,
     gc_id: str,
