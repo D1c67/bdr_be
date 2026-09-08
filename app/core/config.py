@@ -96,6 +96,50 @@ class Settings(BaseSettings):
     self_hosted_email_match_model: str = ""
     self_hosted_email_vary_model: str = ""
     self_hosted_aliases_model: str = ""
+    self_hosted_bid_split_model: str = ""
+
+    # ── Bid File Splitter (experimental; routers/bid_splitter.py) ─────────────
+    # Standalone AI tool that classifies every page of an uploaded bid-set PDF
+    # (rendered to an image, sent to a vision model) and splits the PDF into one
+    # output per contiguous category run. NOT wired into the bidding pipeline.
+    # Default OFF everywhere; the dev environment turns it on. While off every
+    # /bid-splitter route 404s and the frontend hides the page (same contract as
+    # the sub-app flags; the flag rides along in GET /features).
+    bid_file_splitter_enabled: bool = False
+    # Which provider pool serves the 'bid_split' feature: "anthropic",
+    # "openai", or "self_hosted" (the connection below + the vision-capable
+    # SELF_HOSTED_BID_SPLIT_MODEL). Unlike the other features the vendor is
+    # env-selectable, not fixed in llm.py _FEATURES: the whole point of the
+    # tool right now is comparing models. FULL_SELF_HOSTED_LLMS_ENABLED=true
+    # still overrides this to self-hosted (STRICT, like every feature); the
+    # reverse is allowed though — "self_hosted" here routes ONLY bid_split to
+    # the box while the rest of the app stays on its 3rd-party vendors.
+    bid_split_llm_provider: str = "anthropic"
+    claude_bid_split_model: str = "claude-opus-5"
+    openai_bid_split_model: str = "gpt-5.4-mini"
+    bid_split_max_tokens: int = 8000
+    # Pipeline tuning knobs (all per-file): how many page images ride in one
+    # model call, the rendered JPEG's long side in pixels / quality, and the
+    # guardrails on job size. Bigger pages_per_call = fewer calls but more
+    # tokens at risk per retry.
+    bid_split_pages_per_call: int = 8
+    bid_split_render_long_side: int = 1568
+    bid_split_render_jpeg_quality: int = 70
+    bid_split_max_pages_per_file: int = 600
+    bid_split_max_files_per_job: int = 20
+    # File triage (stage 1): one vision call over a sample of pages decides
+    # what the FILE is before any per-page work. Specifications, RFP and
+    # addendum files are identified and left intact (never split, never
+    # re-written) — only drawing sets and mixed packages go on to the
+    # per-page trade classification. triage_pages is the sample size; a
+    # verdict below triage_min_confidence escalates to the per-page pass
+    # instead of being trusted. island_max_pages caps the "island repair"
+    # absorption: a run of pages that long or shorter, sandwiched between two
+    # runs of one same category, is assumed misclassified (e.g. figures
+    # inside a spec book reading as drawings) and absorbed.
+    bid_split_triage_pages: int = 12
+    bid_split_triage_min_confidence: float = 0.7
+    bid_split_island_max_pages: int = 10
 
     # ── LLM health monitoring (app/services/llm_health.py) ────────────────────
     # Feeds the sidebar's "Model status" indicator. A background poller keeps a
@@ -447,6 +491,16 @@ class Settings(BaseSettings):
             ) from exc
         if any(d <= 0 for d in delays):
             raise ValueError("LLM_QUEUE_RETRY_DELAYS entries must be positive seconds.")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_bid_splitter(self) -> "Settings":
+        """A typo'd provider would otherwise surface as a KeyError mid-job."""
+        if self.bid_split_llm_provider not in ("anthropic", "openai", "self_hosted"):
+            raise ValueError(
+                "BID_SPLIT_LLM_PROVIDER must be 'anthropic', 'openai' or "
+                f"'self_hosted' (got {self.bid_split_llm_provider!r})."
+            )
         return self
 
     @property

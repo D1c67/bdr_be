@@ -29,6 +29,7 @@ dependencies = [
     # behaviors (object-dtype strings); hold the line until re-validated on 3.
     "pandas>=2.2,<3",
     "xlrd>=2.0.1",
+    "pypdfium2>=5.13.0",
 ]
 
 [dependency-groups]

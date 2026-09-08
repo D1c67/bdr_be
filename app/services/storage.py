@@ -5,14 +5,25 @@ short-TTL signed URLs (critical for the hardened estimator). Object paths are
 namespaced by project: `{project_id}/{category}/{uuid}-{filename}`.
 """
 
+import logging
 import string
 import time
 import uuid
 
+import httpx
+
 from app.core.config import get_settings
 from app.core.supabase_client import get_supabase
 
+logger = logging.getLogger(__name__)
+
 BUCKET = "project-files"
+
+# Large transfers to Supabase Storage occasionally die at the TLS layer (seen
+# on a ~180 MB bid-split upload as ReadError "SSLV3_ALERT_BAD_RECORD_MAC");
+# httpx discards the broken connection, so a retry gets a fresh one.
+_TRANSFER_ATTEMPTS = 3
+_TRANSFER_BACKOFF_S = 2.0
 
 # Characters Supabase Storage accepts in object keys (storage-api's isValidKey
 # allowlist). Anything else is rejected with a 400 InvalidKey at upload time:
@@ -101,7 +112,22 @@ def signed_url(
 
 
 def download_file(path: str) -> bytes:
-    return get_supabase().storage.from_(BUCKET).download(path)
+    """Download an object. A download is idempotent, so a dropped connection
+    (httpx.TransportError) is retried on a fresh one before giving up."""
+    for attempt in range(1, _TRANSFER_ATTEMPTS + 1):
+        try:
+            return get_supabase().storage.from_(BUCKET).download(path)
+        except httpx.TransportError:
+            if attempt == _TRANSFER_ATTEMPTS:
+                raise
+            logger.warning(
+                "storage download of %s dropped (attempt %d/%d); retrying",
+                path,
+                attempt,
+                _TRANSFER_ATTEMPTS,
+            )
+            time.sleep(_TRANSFER_BACKOFF_S * attempt)
+    raise AssertionError("unreachable")
 
 
 def delete_file(path: str) -> None:
@@ -175,6 +201,14 @@ def move_object(from_path: str, to_path: str) -> None:
     _signed_url_cache.pop(from_path, None)
 
 
+def copy_file(from_path: str, to_path: str) -> None:
+    """Copy an object within the bucket (server-side; the bytes never travel
+    through the app). Used by the bid-split training capture to preserve a
+    source PDF under `bid-splits/training/{file_id}/` so the example outlives
+    the job's deletion sweep."""
+    get_supabase().storage.from_(BUCKET).copy(from_path, to_path)
+
+
 def object_exists(path: str) -> bool:
     """Whether an object exists at `path`. Used to disambiguate a failed move
     during a transfer retry (destination present + source gone means a previous
@@ -184,6 +218,58 @@ def object_exists(path: str) -> bool:
         return bool(get_supabase().storage.from_(BUCKET).exists(path))
     except Exception:  # noqa: BLE001
         return False
+
+
+# ── Bid File Splitter objects (0111) ─────────────────────────────────────────
+
+
+def build_bid_split_source_path(job_id: str, filename: str) -> str:
+    """Object path for an uploaded Bid File Splitter source PDF. Splitter data
+    is standalone (no project), so it lives under a reserved `bid-splits/`
+    prefix in the same private bucket, keyed by job."""
+    return f"bid-splits/{job_id}/source/{uuid.uuid4().hex}-{safe_key_component(filename)}"
+
+
+def build_bid_split_output_path(job_id: str, filename: str) -> str:
+    """Object path for one split output PDF (a segment of a source file)."""
+    return f"bid-splits/{job_id}/output/{uuid.uuid4().hex}-{safe_key_component(filename)}"
+
+
+def delete_bid_split_prefix(job_id: str) -> None:
+    """Remove EVERY object under `bid-splits/{job_id}/` (sources and outputs).
+
+    Mirror of delete_draft_prefix for splitter jobs: the job-delete cleanup must
+    not trust the DB rows alone (a worker racing the delete can land an output
+    object after the rows were read). Splitter objects all live exactly two
+    levels deep — `bid-splits/{job_id}/{source|output}/{object}` — so a
+    two-level walk is complete."""
+    store = get_supabase().storage.from_(BUCKET)
+    prefix = f"bid-splits/{job_id}"
+
+    def _list_all(path: str) -> list[dict]:
+        out: list[dict] = []
+        offset = 0
+        while True:
+            page = store.list(path, {"limit": _LIST_PAGE, "offset": offset}) or []
+            out.extend(page)
+            if len(page) < _LIST_PAGE:
+                return out
+            offset += _LIST_PAGE
+
+    paths: list[str] = []
+    for folder in _list_all(prefix):
+        name = folder.get("name")
+        if not name:
+            continue
+        paths.extend(
+            f"{prefix}/{name}/{entry['name']}"
+            for entry in _list_all(f"{prefix}/{name}")
+            if entry.get("name")
+        )
+    if paths:
+        store.remove(paths)
+        for p in paths:
+            _signed_url_cache.pop(p, None)
 
 
 def delete_draft_prefix(draft_id: str) -> None:

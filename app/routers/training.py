@@ -1,10 +1,17 @@
 """Dev-only Training data — model output vs the user's corrected output.
 
-Backs the /training page (dev accounts only, any role). Today one feature
-section — BOQ extraction examples captured on confirm — with room for more
-capture surfaces to mount alongside. The exact model input/output are never
-copied onto the example row; the detail route joins the pristine
-`boq_analyses` row instead.
+Backs the /training page (dev accounts only, any role). Two feature sections:
+
+- BOQ extraction examples captured on confirm. The exact model input/output
+  are never copied onto the example row; the detail route joins the pristine
+  `boq_analyses` row instead. /training/boq/export emits fine-tuning JSONL.
+- Bid File Splitter examples captured on user corrections (0113). These are
+  fully denormalized - the example must outlive its routinely-deleted job.
+  There is deliberately NO export route for the splitter: its inputs are page
+  IMAGES, and a JSONL of the text prompts alone would not train a vision
+  model. The stored input_snapshot (prompts, page lists, render settings)
+  plus the training copy of the source PDF keep everything needed to build a
+  vision dataset later.
 
 Handlers are plain `def` — the sync Supabase SDK runs in FastAPI's threadpool.
 """
@@ -16,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.core.deps import CurrentUser, require_dev
 from app.core.supabase_client import get_supabase
-from app.models.schemas import BoqTrainingReviewIn
+from app.models.schemas import TrainingReviewIn
 from app.services.boq_training import gold_prompt_flags, reconstruct_gold
 
 router = APIRouter(prefix="/training", tags=["training"])
@@ -183,13 +190,17 @@ def boq_example_detail(example_id: str, user: CurrentUser = Depends(require_dev)
 @router.patch("/boq/{example_id}/review")
 def review_boq_example(
     example_id: str,
-    body: BoqTrainingReviewIn,
+    body: TrainingReviewIn,
     user: CurrentUser = Depends(require_dev),
 ):
     """Mark an example reviewed (with an optional note); false clears the review."""
+    return _apply_review("boq_training_examples", example_id, body, user)
+
+
+def _apply_review(table: str, example_id: str, body: TrainingReviewIn, user: CurrentUser) -> dict:
     sb = get_supabase()
     exists = (
-        sb.table("boq_training_examples").select("id").eq("id", example_id).limit(1).execute()
+        sb.table(table).select("id").eq("id", example_id).limit(1).execute()
     ).data or []
     if not exists:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Training example not found")
@@ -202,5 +213,79 @@ def review_boq_example(
         if body.reviewed
         else {"reviewed_by": None, "reviewed_at": None, "review_note": None}
     )
-    sb.table("boq_training_examples").update(patch).eq("id", example_id).execute()
+    sb.table(table).update(patch).eq("id", example_id).execute()
     return patch
+
+
+# ── Bid File Splitter ────────────────────────────────────────────────────
+#
+# Deliberately NOT gated on BID_FILE_SPLITTER_ENABLED: captured examples stay
+# reviewable even while the tool itself is toggled off (the router mount's
+# Bidding flag still applies, like the BOQ section). require_dev everywhere.
+
+# List rows exclude the heavy jsonbs (input snapshot, pristine model output,
+# corrected output); diff_json is stripped to its counts + flags in code.
+_BID_SPLIT_LIST_SELECT = (
+    "id, file_id, job_id, source_filename, page_count, model, modified, "
+    "diff_json, training_source_path, corrected_by, corrected_at, "
+    "reviewed_by, reviewed_at, "
+    "corrected_by_profile:profiles!bid_split_training_examples_corrected_by_fkey(full_name), "
+    "reviewed_by_profile:profiles!bid_split_training_examples_reviewed_by_fkey(full_name)"
+)
+
+
+@router.get("/bid-split")
+def list_bid_split_examples(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0, le=1_000_000),
+    user: CurrentUser = Depends(require_dev),
+):
+    """Captured splitter examples, newest correction first."""
+    resp = (
+        get_supabase()
+        .table("bid_split_training_examples")
+        .select(_BID_SPLIT_LIST_SELECT, count="exact")
+        .order("corrected_at", desc=True)
+        .range(offset, offset + limit - 1)
+        .execute()
+    )
+    rows = resp.data or []
+    for row in rows:
+        diff = row.pop("diff_json", None) or {}
+        row["counts"] = diff.get("counts") or {}
+        row["flags"] = diff.get("flags") or []
+        # The tiny kind verdict rides along so the list can show "model -> user"
+        # without pulling the changed-runs payload.
+        row["diff_json"] = {"kind": diff.get("kind")}
+    return {"rows": rows, "total": resp.count or 0, "offset": offset, "limit": limit}
+
+
+@router.get("/bid-split/{example_id}")
+def bid_split_example_detail(example_id: str, user: CurrentUser = Depends(require_dev)):
+    """The full example: input snapshot, pristine model output, the user's
+    corrected output and the whole diff."""
+    rows = (
+        get_supabase()
+        .table("bid_split_training_examples")
+        .select(
+            "*, "
+            "corrected_by_profile:profiles!bid_split_training_examples_corrected_by_fkey(full_name), "
+            "reviewed_by_profile:profiles!bid_split_training_examples_reviewed_by_fkey(full_name)"
+        )
+        .eq("id", example_id)
+        .limit(1)
+        .execute()
+    ).data or []
+    if not rows:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Training example not found")
+    return rows[0]
+
+
+@router.patch("/bid-split/{example_id}/review")
+def review_bid_split_example(
+    example_id: str,
+    body: TrainingReviewIn,
+    user: CurrentUser = Depends(require_dev),
+):
+    """Mark an example reviewed (with an optional note); false clears the review."""
+    return _apply_review("bid_split_training_examples", example_id, body, user)

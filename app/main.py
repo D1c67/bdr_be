@@ -228,11 +228,26 @@ async def _storage_exception_handler(_: Request, exc: StorageException) -> JSONR
 # is a transient upstream fault: answer 502 + retry guidance, never a bare 500.
 import httpx  # noqa: E402
 
+_upstream_logger = logging.getLogger("app.upstream")
+
 
 @app.exception_handler(httpx.TransportError)
 async def _upstream_transport_error_handler(
-    _: Request, exc: httpx.TransportError
+    request: Request, exc: httpx.TransportError
 ) -> JSONResponse:
+    # A registered handler bypasses ServerErrorMiddleware's traceback logging,
+    # so log here or the drop is invisible (which upstream, which call).
+    try:
+        host = exc.request.url.host
+    except RuntimeError:  # httpx raises when no request was attached
+        host = "<unknown host>"
+    _upstream_logger.exception(
+        "Upstream transport error (%s) from %s while handling %s %s",
+        type(exc).__name__,
+        host,
+        request.method,
+        request.url.path,
+    )
     return JSONResponse(
         status_code=status.HTTP_502_BAD_GATEWAY,
         content={
@@ -254,7 +269,6 @@ async def _upstream_transport_error_handler(
 # request URL is deliberately not echoed to the client — Graph upload URLs embed
 # pre-authenticated tokens — and the full detail is logged here instead, because
 # a registered handler bypasses ServerErrorMiddleware's traceback logging.
-_upstream_logger = logging.getLogger("app.upstream")
 
 
 @app.exception_handler(httpx.HTTPStatusError)
@@ -306,6 +320,7 @@ def features(_: CurrentUser = Depends(get_current_user)) -> dict[str, bool]:
 from app.routers import (  # noqa: E402
     analytics,
     bid_drafts,
+    bid_splitter,
     boq_analysis,
     change_review,
     emails,
@@ -384,6 +399,11 @@ app.include_router(llm_status.router)
 # Dev AI monitor (queue, failures, retries). Shared for the same reason; every
 # route requires a dev account (require_dev) on top of auth.
 app.include_router(llm_monitor.router)
+# Bid File Splitter — experimental standalone AI tool, gated by its OWN env flag
+# (BID_FILE_SPLITTER_ENABLED, default off → every route 404s), not a sub-app:
+# it is not connected to the bidding pipeline yet, so it must not ride the
+# BIDDING flag. The dependency lives on the router itself (core/features.py).
+app.include_router(bid_splitter.router)
 
 # Bidding — the bid pipeline, its files/notes, and the external estimator portal.
 app.include_router(workflow.router, dependencies=_BIDDING)

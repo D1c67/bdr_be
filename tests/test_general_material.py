@@ -155,3 +155,55 @@ def test_tax_reset_noop_without_prior_attestation():
     assert gm._tax_reset(None, "file-1", 100) == {}
     prior = {"amount": "100", "estimate_file_id": "file-1", "tax_included": None}
     assert gm._tax_reset(prior, "file-2", 250) == {}
+
+
+# ── needs_combination_upgrade: pre-combination rows re-extract on read ───────
+
+
+def test_upgrade_flags_pre_combination_extraction():
+    row = {
+        "source": "extracted",
+        "status": "done",
+        "raw_extraction": {"wiring_material_cost": 100, "found": True},
+    }
+    assert gm.needs_combination_upgrade(row) is True
+
+
+def test_upgrade_skips_combined_shape_even_with_null_component():
+    row = {
+        "source": "extracted",
+        "status": "done",
+        "raw_extraction": {
+            "wiring_material_cost": 100,
+            "other_items_material_cost": None,  # searched and not found: settled
+            "found": True,
+        },
+    }
+    assert gm.needs_combination_upgrade(row) is False
+
+
+def test_upgrade_skips_manual_figures():
+    row = {
+        "source": "manual",
+        "status": "done",
+        "raw_extraction": {"wiring_material_cost": 100, "found": True},
+    }
+    assert gm.needs_combination_upgrade(row) is False
+
+
+def test_upgrade_skips_non_done_rows():
+    # not_found/failed/pending must never re-trigger: the no-estimate-file
+    # outcome keeps the old raw_extraction, and this gate is what stops a loop.
+    for st in ("not_found", "failed", "pending", "running"):
+        row = {
+            "source": "extracted",
+            "status": st,
+            "raw_extraction": {"wiring_material_cost": 100, "found": True},
+        }
+        assert gm.needs_combination_upgrade(row) is False
+
+
+def test_upgrade_skips_rows_without_raw_extraction():
+    assert gm.needs_combination_upgrade(
+        {"source": "extracted", "status": "done", "raw_extraction": None}
+    ) is False

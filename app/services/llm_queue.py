@@ -51,11 +51,13 @@ _WORKER_TOKEN = uuid.uuid4().hex
 JOB_BOQ = "boq_extraction"
 JOB_GENERAL_MATERIAL = "general_material"
 JOB_PROPOSAL = "proposal_lines"
+JOB_BID_SPLIT = "bid_split"
 
 _FEATURE_BY_TYPE = {
     JOB_BOQ: "boq",
     JOB_GENERAL_MATERIAL: "estimate",
     JOB_PROPOSAL: "proposal",
+    JOB_BID_SPLIT: "bid_split",
 }
 
 _ACTIVE_STATUSES = ("queued", "running")
@@ -134,6 +136,17 @@ def _spec(job_type: str) -> _JobSpec:
             lambda p: m.execute(p["draft_id"]),
             lambda target, fields: m._mark(target, **fields),
             lambda target: _row_status("proposal_drafts", "id", target),
+        )
+    if job_type == JOB_BID_SPLIT:
+        from app.services import bid_split as m
+
+        return _JobSpec(
+            "bid_split",
+            # forced_kind rides in the payload (a reprocess pins the user's
+            # verdict), so lease requeues keep forcing the same way.
+            lambda p: m.execute(p["file_id"], forced_kind=p.get("forced_kind")),
+            lambda target, fields: m._mark(target, **fields),
+            lambda target: _row_status("bid_split_files", "id", target),
         )
     raise KeyError(f"Unknown llm job type: {job_type}")
 

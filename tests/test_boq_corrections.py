@@ -45,9 +45,9 @@ from app.models.schemas import (
     BoqGroupMapIn,
     BoqItemSrc,
     BoqOverrideIn,
-    BoqTrainingReviewIn,
     RFQGroupIn,
     RFQLineItemIn,
+    TrainingReviewIn,
 )
 from app.routers import boq_analysis as boq_router
 from app.routers import training as training_router
@@ -702,23 +702,23 @@ def test_training_review_sets_and_clears(monkeypatch):
     dev = _user(uid="dev1", is_dev=True)
 
     training_router.review_boq_example(
-        "ex1", BoqTrainingReviewIn(reviewed=True, note="looks right"), user=dev
+        "ex1", TrainingReviewIn(reviewed=True, note="looks right"), user=dev
     )
     row = db.tables["boq_training_examples"][0]
     assert row["reviewed_by"] == "dev1" and row["reviewed_at"]
     assert row["review_note"] == "looks right"
 
-    training_router.review_boq_example("ex1", BoqTrainingReviewIn(reviewed=False), user=dev)
+    training_router.review_boq_example("ex1", TrainingReviewIn(reviewed=False), user=dev)
     row = db.tables["boq_training_examples"][0]
     assert row["reviewed_by"] is None and row["reviewed_at"] is None and row["review_note"] is None
 
     with pytest.raises(HTTPException) as exc:
         training_router.review_boq_example(
-            "nope", BoqTrainingReviewIn(reviewed=True), user=dev
+            "nope", TrainingReviewIn(reviewed=True), user=dev
         )
     assert exc.value.status_code == 404
     with pytest.raises(ValidationError):
-        BoqTrainingReviewIn(reviewed=True, note="x" * 2001)
+        TrainingReviewIn(reviewed=True, note="x" * 2001)
 
 
 # ── Gold reconstruction + fine-tuning export ─────────────────────────────────

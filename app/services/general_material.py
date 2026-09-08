@@ -311,6 +311,22 @@ def execute(project_id: str) -> None:
         _maybe_bounce(project_id, prior_amount, None)
 
 
+def needs_combination_upgrade(row: dict[str, Any]) -> bool:
+    """True for a committed extraction stored before the figure became the
+    wiring + Other Items combination (its raw_extraction predates the
+    other_items key). Such a figure is wiring alone, which is wrong by
+    definition now, so the read path queues a fresh extraction instead of
+    waiting for someone to notice the breakdown and re-run by hand.
+
+    Gated to status='done' so a re-run that ends anywhere else (not_found,
+    failed) can never re-trigger this: the no-estimate-file outcome keeps the
+    old raw_extraction, and only the done gate keeps that from looping."""
+    if row.get("source") != "extracted" or row.get("status") != "done":
+        return False
+    raw = row.get("raw_extraction")
+    return isinstance(raw, dict) and "other_items_material_cost" not in raw
+
+
 def is_stale_running(row: dict[str, Any], now: datetime | None = None) -> bool:
     if row.get("status") not in ("pending", "running"):
         return False

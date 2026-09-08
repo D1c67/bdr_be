@@ -16,9 +16,11 @@ def my_notifications(user: CurrentUser = Depends(get_current_user)):
         # Explicit list, not "*": the bell serves every role including the
         # external estimator, so infrastructure columns (email_log_id) stay
         # server-side rather than riding along to the least-trusted client.
+        # `metadata` is the deep-link payload (gc_id for gc_pricing.* rows,
+        # 0118); only internal roles ever receive rows that carry it.
         .select(
             "id, user_id, project_id, type, message, read_at, created_at,"
-            " dismissed_at, rfq_id"
+            " dismissed_at, rfq_id, metadata"
         )
         .eq("user_id", user.id)
         # Auto-dismissed (task complete) rows drop out of the bell entirely.

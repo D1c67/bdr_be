@@ -26,6 +26,7 @@ from app.models.schemas import (
     ProjectUpdate,
 )
 from app.services import (
+    bid_date_change_email,
     email_ingest,
     estimator_lifecycle,
     pm,
@@ -98,11 +99,37 @@ def _serialize_cat_state(state: dict[str, dict]) -> dict[str, dict]:
     return {cat: {"category": cat, **vals} for cat, vals in state.items()}
 
 
-def _present(project: dict, role: Role, cat_state: dict[str, dict] | None = None) -> dict:
+def _pending_gc_pricing_counts(project_ids: list[str]) -> dict[str, int]:
+    """project_id -> GCs whose per-GC price change awaits an Executive (0118).
+    The dashboard lists such a project as an Executive task; the stage itself
+    never moves for it."""
+    if not project_ids:
+        return {}
+    rows = (
+        get_supabase()
+        .table("project_gcs")
+        .select("project_id")
+        .eq("pricing_approval_status", "pending")
+        .in_("project_id", project_ids)
+        .execute()
+    ).data or []
+    counts: dict[str, int] = {}
+    for r in rows:
+        counts[r["project_id"]] = counts.get(r["project_id"], 0) + 1
+    return counts
+
+
+def _present(
+    project: dict,
+    role: Role,
+    cat_state: dict[str, dict] | None = None,
+    pending_gc_pricing: int | None = None,
+) -> dict:
     """Attach the derived lifecycle `status` (from the embedded bid outcome, if
     any) plus the per-category `category_state`, and redact. Pass every returned
     project row through here so the API `status` field stays consistent with the
-    dashboard/analytics derivation."""
+    dashboard/analytics derivation. `pending_gc_pricing` is the 0118 approval
+    count for the dashboard (left at the schema default when not supplied)."""
     outcome = project.pop("bid_outcomes", None)
     # The projects↔bid_outcomes FK is unique, so PostgREST may embed it as a
     # single object (to-one) or a list depending on version — handle both.
@@ -117,6 +144,8 @@ def _present(project: dict, role: Role, cat_state: dict[str, dict] | None = None
     )
     if cat_state is not None:
         project["category_state"] = _serialize_cat_state(cat_state)
+    if pending_gc_pricing is not None:
+        project["gc_pricing_approvals_pending"] = pending_gc_pricing
     return redact_for_role(project, role)
 
 
@@ -161,8 +190,12 @@ def list_projects(
         query = query.neq("current_stage", "pm_only").neq("current_stage", "cp_only")
     resp = query.order("created_at", desc=True).execute()
     rows = resp.data or []
-    states = workflow.load_category_states([p["id"] for p in rows])
-    return [_present(p, user.role, states.get(p["id"])) for p in rows]
+    ids = [p["id"] for p in rows]
+    states = workflow.load_category_states(ids)
+    pending = _pending_gc_pricing_counts(ids)
+    return [
+        _present(p, user.role, states.get(p["id"]), pending.get(p["id"], 0)) for p in rows
+    ]
 
 
 # Registered before GET /{project_id} so the literal path wins the match.
@@ -411,6 +444,7 @@ def get_project(project_id: str, user: CurrentUser = Depends(get_current_user)):
         _fetch_project_with_outcome(project_id),
         user.role,
         workflow.load_category_state(project_id),
+        _pending_gc_pricing_counts([project_id]).get(project_id, 0),
     )
 
 
@@ -494,6 +528,13 @@ def update_project(
             status.HTTP_403_FORBIDDEN,
             f"Your role may not edit: {', '.join(denied)}",
         )
+    # The internal bid date is the deadline the whole team works against, so a
+    # change to it is emailed to every internal user (bid_date_change_email).
+    # Read the stored value first: the email states old and new, and a patch
+    # that re-sends the same date must stay silent.
+    previous_bid_at = (
+        _stored_internal_bid_at(project_id) if "internal_bid_at" in patch else None
+    )
     try:
         updated = (
             get_supabase().table("projects").update(patch).eq("id", project_id).execute()
@@ -505,7 +546,27 @@ def update_project(
     if not updated:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
     audit(user.id, "project.update", "project", project_id, patch)
+    if "internal_bid_at" in patch:
+        current_bid_at = updated[0].get("internal_bid_at")
+        if bid_date_change_email.bid_date_changed(previous_bid_at, current_bid_at):
+            bid_date_change_email.queue_internal_bid_date_change(
+                project_id, previous_bid_at, current_bid_at, user.id
+            )
     return _present(updated[0], user.role)
+
+
+def _stored_internal_bid_at(project_id: str) -> str | None:
+    """The internal bid date as it stands before a PATCH rewrites it. A missing
+    project reads as None here and 404s on the update that follows."""
+    rows = (
+        get_supabase()
+        .table("projects")
+        .select("internal_bid_at")
+        .eq("id", project_id)
+        .limit(1)
+        .execute()
+    ).data or []
+    return rows[0].get("internal_bid_at") if rows else None
 
 
 # ── Abandon / reactivate ────────────────────────────────────────────────────
@@ -679,37 +740,9 @@ def log_project_open(
 
 def _project_gc_rows(project_id: str) -> list[dict]:
     """Wire shape shared by the GET and returned from every membership write
-    (the panel swaps its whole list for the response). selected_contact_ids is
-    the project's preferred bid contacts at that GC: advisory, seeds and
-    highlights the Send Out recipient picker."""
-    rows = (
-        get_supabase()
-        .table("project_gcs")
-        .select(
-            "needs_by, project_gc_contacts(gc_contact_id),"
-            " general_contractors(id, name, gc_contacts(id, name, email, phone))"
-        )
-        .eq("project_id", project_id)
-        .execute()
-    ).data or []
-    out = []
-    for r in rows:
-        gc = r.get("general_contractors")
-        if not gc:
-            continue
-        contacts = sorted(gc.get("gc_contacts") or [], key=lambda c: (c.get("name") or "").lower())
-        live_ids = {c["id"] for c in contacts}
-        selected = [
-            s["gc_contact_id"]
-            for s in (r.get("project_gc_contacts") or [])
-            # A selection whose contact was deleted is stale, not a recipient.
-            if s.get("gc_contact_id") in live_ids
-        ]
-        out.append(
-            {"id": gc["id"], "name": gc["name"], "needs_by": r.get("needs_by"),
-             "contacts": contacts, "selected_contact_ids": sorted(selected)}
-        )
-    return sorted(out, key=lambda g: g["name"].lower())
+    (the panel swaps its whole list for the response). Lives in proposal_send
+    since the pricing-approval endpoints there return the same rows."""
+    return proposal_send.project_gc_rows(project_id)
 
 
 def _assert_contacts_belong_to_gc(sb, gc_id: str, contact_ids: list[str]) -> None:
@@ -866,5 +899,10 @@ def remove_project_gc(
     # Sent history stays in proposal_sends; never-sent rows are retired so the
     # Send Out panel stops offering them.
     proposal_send.retire_unsent_proposals(project_id, gc_id)
+    # A removed GC leaves no dangling Executive task: its pending price-change
+    # request (if any) is gone with the row, so its notifications go too.
+    dismiss_notifications(
+        project_id=project_id, types=["gc_pricing.approval_requested"], gc_id=gc_id
+    )
     audit(user.id, "project.gc_remove", "project", project_id, {"gc_id": gc_id})
     return _project_gc_rows(project_id)

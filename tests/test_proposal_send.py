@@ -122,6 +122,72 @@ def test_proposal_amounts_missing_values_are_zero():
     }
 
 
+def test_omit_zero_sections_drops_zero_breakouts():
+    amounts = {
+        "material": Decimal("100"),
+        "gear": Decimal("0.00"),
+        "underground": Decimal("50"),
+        "low_voltage": Decimal("0"),
+        "labor": Decimal("0"),
+        "total": Decimal("150"),
+    }
+    out = psend.omit_zero_sections(amounts)
+    assert out["gear"] is None
+    assert out["low_voltage"] is None
+    assert out["underground"] == Decimal("50")
+    # Material and labor are never dropped, and the total is untouched.
+    assert out["material"] == Decimal("100")
+    assert out["labor"] == Decimal("0")
+    assert out["total"] == Decimal("150")
+    # The input is not mutated, and absent sections pass through as None.
+    assert amounts["gear"] == Decimal("0.00")
+    absent = psend.omit_zero_sections(
+        {
+            "material": Decimal("1"),
+            "gear": None,
+            "underground": None,
+            "low_voltage": None,
+            "labor": Decimal("2"),
+            "total": Decimal("3"),
+        }
+    )
+    assert absent["gear"] is None and absent["low_voltage"] is None
+
+
+def test_zero_section_omission_agrees_between_generation_and_send():
+    # A committed snapshot carrying a $0 low-voltage section: the row must be
+    # dropped from the document (stamp NULL), and the send-time expected
+    # figures go through the SAME omission so the staleness compare matches.
+    verification = {
+        "labor_amount": "144000",
+        "materials_amount": "96437.82",
+        "materials_markup_amount": "7715.03",
+        "gear_amount": "659.35",
+        "underground_amount": "233855.91",
+        "underground_markup_amount": "11692.80",
+        "low_voltage_amount": "0.00",
+        "labor_markup_amount": None,
+        "gear_markup_amount": None,
+        "low_voltage_markup_amount": None,
+        "committed_at": "2026-08-25T00:00:00Z",
+    }
+    defaults = psend.proposal_amounts({}, verification)
+    resolved = psend.omit_zero_sections(psend.resolve_gc_amounts(defaults, {}))
+    assert resolved["low_voltage"] is None
+    assert resolved["gear"] == Decimal("659.35")
+    # The zero contributed nothing: the total is unchanged by the omission.
+    assert resolved["total"] == Decimal("494360.91")
+    # A per-GC override re-adds the section; a zero override drops it.
+    readded = psend.omit_zero_sections(
+        psend.resolve_gc_amounts(defaults, {"low_voltage_override": Decimal("500")})
+    )
+    assert readded["low_voltage"] == Decimal("500")
+    zeroed = psend.omit_zero_sections(
+        psend.resolve_gc_amounts(defaults, {"gear_override": Decimal("0")})
+    )
+    assert zeroed["gear"] is None
+
+
 def test_present_section_without_markup_carries_its_cost():
     # A present section whose markup was never entered: the section figure is
     # the cost as-is (markup treated as 0), not None and not an error.

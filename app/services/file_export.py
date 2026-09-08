@@ -87,10 +87,21 @@ def _dedupe(taken: set[str], arcname: str) -> str:
         i += 1
 
 
-def _render_manifest(manifest: list[dict]) -> str:
+def _render_manifest(
+    manifest: list[dict],
+    *,
+    title: str = "BDR project file export",
+    notes: list[str] | None = None,
+) -> str:
+    """Human-readable inventory of the archive.
+
+    `notes` carries anything the caller wants recorded that never became an
+    entry (e.g. a splitter source file that failed and produced no sections),
+    so the archive explains its own gaps.
+    """
     ok = [m for m in manifest if m["status"] == "ok"]
     missing = [m for m in manifest if m["status"] == "missing"]
-    lines = ["BDR project file export", ""]
+    lines = [title, ""]
     lines.append(f"{len(ok)} file(s) exported.")
     for m in ok:
         lines.append(f"  {m['file']}  ({m['bytes']:,} bytes)")
@@ -98,6 +109,10 @@ def _render_manifest(manifest: list[dict]) -> str:
         lines += ["", f"{len(missing)} file(s) could not be retrieved and were skipped:"]
         for m in missing:
             lines.append(f"  {m['file']}  — {m.get('error', 'unavailable')}")
+    if notes:
+        lines += ["", "Notes:"]
+        for note in notes:
+            lines.append(f"  {note}")
     return "\n".join(lines) + "\n"
 
 
@@ -156,13 +171,18 @@ def build_export_spooled(rows: list[dict]) -> tuple[IO[bytes], list[dict], int]:
     return spool, manifest, size
 
 
+def zip_filename(label: str, suffix: str) -> str:
+    """`{label}_{suffix}_{YYYYMMDD}.zip`, with the label stripped of the
+    characters Windows refuses in a filename."""
+    label = re.sub(r'[\\/:*?"<>|]+', "_", label).strip() or "export"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+    return f"{label}_{suffix}_{stamp}.zip"
+
+
 def export_filename(project: dict, suffix: str = "files") -> str:
     """A download filename like `24-118_files_20260624.zip` (or `_documents_…`
     for the unified PM hub — pass `suffix="documents"`)."""
-    label = str(project.get("number") or project.get("name") or "project")
-    label = re.sub(r'[\\/:*?"<>|]+', "_", label).strip() or "project"
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
-    return f"{label}_{suffix}_{stamp}.zip"
+    return zip_filename(str(project.get("number") or project.get("name") or "project"), suffix)
 
 
 # ── Folder-based export (unified PM documents hub) ────────────────────────────
@@ -206,6 +226,64 @@ def build_folder_export_spooled(rows: list[dict]) -> tuple[IO[bytes], list[dict]
     spool: IO[bytes] = tempfile.SpooledTemporaryFile(max_size=_SPOOL_MAX_MEMORY)
     with zipfile.ZipFile(spool, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
         manifest = _write_folder_entries(zf, rows)
+    size = spool.tell()
+    spool.seek(0)
+    return spool, manifest, size
+
+
+# ── Tree export (arbitrary nested folders) ────────────────────────────────────
+# The two exports above are one level deep. The Bid File Splitter needs a real
+# tree — one folder per source PDF, a category folder inside it, and a further
+# label folder for a free-text "other" section — so rows here carry the folder
+# path as a list of components instead of a single label. Caller order is
+# preserved verbatim (the splitter already orders by source file, then segment),
+# and every component is sanitised the same way a filename is: the arcname is
+# the only zip-slip defence on the extracting side.
+
+
+def _write_tree_entries(
+    zf: zipfile.ZipFile,
+    rows: list[dict],
+    *,
+    title: str,
+    notes: list[str] | None,
+) -> list[dict]:
+    """Download each row's object into `zf` under `{folders…}/{filename}`.
+
+    Each row needs: `folders` (list of path components, outermost first),
+    `filename`, `storage_path`. Peak RAM stays ~one file (see `_write_entries`).
+    """
+    taken: set[str] = set()
+    manifest: list[dict] = []
+    for r in rows:
+        parts = [_safe_name(p) for p in (r.get("folders") or [])]
+        parts.append(_safe_name(r.get("filename")))
+        arcname = _dedupe(taken, "/".join(parts))
+        try:
+            content = storage.download_file(r["storage_path"])
+        except Exception as exc:  # noqa: BLE001 — missing object: record, skip, continue
+            manifest.append({"file": arcname, "status": "missing", "error": str(exc)})
+            continue
+        zf.writestr(arcname, content)
+        manifest.append({"file": arcname, "status": "ok", "bytes": len(content)})
+    zf.writestr("MANIFEST.txt", _render_manifest(manifest, title=title, notes=notes))
+    return manifest
+
+
+def build_tree_export_spooled(
+    rows: list[dict],
+    *,
+    title: str = "BDR export",
+    notes: list[str] | None = None,
+) -> tuple[IO[bytes], list[dict], int]:
+    """Nested-folder variant of `build_export_spooled`.
+
+    Synchronous — call via `run_in_threadpool`; the caller MUST close the
+    returned file.
+    """
+    spool: IO[bytes] = tempfile.SpooledTemporaryFile(max_size=_SPOOL_MAX_MEMORY)
+    with zipfile.ZipFile(spool, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+        manifest = _write_tree_entries(zf, rows, title=title, notes=notes)
     size = spool.tell()
     spool.seek(0)
     return spool, manifest, size

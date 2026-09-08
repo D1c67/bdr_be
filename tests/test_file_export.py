@@ -235,3 +235,91 @@ async def test_internal_export_stamps_files_exported_at(monkeypatch):
     stamps = db.ops("projects", "update")
     assert len(stamps) == 1
     assert "files_exported_at" in stamps[0].payload
+
+
+# ── Tree export (nested folders — Bid File Splitter) ──────────────────────────
+
+
+def _tree_names(rows, **kwargs) -> set[str]:
+    spool, _manifest, _size = file_export.build_tree_export_spooled(rows, **kwargs)
+    try:
+        with zipfile.ZipFile(spool) as zf:
+            return set(zf.namelist())
+    finally:
+        spool.close()
+
+
+def _tree_manifest_text(rows, **kwargs) -> str:
+    spool, _manifest, _size = file_export.build_tree_export_spooled(rows, **kwargs)
+    try:
+        with zipfile.ZipFile(spool) as zf:
+            return zf.read("MANIFEST.txt").decode()
+    finally:
+        spool.close()
+
+
+def test_tree_export_nests_every_folder_component(monkeypatch):
+    monkeypatch.setattr(file_export.storage, "download_file", lambda p: f"b:{p}".encode())
+    rows = [
+        {
+            "folders": ["Bid Set A", "Electrical Drawings"],
+            "filename": "E-Sheets (pages 12-40).pdf",
+            "storage_path": "a",
+        },
+        {
+            "folders": ["Bid Set A", "Other", "Geotechnical Report"],
+            "filename": "Soils (pages 41-60).pdf",
+            "storage_path": "b",
+        },
+    ]
+    names = _tree_names(rows)
+    assert "Bid Set A/Electrical Drawings/E-Sheets (pages 12-40).pdf" in names
+    assert "Bid Set A/Other/Geotechnical Report/Soils (pages 41-60).pdf" in names
+    assert "MANIFEST.txt" in names
+
+
+def test_tree_export_keeps_caller_order_and_dedupes_collisions(monkeypatch):
+    """Rows arrive pre-ordered (source file, then segment order) and must not be
+    re-sorted; two identical paths still get distinct arcnames."""
+    monkeypatch.setattr(file_export.storage, "download_file", lambda p: b"x")
+    rows = [
+        {"folders": ["Set", "Specifications"], "filename": "b.pdf", "storage_path": "1"},
+        {"folders": ["Set", "Specifications"], "filename": "a.pdf", "storage_path": "2"},
+        {"folders": ["Set", "Specifications"], "filename": "a.pdf", "storage_path": "3"},
+    ]
+    spool, manifest, _size = file_export.build_tree_export_spooled(rows)
+    spool.close()
+    assert [m["file"] for m in manifest] == [
+        "Set/Specifications/b.pdf",
+        "Set/Specifications/a.pdf",
+        "Set/Specifications/a (2).pdf",
+    ]
+
+
+def test_tree_export_sanitises_folder_components(monkeypatch):
+    """Folder components are the same zip-slip surface as filenames."""
+    monkeypatch.setattr(file_export.storage, "download_file", lambda p: b"x")
+    rows = [
+        {"folders": ["../..", "C:/Windows"], "filename": "../evil.pdf", "storage_path": "1"},
+    ]
+    for name in _tree_names(rows):
+        assert ".." not in name
+        assert not name.startswith("/")
+
+
+def test_tree_export_manifest_carries_title_and_notes(monkeypatch):
+    monkeypatch.setattr(file_export.storage, "download_file", lambda p: b"x")
+    rows = [{"folders": ["Set", "RFP"], "filename": "rfp.pdf", "storage_path": "1"}]
+    text = _tree_manifest_text(
+        rows, title="BDR Bid File Splitter export", notes=["huge.pdf: failed, no sections"]
+    )
+    assert text.startswith("BDR Bid File Splitter export")
+    assert "huge.pdf: failed, no sections" in text
+
+
+def test_zip_filename_sanitises_and_stamps():
+    name = file_export.zip_filename('bid/set:"A"', "folders")
+    assert name.startswith("bid_set_A_")
+    assert "_folders_" in name
+    assert name.endswith(".zip")
+    assert "/" not in name and ":" not in name

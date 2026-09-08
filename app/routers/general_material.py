@@ -14,7 +14,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from app.core.config import get_settings
 from app.core.deps import CurrentUser, get_current_user, require_writer
 from app.core.ratelimit import ai_rate_limit
-from app.core.roles import INTERNAL_ROLES
+from app.core.roles import INTERNAL_ROLES, WRITER_ROLES
 from app.core.supabase_client import get_supabase
 from app.models.schemas import GeneralMaterialIn, TaxIn
 from app.services import general_material, llm_queue, workflow
@@ -37,34 +37,17 @@ def _get(project_id: str):
     return rows[0] if rows else None
 
 
-@router.get("")
-def get_general_material(project_id: str, user: CurrentUser = Depends(get_current_user)):
-    if user.role not in INTERNAL_ROLES:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
-    row = _get(project_id)
-    if row and row.get("status") in ("pending", "running"):
-        # Release rows stranded by a restart (queue-aware: live jobs are kept).
-        row = general_material.fail_if_stale(row)
-    if row and row.get("status") in ("pending", "running"):
-        # Queue detail (position, attempt count, retry state) for the panel.
-        try:
-            row["queue"] = llm_queue.poll_info(llm_queue.JOB_GENERAL_MATERIAL, project_id)
-        except Exception:  # noqa: BLE001 - detail is optional, polling must not break
-            logger.exception("General-material queue poll_info failed")
-    return row
+def _start_extraction(
+    project_id: str, background: BackgroundTasks, user_id: str, *, strict: bool
+) -> None:
+    """Queue an extraction run and mark the row pending. The sales-tax
+    attestation is cleared up front (not on completion): the recorded answer
+    described the old figure, and clearing it here re-arms the receive-quotes
+    gate immediately: no window where the user advances on a stale attestation
+    while the extraction is still running. tax_rate is kept as a prefill.
 
-
-@router.post("/extract", dependencies=[Depends(ai_rate_limit)])
-def rerun_extraction(
-    project_id: str, background: BackgroundTasks, user: CurrentUser = Depends(_EDITOR)
-):
-    """Queue a re-run of the estimate extraction.
-
-    Reprocessing invalidates the sales-tax attestation up front (not on
-    completion): the recorded answer described the old figure, and clearing it
-    here re-arms the receive-quotes gate immediately — no window where the user
-    advances on a stale attestation while the extraction is still running.
-    tax_rate is kept as a prefill for the re-ask."""
+    strict surfaces a 409 when a run is already underway (the manual re-run
+    button); the read-side combination upgrade collapses onto it silently."""
     if get_settings().llm_queue_enabled:
         # Enqueue BEFORE touching the domain row, so 'pending' is only ever
         # written while a job demonstrably exists. A collapse onto a job that
@@ -77,11 +60,11 @@ def rerun_extraction(
                 target_id=project_id,
                 project_id=project_id,
                 payload={"project_id": project_id},
-                created_by=user.id,
+                created_by=user_id,
                 raise_on_active=True,
             )
         except llm_queue.JobAlreadyActive as exc:
-            if exc.job.get("status") == "running":
+            if strict and exc.job.get("status") == "running":
                 raise HTTPException(
                     status.HTTP_409_CONFLICT,
                     "An extraction is already running for this project. "
@@ -102,6 +85,53 @@ def rerun_extraction(
         },
         on_conflict="project_id",
     ).execute()
+
+
+@router.get("")
+def get_general_material(
+    project_id: str,
+    background: BackgroundTasks,
+    user: CurrentUser = Depends(get_current_user),
+):
+    if user.role not in INTERNAL_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
+    row = _get(project_id)
+    if row and row.get("status") in ("pending", "running"):
+        # Release rows stranded by a restart (queue-aware: live jobs are kept).
+        row = general_material.fail_if_stale(row)
+    if (
+        row
+        and user.role in WRITER_ROLES
+        and general_material.needs_combination_upgrade(row)
+    ):
+        # A figure extracted before the combination change is wiring alone;
+        # catch it up automatically instead of waiting for a manual re-run.
+        # Writer-gated so a read-only role's GET never mutates anything.
+        _start_extraction(project_id, background, user.id, strict=False)
+        audit(
+            user.id,
+            "general_material.extract",
+            "project",
+            project_id,
+            {"reason": "combination_upgrade"},
+        )
+        row = {**row, "status": "pending", "error": None, "tax_included": None}
+    if row and row.get("status") in ("pending", "running"):
+        # Queue detail (position, attempt count, retry state) for the panel.
+        try:
+            row["queue"] = llm_queue.poll_info(llm_queue.JOB_GENERAL_MATERIAL, project_id)
+        except Exception:  # noqa: BLE001 - detail is optional, polling must not break
+            logger.exception("General-material queue poll_info failed")
+    return row
+
+
+@router.post("/extract", dependencies=[Depends(ai_rate_limit)])
+def rerun_extraction(
+    project_id: str, background: BackgroundTasks, user: CurrentUser = Depends(_EDITOR)
+):
+    """Queue a re-run of the estimate extraction (queue-start semantics,
+    including the up-front tax-attestation reset, live in _start_extraction)."""
+    _start_extraction(project_id, background, user.id, strict=True)
     audit(user.id, "general_material.extract", "project", project_id, None)
     return {"status": "pending"}
 

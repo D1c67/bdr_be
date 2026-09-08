@@ -73,6 +73,12 @@ _TYPE_META: dict[str, tuple[str, str]] = {
     "project_withdrawn": ("Project withdrawn", "Open your assignments"),
     "project_reactivated": ("Project reactivated", "Open your assignment"),
     "submittal.response_received": ("A vendor returned a submittal", "View submittals"),
+    # A GC added after the bid went out (0118): the sender asked for a per-GC
+    # price change (Executives), and the decision back to the sender. All three
+    # deep-link to that GC's modal in the project side menu (see _deep_link).
+    "gc_pricing.approval_requested": ("GC pricing change needs your approval", "Review pricing"),
+    "gc_pricing.approved": ("GC pricing change approved", "Send the proposal"),
+    "gc_pricing.rejected": ("GC pricing change rejected", "Open project"),
 }
 
 _DEFAULT_META = ("BDR notification", "Open BDR")
@@ -94,12 +100,21 @@ def _meta(type_: str) -> tuple[str, str]:
     return heading, cta
 
 
-def _deep_link(project_id: str | None, role: str | None, type_: str | None = None) -> str:
+def _deep_link(
+    project_id: str | None,
+    role: str | None,
+    type_: str | None = None,
+    metadata: dict | None = None,
+) -> str:
     """Where this notification's email button lands.
 
     Flag-aware, unlike an in-app link: these URLs are permanent and arrive in a
     mailbox, so one built for a module this deployment doesn't serve is a dead
     link forever rather than a redirect the shell can quietly fix.
+
+    `metadata` is the notification row's optional detail (0118): a gc_pricing.*
+    row names its GC, and the link then opens that GC's modal in the project
+    side menu instead of the bare project page.
     """
     base = get_settings().frontend_url.rstrip("/")
     is_estimator = role == Role.ESTIMATOR.value
@@ -115,6 +130,9 @@ def _deep_link(project_id: str | None, role: str | None, type_: str | None = Non
             # there and its bid history is what remains readable.
             if not is_enabled(SubApp.BIDDING):
                 return f"{base}{home_path()}"
+            gc_id = (metadata or {}).get("gc_id") if (type_ or "").startswith("gc_pricing.") else None
+            if gc_id:
+                return f"{base}/projects/{project_id}?box=gcs&gc={gc_id}"
         prefix = "/estimator/projects" if is_estimator else "/projects"
         return f"{base}{prefix}/{project_id}"
     # A nudge isn't tied to a project — send the recipient straight to their list.
@@ -211,7 +229,9 @@ def _send_one(row: dict, profile: dict | None, project: dict | None) -> None:
         heading=heading,
         message=row.get("message") or "",
         cta_label=cta_label,
-        cta_url=_deep_link(row.get("project_id"), profile.get("role"), type_),
+        cta_url=_deep_link(
+            row.get("project_id"), profile.get("role"), type_, row.get("metadata")
+        ),
         project_label=_project_label(project),
     )
     log = graph_email.send_mail(

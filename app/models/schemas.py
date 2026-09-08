@@ -488,6 +488,11 @@ class ProjectOut(BaseModel):
     # Last successful files export (drives the post-send-out export banner).
     # Default lets reads degrade gracefully before migration 0041 is applied.
     files_exported_at: datetime | None = None
+    # GCs added after the bid went out whose per-GC price change is waiting on
+    # an Executive (migration 0118). The dashboard lists the project as an
+    # Executive task while this is above zero; the project's stage itself never
+    # moves for it.
+    gc_pricing_approvals_pending: int = 0
     created_by: str | None
     created_at: datetime
     updated_at: datetime
@@ -959,8 +964,9 @@ class BoqConfirmIn(BaseModel):
         return v
 
 
-class BoqTrainingReviewIn(BaseModel):
-    """Dev Training page sign-off on a captured example; false clears it."""
+class TrainingReviewIn(BaseModel):
+    """Dev Training page sign-off on a captured example (BOQ or bid-split);
+    false clears it."""
 
     reviewed: bool
     note: str | None = Field(None, max_length=2000)
@@ -1036,6 +1042,11 @@ class VerifyOverrideIn(BaseModel):
 
 class ProposalGenerateIn(BaseModel):
     boq_file_id: str | None = None  # default: latest 'boq' upload
+    # Restrict document generation to these GCs (general_contractors ids). The
+    # side-menu "Send proposal" flow for a GC added after the bid went out
+    # generates that one GC's document only. None = every GC without a sent
+    # document (the Send Out panel's batch behaviour).
+    gc_ids: list[str] | None = Field(default=None, max_length=100)
 
 
 class ProposalLinesIn(BaseModel):
@@ -1069,6 +1080,18 @@ class ProposalAmountsIn(BaseModel):
     underground_amount: Decimal | None = Field(None, **_AMOUNT_BOUNDS)
     low_voltage_amount: Decimal | None = Field(None, **_AMOUNT_BOUNDS)
     labor_amount: Decimal | None = Field(None, **_AMOUNT_BOUNDS)
+
+
+class ProposalAmountsRequestIn(ProposalAmountsIn):
+    # A per-GC price change for a GC added after the bid went out. Posted by
+    # the sender (request) and by the Executive deciding it (approve, where the
+    # figures may be edited before they are accepted). The note travels with
+    # the request / decision into the GC row and the notifications.
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class ProposalAmountsRejectIn(BaseModel):
+    note: str | None = Field(default=None, max_length=1000)
 
 
 class ProposalDispatchIn(BaseModel):

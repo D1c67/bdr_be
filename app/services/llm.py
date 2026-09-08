@@ -80,7 +80,9 @@ class LlmBadOutput(ValueError):
 
 @dataclass(frozen=True)
 class _Feature:
-    third_party: str  # "anthropic" | "openai"
+    # "anthropic" | "openai", or a Settings-reader returning one of those for
+    # the features whose vendor is env-selectable (bid_split).
+    third_party: str | Callable[[Settings], str]
     tp_model: Callable[[Settings], str]
     sh_model: Callable[[Settings], str]
 
@@ -112,6 +114,19 @@ _FEATURES: dict[str, _Feature] = {
         lambda s: s.openai_email_match_model,
         lambda s: s.self_hosted_email_match_model,
     ),
+    # Bid File Splitter page classification. The vendor is env-selectable
+    # (BID_SPLIT_LLM_PROVIDER: anthropic | openai | self_hosted) rather than
+    # fixed: the tool exists to compare models against each other. Vision-only
+    # — see complete_images_json.
+    "bid_split": _Feature(
+        lambda s: s.bid_split_llm_provider,
+        lambda s: (
+            s.claude_bid_split_model
+            if s.bid_split_llm_provider == "anthropic"
+            else s.openai_bid_split_model
+        ),
+        lambda s: s.self_hosted_bid_split_model,
+    ),
 }
 
 
@@ -134,7 +149,18 @@ def resolve(feature: str, settings: Settings | None = None) -> Route:
             api_key=s.self_hosted_llm_api_key,
             base_url=s.self_hosted_llm_base_url,
         )
-    if spec.third_party == "anthropic":
+    provider = spec.third_party(s) if callable(spec.third_party) else spec.third_party
+    if provider == "self_hosted":
+        # Env-selectable features (bid_split) may opt INTO the self-hosted pool
+        # for just themselves while the master switch is off. The switch stays
+        # one-way: true forces EVERY feature self-hosted, never the reverse.
+        return Route(
+            provider="self_hosted",
+            model=spec.sh_model(s),
+            api_key=s.self_hosted_llm_api_key,
+            base_url=s.self_hosted_llm_base_url,
+        )
+    if provider == "anthropic":
         return Route(provider="anthropic", model=spec.tp_model(s), api_key=s.anthropic_api_key)
     return Route(provider="openai", model=spec.tp_model(s), api_key=s.openai_api_key)
 
@@ -556,6 +582,108 @@ def complete_pdf_json(
                 route.model,
                 "",
                 [{"role": "user", "content": user}],
+                max_tokens,
+                schema,
+                schema_name,
+                True,
+            )
+        return parse_json_loose(text)
+
+    return _guarded(feature, route, s, call)
+
+
+def complete_images_json(
+    feature: str,
+    *,
+    system: str = "",
+    prompt: str,
+    images: list[tuple[str, bytes]],
+    media_type: str = "image/jpeg",
+    schema: dict,
+    schema_name: str,
+    max_tokens: int | None = None,
+    timeout: float | None = None,
+    settings: Settings | None = None,
+) -> Any:
+    """Ask a question about a batch of images, returning parsed JSON.
+
+    `images` is an ordered list of (label, bytes) pairs; each label is placed
+    as a text block immediately before its image so the model can reference
+    pages by name ("Page 3 of 40"). The first vision path in the codebase
+    (bid_split) — unlike complete_pdf_json there is NO local-text fallback for
+    the self-hosted pool: page images go to the configured endpoint as-is, so
+    in self-hosted mode the served model must be vision-capable (a text-only
+    server rejects the request and the error propagates normally).
+    """
+    route, s = _require_route(feature, settings)
+    client = _with_timeout(_client_for(route, s), timeout)
+
+    import base64
+
+    def call() -> Any:
+        if route.provider == "anthropic":
+            content: list[dict] = []
+            for label, data in images:
+                content.append({"type": "text", "text": label})
+                content.append(
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": base64.b64encode(data).decode(),
+                        },
+                    }
+                )
+            content.append({"type": "text", "text": prompt})
+            text = _anthropic_call(
+                client,
+                route.model,
+                _schema_hint(system, schema),
+                [{"role": "user", "content": content}],
+                max_tokens,
+            )
+        elif route.provider == "openai":
+            parts: list[dict] = []
+            for label, data in images:
+                parts.append({"type": "input_text", "text": label})
+                parts.append(
+                    {
+                        "type": "input_image",
+                        "image_url": f"data:{media_type};base64,"
+                        + base64.b64encode(data).decode(),
+                    }
+                )
+            parts.append({"type": "input_text", "text": prompt})
+            text = _openai_call(
+                client,
+                route.model,
+                system,
+                [{"role": "user", "content": parts}],
+                max_tokens,
+                schema,
+                schema_name,
+                True,
+            )
+        else:
+            chat_parts: list[dict] = []
+            for label, data in images:
+                chat_parts.append({"type": "text", "text": label})
+                chat_parts.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{media_type};base64,"
+                            + base64.b64encode(data).decode()
+                        },
+                    }
+                )
+            chat_parts.append({"type": "text", "text": prompt})
+            text = _self_hosted_call(
+                client,
+                route.model,
+                system,
+                [{"role": "user", "content": chat_parts}],
                 max_tokens,
                 schema,
                 schema_name,

@@ -84,7 +84,11 @@ class _Query:
 
     # execution
     def _matches(self, row):
-        return all(row.get(c) == v for c, v in self._filters) and all(
+        def _hit(c, v):
+            # in_() stores a list: membership; eq()/is_() store scalars: equality.
+            return row.get(c) in v if isinstance(v, list) else row.get(c) == v
+
+        return all(_hit(c, v) for c, v in self._filters) and all(
             row.get(c) != v for c, v in self._neq_filters
         )
 
@@ -598,6 +602,69 @@ def test_redundant_commit_off_verify_is_silent(monkeypatch):
     user = SimpleNamespace(id="exec1", role=Role.EXECUTIVE)
     pricing.commit_verify("p1", None, user)
     assert calls == []
+
+
+# ── commit_verify: stale never-sent documents are regenerated ──────────────────
+
+
+def _regen_db(send_head="verify", return_stage=None, sends=()):
+    db = _commit_db(send_head=send_head, return_stage=return_stage)
+    db.tables["proposal_sends"] = [dict(r) for r in sends]
+    return db
+
+
+def test_commit_regenerates_stale_unsent_documents(monkeypatch):
+    # Docs generated before the (re)commit carry stale figures; the commit
+    # re-renders them, after routing off Verify so the send window is open.
+    from app.services import proposal_send
+
+    db = _regen_db(sends=[{"project_id": "p1", "gc_id": "g1", "status": "generated"}])
+    pricing, calls = _patch_commit(monkeypatch, db)
+    regen = []
+    monkeypatch.setattr(
+        proposal_send, "regenerate_after_commit",
+        lambda pid, uid: (regen.append((pid, uid)), [])[1],
+    )
+    user = SimpleNamespace(id="exec1", role=Role.EXECUTIVE)
+    pricing.commit_verify("p1", None, user)
+    assert regen == [("p1", "exec1")]
+    assert ("advance", "p1", "send_out") in calls
+
+
+def test_commit_without_stale_documents_skips_regeneration(monkeypatch):
+    # First-time commit (nothing generated yet): the first generation stays an
+    # explicit Send Out action. Sent rows are not regeneration targets either.
+    from app.services import proposal_send
+
+    db = _regen_db(sends=[{"project_id": "p1", "gc_id": "g1", "status": "sent"}])
+    pricing, calls = _patch_commit(monkeypatch, db)
+    regen = []
+    monkeypatch.setattr(
+        proposal_send, "regenerate_after_commit",
+        lambda pid, uid: (regen.append((pid, uid)), [])[1],
+    )
+    user = SimpleNamespace(id="exec1", role=Role.EXECUTIVE)
+    pricing.commit_verify("p1", None, user)
+    assert regen == []
+
+
+def test_commit_regeneration_failure_is_advisory(monkeypatch):
+    # The commit itself must survive a regeneration failure (send fails closed
+    # on the stale stamps anyway); the admin is told to regenerate by hand.
+    from app.services import proposal_send
+
+    db = _regen_db(sends=[{"project_id": "p1", "gc_id": "g1", "status": "failed"}])
+    pricing, calls = _patch_commit(monkeypatch, db)
+
+    def _boom(pid, uid):
+        raise proposal_send.ProposalSendError("Proposal lines must be approved first")
+
+    monkeypatch.setattr(proposal_send, "regenerate_after_commit", _boom)
+    user = SimpleNamespace(id="exec1", role=Role.EXECUTIVE)
+    row = pricing.commit_verify("p1", None, user)  # must not raise
+    assert row["committed_at"] is not None
+    notes = [c for c in calls if c[0] == "notify"]
+    assert any("could not be regenerated" in c[4] for c in notes)
 
 
 # ── Analytics: the bid date survives a re-verify round-trip ────────────────────

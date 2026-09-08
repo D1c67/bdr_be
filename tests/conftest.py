@@ -31,6 +31,10 @@ os.environ["ENVIRONMENT"] = "test"
 os.environ["BIDDING_ENABLED"] = "true"
 os.environ["PM_ENABLED"] = "true"
 os.environ["CERTIFIED_PAYROLL_ENABLED"] = "true"
+# The Bid File Splitter flag defaults FALSE (experimental tool); pin it ON so
+# its router tests exercise real routes whatever the local .env says. Tests
+# that exercise the flag being off set it themselves (test_bid_splitter).
+os.environ["BID_FILE_SPLITTER_ENABLED"] = "true"
 # Pin LLM routing to the 3rd-party pool so a local .env experimenting with
 # self-hosted models can never redirect (or break) the suite's LLM stubs, and
 # drop any shell-exported LLM knobs (.env.example documents them as the

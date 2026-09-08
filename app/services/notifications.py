@@ -39,6 +39,7 @@ def notify_role(
     message: str,
     rfq_id: str | None = None,
     mirror_email: bool = True,
+    metadata: dict | None = None,
 ) -> None:
     """Create a notification for every active user holding `role`.
 
@@ -51,7 +52,10 @@ def notify_role(
     `rfq_id` ties the notification to a specific RFQ so it can be auto-dismissed
     when that category is priced (see `dismiss_notifications`). Pass
     `mirror_email=False` when the caller sends its own richer email for the
-    same event — bell row only, no generic mirror duplicating it.
+    same event: bell row only, no generic mirror duplicating it. `metadata`
+    is optional per-type detail (0118): the gc_pricing.* types carry
+    {"gc_id": ...} so the bell, the mirror email and a later dismissal can all
+    address one GC.
     """
     if role == Role.ESTIMATOR:
         logger.warning(
@@ -77,6 +81,7 @@ def notify_role(
             "type": type_,
             "message": message,
             "rfq_id": rfq_id,
+            **({"metadata": metadata} if metadata is not None else {}),
         }
         for u in users
     ]
@@ -94,6 +99,7 @@ def notify_user(
     message: str,
     rfq_id: str | None = None,
     mirror_email: bool = True,
+    metadata: dict | None = None,
 ) -> None:
     row = {
         "user_id": user_id,
@@ -101,6 +107,7 @@ def notify_user(
         "type": type_,
         "message": message,
         "rfq_id": rfq_id,
+        **({"metadata": metadata} if metadata is not None else {}),
     }
     inserted = (get_supabase().table("notifications").insert(row).execute()).data or [row]
     if mirror_email:
@@ -114,6 +121,7 @@ def dismiss_notifications(
     types: list[str] | None = None,
     type_prefixes: list[str] | None = None,
     user_id: str | None = None,
+    gc_id: str | None = None,
 ) -> None:
     """Soft-dismiss matching notifications so they drop out of the bell.
 
@@ -122,9 +130,12 @@ def dismiss_notifications(
     out entirely. Scope by `project_id` and/or `rfq_id`, optionally narrowed to
     a single `user_id` (per-user dismissals such as a read reply). `types`
     matches exact type strings; `type_prefixes` matches via SQL LIKE `<prefix>%`
-    (for the `due.<kind>.<offset>` family). Requires a project_id or rfq_id
-    scope so a dismissal can never sweep the whole table. The email mirror is
-    already sent and is intentionally left untouched.
+    (for the `due.<kind>.<offset>` family). `gc_id` narrows to rows whose
+    metadata names that GC (the gc_pricing.* family), so approving one GC's
+    price change never clears the request for another GC on the same project.
+    Requires a project_id or rfq_id scope so a dismissal can never sweep the
+    whole table. The email mirror is already sent and is intentionally left
+    untouched.
 
     Exact types and each prefix run as separate UPDATEs (in_ / like) rather than
     one combined or-filter — these are infrequent cleanup writes, and the native
@@ -144,6 +155,9 @@ def dismiss_notifications(
             q = q.eq("rfq_id", rfq_id)
         if user_id:
             q = q.eq("user_id", user_id)
+        if gc_id:
+            # PostgREST JSON path: metadata->>gc_id = <gc_id>.
+            q = q.eq("metadata->>gc_id", gc_id)
         return q
 
     if types:

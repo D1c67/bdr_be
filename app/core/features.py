@@ -57,8 +57,16 @@ def is_enabled(sub_app: SubApp) -> bool:
 
 
 def enabled_map() -> dict[str, bool]:
-    """The flag set as the frontend consumes it (GET /features)."""
-    return {sub_app.value: is_enabled(sub_app) for sub_app in SubApp}
+    """The flag set as the frontend consumes it (GET /features).
+
+    `bid_file_splitter` is NOT a sub-app (no switcher tile, no home route, not
+    counted by the at-least-one-sub-app boot validator) — it is an experimental
+    standalone tool whose flag simply rides along here so the frontend learns
+    about it the same way, with no rebuild when it flips.
+    """
+    flags = {sub_app.value: is_enabled(sub_app) for sub_app in SubApp}
+    flags["bid_file_splitter"] = get_settings().bid_file_splitter_enabled
+    return flags
 
 
 def feature_404(sub_app: SubApp) -> HTTPException:
@@ -110,6 +118,18 @@ PM_NOTIFICATION_TYPES: frozenset[str] = frozenset(
 def notification_sub_app(type_: str | None) -> SubApp:
     """Which sub-app a notification type's project link belongs to."""
     return SubApp.PM if type_ in PM_NOTIFICATION_TYPES else SubApp.BIDDING
+
+
+def require_bid_file_splitter() -> None:
+    """Router-level dependency gating /bid-splitter on its env flag.
+
+    Same contract as require_feature: while BID_FILE_SPLITTER_ENABLED is false
+    the routes 404 with the bare "Not Found" body before auth even runs, so a
+    deployment that doesn't serve the tool is indistinguishable from one where
+    it was never implemented.
+    """
+    if not get_settings().bid_file_splitter_enabled:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
 
 
 def require_feature(sub_app: SubApp):

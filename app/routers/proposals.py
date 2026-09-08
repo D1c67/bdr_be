@@ -13,12 +13,14 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from app.core.config import get_settings
-from app.core.deps import CurrentUser, get_current_user, require_writer
+from app.core.deps import CurrentUser, get_current_user, require_role, require_writer
 from app.core.ratelimit import ai_rate_limit, outbound_email_rate_limit
-from app.core.roles import INTERNAL_ROLES
+from app.core.roles import INTERNAL_ROLES, VERIFY_ROLES
 from app.core.supabase_client import get_supabase
 from app.models.schemas import (
     ProposalAmountsIn,
+    ProposalAmountsRejectIn,
+    ProposalAmountsRequestIn,
     ProposalGenerateIn,
     ProposalLinesIn,
     ProposalMarkSubmittedIn,
@@ -331,6 +333,16 @@ def get_proposal_amounts(
     return proposal_send.amounts_overview(project_id)
 
 
+def _amounts(body: ProposalAmountsIn) -> dict:
+    return {
+        "material": body.material_amount,
+        "gear": body.gear_amount,
+        "underground": body.underground_amount,
+        "low_voltage": body.low_voltage_amount,
+        "labor": body.labor_amount,
+    }
+
+
 @router.put("/proposals/amounts/{gc_id}")
 def set_proposal_amounts(
     project_id: str,
@@ -340,17 +352,62 @@ def set_proposal_amounts(
 ):
     try:
         return proposal_send.set_gc_amounts(
-            project_id,
-            gc_id,
-            {
-                "material": body.material_amount,
-                "gear": body.gear_amount,
-                "underground": body.underground_amount,
-                "low_voltage": body.low_voltage_amount,
-                "labor": body.labor_amount,
-            },
-            user.id,
+            project_id, gc_id, _amounts(body), user.id, role=user.role
         )
+    except ProposalSendError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+
+
+# ── per-GC price change with Executive approval (GCs added after send-out) ──
+# The side-menu GC list's "Send proposal" flow (0118). Every call returns the
+# GC list wire (the same rows as GET /projects/{id}/gcs) so the panel swaps its
+# list for the response.
+
+
+@router.post("/proposals/amounts/{gc_id}/request")
+def request_proposal_amounts_change(
+    project_id: str,
+    gc_id: str,
+    body: ProposalAmountsRequestIn,
+    user: CurrentUser = Depends(require_writer),
+):
+    """A price change for a GC added after the bid went out. Locks the GC at
+    'pending' and notifies the Executives; an Executive's own change is
+    auto-approved."""
+    try:
+        return proposal_send.request_gc_pricing_change(
+            project_id, gc_id, _amounts(body), body.note, user.id, user.role
+        )
+    except ProposalSendError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+
+
+@router.post("/proposals/amounts/{gc_id}/approve")
+def approve_proposal_amounts_change(
+    project_id: str,
+    gc_id: str,
+    body: ProposalAmountsRequestIn,
+    user: CurrentUser = Depends(require_role(*VERIFY_ROLES)),
+):
+    """Executive approval; the posted figures replace the requested ones."""
+    try:
+        return proposal_send.approve_gc_pricing_change(
+            project_id, gc_id, _amounts(body), body.note, user.id
+        )
+    except ProposalSendError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+
+
+@router.post("/proposals/amounts/{gc_id}/reject")
+def reject_proposal_amounts_change(
+    project_id: str,
+    gc_id: str,
+    body: ProposalAmountsRejectIn,
+    user: CurrentUser = Depends(require_role(*VERIFY_ROLES)),
+):
+    """Executive rejection; the GC goes back to the project figures."""
+    try:
+        return proposal_send.reject_gc_pricing_change(project_id, gc_id, body.note, user.id)
     except ProposalSendError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
 
@@ -359,6 +416,7 @@ def set_proposal_amounts(
 def generate_proposals(
     project_id: str,
     background: BackgroundTasks,
+    body: ProposalGenerateIn | None = None,
     user: CurrentUser = Depends(_PA_PM),
 ):
     sb = get_supabase()
@@ -373,7 +431,9 @@ def generate_proposals(
     if not drafts or not drafts[0].get("approved_at"):
         raise HTTPException(status.HTTP_409_CONFLICT, "Proposal lines must be approved first")
     try:
-        created = proposal_send.generate_documents(project_id, drafts[0]["id"], user.id)
+        created = proposal_send.generate_documents(
+            project_id, drafts[0]["id"], user.id, gc_ids=body.gc_ids if body else None
+        )
     except ProposalSendError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
     for row in created:

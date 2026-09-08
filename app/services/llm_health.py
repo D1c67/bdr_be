@@ -76,6 +76,7 @@ FEATURE_LABELS: dict[str, str] = {
     "email_match": "Email → project matching",
     "aliases": "Submittal alternate names",
     "translate": "Interface translation",
+    "bid_split": "Bid file splitting",
 }
 
 _PROVIDER_LABELS = {

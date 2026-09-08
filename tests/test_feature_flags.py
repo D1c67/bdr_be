@@ -122,8 +122,15 @@ def _status(client: TestClient, path: str) -> int:
 
 def test_all_sub_apps_enabled_by_default():
     """Unset means served — dev, staging and this suite are unaffected, and a
-    forgotten var never silently kills a working module."""
-    assert enabled_map() == {"bidding": True, "pm": True, "certified_payroll": True}
+    forgotten var never silently kills a working module. bid_file_splitter is
+    the odd one out: it defaults FALSE (experimental) and reads True here only
+    because conftest pins it on for the suite."""
+    assert enabled_map() == {
+        "bidding": True,
+        "pm": True,
+        "certified_payroll": True,
+        "bid_file_splitter": True,
+    }
 
 
 def test_every_route_is_reachable_with_all_flags_on(client: TestClient):
