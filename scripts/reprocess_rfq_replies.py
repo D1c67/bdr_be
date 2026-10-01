@@ -100,7 +100,8 @@ def _entered_later(sb, send: dict, contact: dict, received_at: str | None) -> bo
             .select("id")
             .eq("rfq_id", send["rfq_id"])
             .eq("vendor_id", contact["vendor_id"])
-            .gte("created_at", received_at)
+            # quotes has no created_at; received_at defaults to now() at insert.
+            .gte("received_at", received_at)
             .limit(1)
             .execute()
         ).data
