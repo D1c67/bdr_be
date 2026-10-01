@@ -38,12 +38,13 @@ from app.core.ratelimit import (
     rate_limit,
     rfq_nudge_rate_limit,
 )
-from app.core.roles import INTERNAL_ROLES
+from app.core.roles import INTERNAL_ROLES, Role
 from app.core.supabase_client import get_supabase
 from app.models.schemas import (
     ManualQuoteIn,
     QuoteApprovalIn,
     QuoteIn,
+    QuoteNoteIn,
     QuoteOverrideIn,
     ReplyManualQuoteIn,
     RFQBulkSendIn,
@@ -56,11 +57,11 @@ from app.models.schemas import (
 )
 from app.routers.pricing import tax_info, taxed_amount
 from app.services import rfq_inbox, rfq_nudges, rfq_sending, vendor_selection, workflow
-from app.services.notifications import audit, dismiss_notifications
+from app.services.notifications import audit, dismiss_notifications, notify_role
 from app.services.sanitize import sanitize_rich_text
 
 # Quote/reply notifications for an RFQ are stale once the engineer makes that
-# category's pricing decision — picking the winning quote or correcting an
+# category's pricing decision - picking the winning quote or correcting an
 # amount. Dismissed per-RFQ (not by stage) so late vendor quotes arriving after
 # the project advances still produce fresh notifications.
 _QUOTE_NOTIF_TYPES = ["quote.received", "rfq.reply_received"]
@@ -100,7 +101,7 @@ def list_rfqs(project_id: str, user: CurrentUser = Depends(get_current_user)):
         .table("rfqs")
         .select(
             "*, material_categories(name, kind, is_general),"
-            " quotes(id, tax_included, is_approved, is_selected, origin)"
+            " quotes(id, tax_included, is_approved, is_selected, origin, received_after_submission)"
         )
         .eq("project_id", project_id)
         .order("created_at")
@@ -154,9 +155,20 @@ def email_preview(project_id: str, user: CurrentUser = Depends(get_current_user)
     }
 
 
+@rfq_router.get("/default-attachments")
+def default_attachments(project_id: str, user: CurrentUser = Depends(get_current_user)):
+    """What each RFQ in this project attaches by default, grouped into sections
+    (BOM split, drawings, specifications, trench markup) with every file id
+    pre-checked. The Modify Files modal seeds itself from this instead of
+    recomputing the rule, so the modal and the send path cannot disagree about
+    what a category sends. Payload shape: rfq_sending.default_attachments."""
+    _internal(user)
+    return rfq_sending.default_attachments(get_supabase(), project_id)
+
+
 @rfq_router.post("/bulk-send", dependencies=[Depends(bulk_send_rate_limit)])
 def bulk_send(project_id: str, body: RFQBulkSendIn, user: CurrentUser = Depends(_PE)):
-    """Send each group's RFQ to its selected contacts — one email per contact.
+    """Send each group's RFQ to its selected contacts - one email per contact.
     Per-contact failures are reported in `results`, not raised."""
     if not body.groups or not any(g.vendor_contact_ids for g in body.groups):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No contacts selected")
@@ -221,15 +233,19 @@ def list_messages(project_id: str, user: CurrentUser = Depends(get_current_user)
     ).data or []
 
 
+@rfq_router.post("/messages/{message_id}/refetch-files", dependencies=[Depends(ai_rate_limit)])
+# The pre-attachment path, kept so a frontend deployed ahead of or behind this
+# backend keeps working.
 @rfq_router.post("/messages/{message_id}/refetch-links", dependencies=[Depends(ai_rate_limit)])
-def refetch_message_links(
+def refetch_message_files(
     project_id: str, message_id: str, user: CurrentUser = Depends(_PE)
 ):
-    """Retry pulling the cloud-share links (OneDrive/Drive/Dropbox/Box) out of a
-    vendor reply whose files never made it in — downloads run in the request,
-    so the PE sees the outcome immediately."""
+    """Re-read a vendor reply whose files never made it in: its email
+    attachments and its cloud-share links (OneDrive/Drive/Dropbox/Box).
+    Downloads and extraction run in the request, so the PE sees the outcome
+    immediately."""
     try:
-        result = rfq_inbox.refetch_link_files(project_id, message_id)
+        result = rfq_inbox.refetch_reply_files(project_id, message_id)
     except LookupError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Message not found")
     except ValueError as exc:
@@ -242,6 +258,7 @@ def refetch_message_links(
         {
             "links_found": result["links_found"],
             "files_ingested": result["files_ingested"],
+            "pdfs_found": result["pdfs_found"],
             "extraction_status": result["extraction_status"],
         },
     )
@@ -355,7 +372,7 @@ def add_reply_manual_quote(
     reply. This is what the generic add-quote form cannot do: the quote lands
     against the vendor the send went to, bound to the reply (and optionally one
     of its files), the reply's notice is resolved ('manual'), and the send is
-    marked answered so the poller stops watching it — exactly the bookkeeping a
+    marked answered so the poller stops watching it - exactly the bookkeeping a
     successful extraction performs, minus the extraction.
 
     The quote itself is a candidate like any other vendor quote: unapproved
@@ -371,6 +388,12 @@ def add_reply_manual_quote(
     send = row["rfq_sends"]
     contact = send.get("vendor_contacts") or {}
     rfq = send["rfqs"]
+
+    # A late quote (0138) must carry its tax answer; it lands approved, since
+    # the person typing it attests to both the amount and the tax answer.
+    window = _post_submission(sb, project_id)
+    if window and body.tax_included is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, _LATE_TAX_REQUIRED)
 
     if body.quote_file_id:
         _quote_file_in_category(
@@ -392,6 +415,15 @@ def add_reply_manual_quote(
     if body.tax_included is not None:
         payload["tax_included"] = body.tax_included
         payload["tax_rate"] = str(body.tax_rate)
+    if window:
+        payload.update(
+            {
+                "received_after_submission": True,
+                "is_approved": True,
+                "approved_by": user.id,
+                "approved_at": "now()",
+            }
+        )
     quote = sb.table("quotes").insert(payload).execute().data[0]
 
     sb.table("rfq_messages").update(
@@ -416,6 +448,10 @@ def add_reply_manual_quote(
             "quote_file_id": body.quote_file_id,
         },
     )
+    if window:
+        _notify_late_quote(
+            sb, project_id, {"id": send["rfq_id"], **rfq}, quote, user.id, "reply"
+        )
     return quote
 
 
@@ -506,7 +542,7 @@ def send_rfq_nudges(
 
 
 def _rfq_in_project(sb, project_id: str, rfq_id: str) -> dict:
-    """The RFQ, 404ing when it doesn't exist under the path's project — so an
+    """The RFQ, 404ing when it doesn't exist under the path's project - so an
     ID mix-up can never read or mutate another project's pricing.
 
     General Material is deliberately NOT special-cased anywhere below it: it is a
@@ -515,7 +551,7 @@ def _rfq_in_project(sb, project_id: str, rfq_id: str) -> dict:
     """
     rows = (
         sb.table("rfqs")
-        .select("id, status, material_category_id, material_categories(is_general)")
+        .select("id, status, material_category_id, material_categories(name, is_general)")
         .eq("id", rfq_id)
         .eq("project_id", project_id)
         .execute()
@@ -523,6 +559,87 @@ def _rfq_in_project(sb, project_id: str, rfq_id: str) -> dict:
     if not rows:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "RFQ not found")
     return rows[0]
+
+
+# ── Late quotes (0138) ────────────────────────────────────────────────────
+# After the bid is submitted (workflow.in_post_submission_window) quotes are
+# still recorded, for the record only. The quote each category was SENT with
+# is frozen, selection cannot change at all, and no quote edit bounces the bid
+# back to Verify: with the winner locked, nothing here can move a price.
+
+_SENT_QUOTE_LOCKED = (
+    "This is the quote the bid was sent with. It can't be changed after the "
+    "bid was submitted."
+)
+_SELECTION_LOCKED = (
+    "The bid has been submitted, so the selected vendor can't be changed. "
+    "Late quotes are kept for the record only."
+)
+_LATE_TAX_REQUIRED = (
+    "Answer the sales tax question (Yes, or No with a rate) before saving a "
+    "quote received after the bid was submitted."
+)
+
+
+def _post_submission(sb, project_id: str) -> bool:
+    return workflow.in_post_submission_window(project_id, sb)
+
+
+def _refuse_if_sent_quote(window: bool, quote: dict) -> None:
+    """409 when `quote` is the category's selected quote in the window."""
+    if window and quote.get("is_selected"):
+        raise HTTPException(status.HTTP_409_CONFLICT, _SENT_QUOTE_LOCKED)
+
+
+def _bounce(window: bool, project_id: str, actor_id: str, reason: str) -> None:
+    """The re-verify hook, skipped in the post-submission window."""
+    if not window:
+        workflow.maybe_reopen_verify_after_edit(project_id, actor_id, reason, stale="materials")
+
+
+def _notify_late_quote(
+    sb, project_id: str, rfq: dict, quote: dict, actor_id: str, via: str
+) -> None:
+    """Bell (and the standard email mirror) to both Estimating engineer
+    focuses, plus the audit entry. Best-effort: the quote is already saved."""
+    try:
+        category = (rfq.get("material_categories") or {}).get("name") or "a category"
+        vendor = None
+        if quote.get("vendor_id"):
+            rows = (
+                sb.table("vendors").select("name").eq("id", quote["vendor_id"]).execute()
+            ).data or []
+            vendor = rows[0].get("name") if rows else None
+        if not vendor:
+            vendor = "a hand-entered price" if quote.get("origin") == "manual" else "a vendor"
+        proj = (
+            sb.table("projects").select("name, number").eq("id", project_id).execute()
+        ).data or []
+        p = proj[0] if proj else {}
+        label = " ".join(x for x in (p.get("number"), p.get("name")) if x) or "a project"
+        message = (
+            f"New quote received for {label} from {vendor} ({category}), "
+            "after the bid was submitted."
+        )
+        for role in (Role.ESTIMATING_ENGINEER_MATERIALS, Role.ESTIMATING_ENGINEER_LABOR):
+            notify_role(role, project_id, "late_quote.received", message, rfq_id=rfq["id"])
+    except Exception:  # noqa: BLE001 - the quote is saved; the bell is best-effort
+        logging.getLogger("bdr.rfqs").exception("Late-quote notification failed")
+    audit(
+        actor_id,
+        "quote.late_add",
+        "quote",
+        quote.get("id"),
+        {
+            "rfq_id": rfq["id"],
+            "via": via,
+            "origin": quote.get("origin"),
+            "vendor_id": quote.get("vendor_id"),
+            "amount": str(quote.get("amount")),
+            "tax_included": quote.get("tax_included"),
+            "quote_file_id": quote.get("quote_file_id"),
+        },
+    )
 
 
 def _quote_in_rfq(sb, rfq_id: str, quote_id: str) -> dict:
@@ -543,15 +660,22 @@ def list_quotes(project_id: str, rfq_id: str, user: CurrentUser = Depends(get_cu
     _rfq_in_project(sb, project_id, rfq_id)
     quotes = (
         sb.table("quotes")
-        .select("*, vendors(name)")
+        .select("*, vendors(name, is_national_account)")
         .eq("rfq_id", rfq_id)
         .order("amount")
         .execute()
     ).data or []
-    # Lowest by tax-INCLUSIVE amount — comparing raw quotes would flatter a
+    # Lowest by tax-INCLUSIVE amount - comparing raw quotes would flatter a
     # vendor whose price doesn't yet carry sales tax. Display only: the lowest
-    # quote prices nothing, the SELECTED one does.
-    lowest = min((taxed_amount(q) for q in quotes), default=None)
+    # quote prices nothing, the SELECTED one does. A quote received after the
+    # bid was submitted (0138) is on record only and never competes for it.
+    lowest = min(
+        (taxed_amount(q) for q in quotes if not q.get("received_after_submission")),
+        default=None,
+    )
+    counts = _note_counts(sb, quotes)
+    for q in quotes:
+        q["note_count"] = counts.get(q["id"], 0)
     return {
         "quotes": quotes,
         "lowest_amount": str(lowest) if lowest is not None else None,
@@ -560,7 +684,7 @@ def list_quotes(project_id: str, rfq_id: str, user: CurrentUser = Depends(get_cu
 
 @rfq_router.post("/{rfq_id}/quotes", status_code=status.HTTP_201_CREATED)
 def add_quote(project_id: str, rfq_id: str, body: QuoteIn, user: CurrentUser = Depends(_PE)):
-    """Type in a quote that a VENDOR gave (origin stays 'vendor' — the number
+    """Type in a quote that a VENDOR gave (origin stays 'vendor' - the number
     came from them, it just didn't arrive through the mailbox). It lands
     unapproved with its tax question unanswered, exactly like an extracted one,
     so Receive Quotes still has to sign it off before it can win. An optional
@@ -568,22 +692,44 @@ def add_quote(project_id: str, rfq_id: str, body: QuoteIn, user: CurrentUser = D
     is reference only, never extracted."""
     sb = get_supabase()
     rfq = _rfq_in_project(sb, project_id, rfq_id)
+    # After submission (0138) the tax answer is required, and the late quote
+    # lands approved: the person typing it attests to the amount and the tax
+    # answer, exactly as a hand-entered figure does. It can never be selected.
+    window = _post_submission(sb, project_id)
+    if window and body.tax_included is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, _LATE_TAX_REQUIRED)
     if body.quote_file_id:
         _quote_file_in_category(
             sb, project_id, rfq["material_category_id"], body.quote_file_id
         )
     payload = body.model_dump(mode="json")
+    if body.tax_included is None:
+        # Unanswered: leave the column defaults, as before the field existed.
+        payload.pop("tax_included", None)
+        payload.pop("tax_rate", None)
     payload["rfq_id"] = rfq_id
     payload["source"] = "manual"
+    if window:
+        payload.update(
+            {
+                "received_after_submission": True,
+                "is_approved": True,
+                "approved_by": user.id,
+                "approved_at": "now()",
+            }
+        )
     row = sb.table("quotes").insert(payload).execute().data[0]
     sb.table("rfqs").update({"status": "quotes_in"}).eq("id", rfq_id).execute()
-    audit(
-        user.id,
-        "quote.add",
-        "quote",
-        row["id"],
-        {"amount": str(body.amount), "quote_file_id": body.quote_file_id},
-    )
+    if window:
+        _notify_late_quote(sb, project_id, rfq, row, user.id, "vendor")
+    else:
+        audit(
+            user.id,
+            "quote.add",
+            "quote",
+            row["id"],
+            {"amount": str(body.amount), "quote_file_id": body.quote_file_id},
+        )
     return row
 
 
@@ -606,35 +752,35 @@ def add_manual_quote(
     both to the amount and to the sales-tax answer the payload carries, which is
     the whole content of an approval. An optional quote_file_id binds an
     already-uploaded quote document to the row; the file is reference only,
-    never extracted — the typed amount is the quote.
+    never extracted - the typed amount is the quote.
     """
     sb = get_supabase()
     rfq = _rfq_in_project(sb, project_id, rfq_id)
+    window = _post_submission(sb, project_id)
     if body.quote_file_id:
         _quote_file_in_category(
             sb, project_id, rfq["material_category_id"], body.quote_file_id
         )
-    row = (
-        sb.table("quotes")
-        .insert(
-            {
-                "rfq_id": rfq_id,
-                # No vendor, no contact: nobody quoted this, a human wrote it down.
-                "vendor_id": None,
-                "amount": str(body.amount),
-                "origin": "manual",
-                "source": "manual",
-                "notes": body.notes,
-                "quote_file_id": body.quote_file_id,
-                "tax_included": body.tax_included,
-                "tax_rate": str(body.tax_rate),
-                "is_approved": True,
-                "approved_by": user.id,
-                "approved_at": "now()",
-            }
-        )
-        .execute()
-    ).data[0]
+    payload: dict = {
+        "rfq_id": rfq_id,
+        # No vendor, no contact: nobody quoted this, a human wrote it down.
+        "vendor_id": None,
+        "amount": str(body.amount),
+        "origin": "manual",
+        "source": "manual",
+        "notes": body.notes,
+        "quote_file_id": body.quote_file_id,
+        "tax_included": body.tax_included,
+        "tax_rate": str(body.tax_rate),
+        "is_approved": True,
+        "approved_by": user.id,
+        "approved_at": "now()",
+    }
+    if window:
+        payload["received_after_submission"] = True
+    row = sb.table("quotes").insert(payload).execute().data[0]
+    if window:
+        _notify_late_quote(sb, project_id, rfq, row, user.id, "manual")
     audit(
         user.id,
         "quote.manual_add",
@@ -689,6 +835,8 @@ def delete_quote(
             status.HTTP_409_CONFLICT,
             "The estimate's figure can't be removed. Correct the amount instead.",
         )
+    window = _post_submission(sb, project_id)
+    _refuse_if_sent_quote(window, quote)
     was_selected = bool(quote.get("is_selected"))
     sb.table("quotes").delete().eq("id", quote_id).eq("rfq_id", rfq_id).execute()
     audit(
@@ -731,11 +879,10 @@ def delete_quote(
         ).data or []
         if not remaining:
             sb.table("rfqs").update({"status": "sent"}).eq("id", rfq_id).execute()
-    # Removing the winner leaves the category with no price at all.
+    # Removing the winner leaves the category with no price at all. (Never
+    # reached in the post-submission window: the winner is refused above.)
     if was_selected:
-        workflow.maybe_reopen_verify_after_edit(
-            project_id, user.id, "Winning quote removed", stale="materials"
-        )
+        _bounce(window, project_id, user.id, "Winning quote removed")
 
 
 @rfq_router.patch("/{rfq_id}/quotes/{quote_id}")
@@ -747,10 +894,14 @@ def override_quote(
     user: CurrentUser = Depends(_PE),
 ):
     """Manually change a quote amount (e.g. correct an AI-extracted number).
-    Every change is recorded in quote_revisions."""
+    Every change is recorded in quote_revisions. After submission the quote
+    the bid was sent with is locked; a late quote is edited freely, with no
+    re-verify bounce."""
     sb = get_supabase()
     _rfq_in_project(sb, project_id, rfq_id)
     quote = _quote_in_rfq(sb, rfq_id, quote_id)
+    window = _post_submission(sb, project_id)
+    _refuse_if_sent_quote(window, quote)
     sb.table("quote_revisions").insert(
         {
             "quote_id": quote_id,
@@ -775,7 +926,7 @@ def override_quote(
         {"previous_amount": str(quote["amount"]), "new_amount": str(body.amount)},
     )
     dismiss_notifications(rfq_id=rfq_id, types=_QUOTE_NOTIF_TYPES)
-    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "Vendor quote amount changed", stale="materials")
+    _bounce(window, project_id, user.id, "Vendor quote amount changed")
     return updated
 
 
@@ -794,7 +945,7 @@ def set_quote_approval(
 
     Approving says two things at once: the amount on the row is the amount that
     was quoted (the extractor's number has been eyeballed against the PDF), and
-    the sales-tax question has been answered — which is why an unanswered
+    the sales-tax question has been answered - which is why an unanswered
     tax_included is a 409 rather than a silent approval of a figure whose true
     cost isn't known yet.
 
@@ -805,6 +956,8 @@ def set_quote_approval(
     sb = get_supabase()
     _rfq_in_project(sb, project_id, rfq_id)
     quote = _quote_in_rfq(sb, rfq_id, quote_id)
+    window = _post_submission(sb, project_id)
+    _refuse_if_sent_quote(window, quote)
     if body.approved and quote.get("tax_included") is None:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -839,9 +992,7 @@ def set_quote_approval(
     )
     # Only the un-approval that dropped a winner moved a price.
     if cleared_selection:
-        workflow.maybe_reopen_verify_after_edit(
-            project_id, user.id, "Winning quote's approval withdrawn", stale="materials"
-        )
+        _bounce(window, project_id, user.id, "Winning quote's approval withdrawn")
     return updated
 
 
@@ -853,7 +1004,7 @@ def select_quote(
 
     This is the ONLY thing that prices a category, so it is deliberately open to
     every candidate: a vendor's quote, a hand-entered figure, or General
-    Material's estimate row (General is picked from like any other category —
+    Material's estimate row (General is picked from like any other category -
     its estimate figure is a candidate, not an automatic answer).
 
     The quote must be approved first: selection carries the number into markup,
@@ -862,6 +1013,9 @@ def select_quote(
     """
     sb = get_supabase()
     _rfq_in_project(sb, project_id, rfq_id)
+    # After submission the winner is what the bid was sent with: no re-pick.
+    if _post_submission(sb, project_id):
+        raise HTTPException(status.HTTP_409_CONFLICT, _SELECTION_LOCKED)
     target = (
         sb.table("quotes")
         .select("id, is_approved")
@@ -902,6 +1056,8 @@ def clear_selected_quote(
     """
     sb = get_supabase()
     _rfq_in_project(sb, project_id, rfq_id)
+    if _post_submission(sb, project_id):
+        raise HTTPException(status.HTTP_409_CONFLICT, _SELECTION_LOCKED)
     cleared = (
         sb.table("quotes")
         .update({"is_selected": False})
@@ -925,9 +1081,11 @@ def set_quotes_confirmed(
     material. Accepted on every category, General Material included: General now
     holds candidates like any other category, so it can be attested like any
     other. The backend only stores who confirmed and when; which categories the
-    step waits on is the frontend's gate."""
+    step waits on is the frontend's gate. No re-verify bounce after the bid was
+    submitted (0138)."""
     sb = get_supabase()
     _rfq_in_project(sb, project_id, rfq_id)
+    window = _post_submission(sb, project_id)
     updated = (
         sb.table("rfqs")
         .update(
@@ -941,7 +1099,7 @@ def set_quotes_confirmed(
         .execute()
     ).data[0]
     audit(user.id, "rfq.quotes_confirmed", "rfq", rfq_id, {"confirmed": body.confirmed})
-    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "Quotes-confirmed flag changed", stale="materials")
+    _bounce(window, project_id, user.id, "Quotes-confirmed flag changed")
     return updated
 
 
@@ -961,9 +1119,15 @@ def set_quote_tax(
     Answerable on every category, General Material included: its candidates go
     through approval and selection like anybody else's, so their tax question has
     to be answerable here. The estimate figure's own attestation still lives on
-    routers/general_material."""
+    routers/general_material.
+
+    After submission (0138) the quote the bid was sent with is locked; a late
+    quote's answer is recorded freely, with no re-verify bounce."""
     sb = get_supabase()
     _rfq_in_project(sb, project_id, rfq_id)
+    window = _post_submission(sb, project_id)
+    if window:
+        _refuse_if_sent_quote(window, _quote_in_rfq(sb, rfq_id, quote_id))
     updated = (
         sb.table("quotes")
         .update({"tax_included": body.tax_included, "tax_rate": str(body.tax_rate)})
@@ -982,14 +1146,170 @@ def set_quote_tax(
     )
     # The tax-inclusive amount changes the materials price basis whenever this
     # quote is the winner, so re-verify if the project already passed Verify.
-    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "Quote tax setting changed", stale="materials")
+    _bounce(window, project_id, user.id, "Quote tax setting changed")
     return updated[0]
+
+
+# ── Quote notes (0137) ────────────────────────────────────────────────────
+# Per-quote commentary that tells candidates in one category apart ("excludes
+# fixtures", "lead time 12 weeks"). Notes are words, never numbers: nothing
+# here touches an amount, an approval or a selection, so nothing here bounces a
+# verified bid. quotes.notes (the one note typed when a figure is entered by
+# hand) is left as it is and rides along as the pinned "entry note"; it counts
+# toward the row's flag like any other note. Internal only: the estimator
+# portal never reads quote_notes.
+
+_NOTE_AUTHOR_JOIN = "author:profiles!quote_notes_author_id_fkey(full_name, role)"
+
+# Who may remove somebody else's note. Everyone may remove their own.
+_NOTE_MODERATOR_ROLES = frozenset({Role.EXECUTIVE, Role.IT_ADMIN})
+
+
+def _note_counts(sb, quotes: list[dict]) -> dict[str, int]:
+    """quote id -> number of notes on it, entry note included. ONE query for
+    the whole list (never one per quote)."""
+    ids = [q["id"] for q in quotes]
+    counts = {q["id"]: 1 if (q.get("notes") or "").strip() else 0 for q in quotes}
+    if not ids:
+        return counts
+    rows = (
+        sb.table("quote_notes").select("quote_id").in_("quote_id", ids).execute()
+    ).data or []
+    for r in rows:
+        counts[r["quote_id"]] = counts.get(r["quote_id"], 0) + 1
+    return counts
+
+
+@rfq_router.get("/{rfq_id}/quote-notes")
+def list_quote_notes(
+    project_id: str, rfq_id: str, user: CurrentUser = Depends(get_current_user)
+):
+    """Everything the quote-notes modal shows for one category: every quote on
+    the RFQ (cheapest first on the tax-inclusive total, as on Select Vendors),
+    each with its entry note and its notes thread, oldest first. Two queries
+    after the RFQ lookup: the quotes, then all their notes at once."""
+    _internal(user)
+    sb = get_supabase()
+    rfq = _rfq_in_project(sb, project_id, rfq_id)
+    quotes = (
+        sb.table("quotes")
+        .select(
+            "id, rfq_id, amount, tax_included, tax_rate, is_approved, is_selected,"
+            " origin, source, notes, quote_file_id, received_at, received_after_submission,"
+            " vendors(name, is_national_account), vendor_contacts(name), project_files(filename)"
+        )
+        .eq("rfq_id", rfq_id)
+        .execute()
+    ).data or []
+    notes: list[dict] = []
+    if quotes:
+        notes = (
+            sb.table("quote_notes")
+            .select(f"id, quote_id, body, author_id, created_at, {_NOTE_AUTHOR_JOIN}")
+            .in_("quote_id", [q["id"] for q in quotes])
+            .order("created_at")
+            .execute()
+        ).data or []
+    by_quote: dict[str, list[dict]] = {q["id"]: [] for q in quotes}
+    for n in notes:
+        by_quote.setdefault(n["quote_id"], []).append(n)
+    for thread in by_quote.values():
+        thread.sort(key=lambda n: n.get("created_at") or "")
+
+    out: list[dict] = []
+    for q in quotes:
+        thread = by_quote[q["id"]]
+        entry = (q.get("notes") or "").strip() or None
+        out.append(
+            {
+                **_candidate(q, len(thread) + (1 if entry else 0)),
+                "entry_note": entry,
+                "quote_notes": thread,
+            }
+        )
+    out.sort(key=lambda c: (Decimal(c["total"]), c["received_at"] or ""))
+    return {
+        "rfq_id": rfq_id,
+        "category_name": (rfq.get("material_categories") or {}).get("name"),
+        "quotes": out,
+    }
+
+
+@rfq_router.post(
+    "/{rfq_id}/quotes/{quote_id}/notes",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(quote_write_rate_limit)],
+)
+def add_quote_note(
+    project_id: str,
+    rfq_id: str,
+    quote_id: str,
+    body: QuoteNoteIn,
+    user: CurrentUser = Depends(_PE),
+):
+    """Add a note to one quote. Writers only (the accountant reads, never
+    writes). Changes no price, so there is no re-verify bounce."""
+    sb = get_supabase()
+    _rfq_in_project(sb, project_id, rfq_id)
+    _quote_in_rfq(sb, rfq_id, quote_id)
+    row = (
+        sb.table("quote_notes")
+        .insert({"quote_id": quote_id, "author_id": user.id, "body": body.body})
+        .execute()
+    ).data[0]
+    audit(
+        user.id,
+        "quote.note_add",
+        "quote",
+        quote_id,
+        {"rfq_id": rfq_id, "note_id": row.get("id")},
+    )
+    return row
+
+
+@rfq_router.delete(
+    "/{rfq_id}/quotes/{quote_id}/notes/{note_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(quote_write_rate_limit)],
+)
+def delete_quote_note(
+    project_id: str,
+    rfq_id: str,
+    quote_id: str,
+    note_id: str,
+    user: CurrentUser = Depends(_PE),
+):
+    """Remove a note: its author may, and so may the Executive / IT Admin.
+    The entry note (quotes.notes) is not a thread row and cannot be removed
+    here. Changes no price, so there is no re-verify bounce."""
+    sb = get_supabase()
+    _rfq_in_project(sb, project_id, rfq_id)
+    _quote_in_rfq(sb, rfq_id, quote_id)
+    rows = (
+        sb.table("quote_notes")
+        .select("id, author_id")
+        .eq("id", note_id)
+        .eq("quote_id", quote_id)
+        .execute()
+    ).data
+    if not rows:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Note not found")
+    if rows[0].get("author_id") != user.id and user.role not in _NOTE_MODERATOR_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only the author can remove this note")
+    sb.table("quote_notes").delete().eq("id", note_id).eq("quote_id", quote_id).execute()
+    audit(
+        user.id,
+        "quote.note_delete",
+        "quote",
+        quote_id,
+        {"rfq_id": rfq_id, "note_id": note_id, "by_author": rows[0].get("author_id") == user.id},
+    )
 
 
 # ── Select Vendors (the step that prices the project) ─────────────────────
 
 
-def _candidate(quote: dict) -> dict:
+def _candidate(quote: dict, note_count: int = 0) -> dict:
     """One row on the Select Vendors table. `total` is the tax-inclusive figure
     computed by pricing.tax_info, so the number the estimator compares here is
     byte-for-byte the number pricing will carry into markup, verify and the bid.
@@ -1001,6 +1321,10 @@ def _candidate(quote: dict) -> dict:
         # Null for a hand-entered figure and for General Material's estimate row:
         # nobody quoted those, so the frontend labels them by origin instead.
         "vendor_name": (quote.get("vendors") or {}).get("name"),
+        # 0139: display-only badge; it buys no priority either.
+        "vendor_national_account": bool(
+            (quote.get("vendors") or {}).get("is_national_account")
+        ),
         "contact_name": (quote.get("vendor_contacts") or {}).get("name"),
         "amount": str(info["pre_tax"]),
         "tax_included": quote.get("tax_included"),
@@ -1015,10 +1339,14 @@ def _candidate(quote: dict) -> dict:
         # Provenance only, like origin: it confers no priority either.
         "source": quote.get("source") or "manual",
         "notes": quote.get("notes"),
+        # quote_notes rows plus the entry note, so the row can flag itself.
+        "note_count": note_count,
         "quote_file_id": quote.get("quote_file_id"),
         # Resolved so the row can open a preview without a second lookup.
         "quote_file_name": (quote.get("project_files") or {}).get("filename"),
         "received_at": quote.get("received_at"),
+        # Recorded after the bid was submitted (0138): never selectable.
+        "received_after_submission": bool(quote.get("received_after_submission")),
     }
 
 
@@ -1030,7 +1358,7 @@ def get_vendor_selection(
     the project, every candidate behind it, and which one currently wins.
 
     Two queries whatever the project's size (the RFQs, then all their quotes at
-    once) — this page is opened on every bid and a per-category fetch would fan
+    once) - this page is opened on every bid and a per-category fetch would fan
     out into dozens of round trips.
 
     Categories come back in the material-category display order; candidates come
@@ -1057,16 +1385,17 @@ def get_vendor_selection(
             sb.table("quotes")
             .select(
                 "id, rfq_id, amount, tax_included, tax_rate, is_approved, is_selected,"
-                " origin, source, notes, quote_file_id, received_at,"
-                " vendors(name), vendor_contacts(name), project_files(filename)"
+                " origin, source, notes, quote_file_id, received_at, received_after_submission,"
+                " vendors(name, is_national_account), vendor_contacts(name), project_files(filename)"
             )
             .in_("rfq_id", rfq_ids)
             .execute()
         ).data or []
 
+    counts = _note_counts(sb, quotes)
     by_rfq: dict[str, list[dict]] = {r["id"]: [] for r in rfqs}
     for q in quotes:
-        by_rfq[q["rfq_id"]].append(_candidate(q))
+        by_rfq[q["rfq_id"]].append(_candidate(q, counts.get(q["id"], 0)))
 
     def _cat(r: dict) -> dict:
         return r.get("material_categories") or {}

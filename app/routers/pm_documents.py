@@ -168,6 +168,7 @@ async def export_documents(
     project_id: str,
     body: PmDocsExportIn | None = Body(default=None),
     user: CurrentUser = Depends(require_pm_read),
+    flat: bool = False,
 ):
     """Bundle the project's documents into a single `.zip`, one folder per
     business folder (Plans/, Quotes/, Certified Payroll/, …).
@@ -218,7 +219,7 @@ async def export_documents(
             )
         try:
             spool, manifest, size = await run_in_threadpool(
-                file_export.build_folder_export_spooled, rows
+                file_export.build_folder_export_spooled, rows, flat=flat
             )
         finally:
             _export_lock.release()

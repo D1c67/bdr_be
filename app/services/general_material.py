@@ -237,14 +237,52 @@ def _tax_reset(prior: dict[str, Any] | None, new_file_id: Any, new_amount: Any) 
     return {}
 
 
+def figure_locked(project_id: str, sb=None) -> bool:
+    """True when the General Material figure is part of what the bid was SENT
+    with and the bid has been submitted (0138), so it may no longer change.
+
+    The figure prices the category in two ways: as the selected 'estimate'
+    quote on the General Material RFQ, or directly (pricing synthesizes the
+    General row from it) when the project has no General Material RFQ. Either
+    way, after submission it is frozen. When the General category was priced
+    by some other selected quote the figure moves nothing and stays editable."""
+    from app.services import workflow
+
+    client = sb if sb is not None else get_supabase()
+    if not workflow.in_post_submission_window(project_id, client):
+        return False
+    rfqs = (
+        client.table("rfqs")
+        .select("id, material_categories(is_general)")
+        .eq("project_id", project_id)
+        .execute()
+    ).data or []
+    general_ids = [
+        r["id"] for r in rfqs if (r.get("material_categories") or {}).get("is_general")
+    ]
+    if not general_ids:
+        return True
+    winners = (
+        client.table("quotes")
+        .select("origin")
+        .in_("rfq_id", general_ids)
+        .eq("is_selected", True)
+        .execute()
+    ).data or []
+    return any(w.get("origin") == "estimate" for w in winners)
+
+
 def _maybe_bounce(project_id: str, prior: Any, new: Any) -> None:
     """If a re-extraction actually changed the figure, re-verify a project that has
     already passed Verify. Local import avoids any import-time cycle; the bounce is
-    best-effort (background task, no actor)."""
+    best-effort (background task, no actor). Never after the bid was submitted
+    (0138): no quote-side change bounces a sent bid."""
     if not _amount_changed(prior, new):
         return
     from app.services import workflow
 
+    if workflow.in_post_submission_window(project_id, get_supabase()):
+        return
     workflow.maybe_reopen_verify_after_edit(project_id, None, "General material re-extracted", stale="materials")
 
 
@@ -255,6 +293,15 @@ def execute(project_id: str) -> None:
     vs terminal fail; "no estimate file" and "model found nothing" are normal
     outcomes (not_found), not failures. Direct callers use run_extraction."""
     settings = get_settings()
+    if figure_locked(project_id):
+        # The figure went out with the bid (0138); a late re-run (an estimator
+        # resubmitting, a queued job) must not rewrite it.
+        logger.info("General material extraction skipped for %s: figure locked after submission", project_id)
+        locked_row = _current_row(project_id)
+        if locked_row is not None:
+            # Release a row a queued run may have marked in flight.
+            _save(project_id, status="done" if locked_row.get("amount") is not None else "not_found")
+        return
     prior = _current_row(project_id)
     prior_amount = prior["amount"] if prior else None
     _save(project_id, status="running", error=None, model=llm.active_model("estimate", settings))

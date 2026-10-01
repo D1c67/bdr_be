@@ -32,17 +32,37 @@ Invariants pinned here:
   service split   execute() raises so the queue owns the terminal mark
                   (row stays "running"); run_* wrappers are the only place
                   failures are terminal-marked inline.
+  rfp_ingest      the sandbox job type rides the same table but never an LLM
+                  slot: the claim RPC's job_types filter keeps the two
+                  passes disjoint, each with its own capacity (a second
+                  sandbox run waits while one runs; the LLM pass never
+                  takes a sandbox row; the pass is skipped while the flag is
+                  off); renew_lease / requeue_self CAS through the same
+                  (claimed_by, attempts) fence and are no-ops with no
+                  current job; the spec's "sandbox" label stands in for an
+                  LLM model and its own error_message keeps every sentence
+                  the queue stores sandbox-authored (an exception the sandbox
+                  never declared is recorded as interrupted, not as a problem
+                  with the AI provider); self-classifying exceptions requeue
+                  (infrastructure) or fail (bad_input) with their own text;
+                  LeaseLost writes nothing; an error inside the failure
+                  handler still forces a terminal state; the hourly prune
+                  slot runs the sandbox retention behind the flag.
 
 Supabase is faked in-memory per house convention; the fake enforces the
 partial unique index on active (job_type, target_id) pairs and implements
-claim_llm_jobs in Python mirroring the SQL semantics in 0094.
+claim_llm_jobs in Python mirroring the SQL semantics in 0094 (plus the
+job_types filter 0119 adds). app.services.rfp_ingest is written by a later
+package, so a stand-in module with exactly the surface llm_queue wires is
+installed in sys.modules for the sandbox tests.
 """
 
 import contextlib
+import sys
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import httpx
 import pytest
@@ -56,6 +76,7 @@ from app.models.schemas import BoqAnalysisStart, ProposalGenerateIn
 from app.routers import boq_analysis as boq_router
 from app.routers import general_material as gm_router
 from app.routers import proposals as proposals_router
+from app.sandbox import protocol
 from app.services import boq_extraction as bx
 from app.services import llm, llm_errors, llm_gate
 from app.services import llm_queue as lq
@@ -221,9 +242,11 @@ class _Query:
 
 
 class _Rpc:
-    """Python mirror of the claim_llm_jobs SQL in 0094: claim up to max_jobs
-    queued jobs whose next_attempt_at <= now, ordered (priority, created_at);
-    set running/claimed_by/lease, spend an attempt, coalesce started_at."""
+    """Python mirror of the claim_llm_jobs SQL in 0094 (+ the job_types filter
+    0119 adds, `job_types is null or job_type = any(job_types)`): claim up to
+    max_jobs queued jobs whose next_attempt_at <= now, ordered (priority,
+    created_at); set running/claimed_by/lease, spend an attempt, coalesce
+    started_at."""
 
     def __init__(self, db, params):
         self.db = db
@@ -232,9 +255,12 @@ class _Rpc:
     def execute(self):
         now = self.db.now
         rows = self.db.tables.setdefault("llm_jobs", [])
+        job_types = self.params.get("job_types")
         due = [
             r for r in rows
-            if r.get("status") == "queued" and _ts(r.get("next_attempt_at")) <= now
+            if r.get("status") == "queued"
+            and _ts(r.get("next_attempt_at")) <= now
+            and (job_types is None or r.get("job_type") in job_types)
         ]
         due.sort(key=lambda r: (r.get("priority", 100), r.get("created_at") or ""))
         claimed = []
@@ -255,12 +281,14 @@ class FakeDB:
         self.tables = {k: [dict(r) for r in v] for k, v in (tables or {}).items()}
         self.now = now
         self._seq = 0
+        self.rpc_calls = []  # every claim's params, so tests can see each pass
 
     def table(self, name):
         return _Query(self, name)
 
     def rpc(self, name, params):
         assert name == "claim_llm_jobs"
+        self.rpc_calls.append(dict(params))
         return _Rpc(self, params)
 
     def next_created_at(self):
@@ -630,10 +658,14 @@ def _raiser(exc):
     return run
 
 
-def _running_row(db, *, job_id, target, attempts, lease=None, max_attempts=6):
+def _running_row(
+    db, *, job_id, target, attempts, lease=None, max_attempts=6,
+    job_type=lq.JOB_BOQ, payload=None,
+):
     row = {
-        "id": job_id, "job_type": lq.JOB_BOQ, "feature": "boq", "target_id": target,
-        "project_id": None, "payload": {"analysis_id": target}, "status": "running",
+        "id": job_id, "job_type": job_type, "feature": lq._FEATURE_BY_TYPE[job_type],
+        "target_id": target, "project_id": None,
+        "payload": payload or {"analysis_id": target}, "status": "running",
         "priority": 100, "attempts": attempts, "max_attempts": max_attempts,
         "next_attempt_at": None, "claimed_by": "w1",
         "lease_expires_at": lease or (NOW + timedelta(seconds=900)).isoformat(),
@@ -903,6 +935,490 @@ def test_requeue_terminal_rejects_a_non_terminal_job(monkeypatch):
         lq.requeue_terminal({"id": "q1", "status": "queued"}, created_by="u2")
 
 
+# ── llm_queue: rfp_ingest (sandbox) job type ─────────────────────────────
+
+
+class _Boom:
+    """A get_supabase() stand-in for paths that must not touch the DB."""
+
+    def table(self, *_a, **_k):  # pragma: no cover - reaching here is the failure
+        raise AssertionError("the DB must not be touched here")
+
+    def rpc(self, *_a, **_k):  # pragma: no cover
+        raise AssertionError("the DB must not be touched here")
+
+
+def _install_rfp_ingest(monkeypatch, *, run=None, current_status=None, prune=None):
+    """Stand in for app.services.rfp_ingest (a later package) with exactly the
+    surface llm_queue wires: execute / mark_from_queue / current_status /
+    prune_expired and the two self-classifying exception classes. Installed
+    in sys.modules AND as the package attribute so `from app.services import
+    rfp_ingest` resolves to the stand-in even once the real module exists."""
+    import app.services as services_pkg
+
+    mod = ModuleType("app.services.rfp_ingest")
+    runs, marks, prunes = [], [], []
+
+    class RfpIngestTransient(RuntimeError):
+        llm_error_kind = "infrastructure"
+
+    class RfpIngestPermanent(ValueError):
+        llm_error_kind = "bad_input"
+
+    def execute(run_id):
+        runs.append(run_id)
+        if run is not None:
+            run(run_id)
+
+    mod.RfpIngestTransient = RfpIngestTransient
+    mod.RfpIngestPermanent = RfpIngestPermanent
+    mod.execute = execute
+    mod.mark_from_queue = lambda run_id, status, error: marks.append((run_id, status, error))
+    mod.current_status = current_status or (lambda run_id: None)
+    mod.prune_expired = prune or (lambda: prunes.append(True))
+    monkeypatch.setitem(sys.modules, "app.services.rfp_ingest", mod)
+    monkeypatch.setattr(services_pkg, "rfp_ingest", mod, raising=False)
+    return mod, runs, marks, prunes
+
+
+def _rfp_job(db, job_id="j1", run_id="r1", attempts=1):
+    return _running_row(
+        db, job_id=job_id, target=run_id, attempts=attempts,
+        job_type=lq.JOB_RFP_INGEST, payload={"run_id": run_id},
+    )
+
+
+def _enqueue_rfp(run_id):
+    return lq.enqueue(
+        lq.JOB_RFP_INGEST, target_id=run_id, payload={"run_id": run_id}, priority=200
+    )
+
+
+def _row(db, job_id):
+    return next(r for r in db.tables["llm_jobs"] if r["id"] == job_id)
+
+
+def test_rfp_ingest_is_a_job_type_but_not_an_llm_one():
+    assert lq.JOB_RFP_INGEST == "rfp_ingest"
+    assert lq.JOB_RFP_INGEST not in lq.LLM_JOB_TYPES
+    assert set(lq.LLM_JOB_TYPES) == {
+        lq.JOB_BOQ, lq.JOB_GENERAL_MATERIAL, lq.JOB_PROPOSAL, lq.JOB_BID_SPLIT
+    }
+
+
+def test_enqueue_rfp_ingest_records_its_feature_and_priority(monkeypatch):
+    db = _queue_env(monkeypatch)
+    job = _enqueue_rfp("r1")
+    row = db.tables["llm_jobs"][0]
+    assert job["id"] == row["id"]
+    assert row["feature"] == "rfp_ingest"
+    assert row["priority"] == 200  # never outranks a user-facing LLM job (100)
+    assert row["payload"] == {"run_id": "r1"}
+
+
+def test_claim_honors_the_job_types_filter(monkeypatch):
+    db = _queue_env(monkeypatch)
+    boq = lq.enqueue(lq.JOB_BOQ, target_id="a")
+    rfp = _enqueue_rfp("r1")
+    # A sandbox-only claim leaves the LLM row queued, and vice versa.
+    assert [j["id"] for j in lq._claim(_settings(), 10, [lq.JOB_RFP_INGEST])] == [rfp["id"]]
+    assert _row(db, boq["id"])["status"] == "queued"
+    assert db.rpc_calls[-1]["job_types"] == [lq.JOB_RFP_INGEST]
+    assert [j["id"] for j in lq._claim(_settings(), 10, list(lq.LLM_JOB_TYPES))] == [boq["id"]]
+
+
+def test_claim_without_a_filter_takes_any_type_and_omits_the_parameter(monkeypatch):
+    db = _queue_env(monkeypatch)
+    lq.enqueue(lq.JOB_BOQ, target_id="a")
+    _enqueue_rfp("r1")
+    claimed = lq._claim(_settings(), 10)
+    assert {j["job_type"] for j in claimed} == {lq.JOB_BOQ, lq.JOB_RFP_INGEST}
+    # None means "no filter"; the key is left out so the RPC default applies.
+    assert "job_types" not in db.rpc_calls[-1]
+
+
+def test_claim_tick_llm_pass_never_takes_a_sandbox_row(monkeypatch):
+    db = _queue_env(monkeypatch)
+    s = _settings(rfp_ingest_enabled=False)
+    rfp = _enqueue_rfp("r1")
+    boq = lq.enqueue(lq.JOB_BOQ, target_id="a")
+    claimed = lq._claim_tick(s, [])
+    assert [j["id"] for j in claimed] == [boq["id"]]
+    # Exactly one RPC call (the sandbox pass is skipped while the flag is
+    # off) and it named the LLM types, so the RPC could never hand back r1.
+    assert len(db.rpc_calls) == 1
+    assert db.rpc_calls[0]["job_types"] == list(lq.LLM_JOB_TYPES)
+    assert _row(db, rfp["id"])["status"] == "queued"
+
+
+def test_claim_tick_sandbox_capacity_is_independent_of_llm_slots(monkeypatch):
+    db = _queue_env(monkeypatch)
+    s = _settings(llm_queue_worker_concurrency=1, rfp_ingest_sandbox_concurrency=1)
+    a = lq.enqueue(lq.JOB_BOQ, target_id="a")
+    b = lq.enqueue(lq.JOB_BOQ, target_id="b")
+    r1 = _enqueue_rfp("r1")
+    r2 = _enqueue_rfp("r2")
+    # Nothing running: one of each, in creation order within each pass.
+    first = lq._claim_tick(s, [])
+    assert [j["id"] for j in first] == [a["id"], r1["id"]]
+    assert _row(db, b["id"])["status"] == "queued"
+    assert _row(db, r2["id"])["status"] == "queued"
+    # An LLM job in flight uses up the LLM slot but not the sandbox one.
+    llm_busy = lq._claim_tick(s, [lq.JOB_BOQ])
+    assert [j["id"] for j in llm_busy] == [r2["id"]]
+    assert _row(db, b["id"])["status"] == "queued"
+    # And a sandbox run in flight never blocks the LLM pass.
+    r3 = _enqueue_rfp("r3")
+    sandbox_busy = lq._claim_tick(s, [lq.JOB_RFP_INGEST])
+    assert [j["id"] for j in sandbox_busy] == [b["id"]]
+    assert _row(db, r3["id"])["status"] == "queued"
+
+
+def test_claim_tick_second_sandbox_run_waits_while_one_runs(monkeypatch):
+    db = _queue_env(monkeypatch)
+    s = _settings(rfp_ingest_sandbox_concurrency=1)
+    r1 = _enqueue_rfp("r1")
+    r2 = _enqueue_rfp("r2")
+    assert [j["id"] for j in lq._claim_tick(s, [])] == [r1["id"]]
+    # While r1 runs the sandbox pass has zero capacity and is not even called.
+    calls_before = len(db.rpc_calls)
+    assert lq._claim_tick(s, [lq.JOB_RFP_INGEST]) == []
+    # The LLM pass and the third pass (the promotion type rides it under the
+    # master switch alone, docs/RFP_CREATE.md 5); never the sandbox pass.
+    assert [c["job_types"] for c in db.rpc_calls[calls_before:]] == [
+        list(lq.LLM_JOB_TYPES), list(lq.CREATE_JOB_TYPES)
+    ]
+    assert _row(db, r2["id"])["status"] == "queued"
+    # r1 finished: the slot frees and r2 is claimed on the next tick.
+    assert [j["id"] for j in lq._claim_tick(s, [])] == [r2["id"]]
+
+
+def test_renew_lease_extends_the_lease_and_refuses_a_stale_attempt(monkeypatch):
+    db = _queue_env(monkeypatch)
+    later = NOW + timedelta(seconds=100)
+    monkeypatch.setattr(lq, "_now", lambda: later)
+    job = _running_row(db, job_id="j1", target="r1", attempts=2)
+    assert lq.renew_lease(job) is True
+    assert _row(db, "j1")["lease_expires_at"] == (later + timedelta(seconds=900)).isoformat()
+    # A stale attempt (the lease expired, the sweep requeued, this process
+    # reclaimed: attempts moved on) must not extend the newer claim's lease.
+    stale = dict(job, attempts=1)
+    assert lq.renew_lease(stale) is False
+    # Not ours, or no longer running: refused too.
+    assert lq.renew_lease(dict(job, claimed_by="someone-else")) is False
+    _row(db, "j1")["status"] = "queued"
+    assert lq.renew_lease(job) is False
+
+
+def test_renew_and_requeue_are_no_ops_outside_a_queue_job(monkeypatch):
+    # BackgroundTasks fallback: no current job, nothing to fence, no DB touch.
+    monkeypatch.setattr(lq, "get_supabase", lambda: _Boom())
+    assert lq.current_job.get() is None
+    assert lq.renew_lease() is True
+    assert lq.requeue_self() is True
+
+
+def test_renew_lease_keeps_the_lease_on_a_database_error(monkeypatch):
+    def boom():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(lq, "get_supabase", boom)
+    monkeypatch.setattr(lq, "get_settings", lambda: _settings())
+    job = {"id": "j1", "claimed_by": lq._WORKER_TOKEN, "attempts": 1}
+    # A hiccup is not a lost lease: most of the window is still ahead and the
+    # next renewal retries. Killing hours of sandbox work for it would be worse.
+    assert lq.renew_lease(job) is True
+
+
+def test_requeue_self_hands_the_job_back_as_interrupted(monkeypatch):
+    db = _queue_env(monkeypatch)
+    monkeypatch.setattr(lq, "_now", lambda: NOW)
+    job = _running_row(db, job_id="j1", target="r1", attempts=1)
+    assert lq.requeue_self(job) is True
+    row = _row(db, "j1")
+    assert row["status"] == "queued"
+    assert row["next_attempt_at"] == NOW.isoformat()  # due immediately
+    assert row["error_kind"] == "interrupted"
+    assert row["last_error"] == lq._INTERRUPTED_MESSAGE
+    assert row["claimed_by"] is None and row["lease_expires_at"] is None
+    assert row["attempts"] == 1  # the next claim spends the next attempt
+    assert job["status"] == "queued"  # the local dict mirrors the hand-off
+    # Already handed on (or reclaimed by someone else): nothing to do.
+    assert lq.requeue_self(dict(job, status="running")) is False
+
+
+def test_execute_exposes_the_current_job_and_a_requeued_run_is_not_marked_done(monkeypatch):
+    db = _queue_env(monkeypatch)
+    monkeypatch.setattr(lq, "_now", lambda: NOW)
+    seen = []
+
+    def run(run_id):
+        seen.append(lq.current_job.get())
+        assert lq.renew_lease() is True  # the default is the current job
+        assert lq.requeue_self() is True  # shutdown path: hand the job on
+
+    _install_rfp_ingest(monkeypatch, run=run)
+    job = _rfp_job(db)
+    lq._execute(job)
+    assert seen == [job]
+    assert lq.current_job.get() is None  # reset after the run
+    row = _row(db, "j1")
+    assert row["status"] == "queued" and row["error_kind"] == "interrupted"
+    assert row["finished_at"] is None  # never marked succeeded
+
+
+def test_rfp_spec_wires_run_mark_status_and_the_sandbox_label(monkeypatch):
+    _, runs, marks, _ = _install_rfp_ingest(monkeypatch, current_status=lambda r: "done")
+    spec = lq._spec(lq.JOB_RFP_INGEST)
+    assert spec.feature == "rfp_ingest"
+    spec.run({"run_id": "r1"})
+    assert runs == ["r1"]
+    spec.mark("r1", {"status": "pending", "error": None})
+    spec.mark("r1", {"status": "failed", "error": "boom"})
+    assert marks == [("r1", "pending", None), ("r1", "failed", "boom")]
+    assert spec.current_status("r1") == "done"
+    assert spec.model_label(_settings()) == "sandbox"
+
+
+def test_default_model_label_is_the_features_active_model():
+    spec = lq._JobSpec("boq", lambda p: None, lambda t, f: None, lambda t: None)
+    s = _settings()
+    assert spec.model_label(s) == llm.active_model("boq", s)
+
+
+def test_execute_rfp_transient_failure_requeues_with_its_own_message(monkeypatch):
+    db = _queue_env(monkeypatch)
+    monkeypatch.setattr(lq, "_now", lambda: NOW)
+    message = "A storage operation failed; retry the run."
+    mod, _, marks, _ = _install_rfp_ingest(monkeypatch)
+
+    def run(run_id):
+        raise mod.RfpIngestTransient(message)
+
+    mod.execute = run
+    lq._execute(_rfp_job(db))
+    row = _row(db, "j1")
+    assert row["status"] == "queued"
+    assert row["error_kind"] == "infrastructure"
+    assert row["last_error"] == message  # app-authored, stored verbatim
+    assert row["next_attempt_at"] == (NOW + timedelta(seconds=10)).isoformat()
+    assert marks == [("r1", "pending", None)]
+
+
+def test_execute_rfp_permanent_failure_fails_with_the_app_authored_message(monkeypatch):
+    db = _queue_env(monkeypatch)
+    monkeypatch.setattr(lq, "_now", lambda: NOW)
+    message = "The PDF has no pages."
+    mod, _, marks, _ = _install_rfp_ingest(monkeypatch)
+
+    def run(run_id):
+        raise mod.RfpIngestPermanent(message)
+
+    mod.execute = run
+    lq._execute(_rfp_job(db))
+    row = _row(db, "j1")
+    assert row["status"] == "failed"
+    assert row["error_kind"] == "bad_input"
+    assert row["last_error"] == message
+    assert row["finished_at"] == NOW.isoformat()
+    assert marks == [("r1", "failed", message)]
+
+
+def test_execute_rfp_lease_lost_writes_nothing(monkeypatch):
+    db = _queue_env(monkeypatch)
+    monkeypatch.setattr(lq, "_now", lambda: NOW)
+
+    class LeaseLost(Exception):
+        __module__ = "app.services.rfp_sandbox_runner"
+
+    def run(run_id):
+        raise LeaseLost()
+
+    _, _, marks, _ = _install_rfp_ingest(monkeypatch, run=run)
+    job = _rfp_job(db)
+    before = dict(_row(db, "j1"))
+    lq._execute(job)
+    # The sweep already handed the job on; our fence would refuse anyway and
+    # the domain row belongs to the new owner. Nothing moved, nothing marked.
+    assert _row(db, "j1") == before
+    assert marks == []
+
+
+def test_execute_rfp_undeclared_failure_stores_the_sandbox_authored_sentence(monkeypatch):
+    db = _queue_env(monkeypatch)
+    monkeypatch.setattr(lq, "_now", lambda: NOW)
+
+    def run(run_id):
+        raise RuntimeError("raw text with /tmp/rfp-ingest-abc/source.pdf")
+
+    _install_rfp_ingest(monkeypatch, run=run)
+    lq._execute(_rfp_job(db))
+    row = _row(db, "j1")
+    assert row["status"] == "queued"  # unknown is transient
+    assert row["error_kind"] == "unknown"
+    assert row["last_error"] == protocol.VERDICT_MESSAGES[protocol.FAIL_INTERRUPTED]
+    assert "/tmp/" not in row["last_error"]  # raw text never stored
+
+
+def test_execute_rfp_undeclared_timeout_never_blames_the_ai_provider(monkeypatch):
+    """A run that never touched an LLM cannot be described as one. httpx and
+    postgrest errors escape execute outside the guarded per-file loop, and
+    llm_errors would classify them as timeout/server_error and write text
+    about "the AI provider"; the rfp spec's error_message maps anything it did
+    not declare to the sandbox's own interrupted sentence, in the domain row
+    (the bell renders it) as well as in the job row."""
+    db = _queue_env(monkeypatch)
+    monkeypatch.setattr(lq, "_now", lambda: NOW)
+
+    def run(run_id):
+        raise httpx.ReadTimeout("timed out", request=httpx.Request("GET", "http://db"))
+
+    _, _, marks, _ = _install_rfp_ingest(monkeypatch, run=run)
+    lq._execute(_rfp_job(db, attempts=6))  # ladder exhausted: terminal
+    row = _row(db, "j1")
+    assert row["status"] == "failed"
+    assert row["error_kind"] == "timeout"
+    message = protocol.VERDICT_MESSAGES[protocol.FAIL_INTERRUPTED]
+    assert row["last_error"] == message
+    assert marks == [("r1", "failed", message + " (failed after 6 attempts)")]
+    for text in (row["last_error"], marks[0][2]):
+        assert "AI provider" not in text and "the model" not in text
+
+
+def test_execute_rfp_undeclared_value_error_does_not_leak_developer_text(monkeypatch):
+    """bad_input is the one kind llm_errors passes through verbatim, so a raw
+    ValueError from a mark helper would otherwise land in the error column."""
+    db = _queue_env(monkeypatch)
+    monkeypatch.setattr(lq, "_now", lambda: NOW)
+
+    def run(run_id):
+        raise ValueError("_mark cannot move a run to 'nonsense'")
+
+    _, _, marks, _ = _install_rfp_ingest(monkeypatch, run=run)
+    lq._execute(_rfp_job(db))
+    row = _row(db, "j1")
+    assert row["status"] == "failed" and row["error_kind"] == "bad_input"
+    assert row["last_error"] == protocol.VERDICT_MESSAGES[protocol.FAIL_INTERRUPTED]
+    assert marks == [("r1", "failed", protocol.VERDICT_MESSAGES[protocol.FAIL_INTERRUPTED])]
+
+
+def test_llm_specs_keep_the_llm_flavored_message(monkeypatch):
+    """Only the sandbox spec overrides the mapper: an LLM job still gets
+    llm_errors.user_message, naming the provider and the model."""
+    spec = lq._spec(lq.JOB_BOQ)
+    exc = httpx.ReadTimeout("t", request=httpx.Request("POST", "http://llm"))
+    assert spec.error_message(exc, "claude-x") == llm_errors.user_message(exc, "claude-x")
+    assert "the AI provider" in spec.error_message(exc, "claude-x")
+
+
+def test_handle_failure_forces_a_terminal_state_when_the_handler_itself_errors(monkeypatch):
+    db = _queue_env(monkeypatch)
+    monkeypatch.setattr(lq, "_now", lambda: NOW)
+    job = _running_row(db, job_id="j1", target="a1", attempts=1)
+    marks = []
+
+    def bad_label(s):
+        raise KeyError("no such feature")
+
+    spec = lq._JobSpec(
+        "nope", _raiser(ValueError("x")), lambda t, f: marks.append((t, f)),
+        lambda t: None, model_label=bad_label,
+    )
+    monkeypatch.setattr(lq, "_spec", lambda jt: spec)
+    lq._execute(job)  # must not raise
+    row = _row(db, "j1")
+    assert row["status"] == "failed"
+    assert row["error_kind"] == "unknown"
+    assert row["last_error"] == lq._HANDLER_FAILED_MESSAGE
+    assert marks == [("a1", {"status": "failed", "error": lq._HANDLER_FAILED_MESSAGE})]
+
+
+def test_handle_failure_fallback_leaves_an_already_requeued_job_alone(monkeypatch):
+    # The inner handler requeued the job and THEN errored (the domain mark
+    # exploding past its own guard, say): the forced terminal CAS is fenced
+    # on status=running and must not overwrite the requeue.
+    db = _queue_env(monkeypatch)
+    monkeypatch.setattr(lq, "_now", lambda: NOW)
+    job = _running_row(db, job_id="j1", target="a1", attempts=1)
+    spec, _, _ = _record_spec(run=_raiser(llm.LlmBadOutput("bad")))
+    monkeypatch.setattr(lq, "_spec", lambda jt: spec)
+
+    def exploding_mark(spec_, job_, fields):
+        raise RuntimeError("mark exploded")
+
+    monkeypatch.setattr(lq, "_mark_domain", exploding_mark)
+    lq._execute(job)
+    row = _row(db, "j1")
+    assert row["status"] == "queued"
+    assert row["error_kind"] == "invalid_output"
+
+
+def test_handle_failure_fallback_does_not_mark_the_domain_when_its_cas_loses(monkeypatch):
+    # The inner handler requeued the job, then errored on something else: the
+    # forced terminal CAS loses its fence (status is queued), so the domain
+    # row must NOT be marked failed behind the requeue's back.
+    db = _queue_env(monkeypatch)
+    monkeypatch.setattr(lq, "_now", lambda: NOW)
+    job = _running_row(db, job_id="j1", target="a1", attempts=1)
+    spec, _, marks = _record_spec(run=_raiser(llm.LlmBadOutput("bad")))
+    monkeypatch.setattr(lq, "_spec", lambda jt: spec)
+    real_inner = lq._handle_failure_inner
+
+    def requeue_then_explode(sb, job_, spec_, exc, s):
+        real_inner(sb, job_, spec_, exc, s)
+        raise RuntimeError("something after the requeue")
+
+    monkeypatch.setattr(lq, "_handle_failure_inner", requeue_then_explode)
+    lq._execute(job)
+    row = _row(db, "j1")
+    assert row["status"] == "queued" and row["error_kind"] == "invalid_output"
+    assert row["last_error"] == "bad"
+    assert marks == [("a1", {"status": "pending", "error": None})]  # no failed mark
+
+
+def test_sweep_prune_slot_runs_the_sandbox_retention_behind_the_flag(monkeypatch):
+    db = _queue_env(monkeypatch)
+    monkeypatch.setattr(lq, "_now", lambda: NOW)
+    _, _, _, prunes = _install_rfp_ingest(monkeypatch)
+    monkeypatch.setattr(lq, "_last_prune", -lq._PRUNE_EVERY_SECONDS)
+    lq._sweep(_settings(rfp_ingest_enabled=False))
+    assert prunes == []  # a disabled feature never runs its prune
+    monkeypatch.setattr(lq, "_last_prune", -lq._PRUNE_EVERY_SECONDS)
+    lq._sweep(_settings(rfp_ingest_enabled=True))
+    assert prunes == [True]
+    # Not due again until the next hour.
+    lq._sweep(_settings(rfp_ingest_enabled=True))
+    assert prunes == [True]
+    assert db.tables.get("llm_call_log", []) == []
+
+
+def test_sweep_survives_either_prune_failing(monkeypatch):
+    db = _queue_env(monkeypatch)
+    monkeypatch.setattr(lq, "_now", lambda: NOW)
+
+    def bad_prune():
+        raise RuntimeError("storage down")
+
+    _install_rfp_ingest(monkeypatch, prune=bad_prune)
+    monkeypatch.setattr(lq, "_last_prune", -lq._PRUNE_EVERY_SECONDS)
+    lq._sweep(_settings())  # the sandbox prune raising must not escape
+
+    # And a ledger prune failure must not skip the sandbox prune.
+    _, _, _, prunes = _install_rfp_ingest(monkeypatch)
+    real_table = db.table
+
+    class _Exploding:
+        def __getattr__(self, _name):
+            raise RuntimeError("ledger table gone")
+
+    monkeypatch.setattr(
+        db, "table", lambda name: _Exploding() if name == "llm_call_log" else real_table(name)
+    )
+    monkeypatch.setattr(lq, "_last_prune", -lq._PRUNE_EVERY_SECONDS)
+    lq._sweep(_settings())
+    assert prunes == [True]
+
+
 # ── Routers: queue-aware dispatch ────────────────────────────────────────
 
 
@@ -1143,3 +1659,462 @@ def test_proposal_execute_raises_bad_output_when_no_lines_come_back(monkeypatch)
     with pytest.raises(llm.LlmBadOutput, match="no usable scope lines"):
         ps.execute("d1")
     assert db.tables["proposal_drafts"][0]["status"] == "running"
+
+
+# ── llm_queue: rfp_harvest job type (docs/RFP_HARVEST.md 2.2) ─────────────
+
+
+def _enqueue_harvest(email_id, force=False):
+    return lq.enqueue(
+        lq.JOB_RFP_HARVEST, target_id=email_id,
+        payload={"email_id": email_id, "force": force}, priority=150,
+    )
+
+
+def _harvest_job(db, job_id="h1", email_id="e1", attempts=1, force=False):
+    return _running_row(
+        db, job_id=job_id, target=email_id, attempts=attempts,
+        job_type=lq.JOB_RFP_HARVEST, payload={"email_id": email_id, "force": force},
+    )
+
+
+def _harvest_settings(**over):
+    base = dict(
+        rfp_ingest_enabled=True, rfp_harvest_enabled=True,
+        procore_login_email="bot@example.com", procore_login_password="pw",
+    )
+    base.update(over)
+    return _settings(**base)
+
+
+def _install_rfp_harvest(monkeypatch, *, run=None, current_status=None):
+    """Recording stand-ins on the real rfp_harvest module for exactly the
+    surface llm_queue wires: execute / mark_from_queue / current_status."""
+    from app.services import rfp_harvest as mod
+
+    runs, marks = [], []
+
+    def execute(email_id, *, force=False):
+        runs.append((email_id, force))
+        if run is not None:
+            run(email_id)
+
+    monkeypatch.setattr(mod, "execute", execute)
+    monkeypatch.setattr(mod, "mark_from_queue", lambda e, s, err: marks.append((e, s, err)))
+    monkeypatch.setattr(mod, "current_status", current_status or (lambda e: None))
+    return mod, runs, marks
+
+
+def test_rfp_harvest_is_a_job_type_but_never_an_llm_one():
+    assert lq.JOB_RFP_HARVEST == "rfp_harvest"
+    assert lq.JOB_RFP_HARVEST in lq.NON_LLM_JOB_TYPES
+    assert lq.JOB_RFP_HARVEST not in lq.LLM_JOB_TYPES
+    assert lq._FEATURE_BY_TYPE[lq.JOB_RFP_HARVEST] == "rfp_harvest"
+    assert set(lq.NON_LLM_JOB_TYPES) == {
+        lq.JOB_RFP_INGEST, lq.JOB_RFP_HARVEST, lq.JOB_PORTAL_SCAN, lq.JOB_PORTAL_HARVEST,
+        lq.JOB_RFP_CREATE_FILES,
+    }
+
+
+def test_enqueue_rfp_harvest_records_its_feature_priority_and_force(monkeypatch):
+    db = _queue_env(monkeypatch)
+    job = _enqueue_harvest("e1", force=True)
+    row = db.tables["llm_jobs"][0]
+    assert job["id"] == row["id"] and row["feature"] == "rfp_harvest"
+    assert row["priority"] == 150 and row["payload"] == {"email_id": "e1", "force": True}
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        {"rfp_ingest_enabled": True, "rfp_harvest_enabled": False},
+        {"rfp_ingest_enabled": False, "rfp_harvest_enabled": True},
+        {"rfp_ingest_enabled": False, "rfp_harvest_enabled": False},
+    ],
+)
+def test_claim_tick_third_pass_needs_both_flags(monkeypatch, flags):
+    db = _queue_env(monkeypatch)
+    s = _harvest_settings(**flags)
+    job = _enqueue_harvest("e1")
+    boq = lq.enqueue(lq.JOB_BOQ, target_id="a")
+    claimed = lq._claim_tick(s, [])
+    assert [j["id"] for j in claimed] == [boq["id"]]
+    assert _row(db, job["id"])["status"] == "queued"
+    # No RPC call ever named the harvest type.
+    assert all(lq.JOB_RFP_HARVEST not in c.get("job_types", []) for c in db.rpc_calls)
+
+
+def test_claim_tick_third_pass_claims_harvest_jobs_with_their_own_capacity(monkeypatch):
+    db = _queue_env(monkeypatch)
+    s = _harvest_settings(
+        llm_queue_worker_concurrency=1, rfp_ingest_sandbox_concurrency=1, rfp_harvest_concurrency=1,
+    )
+    a = lq.enqueue(lq.JOB_BOQ, target_id="a")
+    b = lq.enqueue(lq.JOB_BOQ, target_id="b")
+    r1 = _enqueue_rfp("r1")
+    h1 = _enqueue_harvest("e1")
+    h2 = _enqueue_harvest("e2")
+    # Three passes, three independent slots: one of each in creation order.
+    first = lq._claim_tick(s, [])
+    assert [j["id"] for j in first] == [a["id"], r1["id"], h1["id"]]
+    # The promotion type rides the same pass (docs/RFP_CREATE.md 5).
+    assert db.rpc_calls[-1]["job_types"] == [lq.JOB_RFP_HARVEST, lq.JOB_RFP_CREATE_FILES]
+    assert db.rpc_calls[-1]["max_jobs"] == 1
+    assert _row(db, h2["id"])["status"] == "queued"
+    # A harvest in flight fills only the harvest slot: the LLM pass still runs,
+    # and the harvest pass is not even called.
+    calls_before = len(db.rpc_calls)
+    llm_only = lq._claim_tick(s, [lq.JOB_RFP_HARVEST, lq.JOB_RFP_INGEST])
+    assert [j["id"] for j in llm_only] == [b["id"]]
+    assert [c["job_types"] for c in db.rpc_calls[calls_before:]] == [list(lq.LLM_JOB_TYPES)]
+    assert _row(db, h2["id"])["status"] == "queued"
+    # An LLM job and a sandbox run in flight never block the harvest pass.
+    busy = lq._claim_tick(s, [lq.JOB_BOQ, lq.JOB_RFP_INGEST])
+    assert [j["id"] for j in busy] == [h2["id"]]
+
+
+def test_claim_tick_harvest_capacity_is_concurrency_minus_running_harvests(monkeypatch):
+    db = _queue_env(monkeypatch)
+    s = _harvest_settings(rfp_harvest_concurrency=3, llm_queue_worker_concurrency=2)
+    for i in range(4):
+        _enqueue_harvest(f"e{i}")
+    claimed = lq._claim_tick(s, [lq.JOB_RFP_HARVEST, lq.JOB_RFP_HARVEST])
+    assert [j["target_id"] for j in claimed] == ["e0"]
+    third_pass = [lq.JOB_RFP_HARVEST, lq.JOB_RFP_CREATE_FILES]
+    harvest_call = next(c for c in db.rpc_calls if c.get("job_types") == third_pass)
+    assert harvest_call["max_jobs"] == 1
+    # Running harvests never count against the LLM slots.
+    llm_call = next(c for c in db.rpc_calls if c.get("job_types") == list(lq.LLM_JOB_TYPES))
+    assert llm_call["max_jobs"] == 2
+    # At full harvest capacity the pass is skipped outright; a running
+    # promotion fills a slot the same way.
+    calls_before = len(db.rpc_calls)
+    assert lq._claim_tick(s, [lq.JOB_RFP_HARVEST] * 3) == []
+    assert lq._claim_tick(s, [lq.JOB_RFP_HARVEST] * 2 + [lq.JOB_RFP_CREATE_FILES]) == []
+    assert all(c.get("job_types") != third_pass for c in db.rpc_calls[calls_before:])
+
+
+def test_rfp_harvest_spec_wires_run_mark_status_label_and_message(monkeypatch):
+    from app.services import rfp_harvest as real
+
+    mod, runs, marks = _install_rfp_harvest(monkeypatch, current_status=lambda e: "done")
+    spec = lq._spec(lq.JOB_RFP_HARVEST)
+    assert spec.feature == "rfp_harvest"
+    spec.run({"email_id": "e1"})
+    spec.run({"email_id": "e2", "force": True})
+    spec.run({"email_id": "e3", "force": 0})
+    assert runs == [("e1", False), ("e2", True), ("e3", False)]
+    spec.mark("e1", {"status": "pending", "error": None})
+    spec.mark("e1", {"status": "failed", "error": "boom"})
+    assert marks == [("e1", "pending", None), ("e1", "failed", "boom")]
+    assert spec.current_status("e1") == "done"
+    assert spec.model_label(_settings()) == "procore" == real.MODEL_LABEL
+    assert spec.error_message is real.error_message
+    assert spec.error_message(real.RfpHarvestTransient("Procore storage did not answer."), "procore") == (
+        "Procore storage did not answer."
+    )
+    assert spec.error_message(ValueError("raw /tmp/x"), "procore") == real._MSG_INTERRUPTED
+
+
+def test_execute_rfp_harvest_transient_failure_requeues_with_its_own_sentence(monkeypatch):
+    db = _queue_env(monkeypatch)
+    monkeypatch.setattr(lq, "_now", lambda: NOW)
+    from app.services import rfp_harvest as real
+
+    def run(email_id):
+        raise real.RfpHarvestTransient("Procore answered 503; the harvest will be retried.")
+
+    _, _, marks = _install_rfp_harvest(monkeypatch, run=run)
+    lq._execute(_harvest_job(db))
+    row = _row(db, "h1")
+    assert row["status"] == "queued" and row["error_kind"] == "infrastructure"
+    assert row["last_error"] == "Procore answered 503; the harvest will be retried."
+    assert row["next_attempt_at"] == (NOW + timedelta(seconds=10)).isoformat()
+    assert marks == [("e1", "pending", None)]
+
+
+def test_execute_rfp_harvest_permanent_failure_fails_and_marks_the_domain(monkeypatch):
+    db = _queue_env(monkeypatch)
+    monkeypatch.setattr(lq, "_now", lambda: NOW)
+    from app.services import rfp_harvest as real
+
+    def run(email_id):
+        raise real.RfpHarvestPermanent("The email carries no usable Procore bid link.")
+
+    _, _, marks = _install_rfp_harvest(monkeypatch, run=run)
+    lq._execute(_harvest_job(db))
+    row = _row(db, "h1")
+    assert row["status"] == "failed" and row["error_kind"] == "bad_input"
+    assert row["last_error"] == "The email carries no usable Procore bid link."
+    assert marks == [("e1", "failed", "The email carries no usable Procore bid link.")]
+
+
+def test_execute_rfp_harvest_undeclared_error_never_blames_the_ai_provider(monkeypatch):
+    db = _queue_env(monkeypatch)
+    monkeypatch.setattr(lq, "_now", lambda: NOW)
+    from app.services import rfp_harvest as real
+
+    def run(email_id):
+        raise httpx.ReadTimeout("timed out", request=httpx.Request("GET", "http://db"))
+
+    _, _, marks = _install_rfp_harvest(monkeypatch, run=run)
+    lq._execute(_harvest_job(db, attempts=6))
+    row = _row(db, "h1")
+    assert row["status"] == "failed" and row["error_kind"] == "timeout"
+    assert row["last_error"] == real._MSG_INTERRUPTED
+    assert marks == [("e1", "failed", real._MSG_INTERRUPTED + " (failed after 6 attempts)")]
+    for text in (row["last_error"], marks[0][2]):
+        assert "AI provider" not in text and "the model" not in text and "procore" not in text.lower()
+
+
+def test_execute_rfp_harvest_success_keeps_the_force_flag_through_a_requeue(monkeypatch):
+    db = _queue_env(monkeypatch)
+    monkeypatch.setattr(lq, "_now", lambda: NOW)
+    from app.services import rfp_harvest as real
+
+    outcomes = [real.RfpHarvestTransient("blip"), None]
+
+    def run(email_id):
+        exc = outcomes.pop(0)
+        if exc:
+            raise exc
+
+    _, runs, marks = _install_rfp_harvest(monkeypatch, run=run)
+    job = _harvest_job(db, force=True)
+    lq._execute(job)
+    assert _row(db, "h1")["status"] == "queued" and _row(db, "h1")["payload"]["force"] is True
+    db.now = NOW + timedelta(seconds=30)
+    [reclaimed] = db.rpc("claim_llm_jobs", {"worker_id": lq._WORKER_TOKEN, "lease_seconds": 900,
+                                             "max_jobs": 1, "job_types": [lq.JOB_RFP_HARVEST]}).execute().data
+    lq._execute(reclaimed)
+    assert runs == [("e1", True), ("e1", True)]
+    assert _row(db, "h1")["status"] == "succeeded"
+    assert marks == [("e1", "pending", None)]
+
+
+def test_requeue_terminal_refuses_a_harvest_whose_email_is_done(monkeypatch):
+    db = _queue_env(monkeypatch)
+    _install_rfp_harvest(monkeypatch, current_status=lambda e: "done")
+    job = _harvest_job(db)
+    _row(db, "h1").update(status="failed", finished_at=NOW.isoformat())
+    with pytest.raises(ValueError, match="since completed"):
+        lq.requeue_terminal(_row(db, "h1"), created_by="u1")
+    assert job["id"] == "h1" and len(db.tables["llm_jobs"]) == 1
+
+
+# ── llm_queue: the NGEM portal job types (docs/RFP_NGEM_PORTAL.md 2.2) ─────
+
+
+def _portal_settings(**over):
+    base = dict(
+        rfp_ingest_enabled=True, rfp_ngem_enabled=True, ngem_login_username="acct",
+        ngem_login_password="pw",
+        ngem_entry_url="https://supplier.ionwave.net/VendorResponse/ResponseList.aspx?e=x",
+    )
+    base.update(over)
+    return _settings(**base)
+
+
+def _install_rfp_portal(monkeypatch, *, scan=None, harvest=None, scan_status=None, current_status=None):
+    """Recording stand-ins on the real rfp_portal_ingest module for exactly
+    the surface llm_queue wires."""
+    from app.services import rfp_portal_ingest as mod
+
+    scans, harvests, marks = [], [], []
+
+    def execute_scan(run_id):
+        scans.append(run_id)
+        if scan is not None:
+            scan(run_id)
+
+    def execute_harvest(invitation_id, *, force=False):
+        harvests.append((invitation_id, force))
+        if harvest is not None:
+            harvest(invitation_id)
+
+    monkeypatch.setattr(mod, "execute_scan", execute_scan)
+    monkeypatch.setattr(mod, "execute_harvest", execute_harvest)
+    monkeypatch.setattr(mod, "mark_scan_from_queue", lambda t, s, e: marks.append(("scan", t, s, e)))
+    monkeypatch.setattr(mod, "mark_harvest_from_queue", lambda t, s, e: marks.append(("harvest", t, s, e)))
+    monkeypatch.setattr(mod, "scan_status", scan_status or (lambda t: None))
+    monkeypatch.setattr(mod, "current_status", current_status or (lambda t: None))
+    return mod, scans, harvests, marks
+
+
+def test_portal_job_types_are_non_llm_and_share_the_harvest_family():
+    assert lq.JOB_PORTAL_SCAN == "rfp_portal_scan" and lq.JOB_PORTAL_HARVEST == "rfp_portal_harvest"
+    assert set(lq.PORTAL_JOB_TYPES) == {lq.JOB_PORTAL_SCAN, lq.JOB_PORTAL_HARVEST}
+    assert set(lq.HARVEST_JOB_TYPES) == {lq.JOB_RFP_HARVEST, *lq.PORTAL_JOB_TYPES}
+    for jt in lq.PORTAL_JOB_TYPES:
+        assert jt in lq.NON_LLM_JOB_TYPES and jt not in lq.LLM_JOB_TYPES
+        assert lq._FEATURE_BY_TYPE[jt] == "rfp_portal"
+
+
+def test_portal_specs_wire_run_mark_status_label_and_message(monkeypatch):
+    from app.services import rfp_portal_ingest as real
+
+    mod, scans, harvests, marks = _install_rfp_portal(
+        monkeypatch, scan_status=lambda t: "done", current_status=lambda t: "pending"
+    )
+    scan = lq._spec(lq.JOB_PORTAL_SCAN)
+    assert scan.feature == "rfp_portal"
+    scan.run({"run_id": "r1"})
+    scan.mark("r1", {"status": "failed", "error": "boom"})
+    assert scans == ["r1"] and marks == [("scan", "r1", "failed", "boom")]
+    assert scan.current_status("r1") == "done"
+    assert scan.model_label(_settings()) == "ngem" == real.MODEL_LABEL
+    assert scan.error_message is real.error_message
+    hv = lq._spec(lq.JOB_PORTAL_HARVEST)
+    hv.run({"invitation_id": "i1"})
+    hv.run({"invitation_id": "i2", "force": True})
+    hv.mark("i1", {"status": "pending", "error": None})
+    assert harvests == [("i1", False), ("i2", True)] and marks[-1] == ("harvest", "i1", "pending", None)
+    assert hv.current_status("i1") == "pending" and hv.model_label(_settings()) == "ngem"
+    assert hv.error_message(real.RfpPortalTransient("NGEM answered 503."), "ngem") == "NGEM answered 503."
+    assert hv.error_message(ValueError("raw /tmp/x"), "ngem") == real._MSG_INTERRUPTED
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        {"rfp_ingest_enabled": True, "rfp_ngem_enabled": False},
+        {"rfp_ingest_enabled": False, "rfp_ngem_enabled": True},
+    ],
+)
+def test_claim_tick_portal_types_need_both_flags(monkeypatch, flags):
+    db = _queue_env(monkeypatch)
+    s = _portal_settings(**flags)
+    lq.enqueue(lq.JOB_PORTAL_SCAN, target_id="r1", payload={"run_id": "r1"}, priority=150)
+    lq.enqueue(lq.JOB_PORTAL_HARVEST, target_id="i1", payload={"invitation_id": "i1"}, priority=150)
+    boq = lq.enqueue(lq.JOB_BOQ, target_id="a")
+    claimed = lq._claim_tick(s, [])
+    assert [j["id"] for j in claimed] == [boq["id"]]
+    assert all(not (set(c.get("job_types", [])) & set(lq.PORTAL_JOB_TYPES)) for c in db.rpc_calls)
+
+
+def test_claim_tick_portal_types_share_the_harvest_capacity(monkeypatch):
+    db = _queue_env(monkeypatch)
+    s = _portal_settings(rfp_harvest_enabled=False, rfp_harvest_concurrency=1, llm_queue_worker_concurrency=1)
+    scan = lq.enqueue(lq.JOB_PORTAL_SCAN, target_id="r1", payload={"run_id": "r1"}, priority=150)
+    hv = lq.enqueue(lq.JOB_PORTAL_HARVEST, target_id="i1", payload={"invitation_id": "i1"}, priority=150)
+    first = lq._claim_tick(s, [])
+    assert [j["id"] for j in first] == [scan["id"]]
+    portal_pass = [*lq.PORTAL_JOB_TYPES, lq.JOB_RFP_CREATE_FILES]
+    assert db.rpc_calls[-1]["job_types"] == portal_pass and db.rpc_calls[-1]["max_jobs"] == 1
+    # A portal job in flight fills the one harvest slot: the pass is skipped.
+    calls_before = len(db.rpc_calls)
+    assert lq._claim_tick(s, [lq.JOB_PORTAL_SCAN]) == []
+    assert all(c.get("job_types") != portal_pass for c in db.rpc_calls[calls_before:])
+    assert _row(db, hv["id"])["status"] == "queued"
+    # So does a Procore harvest in flight: one portal request stream per worker.
+    assert lq._claim_tick(s, [lq.JOB_RFP_HARVEST]) == []
+    # With the Procore slice on too, one pass claims all three types.
+    both = _portal_settings(
+        rfp_harvest_enabled=True, procore_login_email="bot@example.com", procore_login_password="pw",
+        rfp_harvest_concurrency=2,
+    )
+    claimed = lq._claim_tick(both, [])
+    assert [j["id"] for j in claimed] == [hv["id"]]
+    assert db.rpc_calls[-1]["job_types"] == [
+        lq.JOB_RFP_HARVEST, *lq.PORTAL_JOB_TYPES, lq.JOB_RFP_CREATE_FILES
+    ]
+    assert db.rpc_calls[-1]["max_jobs"] == 2
+
+
+def test_execute_portal_scan_permanent_failure_marks_the_run(monkeypatch):
+    db = _queue_env(monkeypatch)
+    monkeypatch.setattr(lq, "_now", lambda: NOW)
+    from app.services import rfp_portal_ingest as real
+
+    def run(run_id):
+        raise real.RfpPortalPermanent("The page is not the invitations grid.")
+
+    _, _, _, marks = _install_rfp_portal(monkeypatch, scan=run)
+    lq._execute(_running_row(db, job_id="s1", target="r1", attempts=1, job_type=lq.JOB_PORTAL_SCAN,
+                             payload={"run_id": "r1"}))
+    row = _row(db, "s1")
+    assert row["status"] == "failed" and row["error_kind"] == "bad_input"
+    assert marks == [("scan", "r1", "failed", "The page is not the invitations grid.")]
+
+
+def test_execute_portal_harvest_transient_failure_requeues_with_its_own_sentence(monkeypatch):
+    db = _queue_env(monkeypatch)
+    monkeypatch.setattr(lq, "_now", lambda: NOW)
+    from app.services import rfp_portal_ingest as real
+
+    def run(invitation_id):
+        raise real.RfpPortalTransient("NGEM answered 503; the harvest will be retried.")
+
+    _, _, _, marks = _install_rfp_portal(monkeypatch, harvest=run)
+    lq._execute(_running_row(db, job_id="h9", target="i1", attempts=1, job_type=lq.JOB_PORTAL_HARVEST,
+                             payload={"invitation_id": "i1", "force": True}))
+    row = _row(db, "h9")
+    assert row["status"] == "queued" and row["error_kind"] == "infrastructure"
+    assert row["last_error"] == "NGEM answered 503; the harvest will be retried."
+    assert row["payload"]["force"] is True
+    assert marks == [("harvest", "i1", "pending", None)]
+
+
+def test_requeue_terminal_refuses_a_finished_portal_run(monkeypatch):
+    db = _queue_env(monkeypatch)
+    _install_rfp_portal(monkeypatch, scan_status=lambda t: "done")
+    job = _running_row(db, job_id="s2", target="r2", attempts=1, job_type=lq.JOB_PORTAL_SCAN, payload={"run_id": "r2"})
+    job["status"] = "failed"
+    _row(db, "s2")["status"] = "failed"
+    with pytest.raises(ValueError, match="since completed"):
+        lq.requeue_terminal(job, "u1")
+
+
+# ── llm_queue: rfp_create_files job type (docs/RFP_CREATE.md 5) ───────────
+
+
+def test_rfp_create_files_is_a_third_pass_job_type_but_never_an_llm_one():
+    assert lq.JOB_RFP_CREATE_FILES == "rfp_create_files"
+    assert lq.CREATE_JOB_TYPES == (lq.JOB_RFP_CREATE_FILES,)
+    assert lq.JOB_RFP_CREATE_FILES in lq.THIRD_PASS_JOB_TYPES
+    assert lq.JOB_RFP_CREATE_FILES in lq.NON_LLM_JOB_TYPES
+    assert lq.JOB_RFP_CREATE_FILES not in lq.LLM_JOB_TYPES
+    assert lq.JOB_RFP_CREATE_FILES not in lq.HARVEST_JOB_TYPES   # not a platform session
+    assert lq._FEATURE_BY_TYPE[lq.JOB_RFP_CREATE_FILES] == "rfp_create"
+
+
+def test_rfp_create_files_spec_wires_run_mark_status_label_and_message(monkeypatch):
+    from app.services import rfp_create_files as real
+
+    runs, marks = [], []
+    monkeypatch.setattr(real, "execute",
+                        lambda project_id, harvest_id=None: runs.append((project_id, harvest_id)))
+    monkeypatch.setattr(real, "mark_from_queue", lambda p, s, err: marks.append((p, s, err)))
+    monkeypatch.setattr(real, "current_status", lambda p: "done")
+    spec = lq._spec(lq.JOB_RFP_CREATE_FILES)
+    assert spec.feature == "rfp_create"
+    spec.run({"project_id": "p1"})
+    # The harvest the payload names wins over the record's (RFP_CREATE.md 4.6).
+    spec.run({"project_id": "p1", "harvest_id": "hv-9"})
+    assert runs == [("p1", None), ("p1", "hv-9")]
+    spec.mark("p1", {"status": "pending", "error": None})
+    spec.mark("p1", {"status": "failed", "error": "boom"})
+    assert marks == [("p1", "pending", None), ("p1", "failed", "boom")]
+    assert spec.current_status("p1") == "done"
+    assert spec.model_label(_settings()) == "storage" == real.MODEL_LABEL
+    assert spec.error_message is real.error_message
+    assert spec.error_message(real.RfpCreateFilesTransient("Storage did not answer."), "storage") == (
+        "Storage did not answer."
+    )
+    assert spec.error_message(ValueError("raw /tmp/x"), "storage") == real._MSG_INTERRUPTED
+
+
+def test_claim_tick_promotion_type_needs_only_the_master_switch(monkeypatch):
+    db = _queue_env(monkeypatch)
+    job = lq.enqueue(lq.JOB_RFP_CREATE_FILES, target_id="p1", payload={"project_id": "p1"}, priority=160)
+    # Harvest and NGEM off: the third pass still runs for the promotion alone.
+    s = _harvest_settings(rfp_harvest_enabled=False, rfp_ngem_enabled=False)
+    claimed = lq._claim_tick(s, [])
+    assert [j["id"] for j in claimed] == [job["id"]]
+    assert db.rpc_calls[-1]["job_types"] == [lq.JOB_RFP_CREATE_FILES]
+    # The master switch off: nothing names the type.
+    db.tables["llm_jobs"][0]["status"] = "queued"
+    off = _harvest_settings(rfp_ingest_enabled=False)
+    calls_before = len(db.rpc_calls)
+    assert lq._claim_tick(off, []) == []
+    assert all(lq.JOB_RFP_CREATE_FILES not in c.get("job_types", []) for c in db.rpc_calls[calls_before:])

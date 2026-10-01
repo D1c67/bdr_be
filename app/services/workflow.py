@@ -542,6 +542,48 @@ def _project_row(project_id: str) -> dict:
 # for a re-commit, WITHOUT disturbing the (already-complete) material/labor categories.
 _PAST_VERIFY_HEADS = ("send_out", "submitted", "bid_outcome")
 
+# ── Post-submission window (late quotes, 0138) ────────────────────────────────
+# Once the proposal has gone out (send_out head submitted / bid_outcome, which
+# stays put after a win/loss and after the PM handoff), vendors may still send
+# quotes. They are recorded for the record only: the selected quote in every
+# category is locked, and no quote edit bounces the bid back to Verify. Between
+# Verify and sending (head `send_out`) quote edits still bounce as before.
+# The window also holds while a post-submission pricing edit (labor, markup)
+# has parked the send_out head at `verify` with reverify_return_stage set to a
+# post-submission head: the bid still went out, so the lock must not lapse
+# (same rule as proposal_send.gone_out_rule for 0118).
+POST_SUBMISSION_HEADS = ("submitted", "bid_outcome")
+
+
+def in_post_submission_window(project_id: str, sb=None) -> bool:
+    """Whether the project's bid has been submitted (see POST_SUBMISSION_HEADS),
+    including while a re-verify bounce parks the send_out head at `verify` on
+    its way back to such a head. `sb` lets a router reuse its own client."""
+    client = sb if sb is not None else get_supabase()
+    rows = (
+        client.table("project_category_state")
+        .select("current_task")
+        .eq("project_id", project_id)
+        .eq("category", "send_out")
+        .limit(1)
+        .execute()
+    ).data or []
+    if not rows:
+        return False
+    head = rows[0].get("current_task")
+    if head in POST_SUBMISSION_HEADS:
+        return True
+    if head != "verify":
+        return False
+    proj = (
+        client.table("projects")
+        .select("reverify_return_stage")
+        .eq("id", project_id)
+        .limit(1)
+        .execute()
+    ).data or []
+    return bool(proj) and proj[0].get("reverify_return_stage") in POST_SUBMISSION_HEADS
+
 _SECTION_SNAPSHOT_COLUMNS = (
     "gear_amount",
     "gear_markup_amount",

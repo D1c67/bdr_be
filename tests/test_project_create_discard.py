@@ -22,6 +22,8 @@ from app.services import notifications, workflow
 
 BASE = {
     "name": "Acme Tower",
+    # An old client's typed number: ignored by the schema (0130), the server
+    # assigns one through the fake rpc below.
     "number": "G3-2026-001",
     "internal_bid_at": "2026-08-20T12:00:00Z",
     "invitation_at": "2026-08-01T12:00:00Z",
@@ -42,7 +44,7 @@ BASE = {
 CREATED_ROW = {
     "id": "p1",
     "name": "Acme Tower",
-    "number": "G3-2026-001",
+    "number": "26.9.7204",
     "current_stage": "intake",
     "abandoned_at": None,
     "actual_bid_at": None,
@@ -102,13 +104,29 @@ class _FakeQuery:
         return _FakeResult(data)
 
 
+class _FakeRpc:
+    def __init__(self, sb, name, params):
+        self._sb, self._name, self._params = sb, name, params
+
+    def execute(self):
+        self._sb.rpc_calls.append((self._name, self._params))
+        self._sb.counter += 1
+        return _FakeResult(self._sb.counter)
+
+
 class _FakeSupabase:
     def __init__(self, responses):
         self.calls = []
         self.responses = responses
+        # next_project_number(): the counter the create loop draws from.
+        self.rpc_calls = []
+        self.counter = 7203
 
     def table(self, name):
         return _FakeQuery(self, name)
+
+    def rpc(self, name, params=None):
+        return _FakeRpc(self, name, params)
 
 
 def _setup(monkeypatch, responses):
@@ -147,6 +165,12 @@ def test_create_success_leaves_no_delete_and_schedules_rescan(monkeypatch):
     assert out["id"] == "p1"
     assert _calls(fake, "projects", "delete") == []
     assert len(background.tasks) == 1  # the unknown-email rescan
+    # The number the row was inserted with is the server's, never the client's.
+    [inserted] = _calls(fake, "projects", "insert")
+    assert inserted.payload["number"].endswith(".7204")
+    assert inserted.payload["number"] != "G3-2026-001"
+    assert "budgetary" not in inserted.payload
+    assert fake.rpc_calls == [("next_project_number", None)]
 
 
 @pytest.mark.parametrize("failing_table", ["stage_events", "project_category_state"])

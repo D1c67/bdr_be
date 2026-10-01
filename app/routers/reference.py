@@ -69,11 +69,53 @@ def list_gc_contacts(
     return q.order("name").execute().data or []
 
 
-@router.post("/gc-contacts", response_model=GCContactOut, status_code=status.HTTP_201_CREATED)
-def create_gc_contact(body: GCContactIn, _: CurrentUser = Depends(require_writer)):
+class GCContactSaved(GCContactOut):
+    """A saved GC contact, plus the one advisory RFP ingestion needs to give.
+
+    `rfp_notice` is null for every ordinary contact. It is set when the email
+    sits at a public mailbox provider (gmail.com and friends), because the RFP
+    email intake authorizes those senders by their exact address only — a
+    provider domain can never be trusted as a company. See
+    docs/RFP_EMAIL_INGESTION.md section 3.7.
+    """
+
+    rfp_notice: str | None = None
+
+
+def _rfp_notice(email: str | None) -> str | None:
+    """The advisory to attach when a GC contact's mailbox is a free-mail one.
+
+    Not a refusal: the contact is perfectly valid and its exact address does
+    authorize that sender. The team just needs to know that adding one such
+    contact does NOT cover their colleagues, the way a company domain would.
+    """
+    value = (email or "").strip().lower()
+    if "@" not in value:
+        return None
+    domain = value.rsplit("@", 1)[1]
+    if not domain:
+        return None
+    # Imported on first use: the RFP intake service is a separate slice, and
+    # the contacts page must not depend on its import order.
+    from app.services.rfp_email_auth import is_public_mailbox_domain
+
+    if not is_public_mailbox_domain(domain):
+        return None
     return (
+        f"{domain} is a public mailbox provider, so RFP ingestion matches this "
+        "contact by their full email address only: it cannot trust the whole "
+        f"{domain} domain the way it trusts a company domain. Add every "
+        "colleague at this GC who might send bid invitations as their own "
+        "contact, or their invitations will land in the Unauthorized queue."
+    )
+
+
+@router.post("/gc-contacts", response_model=GCContactSaved, status_code=status.HTTP_201_CREATED)
+def create_gc_contact(body: GCContactIn, _: CurrentUser = Depends(require_writer)):
+    row = (
         get_supabase().table("gc_contacts").insert(body.model_dump(mode="json")).execute()
     ).data[0]
+    return {**row, "rfp_notice": _rfp_notice(row.get("email"))}
 
 
 # ── Material categories ───────────────────────────────────────────────────

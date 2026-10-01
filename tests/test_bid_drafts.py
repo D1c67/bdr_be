@@ -239,12 +239,26 @@ def test_name_and_number_are_stripped():
     assert d.name == "Lab Fit-Out" and d.number == "26-101"
 
 
-@pytest.mark.parametrize("field", ["name", "number"])
 @pytest.mark.parametrize("value", ["", "   \n\t "])
-def test_blank_name_or_number_rejected(field, value):
-    body = {"name": "x", "number": "1", field: value}
+def test_blank_name_rejected(value):
     with pytest.raises(ValidationError):
-        BidDraftIn.model_validate(body)
+        BidDraftIn.model_validate({"name": value, "number": "1"})
+
+
+@pytest.mark.parametrize("value", [None, "", "   \n\t "])
+def test_number_is_optional_and_a_blank_reads_as_absent(value):
+    """Numbers are assigned on save (0130, docs/RFP_CREATE.md section 2): a
+    draft needs none, and a blank one is stored as null, not an empty
+    string."""
+    body = {"name": "x"} if value is None else {"name": "x", "number": value}
+    assert BidDraftIn.model_validate(body).number is None
+
+
+def test_draft_without_a_number_round_trips(db):
+    created = bd.create_draft(BidDraftIn(name="No number yet", data=_blob()), user=_user())
+    assert created["number"] is None
+    listed = bd.list_drafts(user=_user())
+    assert [(r["name"], r["number"]) for r in listed] == [("No number yet", None)]
 
 
 def test_oversize_name_and_number_rejected():

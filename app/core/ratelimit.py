@@ -16,9 +16,11 @@ rather than a bare "slow down". The frontend surfaces this (bdr_fe/lib/api.ts),
 and docs/ERROR_CODES.md documents every code for developers.
 """
 
+import threading
 import time
 from collections import defaultdict
 from collections.abc import Callable
+from contextlib import contextmanager
 
 from fastapi import Depends, HTTPException, status
 
@@ -74,6 +76,80 @@ def _check(scope: str, user_id: str, limit: int, window_seconds: int = 60) -> No
         _prune(window)
 
 
+# ── In-flight large-upload limiter ────────────────────────────────────────────
+#
+# The per-minute upload budget bounds how many uploads START; it says nothing
+# about how many near-cap bodies a worker is holding in RAM at the same moment,
+# which is the concurrent-upload OOM vector. This registry counts uploads at or
+# above `large_upload_bytes` that are currently being buffered and pushed to
+# storage, process-wide and per account, and refuses (429 rate_limited, with
+# Retry-After) when either count is at its cap. Small uploads never touch it.
+# State is per-process, like the buckets above.
+_inflight_lock = threading.Lock()
+_inflight_total = 0
+_inflight_by_user: dict[str, int] = defaultdict(int)
+
+LARGE_UPLOAD_RETRY_AFTER_SECONDS = 5
+
+
+def _acquire_large_upload(user_id: str) -> bool:
+    global _inflight_total
+    s = get_settings()
+    with _inflight_lock:
+        if _inflight_total >= s.large_upload_max_concurrent:
+            return False
+        if _inflight_by_user[user_id] >= s.large_upload_max_concurrent_per_user:
+            return False
+        _inflight_total += 1
+        _inflight_by_user[user_id] += 1
+        return True
+
+
+def _release_large_upload(user_id: str) -> None:
+    global _inflight_total
+    with _inflight_lock:
+        _inflight_total = max(0, _inflight_total - 1)
+        remaining = _inflight_by_user[user_id] - 1
+        if remaining > 0:
+            _inflight_by_user[user_id] = remaining
+        else:
+            _inflight_by_user.pop(user_id, None)
+
+
+def inflight_large_uploads() -> tuple[int, dict[str, int]]:
+    """Snapshot for tests and diagnostics: (process total, per-user counts)."""
+    with _inflight_lock:
+        return _inflight_total, dict(_inflight_by_user)
+
+
+@contextmanager
+def large_upload_slot(user_id: str, size: int | None, scope: str = RateLimitScope.FILE_UPLOAD):
+    """Hold an in-flight slot for the duration of a large upload's buffering
+    and storage push. `size` is the multipart part's advertised size; an
+    unknown size is treated as large (the conservative reading). Raises a
+    code-tagged 429 when the process-wide or the caller's own cap is reached,
+    so a saturated worker fails fast instead of piling bodies up in RAM."""
+    if not get_settings().rate_limit_enabled:
+        yield
+        return
+    if size is not None and size < get_settings().large_upload_bytes:
+        yield
+        return
+    if not _acquire_large_upload(user_id):
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=ErrorCode.RATE_LIMITED,
+            headers={
+                "Retry-After": str(LARGE_UPLOAD_RETRY_AFTER_SECONDS),
+                "X-RateLimit-Scope": scope,
+            },
+        )
+    try:
+        yield
+    finally:
+        _release_large_upload(user_id)
+
+
 def rate_limit(
     scope: str,
     limit_getter: Callable[[], int],
@@ -127,6 +203,20 @@ outbound_email_rate_limit = rate_limit(
     lambda: get_settings().outbound_email_rate_limit_per_hour,
     window_seconds=3600,
 )
+
+
+def check_outbound_email(user_id: str) -> None:
+    """Charge one hit to the hourly outbound-email budget from inside a handler,
+    for routes that email only on some requests (an internal bid date change
+    on PATCH /projects/{id}) and so cannot carry the dependency."""
+    _check(
+        RateLimitScope.OUTBOUND_EMAIL,
+        user_id,
+        get_settings().outbound_email_rate_limit_per_hour,
+        3600,
+    )
+
+
 # Every late-GC price-change request notifies and emails every Executive.
 gc_pricing_request_rate_limit = rate_limit(
     RateLimitScope.GC_PRICING_REQUEST,
@@ -152,4 +242,13 @@ model_status_rate_limit = rate_limit(
 # Dev AI monitor page: summary reads aggregate the call ledger in memory.
 llm_monitor_rate_limit = rate_limit(
     RateLimitScope.LLM_MONITOR, lambda: get_settings().llm_monitor_rate_limit_per_min
+)
+# Dev-only RFP Ingestion sandbox page: every read route (run/file/page
+# listings mint signed URLs and join queue detail, and GET /status with
+# ?self_test=1 spawns a sandbox child). No role narrowing, like every other expensive surface: the
+# routes gate on profiles.is_dev alone, so any role can hold a dev account and
+# every account that reaches them has to be counted.
+rfp_ingest_rate_limit = rate_limit(
+    RateLimitScope.RFP_INGEST,
+    lambda: get_settings().rfp_ingest_rate_limit_per_min,
 )

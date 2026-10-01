@@ -531,7 +531,7 @@ def test_send_drops_a_contact_that_is_both_to_and_cc(monkeypatch):
 
 def test_send_writes_package_and_one_item_per_file(monkeypatch):
     db = FakeDB(_base_tables())
-    sent = _install(monkeypatch, db)
+    _install(monkeypatch, db)
     res = sa.create_and_send("p1", _body(groups=[
         {"material_category_id": "c1", "file_keys": ["att:a1"]},
         {"material_category_id": "c2", "file_keys": ["bank:f1"]},

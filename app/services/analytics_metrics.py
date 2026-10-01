@@ -381,7 +381,10 @@ def _load_pricing(pids: list[str]) -> dict[str, dict]:
     quotes = (
         (
             sb.table("quotes")
-            .select("rfq_id, amount, is_selected, tax_included, tax_rate, origin")
+            .select(
+                "rfq_id, amount, is_selected, tax_included, tax_rate, origin,"
+                " received_after_submission"
+            )
             .in_("rfq_id", rfq_ids)
             .execute()
         ).data
@@ -390,6 +393,10 @@ def _load_pricing(pids: list[str]) -> dict[str, dict]:
     ) or []
     quotes_by_rfq: dict[str, list[dict]] = defaultdict(list)
     for q in quotes:
+        # Quotes recorded after the bid was submitted (0138) are on record
+        # only: they never price or compare, so analytics never sees them.
+        if q.get("received_after_submission"):
+            continue
         quotes_by_rfq[q["rfq_id"]].append(q)
     gen_by_proj = {
         g["project_id"]: g
@@ -600,7 +607,10 @@ def _quotes_data(w: WindowData) -> dict:
         (
             sb.table("quotes")
             # tax fields so _materials_amounts prices by tax-inclusive totals.
-            .select("rfq_id, amount, is_selected, received_at, source, tax_included, tax_rate, origin")
+            .select(
+                "rfq_id, amount, is_selected, received_at, source, tax_included, tax_rate,"
+                " origin, received_after_submission"
+            )
             .in_("rfq_id", rfq_ids)
             .execute()
         ).data
@@ -612,7 +622,8 @@ def _quotes_data(w: WindowData) -> dict:
     latest_received: dict[str, datetime] = {}
     for q in quotes:
         pid = rfq_proj.get(q["rfq_id"])
-        if pid is None:
+        # Late quotes (0138) are on record only and never feed a metric.
+        if pid is None or q.get("received_after_submission"):
             continue
         quotes_by_rfq[q["rfq_id"]].append(q)
         quotes_by_proj[pid].append(q)
@@ -1277,6 +1288,7 @@ ACTIVITY_ACTION_LABELS: dict[str, str] = {
     "quote.override": "Overrode a quote",
     "quote.delete": "Removed a quote",
     "quote.received": "Recorded a quote received",
+    "quote.late_add": "Added a quote received after submission",
     "quote.tax": "Set quote tax",
     "note.create": "Posted a note",
     "proposal.lines_generate": "Generated proposal scope",
@@ -1287,6 +1299,13 @@ ACTIVITY_ACTION_LABELS: dict[str, str] = {
     "proposal.amounts_change_approved": "Approved a per-GC pricing change",
     "proposal.amounts_change_rejected": "Rejected a per-GC pricing change",
     "proposal.generate": "Generated proposal",
+    "external_submission.requested": "Requested permission to mark submitted",
+    "external_submission.cancelled": "Cancelled a mark submitted request",
+    "external_submission.granted": "Granted mark submitted permission",
+    "external_submission.denied": "Denied mark submitted permission",
+    "external_submission.revoked": "Revoked mark submitted permission",
+    "external_submission.submitted": "Marked submitted (sent outside the app)",
+    "external_submission.undone": "Undid a marked submission",
     "proposal.generate_docs": "Generated proposal docs",
     "proposal.send": "Sent a proposal",
     "proposal.send_failed": "Proposal send failed",

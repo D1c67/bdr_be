@@ -308,8 +308,8 @@ def test_addenda_split_by_doc_type():
             _ef("addendum", "specification", "add3-specs.pdf"),
         ]
     )
-    assert "Addenda — plans/drawings" in html
-    assert "Addenda — specifications" in html
+    assert "Addenda - plans/drawings" in html
+    assert "Addenda - specifications" in html
 
 
 def test_legacy_files_keep_their_undivided_section():

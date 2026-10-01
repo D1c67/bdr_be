@@ -26,9 +26,9 @@ def test_groups_by_category_folder_including_proposal(monkeypatch):
     ]
     data, manifest = file_export.build_export_zip(rows)
     names = _names(data)
-    assert "drawing/E-101.pdf" in names
-    assert "estimate/Estimate.xlsx" in names
-    assert "proposal/GC.docx" in names  # proposal gets its own folder, not the fallback
+    assert "Gen Dwgs/E-101.pdf" in names
+    assert "Estimate/Estimate.xlsx" in names
+    assert "Proposals/GC.docx" in names  # proposal gets its own folder, not the fallback
     assert "MANIFEST.txt" in names
     assert all(m["status"] == "ok" for m in manifest)
 
@@ -40,8 +40,8 @@ def test_dedupes_duplicate_filenames_in_same_category(monkeypatch):
         {"category": "drawing", "storage_path": "b", "filename": "plan.pdf", "size_bytes": 1},
     ]
     names = _names(file_export.build_export_zip(rows)[0])
-    assert "drawing/plan.pdf" in names
-    assert "drawing/plan (2).pdf" in names
+    assert "Gen Dwgs/plan.pdf" in names
+    assert "Gen Dwgs/plan (2).pdf" in names
 
 
 def test_missing_object_is_skipped_not_fatal(monkeypatch):
@@ -57,8 +57,8 @@ def test_missing_object_is_skipped_not_fatal(monkeypatch):
     ]
     data, manifest = file_export.build_export_zip(rows)
     names = _names(data)
-    assert "drawing/a.pdf" in names
-    assert "drawing/b.pdf" not in names
+    assert "Gen Dwgs/a.pdf" in names
+    assert "Gen Dwgs/b.pdf" not in names
     assert sum(1 for m in manifest if m["status"] == "ok") == 1
     assert any(m["status"] == "missing" for m in manifest)
 
@@ -73,12 +73,12 @@ def test_safe_name_blocks_zip_slip():
 
 def test_export_filename_prefers_number():
     fn = file_export.export_filename({"number": "24-118", "name": "Riverside"})
-    assert fn.startswith("24-118_files_")
+    assert fn == "24-118_files.zip"
     assert fn.endswith(".zip")
 
 
 def test_addendum_gets_its_own_folder(monkeypatch):
-    # Pins that addenda export into their own `addendum/` folder (parallel to the
+    # Pins that addenda export into their own `Add/` folder (parallel to the
     # spec §8.1 note about ranking the new folder).
     monkeypatch.setattr(file_export.storage, "download_file", lambda p: b"x")
     rows = [
@@ -86,8 +86,8 @@ def test_addendum_gets_its_own_folder(monkeypatch):
         {"category": "drawing", "storage_path": "b", "filename": "E-101.pdf", "size_bytes": 1},
     ]
     names = _names(file_export.build_export_zip(rows)[0])
-    assert "addendum/add3.pdf" in names
-    assert "drawing/E-101.pdf" in names
+    assert "Add/add3.pdf" in names
+    assert "Gen Dwgs/E-101.pdf" in names
 
 
 # ── estimator query set + /export endpoint scoping ─────────────────────────
@@ -189,7 +189,7 @@ async def test_estimator_export_keeps_own_estimate_and_never_stamps(monkeypatch)
 
     captured: dict = {}
 
-    def fake_spool(rows):
+    def fake_spool(rows, **_kw):
         captured["rows"] = rows
         return io.BytesIO(b"zip"), [{"status": "ok"}], 3
 
@@ -216,7 +216,7 @@ async def test_internal_export_stamps_files_exported_at(monkeypatch):
 
     monkeypatch.setattr(
         files_mod.file_export, "build_export_spooled",
-        lambda rows: (io.BytesIO(b"z"), [{"status": "ok"}], 1),
+        lambda rows, **_kw: (io.BytesIO(b"z"), [{"status": "ok"}], 1),
     )
     monkeypatch.setattr(files_mod, "audit", lambda *a, **k: None)
     db = _EDB()
@@ -273,8 +273,8 @@ def test_tree_export_nests_every_folder_component(monkeypatch):
         },
     ]
     names = _tree_names(rows)
-    assert "Bid Set A/Electrical Drawings/E-Sheets (pages 12-40).pdf" in names
-    assert "Bid Set A/Other/Geotechnical Report/Soils (pages 41-60).pdf" in names
+    assert "Bid Set A/Elec Dwgs/E- p12-40.pdf" in names
+    assert "Bid Set A/Other/Geotech Rpt/Soils p41-60.pdf" in names
     assert "MANIFEST.txt" in names
 
 
@@ -290,9 +290,9 @@ def test_tree_export_keeps_caller_order_and_dedupes_collisions(monkeypatch):
     spool, manifest, _size = file_export.build_tree_export_spooled(rows)
     spool.close()
     assert [m["file"] for m in manifest] == [
-        "Set/Specifications/b.pdf",
-        "Set/Specifications/a.pdf",
-        "Set/Specifications/a (2).pdf",
+        "Set/Spec/b.pdf",
+        "Set/Spec/a.pdf",
+        "Set/Spec/a (2).pdf",
     ]
 
 
@@ -317,9 +317,45 @@ def test_tree_export_manifest_carries_title_and_notes(monkeypatch):
     assert "huge.pdf: failed, no sections" in text
 
 
-def test_zip_filename_sanitises_and_stamps():
-    name = file_export.zip_filename('bid/set:"A"', "folders")
-    assert name.startswith("bid_set_A_")
-    assert "_folders_" in name
-    assert name.endswith(".zip")
-    assert "/" not in name and ":" not in name
+def test_zip_filename_sanitises_without_a_date_stamp():
+    # No date: "Extract All" names a folder after the zip, lengthening every path.
+    assert file_export.zip_filename('bid/set:"A"', "folders") == "bid_set_A__folders.zip"
+
+
+def test_zip_filename_is_header_safe_ascii():
+    # Uploaded names are stored verbatim; the zip name lands in a latin-1
+    # encoded Content-Disposition header, so CR/LF, controls and non-latin-1
+    # characters must never reach it.
+    fn = file_export.zip_filename("24-118 Caf\N{LATIN SMALL LETTER E WITH ACUTE} \N{EN DASH} \U0001f525\r\nX-Evil: 1\x00", "split")
+    assert fn == "24-118 Cafe _ _X-Evil_ 1_split.zip"
+    fn.encode("latin-1")
+    assert all(0x20 <= ord(c) <= 0x7E for c in fn)
+    assert file_export.zip_filename("\U0001f525\U0001f525", "split") == "__split.zip"
+    assert file_export.zip_filename("\r\n\t", "split") == "export_split.zip"
+
+
+def test_flat_export_puts_every_file_at_the_root(monkeypatch):
+    monkeypatch.setattr(file_export.storage, "download_file", lambda p: b"x")
+    rows = [
+        {"category": "low_voltage_drawing", "storage_path": "a", "filename": "T-1.pdf", "size_bytes": 1},
+        {"category": "specification", "storage_path": "b", "filename": "Specifications.pdf", "size_bytes": 1},
+    ]
+    names = _names(file_export.build_export_zip(rows, flat=True)[0])
+    assert names == {"LV Dwgs - T-1.pdf", "Spec - Spec.pdf", "MANIFEST.txt"}
+
+
+def test_long_names_are_capped_for_windows_paths(monkeypatch):
+    monkeypatch.setattr(file_export.storage, "download_file", lambda p: b"x")
+    rows = [
+        {
+            "folders": ["A very long original bid set upload name for 26.9.7126 " * 3, "Electrical Drawings"],
+            "filename": "Electrical Power and Lighting Plans Level 1 through 12 " * 3 + ".pdf",
+            "storage_path": "1",
+        }
+    ]
+    spool, manifest, _size = file_export.build_tree_export_spooled(rows)
+    spool.close()
+    path = manifest[0]["file"]
+    assert len(path) <= 120
+    assert path.endswith(".pdf")
+    assert "26.9.7126" not in path

@@ -3,9 +3,17 @@
 import re
 from datetime import date, datetime, time
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, EmailStr, Field, computed_field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from app.core.roles import Role
 from app.services.due_reminder_prefs import NotificationPrefsDoc
@@ -14,15 +22,30 @@ from app.services.project_status import ProjectStatus
 # ── Profiles / users ──────────────────────────────────────────────────────
 
 # Account lifecycle, derived from is_active + invite_accepted_at:
-#   "disabled" — admin turned the account off (is_active = false)
-#   "invited"  — invite email sent, user hasn't accepted it yet
-#   "active"   — user accepted the invite and has authenticated
+#   "disabled" - admin turned the account off (is_active = false)
+#   "invited"  - invite email sent, user hasn't accepted it yet
+#   "active"   - user accepted the invite and has authenticated
 UserStatus = Literal["active", "invited", "disabled"]
 
 # Supported UI / notification languages. Mirrors SUPPORTED_LOCALES in the
 # frontend (bdr_fe/lib/locales.ts) and the profiles.locale CHECK constraint
-# (migration 0040) — keep all three in sync when adding a language.
+# (migration 0040) - keep all three in sync when adding a language.
 SupportedLocale = Literal["en", "fil", "ceb", "sw", "hi", "ur"]
+
+# Deliberately plain: this validates a MAILBOX WE OWN, typed by an admin on
+# Settings > Users, not an arbitrary internet address, so the useful check is
+# "one @, a dotted domain, nothing exotic" rather than a full RFC grammar.
+#
+# The excluded character class is not cosmetic. These values are compared as a
+# PostgREST array literal (`mailboxes=ov.{a,b}`), which the client builds by
+# joining them raw, so a comma, a quote, a brace or a backslash inside one
+# value would be read as a SEPARATOR and silently widen the scope of the
+# query: `a,tmoore@g3electrical.com` would let the holder list rows for a
+# mailbox they do not own. Whitespace is out for the same reason.
+# rfp_email_visibility.apply_scope drops the same characters again, so a row
+# written before this validator existed cannot reach PostgREST either.
+_MAILBOX_FORBIDDEN = set(',"\'{}\\')
+_EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
 
 class ProfileOut(BaseModel):
@@ -43,9 +66,15 @@ class ProfileOut(BaseModel):
     locale: SupportedLocale = "en"
     # When this user first finished the estimator portal tour (migration 0092).
     # NULL/absent = offer it. Defaults to None so reads degrade gracefully
-    # before the column is deployed — the portal then offers the tour, which is
+    # before the column is deployed - the portal then offers the tour, which is
     # the safe direction to be wrong in.
     estimator_tour_completed_at: datetime | None = None
+    # The RFP mailboxes this person owns (migration 0134,
+    # docs/RFP_EMAIL_VISIBILITY.md): which rows of the RFP review queue they
+    # may see and act on. Defaults to empty so reads degrade gracefully before
+    # the column is deployed, and because empty is the safe direction: the
+    # person then sees only the shared mailboxes.
+    rfp_mailboxes: list[str] = Field(default_factory=list)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -89,6 +118,10 @@ class AdminUpdateUserIn(BaseModel):
     role: Role | None = None
     is_active: bool | None = None
     is_dev: bool | None = None
+    # The RFP mailboxes this user owns (docs/RFP_EMAIL_VISIBILITY.md 3.5).
+    # None leaves the mapping alone; [] clears it. The router refuses the list
+    # for an external estimator, since that role never reaches the queue.
+    rfp_mailboxes: list[str] | None = None
 
     @field_validator("full_name")
     @classmethod
@@ -100,9 +133,40 @@ class AdminUpdateUserIn(BaseModel):
             raise ValueError("full_name must not be blank")
         return v
 
+    @field_validator("rfp_mailboxes")
+    @classmethod
+    def _clean_mailboxes(cls, v: list[str] | None) -> list[str] | None:
+        """Trim, lowercase, drop blanks, dedupe (first spelling wins), and
+        refuse anything that is not an address or a list longer than ten.
+
+        The cap is a sanity bound, not a policy: a person owns a handful of
+        mailboxes, and an unbounded array would be sent on every profile read
+        and compared on every visibility check.
+        """
+        if v is None:
+            return None
+        out: list[str] = []
+        for raw in v:
+            if not isinstance(raw, str):
+                raise ValueError("rfp_mailboxes must be email addresses")
+            addr = raw.strip().lower()
+            if not addr:
+                continue
+            if (
+                not _EMAIL_RE.fullmatch(addr)
+                or _MAILBOX_FORBIDDEN & set(addr)
+                or any(ch.isspace() for ch in addr)
+            ):
+                raise ValueError(f"{raw.strip()} is not a valid email address")
+            if addr not in out:
+                out.append(addr)
+        if len(out) > 10:
+            raise ValueError("rfp_mailboxes is limited to 10 addresses")
+        return out
+
 
 class UpdateMeIn(BaseModel):
-    """Self-service profile edits — display name and UI language. Each field is
+    """Self-service profile edits - display name and UI language. Each field is
     optional so the caller can PATCH just the name or just the locale; email and
     role stay admin-managed."""
 
@@ -123,7 +187,7 @@ class UpdateMeIn(BaseModel):
 class NotificationPrefsOut(BaseModel):
     """Effective due-date reminder prefs + whether a custom row exists.
 
-    `is_customized` drives the Settings page's "Reset to default" button —
+    `is_customized` drives the Settings page's "Reset to default" button -
     true iff the user has a notification_prefs row stored.
     """
 
@@ -222,7 +286,7 @@ EstValueBand = Literal[
 ScopeFit = Literal["yes", "no", "maybe", "other", "unknown"]
 
 
-# Membership is just the link — any GC on a project is a bid candidate; who
+# Membership is just the link - any GC on a project is a bid candidate; who
 # we actually bid to is recorded by which proposals were sent (Send Out).
 # needs_by is per-GC because GCs on the same bid can want our number on
 # different days. Bounded to a sane window: a stored 9999-12-31 (typo or
@@ -279,8 +343,12 @@ class ProjectOpenIn(BaseModel):
 # or `data:` text typed into the field would become a working XSS payload the
 # moment someone clicked the button.
 _BIDDING_URL_MAX = 2000
+# The two BuildingConnected text blocks on a project (project_information,
+# trade_instructions): the same cap the ingestion applies (RFP_BC_TEXT_MAX_CHARS
+# tops out here), so a stored value always round-trips through Edit Details.
+PROJECT_TEXT_MAX_CHARS = 20000
 
-# Leading "<word>:" — a candidate scheme. Only a candidate: a host with a port
+# Leading "<word>:" - a candidate scheme. Only a candidate: a host with a port
 # ("example.com:8080", "localhost:3000") wears the same shape, so what follows
 # decides which one it is.
 _SCHEME_RE = re.compile(r"^([A-Za-z][A-Za-z0-9+.\-]*):(.*)$", re.DOTALL)
@@ -289,8 +357,8 @@ _SCHEME_RE = re.compile(r"^([A-Za-z][A-Za-z0-9+.\-]*):(.*)$", re.DOTALL)
 def _clean_bidding_url(value: str | None) -> str | None:
     """Normalize a bidding-site URL; empty/whitespace reads as "not provided".
 
-    People paste what they copied — "app.buildingconnected.com/projects/abc" as
-    often as a full link — so a missing scheme is filled in with https:// rather
+    People paste what they copied - "app.buildingconnected.com/projects/abc" as
+    often as a full link - so a missing scheme is filled in with https:// rather
     than bounced back at them. A URL that names some *other* scheme is still
     refused, because this ends up as an href on the project page.
     """
@@ -308,7 +376,7 @@ def _clean_bidding_url(value: str | None) -> str | None:
             # Also repairs a fumbled "https:/example.com" / "https:example.com".
             url = f"{scheme}://{rest.lstrip('/')}"
         elif "." in scheme or rest[:1].isdigit():
-            # Not a scheme at all — a host with a port, or a host whose TLD the
+            # Not a scheme at all - a host with a port, or a host whose TLD the
             # colon follows. Treat it like any other scheme-less paste.
             url = f"https://{url}"
         else:
@@ -316,7 +384,7 @@ def _clean_bidding_url(value: str | None) -> str | None:
     else:
         # "//host/path" is protocol-relative; everything else is a bare host.
         url = f"https://{url.lstrip('/')}" if url.startswith("//") else f"https://{url}"
-    # Whatever we built has to have an actual host behind the scheme — "https://"
+    # Whatever we built has to have an actual host behind the scheme - "https://"
     # on its own, or a paste that was nothing but slashes, is not a link.
     if not re.match(r"^https?://[^/\s]", url, re.IGNORECASE):
         raise ValueError("bidding_url must be a web link (http:// or https://)")
@@ -325,8 +393,12 @@ def _clean_bidding_url(value: str | None) -> str | None:
 
 class ProjectCreate(BaseModel):
     name: str
-    number: str
-    # Required at intake — mirrored by the New Project form's `required` fields.
+    # The number is assigned by the server on save (services/project_numbers,
+    # docs/RFP_CREATE.md section 2): nobody types one. An old client that still
+    # sends a `number` key is ignored (pydantic's default extra="ignore").
+    # `budgetary` appends the B marker to the assigned number.
+    budgetary: bool = False
+    # Required at intake - mirrored by the New Project form's `required` fields.
     internal_bid_at: datetime
     actual_bid_at: datetime | None = None
     est_start_date: date | None = None
@@ -346,6 +418,14 @@ class ProjectCreate(BaseModel):
     no_bidding_url: bool = False
     # True when the project came to us from NGEM (checkbox on the intake form).
     is_ngem: bool = False
+    # RFP matching (docs/RFP_MATCHING.md 3.9). `bid_notes` is the GC's own
+    # instructions about this bid (walk dates, delivery rules, scope notes),
+    # kept apart from `notes` because the matcher scores it against the notes
+    # extracted from an invitation email. `is_rebid` marks a job that was bid
+    # before under another invitation (the New Bid similar-projects check
+    # offers "Create as a rebid").
+    bid_notes: str | None = None
+    is_rebid: bool = False
     # Go/No-Go scoring answers (reference only for scoring, but required at intake)
     project_type: ProjectType
     owner_type: OwnerType
@@ -368,7 +448,7 @@ class ProjectCreate(BaseModel):
         """Intake must answer the bidding link one way or the other."""
         if self.no_bidding_url and self.bidding_url:
             raise ValueError(
-                "Provide a bidding_url or set no_bidding_url — not both"
+                "Provide a bidding_url or set no_bidding_url - not both"
             )
         if not self.no_bidding_url and not self.bidding_url:
             raise ValueError(
@@ -379,7 +459,9 @@ class ProjectCreate(BaseModel):
 
 class ProjectUpdate(BaseModel):
     name: str | None = None
-    number: str | None = None
+    # The number itself is never edited; `budgetary` adds or strips its B
+    # marker (a rename of the same number, refused on a legacy number).
+    budgetary: bool | None = None
     internal_bid_at: datetime | None = None
     actual_bid_at: datetime | None = None
     est_start_date: date | None = None
@@ -397,6 +479,15 @@ class ProjectUpdate(BaseModel):
     bidding_url: str | None = None
     no_bidding_url: bool | None = None
     is_ngem: bool | None = None
+    bid_notes: str | None = None
+    is_rebid: bool | None = None
+    # BuildingConnected facts (migration 0136, docs/RFP_BUILDINGCONNECTED.md
+    # 3.7): the job walk instant and the two "Project details" text blocks,
+    # capped at the ingestion's own limit (RFP_BC_TEXT_MAX_CHARS) so an
+    # untouched field round-trips through Edit Details.
+    job_walk_at: datetime | None = None
+    project_information: str | None = Field(default=None, max_length=PROJECT_TEXT_MAX_CHARS)
+    trade_instructions: str | None = Field(default=None, max_length=PROJECT_TEXT_MAX_CHARS)
     # Go/No-Go scoring answers (reference only)
     project_type: ProjectType | None = None
     owner_type: OwnerType | None = None
@@ -414,6 +505,53 @@ class ProjectUpdate(BaseModel):
         return _clean_bidding_url(v)
 
 
+class GcCreateIn(BaseModel):
+    """The "Add a GC" half of a GC confirmation (docs/RFP_BUILDINGCONNECTED.md
+    3.4): the GC's name and, optionally, its contact from the platform's lead."""
+
+    name: str = Field(min_length=1, max_length=200)
+    contact_name: str | None = Field(default=None, max_length=200)
+    contact_email: str | None = Field(default=None, max_length=320)
+    contact_phone: str | None = Field(default=None, max_length=60)
+
+
+class ProjectGcConfirmIn(BaseModel):
+    """POST /projects/{id}/gc-confirm: `same` keeps the provisional GC,
+    `pick` names another (`gc_id`), `create` adds one (`create`)."""
+
+    decision: Literal["same", "pick", "create"]
+    gc_id: str | None = None
+    create: GcCreateIn | None = None
+
+    @model_validator(mode="after")
+    def _decision_has_its_argument(self) -> "ProjectGcConfirmIn":
+        if self.decision == "pick" and not (self.gc_id or "").strip():
+            raise ValueError("gc_id is required to pick a GC")
+        if self.decision == "create" and self.create is None:
+            raise ValueError("create is required to add a GC")
+        return self
+
+
+class GcRefOut(BaseModel):
+    id: str | None = None
+    name: str | None = None
+
+
+class ProjectGcConfirmOut(BaseModel):
+    """GET /projects/{id}/gc-confirm: what the project-page card shows
+    (contract 3.5). `pending` mirrors projects.gc_confirm_pending; the
+    rest comes off the BuildingConnected invitation that made or merged
+    onto the project (null when there is none)."""
+
+    pending: bool = False
+    external_name: str | None = None
+    provisional_gc: GcRefOut | None = None
+    candidates: list[dict[str, Any]] = Field(default_factory=list)
+    lead: dict[str, Any] | None = None
+    invitation_id: str | None = None
+    portal: str | None = None
+
+
 class CategoryStateOut(BaseModel):
     """One category's progress head (source of truth for the bidding board)."""
 
@@ -422,6 +560,74 @@ class CategoryStateOut(BaseModel):
     status: str  # 'locked' | 'active' | 'complete'
     owner_role: Role | None = None
     completed_at: datetime | None = None
+
+
+class PortalChangeOut(BaseModel):
+    """One tracked change on a BuildingConnected invitation (docs/
+    RFP_BUILDINGCONNECTED.md 3.6): the field, the old and new values. The
+    values of a `close_at` change are nulled for roles that may not see the
+    actual bid date (the router does it)."""
+
+    at: datetime | None = None
+    field: str
+    old: Any = None
+    new: Any = None
+
+
+class PortalSourceOut(BaseModel):
+    """One portal invitation that resolved to `exists` on a project (NGEM),
+    or, for BuildingConnected (contract D32), one at `exists` OR the one that
+    created the project: the "Also invited through ..." block with the deep
+    link, the package trade, the inviting GC and the change list."""
+
+    portal: str
+    invitation_id: str
+    agency: str | None = None
+    bid_number: str | None = None
+    bid_number_raw: str | None = None
+    addendum_no: int | None = None
+    close_at: datetime | None = None
+    resolution: str | None = None
+    resolved_at: datetime | None = None
+    external_url: str | None = None
+    trade_name: str | None = None
+    invited_at: datetime | None = None
+    gc_external_name: str | None = None
+    gc_id: str | None = None
+    gc_name: str | None = None
+    changes: list[PortalChangeOut] = Field(default_factory=list)
+
+
+class RfpCreatedSummary(BaseModel):
+    """The project-header facts about a project the RFP creation step made
+    (rfp_created_projects, docs/RFP_CREATE.md section 8): who or what created
+    it, the unauthorized-sender marker, and the document promotion outcome.
+    `invitation_method` names the source (an email method, `ngem`,
+    `buildingconnected`) and `gc_plan` how the GC was decided. The intake
+    modal shows where the invitation came from: `source_kind` ('rfp_email' or
+    'rfp_portal'), `mailbox` (the receiving mailbox of an email source; null
+    for a portal) and the likely GC the creation step settled on."""
+
+    automatic: bool = False
+    sender_was_unauthorized: bool = False
+    sender_display: str | None = None
+    sender_allowed_by_name: str | None = None
+    files_status: str = "none"
+    files_promoted: int = 0
+    bid_time_unknown: bool = False
+    invitation_method: str | None = None
+    gc_plan: str | None = None
+    source_kind: str | None = None
+    mailbox: str | None = None
+    likely_gc_id: str | None = None
+    likely_gc_name: str | None = None
+    # The Bid File Splitter flag (docs/RFP_SPLIT.md 10), detail route only:
+    # `{state: failed | partial | running, reason, job_id, files_total,
+    # files_done, files_failed_count, files_failed: [{file_id, filename,
+    # error}], started_at, finished_at, resolution: {kind, by, at} | null,
+    # package_sent}`; null when the split succeeded, was skipped, or the
+    # route does not compute it.
+    split_issue: dict[str, Any] | None = None
 
 
 class ProjectOut(BaseModel):
@@ -449,6 +655,22 @@ class ProjectOut(BaseModel):
     # True when the project originated from NGEM. Default lets reads degrade
     # gracefully before migration 0046 is applied.
     is_ngem: bool = False
+    # RFP matching (migration 0122): the GC's bid instructions and the manual
+    # rebid flag. Defaults let reads degrade gracefully before it is applied.
+    bid_notes: str | None = None
+    is_rebid: bool = False
+    # BuildingConnected (migration 0136, docs/RFP_BUILDINGCONNECTED.md 3.7
+    # and 3.8): the job walk, the two "Project details" text blocks, the
+    # "same GC?" question still open, and the files flag (set / cleared).
+    # Defaults let reads degrade gracefully before 0136 is applied.
+    job_walk_at: datetime | None = None
+    project_information: str | None = None
+    trade_instructions: str | None = None
+    gc_confirm_pending: bool = False
+    files_needed_source: str | None = None
+    files_needed_url: str | None = None
+    files_needed_set_at: datetime | None = None
+    files_needed_cleared_at: datetime | None = None
     # Go/No-Go scoring answers (reference only); defaults so reads degrade
     # gracefully if the 0027 migration hasn't been applied yet.
     project_type: ProjectType | None = None
@@ -493,6 +715,29 @@ class ProjectOut(BaseModel):
     # Executive task while this is above zero; the project's stage itself never
     # moves for it.
     gc_pricing_approvals_pending: int = 0
+    # RFP matching (docs/RFP_MATCHING.md 3.9). `rfp_merged_count` is the open
+    # system merges (a GC the matcher added that is still on the project);
+    # `rfp_history_count` is every other rfp_project_matches row (unmerged
+    # merges, merges whose link a person removed, duplicates), so any row makes
+    # the "Merged by System" modal reachable; `rfp_new_count` is the subset of
+    # open merges on a bid that has already gone out whose GC has no sent or
+    # sending proposal and is not acknowledged (the "New RFP" pill). Derived
+    # by the list and detail routes only; every other route leaves the
+    # defaults, as gc_pricing_approvals_pending does.
+    rfp_merged_count: int = 0
+    rfp_history_count: int = 0
+    rfp_new_count: int = 0
+    # NGEM portal invitations resolved onto this project (docs/RFP_NGEM_PORTAL.md
+    # section 5): the "NGEM" pill and the Portal invitations section. Derived
+    # by the detail route only while RFP_NGEM_ENABLED is on; every other
+    # route leaves the default, as the counts above do.
+    portal_sources: list[PortalSourceOut] = Field(default_factory=list)
+    # RFP project creation (docs/RFP_CREATE.md sections 7 and 8): the created
+    # row's summary, and the intake fields the Estimating Admin still has to
+    # fill (null when the project was not created by that slice, else the
+    # possibly empty list). Derived by the list and detail routes only.
+    rfp_created: RfpCreatedSummary | None = None
+    rfp_intake_missing: list[str] | None = None
     created_by: str | None
     created_at: datetime
     updated_at: datetime
@@ -500,7 +745,7 @@ class ProjectOut(BaseModel):
 
 class BidsTodayProjectOut(ProjectOut):
     """A Bids Today row: a full project plus the one page-specific fact the
-    client can't derive — whether the bid went out earlier today (rows sent
+    client can't derive - whether the bid went out earlier today (rows sent
     today stay on the page with a Sent badge and drop off tomorrow)."""
 
     sent_today: bool = False
@@ -588,6 +833,103 @@ class AbandonIn(BaseModel):
         return v
 
 
+class ProjectDeleteIn(BaseModel):
+    """POST /projects/{id}/delete (docs/PROJECT_DELETE.md 6). The reason code,
+    the note and the typed confirmation are checked by the service and again
+    by the database function, each failure a 422 with a sentence (so these
+    fields are plain strings here, capped only to bound the request)."""
+
+    reason: str | None = Field(default=None, max_length=64)
+    note: str | None = Field(default=None, max_length=4000)
+    confirm_name: str | None = Field(default=None, max_length=1000)
+
+
+# ── RFP matching (docs/RFP_MATCHING.md sections 3.7 to 3.9) ──────────────
+
+_RFP_REASON_MAX = 500
+
+
+def _clean_reason(v: str | None) -> str | None:
+    """A free-text reason, whitespace-trimmed; blank reads as not given."""
+    if v is None:
+        return None
+    v = v.strip()
+    return v or None
+
+
+class SimilarProjectsIn(BaseModel):
+    """POST /projects/similar: the New Bid form's pre-create check.
+
+    Name-only by design: the check scores project names and windows on the
+    internal bid date, so no score, membership or sort order in the response
+    can be a function of the confidential actual date. Any other key a client
+    sends (dates included) is dropped, never read.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    name: str = Field(min_length=1, max_length=500)
+
+
+class RfpMatchMergeIn(BaseModel):
+    """POST /rfp-emails/{id}/match/merge: the human "merge into X" action.
+
+    `gc_id` is optional; when given it also becomes the email's resolved GC
+    (kind `human`). With neither it nor a resolved GC the service refuses
+    with 400 rfp_match_gc_required. Both ids are plain strings here; the
+    router refuses a malformed id (and an unknown GC) with a 404 before the
+    service runs, so a bad id never reaches PostgREST as a 500."""
+
+    project_id: str = Field(min_length=1, max_length=64)
+    gc_id: str | None = Field(default=None, min_length=1, max_length=64)
+
+
+class RfpMatchDuplicateIn(BaseModel):
+    """POST /rfp-emails/{id}/match/duplicate: "the GC is already on X". A
+    malformed project_id is a 404 in the router."""
+
+    project_id: str = Field(min_length=1, max_length=64)
+
+
+class RfpMatchGcIn(BaseModel):
+    """POST /rfp-emails/{id}/match/gc: set the email's GC by hand. A
+    malformed or unknown gc_id is a 404 in the router."""
+
+    gc_id: str = Field(min_length=1, max_length=64)
+
+
+class RfpMatchReopenIn(BaseModel):
+    """POST /rfp-emails/{id}/match/reopen: optional reason, audit only."""
+
+    reason: str | None = Field(default=None, max_length=_RFP_REASON_MAX)
+
+    _reason_clean = field_validator("reason")(_clean_reason)
+
+
+class RfpMatchUnmergeIn(BaseModel):
+    """Unmerge (by email or by project): the reason is required, 3 to 500
+    characters, and is stored on the closed match row."""
+
+    reason: str = Field(min_length=3, max_length=_RFP_REASON_MAX)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_required(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 3:
+            raise ValueError("A reason of at least 3 characters is required")
+        return v
+
+
+class RfpMatchAcknowledgeIn(BaseModel):
+    """POST /projects/{id}/rfp-matches/{match_id}/acknowledge: "no proposal
+    needed", optional reason."""
+
+    reason: str | None = Field(default=None, max_length=_RFP_REASON_MAX)
+
+    _reason_clean = field_validator("reason")(_clean_reason)
+
+
 # ── Go / No-Go ──────────────────────────────────────────────────────────--
 
 
@@ -602,6 +944,14 @@ class GonoDecisionIn(BaseModel):
 class VendorIn(BaseModel):
     name: str
     notes: str | None = None
+    # 0139: a national account vendor. Display only, no pricing effect.
+    is_national_account: bool = False
+
+
+class VendorUpdate(BaseModel):
+    """Toggle a vendor company's national account flag (0139)."""
+
+    is_national_account: bool
 
 
 class VendorContactIn(BaseModel):
@@ -635,12 +985,16 @@ class RFQBulkSendGroup(BaseModel):
     # request can't be turned into a mass-mail amplifier.
     vendor_contact_ids: list[str] = Field(..., min_length=1, max_length=100)
     # None = the default set: BOM split + Electrical Drawings (falling back to
-    # General Drawings/Plans when no electrical set exists). Trenching swaps
+    # General Drawings/Plans when no electrical set exists) + the project's
+    # Specifications (0132, every category). Trenching swaps
     # the BOM split for the estimator's markup files (vendors price trenching
     # from the markup, not counts). An explicit list (possibly empty) is
     # exactly what the PE left in the Modify Files / confirm modals after
-    # adding/removing files — what they saw is what gets sent.
-    attachment_file_ids: list[str] | None = Field(default=None, max_length=50)
+    # adding/removing files - what they saw is what gets sent.
+    # 50 until 0132. The default set now includes every spec file, so a PE who
+    # opens Modify Files and confirms it unchanged posts the whole list back:
+    # 50 was reachable on a real spec book.
+    attachment_file_ids: list[str] | None = Field(default=None, max_length=200)
     # Optional CC lists keyed by To-contact id: each CC contact is copied on
     # that one email instead of getting their own. The send layer enforces that
     # every CC works at the same vendor company as its To contact.
@@ -771,6 +1125,10 @@ class QuoteIn(BaseModel):
     # carry as the quote's document. Reference only: nothing is extracted from
     # it, the typed amount IS the quote.
     quote_file_id: str | None = None
+    # Optional sales-tax answer recorded with the row. REQUIRED once the bid
+    # has been submitted (a late quote, 0138): the router 422s without it.
+    tax_included: bool | None = None
+    tax_rate: Decimal = Field(Decimal("8.375"), ge=0, le=Decimal("100"), decimal_places=3)
 
 
 class QuoteOverrideIn(BaseModel):
@@ -801,6 +1159,22 @@ class ManualQuoteIn(BaseModel):
     # carry as the quote's document. Reference only: nothing is extracted from
     # it, the typed amount IS the quote.
     quote_file_id: str | None = None
+
+
+class QuoteNoteIn(BaseModel):
+    """One note on one quote (quote_notes, 0137): commentary that tells quotes
+    in the same category apart ("excludes fixtures", "lead time 12 weeks").
+    Never moves a price. Trimmed; the 1..2000 bound matches the table check."""
+
+    body: str = Field(min_length=1, max_length=2_000)
+
+    @field_validator("body")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Note cannot be empty")
+        return v
 
 
 class ReplyManualQuoteIn(BaseModel):
@@ -852,7 +1226,7 @@ class RfqQuotesConfirmIn(BaseModel):
 
 
 class TaxIn(BaseModel):
-    """Tax attestation for a priced figure on the receive-quotes step — a vendor
+    """Tax attestation for a priced figure on the receive-quotes step - a vendor
     quote or the General Material estimate: does the number already include
     sales tax? When not, tax_rate (a percent, default the Clark County 8.375%)
     is applied on top, and pricing compares/carries the tax-inclusive figure so
@@ -872,7 +1246,7 @@ class BoqAnalysisStart(BaseModel):
 
 
 class BoqItemSrc(BaseModel):
-    """An item's position in the analysis's pristine result_json —
+    """An item's position in the analysis's pristine result_json -
     sites[s].material_groups[g].items[i]. Rides through drafts and the confirm
     payload so the server can diff the user's output against the model's."""
 
@@ -894,7 +1268,7 @@ class BoqOverrideIn(BaseModel):
 
 
 class BoqDraftBody(BaseModel):
-    # Sparse — an entry exists only for touched items — so the cap comfortably
+    # Sparse - an entry exists only for touched items - so the cap comfortably
     # exceeds any real correction pass while bounding the stored jsonb.
     overrides: list[BoqOverrideIn] = Field(default_factory=list, max_length=5000)
     # Mirrors the panel's group→category Select ("" = Hold/skip).
@@ -905,7 +1279,7 @@ class BoqDraftBody(BaseModel):
     def _cap_mappings(cls, v: dict[str, str]) -> dict[str, str]:
         if len(v) > 200:
             raise ValueError("Too many group mappings in one draft")
-        # Key/value length caps too — the draft is stored verbatim as jsonb and
+        # Key/value length caps too - the draft is stored verbatim as jsonb and
         # echoed back on every /latest, so unbounded strings would be amplified.
         for name, cat_id in v.items():
             if len(name) > 300:
@@ -949,7 +1323,7 @@ class BoqConfirmIn(BaseModel):
     # categories already mapped to a material_category_id. Material categories are
     # a small fixed table, so a modest cap can't reject legitimate input.
     groups: list[RFQGroupIn] = Field(..., min_length=1, max_length=50)
-    # Model group names the reviewer left on Hold — neutral for the training
+    # Model group names the reviewer left on Hold - neutral for the training
     # diff: their items are never counted as removed.
     held_groups: list[str] = Field(default_factory=list, max_length=200)
     # The panel's group→category mapping at confirm time, so the training diff
@@ -961,6 +1335,52 @@ class BoqConfirmIn(BaseModel):
     def _cap_held(cls, v: list[str]) -> list[str]:
         if any(len(name) > 300 for name in v):
             raise ValueError("Held group name too long")
+        return v
+
+
+class BoqManualItemIn(BaseModel):
+    """One hand-typed BOQ item. Same shape the model produces per item, so
+    the manual analysis reads/edits/confirms through the normal panel."""
+
+    description: str = Field(..., max_length=500)
+    quantity: Decimal | None = Field(None, ge=0, le=Decimal("1000000000"))
+    unit: str | None = Field(None, max_length=80)
+    notes: str | None = Field(None, max_length=500)
+
+    @field_validator("description")
+    @classmethod
+    def _desc(cls, v: str) -> str:
+        cleaned = " ".join(v.split())
+        if not cleaned:
+            raise ValueError("Each item needs a description")
+        return cleaned
+
+    @field_validator("unit", "notes")
+    @classmethod
+    def _opt(cls, v: str | None) -> str | None:
+        cleaned = " ".join(v.split()) if v else ""
+        return cleaned or None
+
+
+class BoqManualGroupIn(BaseModel):
+    material_category_id: str
+    items: list[BoqManualItemIn] = Field(..., min_length=1, max_length=2000)
+
+
+class BoqManualIn(BaseModel):
+    """POST /boq-analysis/manual: the reviewer's own item list, one group per
+    material category, for a project run without the model (instance down,
+    or a BOQ the model has no business reading). Lands as a `done` analysis
+    with model='manual' so review, corrections and confirm work unchanged."""
+
+    groups: list[BoqManualGroupIn] = Field(..., min_length=1, max_length=50)
+
+    @field_validator("groups")
+    @classmethod
+    def _unique_categories(cls, v: list[BoqManualGroupIn]) -> list[BoqManualGroupIn]:
+        ids = [g.material_category_id for g in v]
+        if len(set(ids)) != len(ids):
+            raise ValueError("Each material category can be listed once")
         return v
 
 
@@ -1070,6 +1490,28 @@ class ProposalLinesIn(BaseModel):
         return cleaned
 
 
+class ProposalManualIn(BaseModel):
+    """Seed for a hand-entered scope-lines draft: no BOQ read, no model call.
+    Lines are optional (an empty list just opens the editor); blank rows are
+    dropped rather than rejected so a half-typed list still lands, but the
+    same length/character rules as ProposalLinesIn apply to what is kept."""
+
+    lines: list[str] = Field(default_factory=list, max_length=200)
+
+    @field_validator("lines")
+    @classmethod
+    def _clean(cls, v: list[str]) -> list[str]:
+        from app.services.proposal_scope import MAX_LINE_CHARS
+
+        cleaned = [" ".join(line.split()) for line in v]
+        cleaned = [line for line in cleaned if line]
+        if any(len(line) > MAX_LINE_CHARS for line in cleaned):
+            raise ValueError(f"Scope lines must be {MAX_LINE_CHARS} characters or fewer")
+        if any("<" in line or ">" in line for line in cleaned):
+            raise ValueError("Scope lines cannot contain '<' or '>' characters")
+        return cleaned
+
+
 class ProposalAmountsIn(BaseModel):
     # One GC's proposal figures (GC Pricing step editor). None clears the
     # override back to the pricing base; the total is never stored, it is
@@ -1160,15 +1602,15 @@ class ProposalResendIn(ProposalDispatchIn):
 
 class ProposalMarkSubmittedIn(BaseModel):
     # The bid went out through a third-party application (GC portal etc.), not
-    # our email — record the listed proposals as submitted without sending.
+    # our email - record the listed proposals as submitted without sending.
     proposal_ids: list[str] = Field(..., min_length=1, max_length=100)
 
 
-# ── Win / Loss (bid outcome) — final step ───────────────────────────────────
+# ── Win / Loss (bid outcome) - final step ───────────────────────────────────
 
 
 class BidGcOutcomeIn(BaseModel):
-    # One GC we bid to. All detail is optional / "unknown" — the PA records what
+    # One GC we bid to. All detail is optional / "unknown" - the PA records what
     # they've heard back, which is usually partial. winning_amount is the number
     # that GC actually went with (lets us show how far off ours was); our_amount
     # is snapshotted server-side from proposal_sends, never trusted from the client.
@@ -1221,7 +1663,7 @@ def _max_len(field: str, limit: int):
 
 
 class PMProjectCreate(BaseModel):
-    """Direct creation in Project Management — a project awarded without a bid,
+    """Direct creation in Project Management - a project awarded without a bid,
     or an already-live job being onboarded (initial_stage picks where it enters).
     Deliberately NOT ProjectCreate: the bidding intake's required fields (bid
     dates, go/no-go answers) don't exist for a never-bid project."""
@@ -1374,18 +1816,18 @@ RFIPriority = Literal["standard", "urgent"]
 
 # `question` is sanitized HTML (migration 0068), so this bounds *markup*, not
 # prose: tags inflate a plain-text question well past the 8000 it used to cost.
-# It is only the outer guard against an absurd payload — routers/pm_field.py
+# It is only the outer guard against an absurd payload - routers/pm_field.py
 # applies the real check to the sanitized value, so markup the author never sees
 # can't be what blocks them.
 RFI_QUESTION_MAX_CHARS = 24000
 
 # drawing_numbers / applicable_references are free-text chips ("E-101", "Spec
-# 26 05 19") — there is no drawings or specs table to point at (see 0068).
+# 26 05 19") - there is no drawings or specs table to point at (see 0068).
 _RFI_CHIP_MAX_ITEMS = 50
 _RFI_CHIP_MAX_CHARS = 100
 
 # Documents-hub handles ("source:id"), mirroring the rfi_attachments.doc_key
-# CHECK constraint. Shape only — routers/pm_field.py is what proves a key names
+# CHECK constraint. Shape only - routers/pm_field.py is what proves a key names
 # a document this project may actually see.
 _ATTACHMENT_KEY_RE = re.compile(r"^(pm|bid|cp):[0-9a-f-]{36}$")
 _RFI_ATTACHMENT_MAX = 50
@@ -1431,7 +1873,7 @@ class RFIIn(BaseModel):
     applicable_references: list[str] = Field(default_factory=list)
     assigned_gc_id: str | None = None
     assigned_contact_id: str | None = None
-    # Not a column on `rfis` — the router writes these to rfi_attachments.
+    # Not a column on `rfis` - the router writes these to rfi_attachments.
     attachment_keys: list[str] = Field(default_factory=list)
 
     @field_validator("drawing_numbers", "applicable_references")
@@ -1460,7 +1902,7 @@ class RFIUpdate(BaseModel):
     priority: RFIPriority | None = None
     drawing_numbers: list[str] | None = None
     applicable_references: list[str] | None = None
-    # Explicit null unassigns — these are nullable FKs.
+    # Explicit null unassigns - these are nullable FKs.
     assigned_gc_id: str | None = None
     assigned_contact_id: str | None = None
     # Absent = leave attachments alone; present = replace the whole set. The
@@ -1482,7 +1924,7 @@ class RFIClose(BaseModel):
     """Closing an RFI is gated: the responder, the answer, and at least one
     response document are all required (routers/pm_field.py enforces the last).
 
-    Distinct from the answer→answered convenience — that only records that an
+    Distinct from the answer→answered convenience - that only records that an
     answer was typed; this is the formal terminal state with an audit-worthy
     responder and a response document attached.
     """
@@ -1511,7 +1953,7 @@ class RFIClose(BaseModel):
         return cleaned
 
 
-# gc_contacts ids the send is addressed to. Capped like the attachment list — an
+# gc_contacts ids the send is addressed to. Capped like the attachment list - an
 # RFI never legitimately fans out to dozens of contacts, and it bounds the payload.
 _RFI_RECIPIENTS_MAX = 50
 
@@ -1520,7 +1962,7 @@ class RFISendIn(BaseModel):
     """App send: email the RFI (as a filled PDF) to selected GC contacts.
 
     The router proves each contact belongs to the RFI's assigned company and has an
-    email address — this only bounds and de-dupes the raw id list.
+    email address - this only bounds and de-dupes the raw id list.
     """
 
     contact_ids: list[str] = Field(min_length=1, max_length=_RFI_RECIPIENTS_MAX)
@@ -1566,7 +2008,7 @@ class ManpowerUpdate(BaseModel):
 
 
 class PmMaterialIn(BaseModel):
-    """A PM material line — the same shape a BOQ extraction item carries
+    """A PM material line - the same shape a BOQ extraction item carries
     (no pricing). material_category_id None = uncategorized."""
 
     material_category_id: str | None = None
@@ -1600,7 +2042,7 @@ class SubmittalCategoryGroup(BaseModel):
     """One material category's slice of a submittal request: which of the
     project's materials to request submittals for, any typed-in extras (to cover
     ourselves), and the vendor contacts of that category to email. Add/deselect
-    is a per-request snapshot — it never touches pm_materials."""
+    is a per-request snapshot - it never touches pm_materials."""
 
     material_category_id: str | None = None
     included_material_ids: list[str] = Field(default_factory=list, max_length=500)
@@ -1618,7 +2060,7 @@ class SubmittalRequestIn(BaseModel):
     # Documents-hub keys ("source:id") of the spec sheets to attach. Plans are
     # always attached (not listed here). Only honored when include_specs is true.
     spec_document_keys: list[str] = Field(default_factory=list, max_length=100)
-    # Project materials the sender unchecked — recorded for the "these never had
+    # Project materials the sender unchecked - recorded for the "these never had
     # submittals requested" view; they simply produce no request items.
     deselected_material_ids: list[str] = Field(default_factory=list, max_length=1000)
     email_body: str | None = Field(None, max_length=20_000)
@@ -1637,14 +2079,14 @@ class SubmittalApprovalGroup(BaseModel):
     """One category's contribution to an approval package: which of that
     category's available files the sender ticked. `material_category_id` is null
     for the Uncategorized bucket. Keys are opaque ("att:"/"bank:"/"pm:") and are
-    validated against the project's available set on the server — never trusted."""
+    validated against the project's available set on the server - never trusted."""
 
     material_category_id: str | None = None
     file_keys: list[str] = Field(default_factory=list, max_length=300)
 
 
 class SubmittalApprovalIn(BaseModel):
-    """Send collected submittals to the GC for approval — one email, To + CC."""
+    """Send collected submittals to the GC for approval - one email, To + CC."""
 
     groups: list[SubmittalApprovalGroup] = Field(..., min_length=1, max_length=100)
     # gc_contacts ids. The fan-out is one message, so these bound the header
@@ -1659,7 +2101,7 @@ class SubmittalApprovalIn(BaseModel):
         return v if v and v.strip() else None
 
 
-# Mirror of submittal_package_items.approval_status (0081) — no 'partial' here:
+# Mirror of submittal_package_items.approval_status (0081) - no 'partial' here:
 # one file is approved, approved with comments, or rejected. 'partial' belongs
 # to the package alone, and is derived from these rather than sent by the client.
 SubmittalItemVerdict = Literal["pending", "approved", "approved_as_noted", "rejected"]
@@ -1678,7 +2120,7 @@ class SubmittalVerdictIn(BaseModel):
     """Record the GC's response to an approval package, per file.
 
     Only the items listed are touched, so the modal can save one row or all of
-    them. The PACKAGE's headline status is deliberately not accepted here — it is
+    them. The PACKAGE's headline status is deliberately not accepted here - it is
     derived from the items (submittal_approval._rollup) so the two can never
     disagree.
     """
@@ -1689,7 +2131,7 @@ class SubmittalVerdictIn(BaseModel):
 
 # ── Submittal Bank ───────────────────────────────────────────────────────────
 
-# Mirror the submittal_category PG enum (0072) — keep in sync with
+# Mirror the submittal_category PG enum (0072) - keep in sync with
 # bdr_fe/lib/types.ts when a value is added.
 SubmittalCategory = Literal["general_material", "low_voltage", "switchgear"]
 
@@ -1764,7 +2206,7 @@ class PmBankPullIn(BaseModel):
 
 class PmAddToBankIn(BaseModel):
     """Push an uploaded project submittal PDF into the global bank. Everything is
-    optional (filling out the bank entry is not required) — an unset name defaults
+    optional (filling out the bank entry is not required) - an unset name defaults
     to the material's description on the backend."""
 
     category: SubmittalCategory = "general_material"
@@ -1788,7 +2230,7 @@ class EmailAssignIn(BaseModel):
 
 # ── Certified Payroll ────────────────────────────────────────────────────────
 
-# Mirror the cp_* PG enums (0063/0064) — keep all three in sync with
+# Mirror the cp_* PG enums (0063/0064) - keep all three in sync with
 # bdr_fe/lib/types.ts when a value is added.
 CpReportType = Literal["lcp_tracker", "comply", "paper"]
 CpShiftType = Literal["four_tens", "nights", "swing", "regular"]
@@ -1809,7 +2251,7 @@ _CP_MONEY_BOUNDS = {"ge": Decimal(0), "le": Decimal("99999"), "decimal_places": 
 class CpEnrollBody(BaseModel):
     """The enroll-into-Certified-Payroll hard gate: a project may not enter CP
     until every compliance field is supplied (the FE prefills the contractor
-    address from cp_settings). Enrollment implies prevailing wage — there is no
+    address from cp_settings). Enrollment implies prevailing wage - there is no
     project_group. Legacy imports bypass this via the migration script only."""
 
     contract_id: str = Field(min_length=1, max_length=200)
@@ -1825,12 +2267,12 @@ class CpEnrollBody(BaseModel):
 
 
 class CpProjectCreate(CpEnrollBody):
-    """Direct creation INSIDE Certified Payroll — a brand-new prevailing-wage
+    """Direct creation INSIDE Certified Payroll - a brand-new prevailing-wage
     project that never existed as a bid (the CP mirror of PMProjectCreate). It
     adds the projects spine (name / number / address) to the same hard-gated
     compliance set as enrollment, inherited wholesale from CpEnrollBody so the
     two can never drift. The service stamps current_stage='cp_only' and enrolls
-    in one shot — mirroring the pm_only direct-create."""
+    in one shot - mirroring the pm_only direct-create."""
 
     name: str = Field(min_length=1, max_length=300)
     number: str = Field(min_length=1, max_length=100)
@@ -1843,7 +2285,7 @@ def _reject_explicit_nulls(model: BaseModel, fields: tuple[str, ...]) -> None:
     These Patch models are dumped with exclude_unset, so a field sent as null
     reaches the UPDATE as SET col = NULL and the DB rejects it with a raw 500
     (CORS-less). Turn that into a clean 422 at the edge. Fields not sent at all
-    (not in model_fields_set) are untouched — only an explicit null is refused.
+    (not in model_fields_set) are untouched - only an explicit null is refused.
     """
     for name in fields:
         if name in model.model_fields_set and getattr(model, name) is None:
@@ -1964,7 +2406,7 @@ class CpRatePatch(BaseModel):
 
 
 class CpReportCreate(BaseModel):
-    """Any date within the target week — the service snaps it to Sun–Sat."""
+    """Any date within the target week - the service snaps it to Sun–Sat."""
 
     week_start_date: date
 
@@ -1979,7 +2421,7 @@ class CpPaperReportInput(BaseModel):
 
 
 class CpGenerateBody(BaseModel):
-    """Optional body for CPR generation — required only when paper-type
+    """Optional body for CPR generation - required only when paper-type
     projects are in scope for the week."""
 
     paper_reports: list[CpPaperReportInput] | None = None
@@ -2023,7 +2465,7 @@ class CpIgnoredProjectCreate(BaseModel):
 # (app.services.file_sends: build_log / build_handoff) does the role-dependent
 # scoping and returns plain dicts; these models are the response contract.
 #
-# PRIVACY — the estimator projection: for the estimator viewer, build_log OMITS
+# PRIVACY - the estimator projection: for the estimator viewer, build_log OMITS
 # the `recipients` and `sent_by_name` keys entirely (they are absent, not null),
 # so no co-assignee's identity is ever serialized. A router MUST NOT re-add them
 # via a response_model that fills the Optional fields with null: return the
@@ -2034,7 +2476,7 @@ class CpIgnoredProjectCreate(BaseModel):
 class SendBatchFileOut(BaseModel):
     file_id: str
     category: str
-    # 0077 — WHICH DOCUMENT SET a post-hand-off file belongs to. Set only on
+    # 0077 - WHICH DOCUMENT SET a post-hand-off file belongs to. Set only on
     # 'revision' / 'addendum'; None on the initial package (whose category is
     # already the document set) and on rows predating the column.
     doc_type: Literal["drawing", "specification"] | None = None
@@ -2061,13 +2503,13 @@ class SendBatchOut(BaseModel):
     message: str | None = None
     reconstructed: bool = False
     counts: dict[str, int]  # from the batch.summary snapshot, not the live join
-    # 0077 — per-section "what changed" notes captured at send time, keyed by
+    # 0077 - per-section "what changed" notes captured at send time, keyed by
     # file_categories.section_key(): "revision:drawing", "revision:specification",
     # "addendum", "additional". Shown to BOTH viewers (the estimator is who they
     # are written for); the per-file `note` still describes each file.
     section_notes: dict[str, str] = Field(default_factory=dict)
     files: list[SendBatchFileOut]
-    # INTERNAL ONLY. Both keys are ABSENT (not null) in the estimator payload —
+    # INTERNAL ONLY. Both keys are ABSENT (not null) in the estimator payload -
     # build_log emits a separate dict shape, never a post-filter.
     recipients: list[SendBatchRecipientOut] | None = None
     sent_by_name: str | None = None
@@ -2114,3 +2556,73 @@ class HandoffOut(BaseModel):
     # ESTIMATOR only: their own assignment window. Never another's.
     my_access_expires_at: datetime | None = None
     my_due_at: datetime | None = None
+
+
+# ── External submission ("Mark submitted" from the side menu, 0140) ─────────
+# A proposal sent outside the app, recorded from any stage past Go/No-Go.
+# See services/external_submission.py and docs/EXTERNAL_SUBMISSION.md.
+
+ExternalPricingSection = Literal["materials", "gear", "underground", "low_voltage"]
+
+
+class ExternalSubmissionRequestIn(BaseModel):
+    # Optional note to the approvers ("sent through the GC portal at 3 PM").
+    message: str | None = Field(default=None, max_length=2000)
+
+
+class ExternalSubmissionDenyIn(BaseModel):
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class ExternalSubmissionUndoIn(BaseModel):
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class ExternalSubmissionLineIn(BaseModel):
+    # One material category in one pricing section. The section is posted so
+    # the server can prove the category really belongs to it.
+    material_category_id: str = Field(..., min_length=1, max_length=64)
+    pricing_section: ExternalPricingSection
+    amount: Decimal = Field(..., ge=0, max_digits=14, decimal_places=2)
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class ExternalSubmissionMarkupIn(BaseModel):
+    # Mirrors the Markup step: a percent and the dollar amount it works out to.
+    # The amount is what prices the bid; the percent is kept for the record.
+    # Under 1000: markups.*_markup_pct is numeric(6,3).
+    pct: Decimal | None = Field(default=None, ge=0, lt=1000, max_digits=6, decimal_places=3)
+    amount: Decimal | None = Field(default=None, ge=0, max_digits=14, decimal_places=2)
+
+
+class ExternalSubmissionMarkupsIn(BaseModel):
+    materials: ExternalSubmissionMarkupIn = Field(default_factory=ExternalSubmissionMarkupIn)
+    gear: ExternalSubmissionMarkupIn = Field(default_factory=ExternalSubmissionMarkupIn)
+    underground: ExternalSubmissionMarkupIn = Field(default_factory=ExternalSubmissionMarkupIn)
+    low_voltage: ExternalSubmissionMarkupIn = Field(default_factory=ExternalSubmissionMarkupIn)
+    labor: ExternalSubmissionMarkupIn = Field(default_factory=ExternalSubmissionMarkupIn)
+
+
+class ExternalSubmissionGcIn(BaseModel):
+    # included = submitted to this GC; excluded = no bid. The five amounts are
+    # this GC's own per-section overrides (null = the project price, cost plus
+    # markup), exactly like project_gcs.proposal_*_amount.
+    gc_id: str = Field(..., min_length=1, max_length=64)
+    included: bool
+    material_amount: Decimal | None = Field(default=None, ge=0, max_digits=14, decimal_places=2)
+    gear_amount: Decimal | None = Field(default=None, ge=0, max_digits=14, decimal_places=2)
+    underground_amount: Decimal | None = Field(default=None, ge=0, max_digits=14, decimal_places=2)
+    low_voltage_amount: Decimal | None = Field(default=None, ge=0, max_digits=14, decimal_places=2)
+    labor_amount: Decimal | None = Field(default=None, ge=0, max_digits=14, decimal_places=2)
+
+
+class ExternalSubmissionIn(BaseModel):
+    lines: list[ExternalSubmissionLineIn] = Field(default_factory=list, max_length=300)
+    labor_amount: Decimal = Field(default=Decimal(0), ge=0, max_digits=14, decimal_places=2)
+    labor_note: str | None = Field(default=None, max_length=2000)
+    markups: ExternalSubmissionMarkupsIn = Field(default_factory=ExternalSubmissionMarkupsIn)
+    # May be empty: GCs whose proposal already went out through Send Out are
+    # never posted (they are left untouched) yet still count as included, so
+    # a bid already sent to every GC posts no rows. The service enforces "at
+    # least one GC included" over both.
+    gcs: list[ExternalSubmissionGcIn] = Field(default_factory=list, max_length=100)

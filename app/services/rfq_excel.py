@@ -125,7 +125,9 @@ def build_rfq_workbook(
 
     def _headline(row: int, text: str, font: Font) -> None:
         ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=ncols)
-        cell = ws.cell(row=row, column=2, value=text)
+        # _formula_safe: the project label can carry a user-typed name, so a
+        # leading '=' must not reach the vendor's workbook as a live formula.
+        cell = ws.cell(row=row, column=2, value=_formula_safe(text))
         cell.font = font
         cell.alignment = Alignment(horizontal="right", vertical="center")
 
@@ -149,7 +151,8 @@ def build_rfq_workbook(
         ws.cell(row=banner_row, column=c).fill = navy_fill
 
     ws.merge_cells(start_row=banner_row, start_column=1, end_row=banner_row, end_column=3)
-    left = ws.cell(row=banner_row, column=1, value=category.upper())
+    # Category names are writer-editable free text: same formula guard.
+    left = ws.cell(row=banner_row, column=1, value=_formula_safe(category.upper()))
     left.font = Font(bold=True, size=13, color="FFFFFF")
     left.alignment = Alignment(horizontal="left", vertical="center", indent=1)
 

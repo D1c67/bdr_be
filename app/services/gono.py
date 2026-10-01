@@ -3,7 +3,10 @@
 Rule (confirmed with the user): the intake scoring rubric drives the outcome.
 Score >= 30 is a Go (the project passes straight through to To Estimator),
 20-29 parks the project in review at the go_no_go stage, and below 20 is a
-No-Go (declined). Any writer role may push a project to review, go, or no_go
+No-Go (declined). A Go needs no confirmation: the Send to Go/No-Go modal is
+skipped at 30+ when nothing is flagged, and an RFP-created project auto-Goes
+the moment its intake is complete at 30+ (auto_go_if_scored). A No-Go always
+waits for a person to confirm. Any writer role may push a project to review, go, or no_go
 regardless of its score — at the send-to-Go/No-Go step, or (for projects in
 review) with the decide endpoint. Voting is retired.
 
@@ -25,9 +28,11 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
 
-from app.core.roles import Role
+from app.core.config import get_settings
+from app.core.roles import ACTUAL_BID_VIEWER_ROLES, Role
 from app.core.supabase_client import get_supabase
-from app.services import workflow
+from app.services import project_intake, workflow
+from app.services.notification_email import intake_missing_phrase
 from app.services.notifications import audit, dismiss_notifications, notify_role
 
 logger = logging.getLogger(__name__)
@@ -190,21 +195,79 @@ def finalize(
     return updated
 
 
+# ── The intake gate ───────────────────────────────────────────────────────────
+# A project the RFP creation step made arrives with its intake unanswered (the
+# three dates, the nine rubric answers, sometimes the actual bid time;
+# docs/RFP_CREATE.md section 7). Its score would be meaningless, so no decision
+# (go, no_go, or a score-driven one) is taken until the intake is complete.
+# Parking in review stays open: that is how the creation step enters the gate.
+
+INTAKE_INCOMPLETE = "Complete the intake details before deciding Go/No-Go"
+
+
+def intake_missing_for(project: dict) -> list[str]:
+    """The intake fields still missing on an RFP-created project, in the
+    project_intake order; [] for any other project, and [] at once while
+    RFP_INGESTION_ENABLED is off (read through `getattr` so an absent flag
+    fails closed, as routers/projects._rfp_created_rows does). One read of
+    rfp_created_projects for the bid-time marker."""
+    project_id = (project or {}).get("id")
+    if not project_id or not getattr(get_settings(), "rfp_ingest_enabled", False):
+        return []
+    rows = (
+        get_supabase()
+        .table("rfp_created_projects")
+        .select("bid_time_unknown")
+        .eq("project_id", project_id)
+        .limit(1)
+        .execute()
+    ).data or []
+    if not rows:
+        return []
+    return project_intake.missing_intake_fields(
+        project, bid_time_unknown=bool(rows[0].get("bid_time_unknown"))
+    )
+
+
+def visible_intake_missing(missing: list[str], role: Role | None) -> list[str]:
+    """`missing` as `role` may see it: `bid_time` is dropped for a role that may
+    not see the actual bid date (nor that its time is unknown), as
+    routers/projects._present does. An unknown role (None) is redacted."""
+    if role in ACTUAL_BID_VIEWER_ROLES:
+        return list(missing)
+    return [key for key in missing if key != project_intake.BID_TIME_KEY]
+
+
+def ensure_intake_complete(project: dict, role: Role | None = None) -> None:
+    """409 while the project's intake is incomplete, naming what is missing
+    (as `role` may see it). When only a field the role may not see is
+    missing, the refusal names nothing."""
+    missing = intake_missing_for(project)
+    if not missing:
+        return
+    phrase = intake_missing_phrase(visible_intake_missing(missing, role))
+    detail = f"{INTAKE_INCOMPLETE}: {phrase}" if phrase else INTAKE_INCOMPLETE
+    raise HTTPException(status.HTTP_409_CONFLICT, detail)
+
+
 def apply_entry_action(
-    project_id: str, actor_id: str | None, action: str
+    project_id: str, actor_id: str | None, action: str, *, role: Role | None = None
 ) -> tuple[str | None, dict | None]:
     """Run the Go/No-Go gate for a project that just entered the stage.
 
     `action` is the sender's choice: 'score' (default — the thresholds decide),
     'review' (hold for a manual decision regardless of score), or 'go'/'no_go'
     (push the outcome regardless of score). Returns (outcome, updated project
-    row); (None, None) means the project stays in review.
+    row); (None, None) means the project stays in review. Every action but
+    'review' is refused with a 409 while an RFP-created project's intake is
+    incomplete (ensure_intake_complete; `role` shapes that refusal's text).
     """
     if action == "review":
         return None, None
     project = (
         get_supabase().table("projects").select("*").eq("id", project_id).single().execute()
     ).data or {}
+    ensure_intake_complete(project, role)
     score = compute_score(project)
     if action in ("go", "no_go"):
         return action, finalize(project_id, action, "manual", actor_id, score=score)
@@ -212,6 +275,53 @@ def apply_entry_action(
     if outcome == "review":
         return None, None
     return outcome, finalize(project_id, outcome, "score", actor_id, score=score)
+
+
+# ── Auto-Go once an RFP-created project's intake is complete ──────────────────
+# An RFP-created project waits in review at the gate until its intake is filled
+# in. The save that leaves the intake complete runs this: a score at or above
+# the Go threshold is a Go on the spot (method 'score'). Anything lower stays in
+# review for a person to decide, so a low score is never declined unseen. A
+# project whose decision was once undone is left alone: someone took the call
+# back on purpose, and a later edit must not make it for them again.
+
+
+def _was_undone(project_id: str) -> bool:
+    rows = (
+        get_supabase()
+        .table("audit_log")
+        .select("id")
+        .eq("action", "gono.undo")
+        .eq("entity_id", project_id)
+        .limit(1)
+        .execute()
+    ).data or []
+    return bool(rows)
+
+
+def auto_go_if_scored(project_id: str, actor_id: str | None) -> str | None:
+    """Apply a score Go to a project parked in review at Go/No-Go. Returns
+    'go' when it did, None when the project stays where it is. The caller has
+    already confirmed the intake is complete."""
+    sb = get_supabase()
+    project = (
+        sb.table("projects").select("*").eq("id", project_id).single().execute()
+    ).data or {}
+    if not project or project.get("abandoned_at"):
+        return None
+    score = compute_score(project)
+    if outcome_for_score(score) != "go":
+        return None
+    intake = workflow.load_category_state(project_id).get("intake") or {}
+    if intake.get("current_task") != "go_no_go" or intake.get("status") != "active":
+        return None
+    decided = (
+        sb.table("go_no_go_decisions").select("project_id").eq("project_id", project_id).execute()
+    ).data or []
+    if decided or _was_undone(project_id):
+        return None
+    finalize(project_id, "go", "score", actor_id, score=score)
+    return "go"
 
 
 # ── Undo ──────────────────────────────────────────────────────────────────────

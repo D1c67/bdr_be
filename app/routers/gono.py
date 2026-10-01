@@ -43,6 +43,10 @@ def gono_status(project_id: str, user: CurrentUser = Depends(get_current_user)):
         "decision": decided,
         # Whether the recorded decision can still be taken back, and why not.
         **gono.undo_status(project, workflow.load_category_state(project_id), decided),
+        # The intake fields an RFP-created project still lacks (docs/RFP_CREATE.md
+        # section 7); a decision is refused until this is empty. [] for any other
+        # project. `bid_time` is dropped for a role that may not see the actual bid.
+        "intake_missing": gono.visible_intake_missing(gono.intake_missing_for(project), user.role),
     }
 
 
@@ -71,6 +75,8 @@ def decide(
     state = workflow.load_category_state(project_id)
     if state.get("intake", {}).get("current_task") != "go_no_go" or state["intake"]["status"] != "active":
         raise HTTPException(status.HTTP_409_CONFLICT, "Project is not in the Go/No-Go step")
+    # An RFP-created project decides nothing until its intake is complete.
+    gono.ensure_intake_complete(project, user.role)
     finalize(project_id, body.outcome, "manual", user.id, score=compute_score(project))
     return {"decided": body.outcome, "method": "manual"}
 

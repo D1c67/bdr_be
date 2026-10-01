@@ -1,0 +1,1860 @@
+<!DOCTYPE html><html lang="en" class="t-chrome t-chrome128"><head id="ctl00_Head1"><link href="../../App_Themes/Proc/v3/Ajax.Proc.css" type="text/css" rel="stylesheet"><link href="../../App_Themes/Proc/v3/Calendar.Proc.css" type="text/css" rel="stylesheet"><link href="../../App_Themes/Proc/v3/FontIcons/flaticon.css" type="text/css" rel="stylesheet"><link href="../../App_Themes/Proc/v3/Grid.Proc.css" type="text/css" rel="stylesheet"><link href="../../App_Themes/Proc/v3/Input.Proc.css" type="text/css" rel="stylesheet"><link href="../../App_Themes/Proc/v3/Menu.Proc.css" type="text/css" rel="stylesheet"><link href="../../App_Themes/Proc/v3/Proc.css" type="text/css" rel="stylesheet"><link href="../../App_Themes/Proc/v3/Scheduler.Proc.css" type="text/css" rel="stylesheet"><link href="../../App_Themes/Proc/v3/Support.css" type="text/css" rel="stylesheet"><link href="../../App_Themes/Proc/v3/TabStrip.Proc.css" type="text/css" rel="stylesheet"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta name="robots" content="noindex"><title>
+	G3 Electrical
+</title>
+	<style type="text/css">
+		.TelerikModalOverlayTO {
+			filter: progid:DXImageTransform.Microsoft.Alpha(style=0,opacity=95) !important;
+			opacity: .95 !important;
+			-moz-opacity: .95 !important;
+			z-index: 9999;
+		}
+
+		#divPageMainWrapper {
+			display: flex;
+			flex-direction: column;
+			height: 100vh;
+		}
+
+		#divPageMain {
+			flex-grow: 1;
+			overflow-y: auto;
+			overflow-x: auto;
+			padding: 5px 5px 25px 5px;
+		}
+	</style>
+	
+		<script type="text/javascript" async="" src="https://ssl.google-analytics.com/ga.js"></script><script type="text/javascript">
+			//SESSION MANAGER TIMEOUT STUFF *******************************************************************
+			/** When the session-timeout reaches this #of minutes, open the Timout Warning popup. */
+			var PopupTimeout = 10;
+
+
+			var iSessionCheckIntervalID = 0;
+			var showAcknowledgeMessagesPopup = false;
+
+			//Start the timer to check the session in x minutes
+			function StartSessionCheckTimer(iMinutes) {
+				var iSessionCheckInterval = iMinutes * 60 * 1000;
+				iSessionCheckIntervalID = setTimeout(GetSessionMinutesRemaining, iSessionCheckInterval);
+			}
+
+			//Stop checking the session (most likely because we are popping up the "session is timing out" rad window
+			function StopSessionCheckTimer() {
+				clearTimeout(iSessionCheckIntervalID);
+			}
+
+			//Call web service to determine how many minutes left until session timeout
+			function GetSessionMinutesRemaining() {
+				IWT.Proc.Utility.SessionHelper.GetSessionMinutesRemaining(OnGetSessionMinutesRemainingComplete);
+			}
+
+			//Callback from checking how many minutes left in session; if less than 11 warn the user
+			function OnGetSessionMinutesRemainingComplete(result) {
+				var iResult = result;
+				//StopSessionCheckTimer();
+				if (iResult < 0) {
+					window.location = sLogout;  //if we're here, the session was totally lost and we no longer know the user. So, prevent them from logging in as someone else in the popup
+				}
+				else if (iResult <= PopupTimeout) {
+					var oManager = $find("ctl00_rwmMain");  //GetRadWindowManager();
+					var oWnd = oManager.open("https://supplier.ionwave.net/TimeoutWarning.aspx");
+					oWnd.set_modal(true);
+					oWnd.set_height(325);
+					oWnd.set_width(380);
+					oWnd.set_keepInScreenBounds(true);
+					oWnd.set_behaviors(Telerik.Web.UI.WindowBehaviors.Move);
+					oWnd.set_title("Timeout Warning");
+					oWnd.set_visibleStatusbar(false);
+					oWnd._modalExtender._backgroundElement.className = "TelerikModalOverlayTO";
+
+				}
+				else {
+					iMinutes = iResult - PopupTimeout;
+					StartSessionCheckTimer(iMinutes);
+				}
+			}
+
+			//Call web service to reset the session timeout (as long as the user is still logged in)
+			function ResetSessionTimeout() {
+				IWT.Proc.Utility.SessionHelper.ExtendSession(OnExtendSessionComplete);
+			}
+
+			//Callback from resetting the session timeout.  Restart the timer to check session
+			function OnExtendSessionComplete() {
+				GetSessionMinutesRemaining();
+			}
+
+			//Redirect to logout to abandon the session
+			function AbandonSession() {
+				window.location = sLogout;
+			}
+
+			//Used from the ReLogin popup, so that we don't kill user's session in the case they've re-loggedin on a different window.
+			//  If they have reloggedin, then Login.aspx will just redirect them to their default tab
+			function RedirectToLogin(time) {
+				var sLocation = sLogin;
+				
+				if (sLocation.indexOf("?") > 0) {
+					sLocation += "&tout=" + escape(time);
+				}
+				else {
+					sLocation += "?tout=" + escape(time);
+				}
+				
+				window.location = sLocation;
+			}
+
+			//Will redirect window to the passed in path
+			function RedirectTo(path) {
+				window.location = path;
+			}
+
+			//Will refresh current page by re-requesting the current url
+			function RefreshPage() {
+				window.location = 'https://supplier.ionwave.net/VendorResponse/Bid/VResponseEvent.aspx?e=event03';
+			}
+
+			//function OpenRadWindowCaptcha(inUrl) {
+			//	var oWnd = $find("< % = rwPopUpCaptcha.ClientID %>");
+			//	oWnd.setUrl(inUrl);
+			//	oWnd.show();
+			//	//oWnd.maximize();
+			//}
+
+			function OpenRadWindowModalReloadFullScreen(inUrl) {
+				var oWnd = $find("ctl00_rwPopUpModal");
+				oWnd.setUrl(inUrl);
+				oWnd.show();
+				oWnd.maximize();
+			}
+
+			function OpenRadWindowModalReload(inUrl, inWidth, inHeight) {
+				var oWnd = $find("ctl00_rwPopUpModal");
+				oWnd.set_height(inHeight);
+				oWnd.set_width(inWidth)
+				oWnd.setUrl(inUrl);
+				oWnd.show();
+			}
+
+			function OpenRadWindowModal(inUrl, inWidth, inHeight) {
+				var oWnd = $find("ctl00_rwPopUpModalNoClientClose");
+				oWnd.set_height(inHeight);
+				oWnd.set_width(inWidth)
+				oWnd.setUrl(inUrl);
+				oWnd.show();
+			}
+
+			function OpenVendorTermsEditWindow(vid, cid, parentForm) {
+				var oWnd = $find("ctl00_rwVendorBuyerTermsEdit");
+				oWnd.setUrl('https://supplier.ionwave.net/VendorAdmin/VendorBuyerTermsEditPopup.aspx?vid=' + vid + '&cid=' + cid + '&pform=' + parentForm);
+				document.getElementById("ctl00_hdnVendorID").value = vid;
+				document.getElementById("ctl00_hdnCompanyID").value = cid;
+				document.getElementById("ctl00_hdnParentForm").value = parentForm;
+				oWnd.show();
+			}
+
+			function OpenRecoveryEmailEditWindow(vid) {
+				var oWnd = $find("ctl00_rwVendorRecoveryEmailEdit");
+				oWnd.setUrl('https://supplier.ionwave.net/VendorAdmin/VendorRecoveryEmailEditPopup.aspx?vid=' + vid);
+				document.getElementById("ctl00_hdnVendorID").value = vid;
+				oWnd.show();
+			}
+
+			//Custom RadWindow Confirm
+			function ShowTermsCloseOrRenewOptions(sender, args) {
+
+				var oWnd = $find("ctl00_confirmWindow");
+				oWnd.close();
+				if (sender.get_text() == "Logout") {
+					window.location = 'https://supplier.ionwave.net/SessionLogout.aspx';
+				}
+				if (sender.get_text() == "Return to Terms Agreement") {
+					var vid = document.getElementById("ctl00_hdnVendorID").value;
+					var cid = document.getElementById("ctl00_hdnCompanyID").value;
+					var parentForm = document.getElementById("ctl00_hdnParentForm").value;
+					OpenVendorTermsEditWindow(vid, cid, parentForm);
+				}
+			}
+
+			function OnRecoveryEmailPopupClose(sender, args) {
+				var oWnd = $find("ctl00_rwVendorRecoveryEmailEdit");
+				oWnd.close();
+				if ('True' == 'False') {
+					if ('True' == 'True') {
+						ShowAcknowledgeRequestedMessages();
+					}
+				}
+			}
+
+			function OnAcknowledgePopupClose(sender, args) {
+				var oWnd = $find("ctl00_rwAcknowledgeMessages");
+				oWnd.close();
+			}
+
+			function OnBuyerTermsPopupClose(sender, args) {
+				var arg = args.get_argument();
+				//debugger;
+				//no arg means the window closed itself after finishing
+				if (arg) {
+					if (arg.Close == "TRUE" && arg.IonWaveTermsRequired == "TRUE" && arg.IonWaveGracePeriodOver == "TRUE") {
+						var oWnd = $find("ctl00_confirmWindow");
+						oWnd.show();
+					}
+				}
+			}
+
+			function ShowAcknowledgeRequestedMessages() {
+				var oWnd = $find("ctl00_rwAcknowledgeMessages");
+				oWnd.setUrl('https://supplier.ionwave.net/Vendor/AcknowledgeMessagesPopup.aspx');
+				oWnd.show();
+			}
+
+			function OpenVendorBuyerTermsErrorWindow(vid, cid) {
+				var oWnd = $find("ctl00_rwVendorBuyerTermsError");
+				oWnd.setUrl('https://supplier.ionwave.net/VendorAdmin/VendorBuyerTermsErrorPopup.aspx');
+				oWnd.show();
+			}
+
+			var OnProgressCloseEvent;
+			function OpenRadWindowProgress(batchProcessID, inWidth, inHeight, onProgressClose, allowClose) {
+				var oWnd = $find("ctl00_rwPopUpProgress");
+				OnProgressCloseEvent = onProgressClose;
+				oWnd.set_height(inHeight);
+				oWnd.set_width(inWidth);
+				sURL = 'https://supplier.ionwave.net/ProgressPopup.aspx?bpid=' + batchProcessID;
+				if (allowClose == false) {
+					sURL += '&AllowClose=N';
+				}
+				oWnd.setUrl(sURL);
+				oWnd.show();
+			}
+			function OnProgressClose(sender, args) {
+				if (OnProgressCloseEvent) {
+					OnProgressCloseEvent(sender, args)
+				}
+			}
+
+			function OnClientClose(sender, args) {
+				document.location.reload();
+			}
+
+			function OnClientClose(sender, args) {
+				document.location.reload();
+			}
+
+			// Allow spaces to be entered on the commodity search textbox
+			function clientLoad(sender) {
+				$telerik.$("input", sender.get_element()).on('keydown', function (e) {
+					if (!e) var e = window.event;
+					e.cancelBubble = true;
+					if (e.stopPropagation) e.stopPropagation();
+				});
+			}
+
+			function clientShow(sender, args) {
+				if ($telerik.isChrome) {
+					sender.get_contentFrame().style.width = "";
+					setTimeout(function () {
+						sender.get_contentFrame().style.width = "100%";
+					}, 0);
+				}
+			}
+
+			//this is here to support auctions and the old calendar in the attributes stuff
+			function OpenCalendarWindow(mypage, myname, w, h, scroll) {
+				var winl = (screen.width - w) / 2;
+				var wint = (screen.height - h) / 2;
+				winprops = 'height=' + h + ',width=' + w + ',top=' + wint + ',left=' + winl + ',scrollbars=' + scroll + ',resizable'
+				win = window.open(mypage, myname, winprops)
+				if (parseInt(navigator.appVersion) >= 4) { win.window.focus(); }
+			}
+
+			function openHelpInfo() {
+				//debugger;
+				var iMyWidth;
+				var iMyHeight;
+				var newWinWidth = 1200;
+				var newWinHeight = 800;
+				var url1 = "https://supplier.ionwave.net//Help.aspx";
+
+				iMyWidth = window.screenLeft + (window.outerWidth / 2) - (newWinWidth / 2);
+				iMyHeight = window.screenTop + (window.outerHeight / 2) - (newWinHeight / 2);
+
+				window.open(url1, 'newwindow', "left=" + iMyWidth + ",top=" + iMyHeight + ",screenX=" + iMyWidth + ",screenY=" + iMyHeight + ",height=" + newWinHeight + ",width=" + newWinWidth + "");
+			}
+
+			//MOVED HELP FROM PROFILE MENU TO HELP ICON (openHelpInfo above)
+			//Removed OnClicking event from menuProfile RadMenu
+			//function onClicking(sender, eventArgs) {
+			//	var item = eventArgs.get_item();
+			//	var navigateUrl = item.get_navigateUrl();
+			//	if (navigateUrl && navigateUrl != "#") {
+			//		if (item.get_value() == "HELP") {
+			//			var iMyWidth;
+			//			var iMyHeight;
+			//			var newWinWidth = 1200;
+			//			var newWinHeight = 800;
+
+			//			iMyWidth = window.screenLeft + (window.outerWidth / 2) - (newWinWidth / 2);
+			//			iMyHeight = window.screenTop + (window.outerHeight / 2) - (newWinHeight / 2);
+
+			//			window.open(navigateUrl, 'newwindow', "left=" + iMyWidth + ",top=" + iMyHeight + ",screenX=" + iMyWidth + ",screenY=" + iMyHeight + ",height=" + newWinHeight + ",width=" + newWinWidth + "");
+			//			eventArgs.set_cancel(true);
+			//		}
+			//	}
+			//}
+		</script>
+
+	<style type="text/css">
+#menubar, #menubarHelp, #profileMenuBar
+{
+background-color: #004080;
+background-image: none;
+border-top-color: #004080;
+border-right-color: #004080;
+border-bottom-color: #004080;
+}
+div#menubarLogo
+{
+background-color: #004080;
+}
+div.RadMenu_Proc
+{
+background-color: #004080;
+background-image: none;
+border-right-color: #004080;
+}
+div.RadMenu_Proc .rmLink
+{
+background-color: #004080;
+background-image: none;
+border-left-color: #004080;
+color: #FFFFFF;
+}
+div.RadMenu_Proc .rmGroup
+{
+background-color: #004080 !important;
+}
+.rptHeader
+{
+background-color:#004080;
+color:#FFFFFF;
+}
+h1, h2, td.h2
+{
+border-color:#004080;
+}
+[class^='flaticon-mainMenu_']:before, [class*=' flaticon-mainMenu_']:before,
+[class^='flaticon-mainMenu_']:after, [class*=' flaticon-mainMenu_']:after
+{
+color: #FFFFFF;
+}
+[class^='flaticon-toolbar_']:before, [class*=' flaticon-toolbar_']:before,
+[class^='flaticon-toolbar_']:after, [class*=' flaticon-toolbar_']:after
+{
+color: #004080;
+}
+[class^='flaticon-grid_']:before, [class*=' flaticon-grid_']:before,
+[class^='flaticon-grid_']:after, [class*=' flaticon-grid_']:after
+{
+color: #004080;
+}
+.rgEdit:enabled > .rgEditIcon:after, .rgCancel:enabled > .rgCancelIcon:after, .rgUpdate:enabled > .rgUpdateIcon:after, .rgDel:enabled > .rgDelIcon:after
+{
+color: #004080 !important;
+}
+[class^='flaticon-docType_']:before, [class*=' flaticon-docType_']:before,
+[class^='flaticon-docType_']:after, [class*=' flaticon-docType_']:after
+{
+color: #004080;
+}
+[class^='flaticon-inline_']:before, [class*=' flaticon-inline_']:before,
+[class^='flaticon-inline_']:after, [class*=' flaticon-inline_']:after
+{
+color: #004080;
+}
+[class^='flaticon-fieldAction_']:before, [class*=' flaticon-fieldAction_']:before,
+[class^='flaticon-fieldAction_']:after, [class*=' flaticon-fieldAction_']:after
+{
+color: #004080;
+}
+[class^='flaticon-contextMenu_']:before, [class*=' flaticon-contextMenu_']:before,
+[class^='flaticon-contextMenu_']:after, [class*=' flaticon-contextMenu_']:after
+{
+color: #004080;
+}
+.buttonPrimary
+{
+background-color:#004080 !important;
+border-color:#004080 !important;
+}
+.buttonPrimary:hover:not(.rbDisabled)
+{
+background-color:#004080 !important;
+border-color:#004080 !important;
+}
+.buttonStandard
+{
+background-color:white !important;
+color:#004080 !important;
+border-color:#004080 !important;
+}
+.buttonStandard:hover:not(.rbDisabled)
+{
+background-color:white !important;
+color:#004080 !important;
+border-color:#004080 !important;
+}
+.buttonStandard.RadButton > .rbSplitPart
+{
+color:#004080 !important;
+}
+.buttonStandard.RadButton:hover > .rbSplitPart, .buttonStandard.RadButton > .rbSplitPart:hover
+{
+color:#004080 !important;
+}
+div.MenuBar
+{
+background-color:#004080 !important;
+border-top: solid 1px #004080;
+border-bottom: solid 1px #004080;
+}
+.MenuBar
+{
+background-color:#004080 !important;
+}
+.RadCalendar_Material .rcTitlebar, .RadCalendar_Material.rcPrev, .RadCalendar_Material.rcNext, .RadCalendar_Material.rcFastPrev, .RadCalendar_Material.rcFastNext
+{
+border-color:#004080 !important;
+background-color:#004080 !important;
+color:#FFFFFF !important;
+}
+.RadGrid_Proc { border-color: #004080 !important; }
+.RadGrid_Proc .rgHeader, .RadGrid_Proc th.rgResizeCol, .RadGrid_Proc th.rgSorted { border-bottom-color: #004080 !important; }
+.RadGrid_Proc .rgRow td, .RadGrid_Proc .rgAltRow td { border-top-color: #004080 !important; }
+.RadTabStrip_Proc .rtsLink
+{
+.RadTabStrip_Proc .rtsSelected, .RadTabStrip_Proc .rtsLast .rtsSelected
+{
+border-bottom-color: white;
+}
+</style>
+<script type="text/javascript">
+var _gaq = _gaq || [];
+_gaq.push(['_setAccount', 'UA-33168174-2']);
+_gaq.push(['_setDomainName', 'ionwave.net']);
+_gaq.push(['_trackPageview', '/VendorResponse/Bid/VResponseEvent.aspx']);
+(function () {
+var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+})();
+</script>
+<script async="" src="https://www.googletagmanager.com/gtag/js?id=G-4NYWTSNZ2P"></script><script>window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());gtag('config', 'G-4NYWTSNZ2P', {page_location: 'https://supplier.ionwave.net/VendorResponse/Bid/VResponseEvent.aspx'});</script><link href="https://fonts.googleapis.com/css?family=Roboto|Roboto+Condensed" rel="stylesheet"><link href="/WebResource.axd?d=QKX1AO1vX8ebWKfbb4eOTB7Jb-B9Cl2T3yeeItUBRzLQBeOBUsfM9EPI56SQ5rfhlAzROoEdvBliGUPM72LDgEDY2q1I0UXbltOOIlm7RfiNQ3pCzqoWG40w02pOAZI30&amp;t=639221014900000000" type="text/css" rel="stylesheet" class="Telerik_stylesheet"><link href="/WebResource.axd?d=abSXP-RgNuAsfhlSYpnpbChFbZ_cO5M8BPaEtSuSsVncNMCTQO_x4TIzP670QJ__E8lWlh3xKAMafVssIIzb6-nQFpQG8CrnKVdc8ecwukYr-xDMdkqZmNd0vYrOA4X3dI3JtBwS2DOEzWhlBa_1uA2&amp;t=639221014900000000" type="text/css" rel="stylesheet" class="Telerik_stylesheet"><link href="/WebResource.axd?d=VdPoLqp1pEU6N0-IfFplZPkDwO-MisjbRLhypAJwrvNwmKkOZq7D6hqIzmI4-HndQ4og6G3NzL1qx0jwd9f3sCg0UfQbnsD7d9N5rLwh_-_O8uYs8z8JH1meOnGEZJvmr0TsiFyOdBL0aJRS_CWejw2&amp;t=639221014900000000" type="text/css" rel="stylesheet" class="Telerik_stylesheet"><link href="/WebResource.axd?d=6d0ORl_GDQ8il0vfaye5YWFeHqxolhGxZvIWYwDLVoJ5QZSQforKUQeUk__-52Mrp_gKSfXVxJ9EFMB7FkFMSHalhznA02rB0bBZ5rpeW6CWwaMPFp5lX8h7k_fqqCyltATizOHs9sORrCGn9U8D4Q2&amp;t=639221014900000000" type="text/css" rel="stylesheet" class="Telerik_stylesheet"><link href="/WebResource.axd?d=qpDogBCh8B2zFH7Wt5kgoJjjW4N6hIYOYFfdfMapZFhzXa4hLUR8szPMSiTv02TewDkCXXmrRTyO5L5nRv1XjBDFnm_7PY3VGxYVzjideIqcCnOD5TmR3k7LhhUyO2VHlAVDX6JtSZJ_DbtFLkfWkw2&amp;t=639221014900000000" type="text/css" rel="stylesheet" class="Telerik_stylesheet"><link href="/WebResource.axd?d=NZp3oGkpijSHfvYvEXDUvI9MTBlp7SAXWuzbdUTBSwCsqmJuUyYcecD_qZrk0QmctkrR9O6PwbMehrvbXFU9xk4VZJk4QpBcSW5Vs-shJd6Sjx_6NfxwTDa0O92VtR-i1fdGjswkBmATGNkXpoAf9NZYKAjzDRbrEosK9B84udY1&amp;t=639221014900000000" type="text/css" rel="stylesheet" class="Telerik_stylesheet"><link href="/WebResource.axd?d=vsKpXOsoEwDUfVug9KOqSt7KAA15hCm8tqqbmsb7e78FWEEvIlAmLPcWLZOnX5gSB0OyUgdjNsOl4hz8V_TxS5MSWsH5O72aDk-9QKeUd5YzE-Uaj2jT7T2EKqTcisk_0&amp;t=639221014900000000" type="text/css" rel="stylesheet" class="Telerik_stylesheet"><link href="/WebResource.axd?d=oO40Bmgl131nVzNYSi8Tp8mmOG7Z4kGz2XW2K49OGnIbBgiKXIPR41WM2kxj9zrhNkA6UW3NarABGOn7ZjNaFTV7Pp9yo0PIEukWyJjfHBJOSkGLUq7Qxpber6ZOR9anF6jur0R2Nk8KYmpfY6bOig2&amp;t=639221014900000000" type="text/css" rel="stylesheet" class="Telerik_stylesheet"><link href="/WebResource.axd?d=HvV0J6Ag91qY_gkEb9EBS3G0mkkjsHhSOdtgy3qe9kW2bt-gIaEXQS0nzK6c77Jp_v9yitscxEI4__9LuqKkP_OMro4CChbFHNfvofEG5KFjkoIMmD3Z9Yk1taXQPZ_EXjJnS5FNwlHvapig7k-tm1xa7KJMCY4qLdqcbLncyao1&amp;t=639221014900000000" type="text/css" rel="stylesheet" class="Telerik_stylesheet"><link href="/WebResource.axd?d=HkmiNSkKJcp9zYO7iQ4LQRUTaj8EGR4NqBJIc__ihpmODSxl5lYLmgh8lYBKDLc0E7iSiI6I4zCw05TJDMLZxAbDVa7xvhQvQLvrN9ZrHg-xy8V-DEdJsB6G0mUoFtzL85KR1dqbH35uyIyLrXZwCg2&amp;t=639221014900000000" type="text/css" rel="stylesheet" class="Telerik_stylesheet"></head>
+<body style="overflow: auto hidden; min-width: 1050px;">
+	<div id="overDiv" style="position: absolute; visibility: hidden; z-index: 1000;"></div>
+	<form method="post" action="./VResponseEvent.aspx?e=event03" id="aspnetForm" enctype="multipart/form-data">
+<div class="aspNetHidden">
+<input type="hidden" name="ctl00_ScriptManager_TSM" id="ctl00_ScriptManager_TSM" value="">
+<input type="hidden" name="__EVENTTARGET" id="__EVENTTARGET" value="">
+<input type="hidden" name="__EVENTARGUMENT" id="__EVENTARGUMENT" value="">
+<input type="hidden" name="__VIEWSTATE" id="__VIEWSTATE" value="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">
+</div>
+
+<script type="text/javascript">
+//<![CDATA[
+var theForm = document.forms['aspnetForm'];
+if (!theForm) {
+    theForm = document.aspnetForm;
+}
+function __doPostBack(eventTarget, eventArgument) {
+    if (!theForm.onsubmit || (theForm.onsubmit() != false)) {
+        theForm.__EVENTTARGET.value = eventTarget;
+        theForm.__EVENTARGUMENT.value = eventArgument;
+        theForm.submit();
+    }
+}
+//]]>
+</script>
+
+
+<script src="/WebResource.axd?d=pynGkmcFUV13He1Qd6_TZJPr2k25angMO4awhtK5XjYxJ_iizFZYTXESeXRu55iKO2VaYhnaDv6qOPA8JgIGtg2&amp;t=639190653332169432" type="text/javascript"></script>
+
+
+<script type="text/javascript">
+//<![CDATA[
+const APP_INSIGHTS_ENABLED=false;//]]>
+</script>
+
+<script src="/ScriptResource.axd?d=NJmAwtEo3Ipnlaxl6CMhvugheA-hufiLx9kbN4Jlqu5rkKfhD4EMInQys2Qpj1Sz0r3zQr9-l0CklXsGRekKCvOuELJf73919iQAhfk3fsYr4Cf203DtHVELC-K1QBUx_wSWNnezyhKxoXUMk-5_z2-J2UItmfPjGXf0GVGRm4I1&amp;t=ffffffffbec1863d" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=dwY9oWetJoJoVpgL6Zq8OJ9soJVOJCKfm3YmA6zFsGJrir1J6pskA31SwIrzDcHW0Qr_m4ztj46osjYDIhAdUKsHEjrc3SFToGHcZ5LV7zyuGPpr2YpusIes7uVV6jbP3WtkqwSHzZyN4dIw2aLMYEQF_IPaO1Nc3O0cZ0q9-MQ1&amp;t=ffffffffbec1863d" type="text/javascript"></script>
+<script src="../../JavaScript/input.js" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=TDVjdgRbdvNAY3tnbizUcAW7Sh0-gIu7AedUypKlxDjDvZG88ZgBC29EjPOmriSY1HRLX2Ykd8YmbKwxceifDs3yUo8tRgwv-68R0M0UIrE7bHso2HlL1FA5rCIxBD-50&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=mbGZm65DzNC0tMTq0ElbcYlpBgUKTSrh_kIXka-mPZ7T2Y1ziKhVIFeNrFNDvlYwbxuIJyFpjLr8JoBlcyZkt93sokigKIqFKzvb3Z6E6KRSONsjM567iF8myhjU7VJi_Gn8ksSFWy1TDxJsIeqq_w2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=cmIcXiVJ__exjjpjrN730uZVEt4NjcyGAGJCcGC-sPNUQWXfQ75ZiY26NqDeoApul58dLbmluiOSfvYpRslxddA8KkFyeMuJdCqXhkQFg5-hmwcn1hqyr51WmLBFCsPeNiG7a--E_vS14dnTKyCCyw2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=aoSSiMnLNTC20U5L7LFIKhluoA2fAkafvTV_bhzsEmO-fwAtunXT1Al1gwu52fNPbkB3xIX4fYMj-xYqdKXZDN5OOLcZ98D2lNsJoV7k0PG1uxTajlXvLI2J30NkL6AaqVjv-Y4CLKwNb6FPt1bkmR5qh6J50wSp2s4c9nhsqJc1&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=GUyLPMOEFhffuIMm6XZ0oEVYA5TXJGfTbqTsZU0FScXZIWlTwjTN_2hp3wuMzPJ_YmOLdUWFp2OuozbzJtO4YRvX-O1qp8Igvn2tY5SqRJAa5VnbPP2gEY8gSCW5axjRj5VyvANq5ZBp86VXKvhaT0X1nVkvQt7SlX0uw96pIAE1&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=A22-SyJgKhJ5FWUJePaPlEF_GLx_zIp6mRUz7-Cryfubhytfpz5HXh7fsZ4HAXMucO8mbP4H2u76pvn3KQr_gH-yA9_XiUHEGpwcou7F10fmdds2b-r194beAacBYcfsuTj9KDmG5VPTzC9LW1Klcg2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=mxxObI9nroQxDBLgf-QlAkaZ5rQuiYH6_YJZjPO4Wpofnm4PSGuZ8DUNWnVcXgl6s9jnPEfUGhbyYgiglknm8f2LO52ikNBoaGRY1T_i3fC8BPpz3DniuMwu73ZoLLujFQ17LzsOvUcRG8wSBHcrW8Ahte9a9tXuUC3_3TVrEz81&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=utaAJrK4EroNO-KNr3p19JLHxeTPXsjnEnkYF22hjGY6-QtY7mQmZo1CKuhS8aM7_v9HFCwvbur1KIqr5fsz_DI27rflmwlye1Uy7EGk3aEKBAsinDRMroAZji0yJElM-AcynxZHTJAiJthYzWfWWA2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=ei_BvuPu_kfWuvcXX4wAOBC4FenN62Y4j0MMnn-tzlBhwcXwOIgDUr37hUlCiFwTuk6RSvuQgKaEf3QUcL--4C6eJMAR85xvTxXikdmjB7dXJ6kW76KIhhmQxnMjobANbOq-i2pd4wKWj70ELBHuzw2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=qsRpKh5Y3Y02fhrPxQCAxRMe6bf9vzusVYBvXeUmnLPZCEzrNl4_nWFx5YiRbZPkC58hEbAdnwpGB7F8qTvDeNzF20mu-IBi42WDuIQumRcX6_9Ael2cK0oQcLF0SGtPV6dXJ3V85egmE-dBy7swvQ2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=LxjRs3XOu8Cy2bbYGMzbCtdSxWgvDqWCMPLSILT9mWDwXmh5dUpqIeQpomqMNgO_ickY9vqDoXQWJF6xMVS7pOup0wKrhx4anT-x3jx7MFu8BB_-hQepx91MV-a5KKpez7TCWmdBmvrLnqiAIlwCnlBXxaBdB7aCB5Dvwilc7kNK2BKcNMmbpila_zMMz7NU0&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=86EhAqQjfuMKlbK4FWyenA7ol18m67XDcV5DY1Me1DrJajRvUNpwfnraMU9ZGrDsZRUbEs-gZwn_hCkgKuSeXoVuWsdStcSaICOLimB2H5SMEZNPZFp6cZfbS_-0ogBx-Ui6bL9_OOOr0ZrInanjwvseFe8IRiC57w6LOwPtZE81&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=wl5RKBCXTWDacHhxsSq8Qzht-GjahPOExDvEPZknDesgoaI6flMVm4PCyKm4dtpawyzoqikF4zuFbhrXsCuoSVBqzgmBlRETTSpZXRie0u3vV37xGmL39MdRVTb0u0CfDY_893_zbctI1Ad_RsBRBg2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=OhiQVM8i2feYV04aiMKgwsVZ00jkl5xb0QYuF60IDr2OyMJaddBz5rcvK7ofDYMNauTe3tMl8OL5YhHRerTQkfcgMGOuFLxsFtlZcNpaavr0bewKNbM8Rys7oxz8hWjamwNO2vJ9hVKBXGSqm7JA8A2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=6cZcu819zlBI2GnZAKr8cf2_XivAGwvBV_nwDeHhWFJLeFqeGvp89ukBDbqCWoV02vU6Tc0M2B1m0LgmR3FxiE9LjXodImZT2s6BrbLFpxjIMW8-_Ir-BKzSi8wVd84MIxtHCrsJNVxIAQ-bwjeNoQ2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=OMa_nbU0_VSWnHtE895qh3XoL_ZIb825BwfdyvZUBJW6RcMfviU_YCp9FTyX2y6BoJQV8sgXzJHrf92a3phpfkzh653n8BfvTWJCYRH4WYv3s9uGq5Wvw6wojlXYU3hCiid4kOYJEhGCwD9VyS8ffl8DfBfmB5vi_0jKpegYy241&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=-9rjE8XFv-zikiBdee7RrkHwpAgy0t7e-HLvp3NhSfFl8keiDgHvNipD_UN_9vJMr-9zP0yfkmf91BiEAljCwGwRelUBce91RELiTCw6rvPtMPlvvJw6fnYXdHV5vf9rTCruy2Xs_UmFthrZt-9Q-k3Ff-lUt0IjUMlLwceKPzk1&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=eKZhdBAoDXLAsQys5JFN8ucBkoNMvjKFsBond6RfG8CK4r8qdIO3ZMZFtTJ2ZBJOz3x2cDCv8oi9kTefvPLFfI3M2UxOEHPoayQBApSPB5AONriu1ekD3CZqH4hKgaF4OsDUXsoYZaaDMFO4UJ4ARzpjTD2PowCEXXl77Z5rdOQ1&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=uZyysmNAhs23bID72ZUaSvfnFKvC7xvwe6SiVsU9vNscCLxuTUW_6rjxMVUM1EJVOhA0VYUUPnp7UiZ3lwLt8zxb9PW-Pfk5JKkXZ9VZDJfXHqXOmmZgOmM6kPWPQe7_cO1Ui1xn5AXPygjW0LaCdfyvMPiD7K1UzCBKCahP5381&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=xvYBvOx-63dLu5JJe1OI3cB2APa0OHD4og4oJCYxvTaqGOhMRctM-DKRDMFLZeFZBda-oK-Y-9NTA6OuFhR1-cmUK2rlp_tG_9NQpgreSaazbrFMBKqj8BeHkQ2qgl9aYuMZYZSGIFTo4NsglaGJCQ2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=LlwbgV7oh28tpCvE08ZbOcyGJ9wjqTV5PsTuw8rXBwXjnjvh_nbw3RzGSYylc-Tk8n5DAcdwPO8bPk3b8UWey6AYm50SzpE2MO0EiK67DtxIJBupBAj8CLffeC2fu3-Hx7YvypivVO9_8y82-7W4Ug2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=DJqzVDlyNLlLft2Spv1G597h8QjQdOh28giOH9NW_EqD8rUGCfVr6h9nJuCuDmHMFw9oEOs7c6XQOC72ubD48MFVFr2iuxxxJuwTuKiwsz8ryLcJmtBDDZVEGDk2uLD6GClSqGOCVFPCb6jxB5Mrbw2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=E5x_TPxmFLaA4jSY3dSbO8Dy-JQG1DWpzr0-rQkTxSu-mAjmXrrFvDlRws405ECdQC7K8aLFrx9zca-4YeVKRH9CZi5FLMd-RmEg5V0g3FK60NNI2rOEY3PCtR47wvJ08MoqU1bUlntSntj3SRKegGDIUbI0MIjltz7r3lMo_t41&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=XzPtRnbPl1gSAt2W84GB4xG72YcUGXMhluIlLTxLcbETfg_Ba1xmsQQf9DMVrZPXaXJ7bgowAViLDg9PUfErAHjrIs25gw6eswYVlNCtQy5fMVrAHSNahjcOSuSuU5zH4ZQICUSORrwYEEGHsoRrlw2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=J3KXk9aJ0qdg4i-qt8PQkJBPm1LSXxfE6pbvcKCALgTHy16Hwtn2v6N_MQaTOoFIMP9ud1Uh4avrRJy0zf-pBoodhD902F0tVsBTA7s3LwBWZgQ1KOxeaUebs8tQjJ5JMeaRGa22OvR14dnkCXWigw2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=2TF50x1OvbS9BInr97zkRNNj0Ja2Os1YPGQSyhbSmhpYKnCBOJ4tCGHGPpQr6YKzga5ecv-dk_1XZMuXYSFZYeoHTZvxjOb-kCb2sjWPW-_iceeJi-h2FLQxtOsNj0Ee0HqHBEbIkgtdhduHKRgZ5w2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="../../utility/SessionHelper.asmx/js" type="text/javascript"></script>
+<div class="aspNetHidden">
+
+	<input type="hidden" name="__VIEWSTATEGENERATOR" id="__VIEWSTATEGENERATOR" value="FA92D1D7">
+	<input type="hidden" name="__VIEWSTATEENCRYPTED" id="__VIEWSTATEENCRYPTED" value="">
+</div>
+		<script type="text/javascript">
+//<![CDATA[
+Sys.WebForms.PageRequestManager._initialize('ctl00$ScriptManager', 'aspnetForm', ['tctl00$upWCAGToggle','','tctl00$pnlLayoutValidation',''], [], [], 90, 'ctl00');
+//]]>
+</script>
+
+
+<div id="ctl00_rwmMain" style="z-index:11000;display:none;">
+	<!-- 2026.3.812.462 --><div id="ctl00_rwPopUpModal" style="z-index:11000;display:none;">
+		<div id="ctl00_rwPopUpModal_C" style="display:none;">
+
+		</div><input id="ctl00_rwPopUpModal_ClientState" name="ctl00_rwPopUpModal_ClientState" type="hidden" autocomplete="off">
+	</div><div id="ctl00_rwPopUpModalNoClientClose" style="z-index:11000;display:none;">
+		<div id="ctl00_rwPopUpModalNoClientClose_C" style="display:none;">
+
+		</div><input id="ctl00_rwPopUpModalNoClientClose_ClientState" name="ctl00_rwPopUpModalNoClientClose_ClientState" type="hidden" autocomplete="off">
+	</div><div id="ctl00_rwPopUpProgress" style="z-index:11000;display:none;">
+		<div id="ctl00_rwPopUpProgress_C" style="display:none;">
+
+		</div><input id="ctl00_rwPopUpProgress_ClientState" name="ctl00_rwPopUpProgress_ClientState" type="hidden" autocomplete="off">
+	</div><div id="ctl00_rwVendorBuyerTermsError" style="z-index:11000;display:none;">
+		<div id="ctl00_rwVendorBuyerTermsError_C" style="display:none;">
+
+		</div><input id="ctl00_rwVendorBuyerTermsError_ClientState" name="ctl00_rwVendorBuyerTermsError_ClientState" type="hidden" autocomplete="off">
+	</div><div id="ctl00_rwVendorRecoveryEmailEdit" style="z-index:11000;display:none;">
+		<div id="ctl00_rwVendorRecoveryEmailEdit_C" style="display:none;">
+
+		</div><input id="ctl00_rwVendorRecoveryEmailEdit_ClientState" name="ctl00_rwVendorRecoveryEmailEdit_ClientState" type="hidden" autocomplete="off">
+	</div><div id="ctl00_rwVendorBuyerTermsEdit" style="z-index:11000;display:none;">
+		<div id="ctl00_rwVendorBuyerTermsEdit_C" style="display:none;">
+
+		</div><input id="ctl00_rwVendorBuyerTermsEdit_ClientState" name="ctl00_rwVendorBuyerTermsEdit_ClientState" type="hidden" autocomplete="off">
+	</div><div id="ctl00_rwAcknowledgeMessages" style="z-index:11000;display:none;">
+		<div id="ctl00_rwAcknowledgeMessages_C" style="display:none;">
+
+		</div><input id="ctl00_rwAcknowledgeMessages_ClientState" name="ctl00_rwAcknowledgeMessages_ClientState" type="hidden" autocomplete="off">
+	</div><div id="ctl00_confirmWindow" style="z-index:11000;display:none;">
+		<div id="ctl00_confirmWindow_C" style="display:none;">
+			
+				<div id="ctl00_confirmWindow_C_divMessage" style="text-align: center;" class="msgError msgPad">WARNING - Terms must be agreed to in order to continue using this site</div>
+				<br>
+				<div style="text-align: center;">
+					<div style="margin-top: 15px;">
+						<button type="button" name="ctl00$confirmWindow$C$btnReturnToTerms" value="Return to Terms Agreement" id="ctl00_confirmWindow_C_btnReturnToTerms" class="RadButton RadButton_Default rbButton rbRounded rbIconButton buttonPrimary" tabindex="0"><span class="rbText">Return to Terms Agreement</span><input id="ctl00_confirmWindow_C_btnReturnToTerms_ClientState" name="ctl00_confirmWindow_C_btnReturnToTerms_ClientState" type="hidden" autocomplete="off" value="{&quot;text&quot;:&quot;Return to Terms Agreement&quot;,&quot;value&quot;:&quot;&quot;,&quot;checked&quot;:false,&quot;target&quot;:&quot;&quot;,&quot;navigateUrl&quot;:&quot;&quot;,&quot;commandName&quot;:&quot;&quot;,&quot;commandArgument&quot;:&quot;&quot;,&quot;autoPostBack&quot;:false,&quot;selectedToggleStateIndex&quot;:0,&quot;validationGroup&quot;:null,&quot;readOnly&quot;:false,&quot;primary&quot;:false,&quot;enabled&quot;:true}"></button>
+					</div>
+					<div style="margin-top: 15px;">
+						<button type="button" name="ctl00$confirmWindow$C$btnCloseAndLogout" value="Logout" id="ctl00_confirmWindow_C_btnCloseAndLogout" class="RadButton RadButton_Default rbButton rbRounded rbIconButton buttonStandard" tabindex="0"><span class="rbText">Logout</span><input id="ctl00_confirmWindow_C_btnCloseAndLogout_ClientState" name="ctl00_confirmWindow_C_btnCloseAndLogout_ClientState" type="hidden" autocomplete="off" value="{&quot;text&quot;:&quot;Logout&quot;,&quot;value&quot;:&quot;&quot;,&quot;checked&quot;:false,&quot;target&quot;:&quot;&quot;,&quot;navigateUrl&quot;:&quot;&quot;,&quot;commandName&quot;:&quot;&quot;,&quot;commandArgument&quot;:&quot;&quot;,&quot;autoPostBack&quot;:false,&quot;selectedToggleStateIndex&quot;:0,&quot;validationGroup&quot;:null,&quot;readOnly&quot;:false,&quot;primary&quot;:false,&quot;enabled&quot;:true}"></button>
+					</div>
+				</div>
+			
+		</div><input id="ctl00_confirmWindow_ClientState" name="ctl00_confirmWindow_ClientState" type="hidden" autocomplete="off">
+	</div><div id="ctl00_rwmMain_alerttemplate" style="display:none;">
+        <div class="rwDialogPopup radalert">
+            <div class="rwDialogText" role="alert">
+            {1}
+            </div>
+
+            <div>
+                <a onclick="$find('{0}').close(true);" class="rwPopupButton" href="javascript:void(0);">
+                    <span class="rwOuterSpan">
+                        <span class="rwInnerSpan">##LOC[OK]##</span>
+                    </span>
+                </a>
+            </div>
+        </div>
+        </div><div id="ctl00_rwmMain_prompttemplate" style="display:none;">
+         <div class="rwDialogPopup radprompt">
+                <div class="rwDialogText">
+                {1}
+                </div>
+                <div>
+                    <script type="text/javascript">
+                    function RadWindowprompt_detectenter(id, ev, input)
+                    {
+                        if (!ev) ev = window.event;
+                        if (ev.keyCode == 13)
+                        {
+                            var but = input.parentNode.parentNode.getElementsByTagName("A")[0];
+                            if (but)
+                            {
+                                if (but.click) but.click();
+                                else if (but.onclick)
+                                {
+                                    but.focus(); var click = but.onclick; but.onclick = null; if (click) click.call(but);
+                                }
+                            }
+                           return false;
+                        }
+                        else return true;
+                    }
+                    </script>
+                    <input title="Enter Value" aria-label="Enter Value" onkeydown="return RadWindowprompt_detectenter('{0}', event, this);" type="text" class="rwDialogInput" value="{2}">
+                </div>
+                <div>
+                    <a onclick="$find('{0}').close(this.parentNode.parentNode.getElementsByTagName('input')[0].value);" class="rwPopupButton" href="javascript:void(0);"><span class="rwOuterSpan"><span class="rwInnerSpan">##LOC[OK]##</span></span></a>
+                    <a onclick="$find('{0}').close(null);" class="rwPopupButton" href="javascript:void(0);"><span class="rwOuterSpan"><span class="rwInnerSpan">##LOC[Cancel]##</span></span></a>
+                </div>
+            </div>
+        </div><div id="ctl00_rwmMain_confirmtemplate" style="display:none;">
+        <div class="rwDialogPopup radconfirm">
+            <div class="rwDialogText">
+            {1}
+            </div>
+            <div>
+                <a onclick="$find('{0}').close(true);" class="rwPopupButton" href="javascript:void(0);"><span class="rwOuterSpan"><span class="rwInnerSpan">##LOC[OK]##</span></span></a>
+                <a onclick="$find('{0}').close(false);" class="rwPopupButton" href="javascript:void(0);"><span class="rwOuterSpan"><span class="rwInnerSpan">##LOC[Cancel]##</span></span></a>
+            </div>
+        </div>
+        </div><input id="ctl00_rwmMain_ClientState" name="ctl00_rwmMain_ClientState" type="hidden">
+</div>
+
+<script type="text/javascript">
+	// Fix RadPrompt accessibility - add aria-label from title attribute
+	function fixRadPromptAccessibility() {
+		var promptInputs = document.querySelectorAll('.rwDialogInput');
+		promptInputs.forEach(function (input) {
+			if (input.hasAttribute('title') && !input.hasAttribute('aria-label')) {
+				input.setAttribute('aria-label', input.getAttribute('title'));
+			}
+		});
+	}
+
+	// Run on page load and periodically to catch dynamically created prompts
+	if (document.readyState === 'loading') {
+		document.addEventListener('DOMContentLoaded', fixRadPromptAccessibility);
+	} else {
+		fixRadPromptAccessibility();
+	}
+
+	// Also fix when RadWindow prompts are shown
+	var originalRadprompt = window.radprompt;
+	if (typeof radprompt !== 'undefined') {
+		window.radprompt = function () {
+			var result = originalRadprompt.apply(this, arguments);
+			setTimeout(fixRadPromptAccessibility, 100);
+			return result;
+		};
+	}
+</script>
+<div id="divPageMainWrapper">
+	<header role="banner">
+		<div id="divMenuWrap" style="display: flex;">
+			<div id="menubarLogo">
+				<a href="../../#divPageMain">
+					<img src="../../images/Euna_Procurement-IonWave_White-RGB_Menu_Bar.png" id="ctl00_imgHeaderLogo" height="25" alt="IonWave Procurement - Skip to main content">
+				</a>
+			</div>
+			<nav id="menubar" style="flex-grow: 1;" role="navigation" aria-label="Main navigation">
+				<div tabindex="0" id="ctl00_menuMain" class="RadMenu RadMenu_Proc" style="z-index: 500">
+	<ul class="rmRootGroup rmHorizontal">
+		<li class="rmItem rmFirst"><a class="rmLink rmRootLink" id="rmiHome" href="../../Vendor/VendorHome.aspx"><span title="" class="rmLeftImage flaticon-mainMenu_Home"></span><span class="rmText rmExpandDown">Home</span></a><div class="rmSlide">
+			<ul class="rmVertical rmGroup rmLevel1">
+				<li class="rmItem rmFirst"><a class="rmLink" id="rmiHomeDashboard" href="../../Vendor/VendorHome.aspx"><span class="rmText">Dashboard</span></a></li><li class="rmItem rmLast"><a class="rmLink" href="../../Vendor/VendorMessage.aspx"><span class="rmText">Messages</span></a></li>
+			</ul>
+		</div></li><li class="rmItem "><a class="rmLink rmRootLink" id="rmiBidEvents" href="../ResponseList.aspx?e=list12"><span title="" class="rmLeftImage flaticon-mainMenu_Bid"></span><span class="rmText">Bid Events</span></a></li><li class="rmItem "><a class="rmLink rmRootLink" id="rmiAuctionEvents" href="../AuctionList.aspx?e=list12"><span title="" class="rmLeftImage flaticon-mainMenu_Auction"></span><span class="rmText">Auction Events</span></a></li><li class="rmItem "><a class="rmLink rmRootLink" href="../../Vendor/BuyerList.aspx"><span title="" class="rmLeftImage flaticon-mainMenu_Supplier"></span><span class="rmText rmExpandDown">Agency</span></a><div class="rmSlide">
+			<ul class="rmVertical rmGroup rmLevel1">
+				<li class="rmItem rmFirst"><a class="rmLink" href="../../Vendor/BuyerList.aspx"><span class="rmText">My Agencies</span></a></li><li class="rmItem rmLast"><a class="rmLink" href="../../VendorAdmin/RegistrationList.aspx"><span class="rmText">Registrations</span></a></li>
+			</ul>
+		</div></li><li class="rmItem rmLast"><a class="rmLink rmRootLink" href="#"><span title="" class="rmLeftImage flaticon-mainMenu_Admin"></span><span class="rmText rmExpandDown">Admin</span></a><div class="rmSlide">
+			<ul class="rmVertical rmGroup rmLevel1">
+				<li class="rmItem rmFirst"><a class="rmLink" href="../../VendorAdmin/VendorProfile.aspx"><span class="rmText">Supplier Company Profile</span></a></li><li class="rmItem "><a class="rmLink" id="rmiAdminBuyerProfile" href="../../Vendor/BuyerProfile/ProfileCommodity.aspx?e=misc03"><span class="rmText">Agency Specific Profile</span></a></li><li class="rmItem rmLast"><a class="rmLink" href="../../Vendor/VendorAuditHistory.aspx"><span class="rmText">Audit History</span></a></li>
+			</ul>
+		</div></li>
+	</ul><input id="ctl00_menuMain_ClientState" name="ctl00_menuMain_ClientState" type="hidden" autocomplete="off">
+</div>
+			</nav>
+			<div id="menubarHelp">
+				<a href="javascript:openHelpInfo();" class="menubarHelpLink" aria-label="Help"><span title="Help" class="rmLeftImage flaticon-mainMenu_Help"></span><span class="rmText"></span></a>
+			</div>
+			<nav id="profileMenuBar" role="navigation" aria-label="User menu">
+				<div tabindex="0" id="ctl00_menuProfile" class="RadMenu RadMenu_Proc rmSized" style="height:35px;z-index: 500">
+	<ul class="rmRootGroup rmHorizontal">
+		<li class="rmItem rmFirst rmLast"><a class="rmLink rmRootLink profileMenu" href="#"><span class="rmText rmExpandDown">VENDORUSER ⏷</span></a><div class="rmSlide">
+			<ul class="rmVertical rmGroup rmLevel1">
+				<li class="rmItem rmFirst"><a class="rmLink" href="../../VendorAdmin/MyProfile.aspx"><span class="rmText">My Profile</span></a></li><li class="rmItem rmSeparator"><span class="rmText"></span></li><li class="rmItem rmLast"><a class="rmLink" href="../../SessionLogout.aspx"><span class="rmText">Log Off</span></a></li>
+			</ul>
+		</div></li>
+	</ul><input id="ctl00_menuProfile_ClientState" name="ctl00_menuProfile_ClientState" type="hidden" autocomplete="off">
+</div>
+			</nav>
+		</div>
+	</header>
+
+	
+	<div id="ctl00_upWCAGToggle">
+	
+			<div id="divToggleWCag">
+				
+			</div>
+		
+</div>
+	<main id="divPageMain" role="main">
+		<div id="ctl00_pnlLayoutValidation">
+	
+				<div id="ctl00_valSummary" class="valSum" style="display:none;">
+
+	</div>
+			
+</div>
+		
+	
+<style>
+	.bidInfoVisible {
+		max-height: 325px;
+		overflow: hidden;
+		transition: all 0.5s;
+	}
+
+	.bidInfoHidden {
+		max-height: 15px;
+		overflow: hidden;
+		transition: all 0.5s;
+	}
+
+	#divBidInfoContent {
+		position: relative;
+		top: -15px;
+		z-index: 0;
+		transition: all 0.5s;
+	}
+
+	.expandDown, .expandUp {
+		cursor: pointer;
+		display: inline-block;
+		background-color: white;
+		padding: 0px;
+		font-weight: bold;
+		color: #999999;
+		transition: all 0.35s;
+		width: 18px;
+		height: 9px;
+	}
+
+	.divGradientVisible {
+		position: relative;
+		background-image: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,1));
+		height: 15px;
+		z-index: 1;
+		transition: all 0.5s;
+	}
+
+	.divGradientHidden {
+		position: relative;
+		background-image: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,1));
+		height: 15px;
+		z-index: 1;
+		opacity: 0;
+		transition: all 0.5s;
+	}
+
+	.expandDown {
+		transform: rotate(0deg);
+	}
+
+	.expandUp {
+		transform: rotate(180deg);
+		margin-top: -10px;
+	}
+
+	.caret {
+		width: 0;
+		height: 0;
+		display: inline-block;
+		border: 10px solid transparent;
+		border-top-color: #8862B1;
+		margin-top: 1px;
+		animation: caretAni 2s linear infinite;
+	}
+
+	.innerCaret1 {
+		width: 0;
+		height: 0;
+		display: inline-block;
+		border: 9px solid transparent;
+		border-top-color: white;
+		position: relative;
+		top: -11px;
+		left: -9px;
+	}
+
+	.innerCaret2 {
+		width: 0;
+		height: 0;
+		display: inline-block;
+		border: 8px solid transparent;
+		border-top-color: #8862B1;
+		position: relative;
+		top: -10px;
+		left: -8px;
+	}
+
+	.innerCaret3 {
+		width: 0;
+		height: 0;
+		display: inline-block;
+		border: 6px solid transparent;
+		border-top-color: white;
+		position: relative;
+		top: -8px;
+		left: -6px;
+	}
+
+	.divUp {
+		margin-bottom: -4px;
+		transition: all 0.35s;
+	}
+
+	.divDown {
+		margin-bottom: 5px;
+		transition: all 0.35s;
+	}
+
+	@keyframes caretAni {
+		0% {
+			border-top-color: #8862B1;
+		}
+
+		50% {
+			border-top-color: white;
+		}
+
+		100% {
+			border-top-color: #8862B1;
+		}
+	}
+
+	#loading {
+		width: 100%;
+		height: 100%;
+		top: 0;
+		left: 0;
+		position: fixed;
+		display: block;
+		opacity: 0.7;
+		background-color: #fff;
+		z-index: 1000;
+		text-align: center;
+	}
+
+	#loadingimage {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: 0;
+		right: 0;
+		margin: auto;
+	}
+</style>
+<div id="ctl00_mainContent_ctlTabStrip_divNewHeader">
+	<div id="loading" style="display: none; z-index: 20000;">
+		<img src="../../images/loadingpanel.gif" id="ctl00_mainContent_ctlTabStrip_loadingimage" alt="Loading..." width="100" height="100">
+	</div>
+	<div style="display: flex; flex-direction: row; align-items: center;">
+		<div style="flex-grow: 0; margin-right: 5px; height: 95px; line-height: 95px;">
+			<a id="ctl00_mainContent_ctlTabStrip_lnkReturn" title="Return" class="flaticon-toolbar_ChevronLeft linkHeaderReturn" href="https://supplier.ionwave.net/VendorResponse/ResponseList.aspx?e=list13"></a>
+		</div>
+		<div style="flex-grow: 1;">
+			<div>
+				<img src="https://supplier.ionwave.net/_custconfig/_default/PageHeaderLogo.jpg?brs=26091503422172" id="ctl00_mainContent_ctlTabStrip_imgLogo2" height="55">
+			</div>
+			<div>
+					<span>
+						
+						
+						
+					</span>
+			</div>
+			<div id="ctl00_mainContent_ctlTabStrip_divBidNumber" style="margin-top: 0px; padding-left: 2px; font-size: 18px;">5584-GS Addendum 1 (Emergency Phone Tower Installations and Upgrades)<span class="pillStatus_Bid-OPEN" style="margin-left: 5px;">Issued</span></div>
+			<div id="ctl00_mainContent_ctlTabStrip_divResponseStatusMessage" style="margin-top: 0px; padding-left: 2px;" class="msgError">NOT SUBMITTED - To complete your response, you must click 'Submit Response' in the Response Submission tab.</div>
+			<div id="ctl00_mainContent_ctlTabStrip_divTimeLeft" style="margin-top: 2px;">
+				<div style="margin-top: 0px; padding-left: 2px; font-size: 12px; color: #999999;">Closing in <span id="cntdwn">2 days 17 minutes 36 seconds </span></div>
+			</div>
+		</div>
+		<div id="ctl00_mainContent_ctlTabStrip_div1" style="flex-grow: 0; height: 100%; vertical-align: middle;">
+			
+			<span id="ctl00_mainContent_ctlTabStrip_rbBidHeaderActions" class="RadButton RadButton_Default rbButton rbRounded rbIconButton buttonPrimary" tabindex="0"><span class="rbSplitPart rbSplitPartRight"><span class="rbIcon p-icon rbSplitIcon p-i-arrow-down"></span></span><span class="rbText">Actions</span><input id="ctl00_mainContent_ctlTabStrip_rbBidHeaderActions_ClientState" name="ctl00_mainContent_ctlTabStrip_rbBidHeaderActions_ClientState" type="hidden" autocomplete="off" value="{&quot;text&quot;:&quot;Actions&quot;,&quot;value&quot;:&quot;&quot;,&quot;checked&quot;:false,&quot;target&quot;:&quot;&quot;,&quot;navigateUrl&quot;:&quot;&quot;,&quot;commandName&quot;:&quot;&quot;,&quot;commandArgument&quot;:&quot;&quot;,&quot;autoPostBack&quot;:false,&quot;selectedToggleStateIndex&quot;:0,&quot;validationGroup&quot;:null,&quot;readOnly&quot;:false,&quot;primary&quot;:false,&quot;enabled&quot;:true}"></span>
+			<div tabindex="0" id="ctl00_mainContent_ctlTabStrip_rcmBidHeaderActions" style="display: none; visibility: visible; z-index: 7000;">
+	<div class="RadMenu RadMenu_Default RadMenu_Context RadMenu_Default_Context    customContextMenu" id="ctl00_mainContent_ctlTabStrip_rcmBidHeaderActions_detached" style="display: none; visibility: visible; z-index: 7000;">
+		<ul class="rmActive rmVertical rmGroup rmLevel1" style="float: left;">
+			<li class="rmItem rmFirst"><a class="rmLink" href="https://supplier.ionwave.net/VendorResponse/Bid/VResponseBidAudit.aspx?e=misc04">Bid History</a></li><li class="rmItem "><span class="rmLink" tabindex="0">Error Check</span></li><li class="rmItem rmLast"><span class="rmLink" tabindex="0">No Bid</span></li>
+		</ul>
+	</div><input id="ctl00_mainContent_ctlTabStrip_rcmBidHeaderActions_ClientState" name="ctl00_mainContent_ctlTabStrip_rcmBidHeaderActions_ClientState" type="hidden" autocomplete="off">
+</div>
+			<div id="ctl00_mainContent_ctlTabStrip_divSubActions">
+				<h3 style="margin-top: 3px;"></h3>
+				<div style="margin-top: 4px; text-align: right;">
+					<a id="ctl00_mainContent_ctlTabStrip_hypDocuments" class="procLink" title="Documents" href="https://supplier.ionwave.net/VendorResponse/Bid/VResponseDocumentList.aspx?e=misc05"><span class="flaticon-headerAction_Documents"></span></a>
+					<a id="ctl00_mainContent_ctlTabStrip_hypHistory" class="procLink" title="Response History" href="https://supplier.ionwave.net/VendorResponse/Bid/VResponseAudit.aspx?e=misc06"><span class="flaticon-headerAction_AuditHistory"></span></a>
+				</div>
+			</div>
+		</div>
+	</div>
+	<div id="divBidInfo" class="bidInfoHidden" style="margin-top: 7px; margin-bottom: 5px;">
+		<div id="divGradient" class="divGradientVisible"></div>
+		<div id="divBidInfoContent" style="padding-left: 29px;">
+			<div style="display: flex; flex-direction: row;">
+				<div style="flex-grow: 0; min-width: 200px;">
+					<div style="margin-top: 0px; padding-left: 2px; font-size: 11px; color: #999999;">Type</div>
+					<div style="margin-top: 2px; padding-left: 2px; padding-right: 10px; font-size: 12px; color: #444444; font-weight: bold;">
+						<span id="ctl00_mainContent_ctlTabStrip_lblBidType">Invitation for Bid</span>
+					</div>
+					
+					<div id="ctl00_mainContent_ctlTabStrip_divQuestionCutoff">
+						<div style="margin-top: 15px; padding-left: 2px; font-size: 11px; color: #999999;">Question Cut Off</div>
+						<div style="margin-top: 2px; padding-left: 2px; padding-right: 10px; font-size: 12px; color: #444444; font-weight: bold;">
+							<span id="ctl00_mainContent_ctlTabStrip_lblQuestionCutoff">9/3/26 @ 2:00pm</span>
+						</div>
+					</div>
+				</div>
+				<div style="flex-grow: 0; min-width: 200px;">
+					<div style="margin-top: 0px; padding-left: 2px; font-size: 11px; color: #999999;">Date Issued</div>
+					<div style="margin-top: 2px; padding-left: 2px; padding-right: 10px; font-size: 12px; color: #444444; font-weight: bold;">
+						<span id="ctl00_mainContent_ctlTabStrip_lblIssueDate">8/17/26 @ 8:00am</span>
+					</div>
+					<div style="margin-top: 15px; padding-left: 2px; font-size: 11px; color: #999999;">Date Closing</div>
+					<div style="margin-top: 2px; padding-left: 2px; padding-right: 10px; font-size: 12px; color: #444444; font-weight: bold;">
+						<span id="ctl00_mainContent_ctlTabStrip_lblCloseDate">9/17/26 @ 2:00pm</span>
+					</div>
+				</div>
+				<div style="flex-grow: 1;">
+					<div style="margin-top: 0px; padding-left: 2px; font-size: 11px; color: #999999;">Description</div>
+					<div style="margin-top: 2px; padding-left: 2px; padding-right: 40px; font-size: 12px; color: #444444;">
+						<span id="ctl00_mainContent_ctlTabStrip_lblDescription"><p style="text-align: justify;"><strong><span style="text-decoration: underline; color: red;">PLEASE NOTE: FOR PUBLIC WORKS PROJECTS, A BIDDER MUST BE QUALIFIED AS A BIDDER WITH THE STATE PUBLIC WORKS DIVISION OF THE DEPARTMENT OF ADMINISTRATION FOR THE COST CATEGORY REQUIRED FOR THE PROJECT. PLEASE REFER TO http://publicworks.nv.gov/Bids/Bids/.</span></strong></p>
+<div style="text-align: justify;">Two (2) <strong>MANDATORY</strong> Pre-Bid Conference and Site Walks will be held: Wednesday, August 26, at 9 a.m., meet in the Front Reception Area at Campus Services Building <a href="https://www.unlv.edu/maps/csb">CSB Map</a>. Thursday, August 27, at 9 a.m., meet at Shadow Lane Dental School <a href="https://www.unlv.edu/maps/slc-a">Dental School Map</a>&nbsp;1001 Shadow Lane, Las Vegas, NV 89106, Building A/Dental School, outside near flag.</div>
+<div style="text-align: justify;">&nbsp;</div>
+<div style="text-align: justify;">Parking &amp; Transportation Services and the university police are authorized to enforce the parking rules and regulations. The university police have the additional duty to enforce federal, state, and municipal laws on all UNLV property in accordance with the provisions of NRS 396.325</div>
+<div style="text-align: justify;"><a href="http://https://www.unlv.edu/parking">parking information</a></div></span>
+					</div>
+				</div>
+			</div>
+			
+<style type="text/css">
+	#tblTimeline {
+		width: 100%;
+	}
+
+	.circlePast, .circleToday, .circleFuture {
+		width: 10px;
+		height: 10px;
+		border-radius: 50%;
+		min-width: 10px;
+		display: inline-block;
+		vertical-align: middle;
+		/*box-shadow: 1px 1px 2px 1px rgba(90, 90, 90, 0.3);*/
+	}
+
+	.circlePast {
+		background-color: #ff6b00;
+	}
+
+	.circleToday {
+		background-color: #00b1ee;
+	}
+
+	.circleFuture {
+		background-color: #dbdbdb;
+	}
+
+	.line, .futureLine {
+		content: "";
+		height: 3px;
+		min-width: 60px;
+		margin-left: 5px;
+		margin-right: 5px;
+		vertical-align: middle;
+		/*box-shadow: 1px 1px 2px 1px rgba(90, 90, 90, 0.3);*/
+	}
+
+	.line {
+		background-color: #ff974c;
+	}
+
+	.futureLine {
+		background-color: #dbdbdb;
+	}
+
+	.lineGapLeft, .lineGapRight, .futureLineGapLeft, .futureLineGapRight {
+		position: relative;
+		vertical-align: middle;
+		content: "";
+		height: 3px;
+		margin-left: 5px;
+		margin-right: 5px;
+		vertical-align: middle;
+		/*box-shadow: 1px 1px 2px 1px rgba(90, 90, 90, 0.3);*/
+	}
+
+		.lineGapLeft::after, .lineGapRight::after, .futureLineGapLeft::after, .futureLineGapRight::after {
+			content: "";
+			position: absolute;
+			width: 3px;
+			height: 35px;
+			top: -15px;
+			transform: rotate(20deg);
+		}
+
+		.lineGapLeft::after, .futureLineGapLeft::after {
+			right: -2px;
+		}
+
+		.lineGapRight::after, .futureLineGapRight::after {
+			left: -2px;
+		}
+
+	.lineGapLeft, .lineGapRight {
+		background-color: #ff974c;
+	}
+
+		.lineGapLeft::after, .lineGapRight::after {
+			background-color: #ff8329;
+		}
+
+	.futureLineGapLeft, .futureLineGapRight {
+		background-color: #dbdbdb;
+	}
+
+		.futureLineGapLeft::after, .futureLineGapRight::after {
+			background-color: #dbdbdb;
+		}
+
+
+	.labelTop, .labelBottom {
+		display: flex;
+		width: 155px;
+		position: absolute;
+		background-color: #dbdbdb;
+		border-radius: 5px;
+		/*box-shadow: 1px 1px 2px 1px rgba(90, 90, 90, 0.3);*/
+	}
+
+	.tdContainer {
+		position: relative;
+		width: 10px;
+	}
+
+	#trTop .tdContainer::before, #trBot .tdContainer::before {
+		content: "";
+		position: absolute;
+		border-style: solid;
+		border-color: transparent;
+		border-width: 10px;
+		z-index: 10;
+		left: -5px;
+	}
+
+	#trTop .tdContainer::before {
+		bottom: -5px;
+		border-top-color: #dbdbdb;
+	}
+
+	#trBot .tdContainer::before {
+		top: -5px;
+		border-bottom-color: #dbdbdb;
+	}
+
+	.labelDayOfMonth {
+		font-size: 20pt;
+		padding-left: 2px;
+		padding-right: 2px;
+		position: relative;
+		top: -2px;
+		color: #004165;
+	}
+
+	.labelDayOfWeek {
+		position: relative;
+		top: 2px;
+		vertical-align: top;
+		font-size: 8pt;
+		padding-right: 5px;
+	}
+
+	.labelTitle {
+		padding-top: 2px;
+		padding-right: 2px;
+		font-size: 10pt;
+	}
+
+	.bulletTitleList {
+		padding-top: 2px;
+		padding-right: 2px;
+		font-size: 9pt;
+		padding-left: 16px;
+		margin-top: 0px;
+		margin-bottom: 2px;
+	}
+
+	.divTitle {
+		display: flex;
+		flex-direction: column;
+	}
+</style>
+<div role="region" aria-label="Bid Timeline" style="padding: 0px 20px;">
+	<table id="tblTimeline">
+	<tbody><tr id="trTop">
+		<td></td><td style="width:29.0322580645161%;"></td><td class="tdContainer" style="height:65px;"><div class="labelTop" role="listitem" aria-label="Timeline event: Mandatory Site Walk - Maryland Campus on August 26, 2026" tabindex="0" style="padding:2px;left:-12px;bottom:15px;">
+			<span class="labelDayOfMonth" aria-label="Day of month: 26">26</span><div class="divTitle">
+				<div class="labelDayOfWeek">
+					<span>Wed, Aug 2026</span>
+				</div><div class="labelTitle">
+					<span title="Mandatory Site Walk - Maryland Campus" aria-label="Milestone: Mandatory Site Walk - Maryland Campus">Mandatory Sit...</span>
+				</div>
+			</div>
+		</div></td><td style="width:3.2258064516129%;"></td><td></td><td style="width:22.5806451612903%;"></td><td class="tdContainer" style="height:65px;"><div class="labelTop" role="listitem" aria-label="Timeline event: Question Cut Off on September 3, 2026" tabindex="0" style="padding:2px;left:-12px;bottom:15px;">
+			<span class="labelDayOfMonth" aria-label="Day of month: 3">3</span><div class="divTitle">
+				<div class="labelDayOfWeek">
+					<span>Thu, Sep 2026</span>
+				</div><div class="labelTitle">
+					<span title="Question Cut Off" aria-label="Milestone: Question Cut Off">Question Cut ...</span>
+				</div>
+			</div>
+		</div></td><td style="width:38.7096774193548%;"></td><td></td><td style="width:6.45161290322581%;"></td><td></td>
+	</tr><tr id="trMid">
+		<td style="width:1px;"><div class="circlePast">
+
+		</div></td><td style="width:29.0322580645161%;"><div class="line">
+
+		</div></td><td style="width:1px;"><div class="circlePast">
+
+		</div></td><td style="width:3.2258064516129%;"><div class="line">
+
+		</div></td><td style="width:1px;"><div class="circlePast">
+
+		</div></td><td style="width:22.5806451612903%;"><div class="line">
+
+		</div></td><td style="width:1px;"><div class="circlePast">
+
+		</div></td><td style="width:38.7096774193548%;"><div class="line">
+
+		</div></td><td style="width:1px;"><div title="Today" class="circleToday">
+
+		</div></td><td style="width:6.45161290322581%;"><div class="futureLine">
+
+		</div></td><td style="width:1px;"><div class="circleFuture">
+
+		</div></td><td style="min-width:150px;"><div class="futureLine">
+
+		</div></td>
+	</tr><tr id="trBot">
+		<td class="tdContainer" style="height:65px;"><div class="labelBottom" role="listitem" aria-label="Timeline event: Bid Issue on August 17, 2026" tabindex="0" style="padding:2px;left:-12px;top:15px;">
+			<span class="labelDayOfMonth" aria-label="Day of month: 17">17</span><div class="divTitle">
+				<div class="labelDayOfWeek">
+					<span>Mon, Aug 2026</span>
+				</div><div class="labelTitle">
+					<span aria-label="Milestone: Bid Issue">Bid Issue</span>
+				</div>
+			</div>
+		</div></td><td style="width:29.0322580645161%;"></td><td></td><td style="width:3.2258064516129%;"></td><td class="tdContainer" style="height:65px;"><div class="labelBottom" role="listitem" aria-label="Timeline event: Mandatory Site Walk - Shadow Lane Campus on August 27, 2026" tabindex="0" style="padding:2px;left:-12px;top:15px;">
+			<span class="labelDayOfMonth" aria-label="Day of month: 27">27</span><div class="divTitle">
+				<div class="labelDayOfWeek">
+					<span>Thu, Aug 2026</span>
+				</div><div class="labelTitle">
+					<span title="Mandatory Site Walk - Shadow Lane Campus" aria-label="Milestone: Mandatory Site Walk - Shadow Lane Campus">Mandatory Sit...</span>
+				</div>
+			</div>
+		</div></td><td style="width:22.5806451612903%;"></td><td></td><td style="width:38.7096774193548%;"></td><td></td><td style="width:6.45161290322581%;"></td><td class="tdContainer" style="height:65px;opacity:.5;"><div class="labelBottom" role="listitem" aria-label="Timeline event: Bid Close on September 17, 2026" tabindex="0" style="padding:2px;left:-12px;top:15px;">
+			<span class="labelDayOfMonth" aria-label="Day of month: 17">17</span><div class="divTitle">
+				<div class="labelDayOfWeek">
+					<span>Thu, Sep 2026</span>
+				</div><div class="labelTitle">
+					<span aria-label="Milestone: Bid Close">Bid Close</span>
+				</div>
+			</div>
+		</div></td>
+	</tr>
+</tbody></table>
+</div>
+
+		</div>
+	</div>
+	<div id="divDivider" class="divUp" style="padding-left: 5px; border-top: solid 1px #8862B1;"><span id="spanExpander" onclick="showHideBidInfo();" class="expandDown" style="display: block;"><span class="caret"><span class="innerCaret1"><span class="innerCaret2"><span class="innerCaret3"></span></span></span></span></span></div>
+</div>
+
+<div style="margin-top: 5px;">
+	<span id="ctl00_mainContent_ctlTabStrip_lblIntent" class="instructPage"></span>
+	<span id="ctl00_mainContent_ctlTabStrip_lblHeaderText" class="instructPage"></span>
+	<span id="ctl00_mainContent_ctlTabStrip_lblAddendumText" class="instructPage"></span>
+</div>
+
+
+
+
+
+
+<div style="padding-top: 10px;">
+	<div id="ctl00_mainContent_ctlTabStrip_rts" class="RadTabStrip RadTabStrip_Proc RadTabStripTop_Proc RadTabStripTop">
+	<div class="rtsLevel rtsLevel1">
+		<ul class="rtsUL"><li class="rtsLI rtsFirst"><a class="rtsLink rtsSelected" href="https://supplier.ionwave.net/VendorResponse/Bid/VResponseEvent.aspx?e=event41"><span class="rtsOut"><span class="rtsIn"><span class="rtsTxt">Event Details</span></span></span></a></li><li class="rtsLI"><a class="rtsLink rtsAfter" href="https://supplier.ionwave.net/VendorResponse/Bid/VResponseQuestion.aspx?e=event41"><span class="rtsOut"><span class="rtsIn"><span class="rtsTxt">Questions</span></span></span></a></li><li class="rtsLI"><a class="rtsLink" href="https://supplier.ionwave.net/VendorResponse/Bid/VResponseActivity.aspx?e=event41"><span class="rtsOut"><span class="rtsIn"><span class="rtsTxt">Activities</span></span></span></a></li><li class="rtsLI"><a class="rtsLink" href="https://supplier.ionwave.net/VendorResponse/Bid/VResponseBidAttachments.aspx?e=event41"><span class="rtsOut"><span class="rtsIn"><span class="rtsTxt">Attachments</span></span></span></a></li><li class="rtsLI"><a class="rtsLink" href="https://supplier.ionwave.net/VendorResponse/Bid/VResponseAttribute.aspx?e=event41"><span class="rtsOut"><span class="rtsIn"><span class="rtsTxt">Attributes</span></span></span></a></li><li class="rtsLI"><a class="rtsLink" href="https://supplier.ionwave.net/VendorResponse/Bid/VResponseLine.aspx?e=event41"><span class="rtsOut"><span class="rtsIn"><span class="rtsTxt">Line Items</span></span></span></a></li><li class="rtsLI"><a class="rtsLink" href="https://supplier.ionwave.net/VendorResponse/Bid/VResponseAttachments.aspx?e=event41"><span class="rtsOut"><span class="rtsIn"><span class="rtsTxt">Response Attachments</span></span></span></a></li><li class="rtsLI rtsLast"><a class="rtsLink" href="https://supplier.ionwave.net/VendorResponse/Bid/VResponseSubmission.aspx?e=event41"><span class="rtsOut"><span class="rtsIn"><span class="rtsTxt">Response Submission</span></span></span></a></li></ul>
+	</div><input id="ctl00_mainContent_ctlTabStrip_rts_ClientState" name="ctl00_mainContent_ctlTabStrip_rts_ClientState" type="hidden" autocomplete="off" value="{&quot;selectedIndexes&quot;:[&quot;0&quot;],&quot;logEntries&quot;:[],&quot;scrollState&quot;:{}}">
+</div>
+	<input type="hidden" name="ctl00$mainContent$ctlTabStrip$hdnTabClickSelection" id="ctl00_mainContent_ctlTabStrip_hdnTabClickSelection">
+</div>
+<input type="button" name="ctl00$mainContent$ctlTabStrip$btnHiddenRetract" value="" onclick="javascript:__doPostBack('ctl00$mainContent$ctlTabStrip$btnHiddenRetract','')" id="ctl00_mainContent_ctlTabStrip_btnHiddenRetract" style="display: none;">
+<div id="ctl00_mainContent_ctlTabStrip_rwmVendorResponse" style="z-index:11000;display:none;">
+	<div id="ctl00_mainContent_ctlTabStrip_rwIntent" style="z-index:11000;display:none;">
+		<div id="ctl00_mainContent_ctlTabStrip_rwIntent_C" style="display:none;">
+
+		</div><input id="ctl00_mainContent_ctlTabStrip_rwIntent_ClientState" name="ctl00_mainContent_ctlTabStrip_rwIntent_ClientState" type="hidden" autocomplete="off">
+	</div><div id="ctl00_mainContent_ctlTabStrip_rwPlanHolderIntent" style="z-index:11000;display:none;">
+		<div id="ctl00_mainContent_ctlTabStrip_rwPlanHolderIntent_C" style="display:none;">
+
+		</div><input id="ctl00_mainContent_ctlTabStrip_rwPlanHolderIntent_ClientState" name="ctl00_mainContent_ctlTabStrip_rwPlanHolderIntent_ClientState" type="hidden" autocomplete="off">
+	</div><div id="ctl00_mainContent_ctlTabStrip_rwNoBid" style="z-index:11000;display:none;">
+		<div id="ctl00_mainContent_ctlTabStrip_rwNoBid_C" style="display:none;">
+
+		</div><input id="ctl00_mainContent_ctlTabStrip_rwNoBid_ClientState" name="ctl00_mainContent_ctlTabStrip_rwNoBid_ClientState" type="hidden" autocomplete="off">
+	</div><div id="ctl00_mainContent_ctlTabStrip_rwCostCalc" style="z-index:11000;display:none;">
+		<div id="ctl00_mainContent_ctlTabStrip_rwCostCalc_C" style="display:none;">
+
+		</div><input id="ctl00_mainContent_ctlTabStrip_rwCostCalc_ClientState" name="ctl00_mainContent_ctlTabStrip_rwCostCalc_ClientState" type="hidden" autocomplete="off">
+	</div><div id="ctl00_mainContent_ctlTabStrip_rwmVendorResponse_alerttemplate" style="display:none;">
+        <div class="rwDialogPopup radalert">
+            <div class="rwDialogText" role="alert">
+            {1}
+            </div>
+
+            <div>
+                <a onclick="$find('{0}').close(true);" class="rwPopupButton" href="javascript:void(0);">
+                    <span class="rwOuterSpan">
+                        <span class="rwInnerSpan">##LOC[OK]##</span>
+                    </span>
+                </a>
+            </div>
+        </div>
+        </div><div id="ctl00_mainContent_ctlTabStrip_rwmVendorResponse_prompttemplate" style="display:none;">
+         <div class="rwDialogPopup radprompt">
+                <div class="rwDialogText">
+                {1}
+                </div>
+                <div>
+                    <script type="text/javascript">
+                    function RadWindowprompt_detectenter(id, ev, input)
+                    {
+                        if (!ev) ev = window.event;
+                        if (ev.keyCode == 13)
+                        {
+                            var but = input.parentNode.parentNode.getElementsByTagName("A")[0];
+                            if (but)
+                            {
+                                if (but.click) but.click();
+                                else if (but.onclick)
+                                {
+                                    but.focus(); var click = but.onclick; but.onclick = null; if (click) click.call(but);
+                                }
+                            }
+                           return false;
+                        }
+                        else return true;
+                    }
+                    </script>
+                    <input title="Enter Value" aria-label="Enter Value" onkeydown="return RadWindowprompt_detectenter('{0}', event, this);" type="text" class="rwDialogInput" value="{2}">
+                </div>
+                <div>
+                    <a onclick="$find('{0}').close(this.parentNode.parentNode.getElementsByTagName('input')[0].value);" class="rwPopupButton" href="javascript:void(0);"><span class="rwOuterSpan"><span class="rwInnerSpan">##LOC[OK]##</span></span></a>
+                    <a onclick="$find('{0}').close(null);" class="rwPopupButton" href="javascript:void(0);"><span class="rwOuterSpan"><span class="rwInnerSpan">##LOC[Cancel]##</span></span></a>
+                </div>
+            </div>
+        </div><div id="ctl00_mainContent_ctlTabStrip_rwmVendorResponse_confirmtemplate" style="display:none;">
+        <div class="rwDialogPopup radconfirm">
+            <div class="rwDialogText">
+            {1}
+            </div>
+            <div>
+                <a onclick="$find('{0}').close(true);" class="rwPopupButton" href="javascript:void(0);"><span class="rwOuterSpan"><span class="rwInnerSpan">##LOC[OK]##</span></span></a>
+                <a onclick="$find('{0}').close(false);" class="rwPopupButton" href="javascript:void(0);"><span class="rwOuterSpan"><span class="rwInnerSpan">##LOC[Cancel]##</span></span></a>
+            </div>
+        </div>
+        </div><input id="ctl00_mainContent_ctlTabStrip_rwmVendorResponse_ClientState" name="ctl00_mainContent_ctlTabStrip_rwmVendorResponse_ClientState" type="hidden">
+</div>
+<script type="text/javascript">
+	function OpenPlanHolderIntentWindow(planHolderIntentURL) {
+		var oWnd = $find("ctl00_mainContent_ctlTabStrip_rwPlanHolderIntent");
+		oWnd.setUrl(planHolderIntentURL);
+		oWnd.show();
+	}
+
+	function OpenNoBidWindow(noBidURL) {
+		var oWnd = $find("ctl00_mainContent_ctlTabStrip_rwNoBid");
+		oWnd.setUrl(noBidURL);
+		oWnd.show();
+	}
+
+	function OpenCostCalcWindow(costCalcURL) {
+		var oWnd = $find("ctl00_mainContent_ctlTabStrip_rwCostCalc");
+		oWnd.setUrl(costCalcURL);
+		oWnd.show();
+	}
+
+	function onTabSelected(sender, eventArgs) {
+		//store this for the post back on the activities and lines page so each can redirect correctly
+		//lines and attributes do auto save on tab click so save what tab clicked here to grab and redirect in lines and tab aspx
+
+		var maxZ = Math.max.apply(null,
+			$.map($('body *'), function (e, n) {
+				if ($(e).css('position') != 'static')
+					return parseInt($(e).css('z-index')) || 1;
+			}));
+
+		showLoading();
+
+		var tab = eventArgs.get_tab();
+		document.getElementById("ctl00_mainContent_ctlTabStrip_hdnTabClickSelection").value = tab.get_value();
+	}
+	function CloseProgress(sender, args) {
+		showLoading();
+		//the window closed itself so we need to redirect back with errorCheckComplete=true
+		//that way we will not re run the error check every time
+		//without doing the replace we will end up with &errorCheckComplete=true&errorCheckComplete=true&errorCheckComplete=true
+		//if the user clicks error  check over and over
+		//we need to make this url in the codebehind so it is encrypted
+		window.location.href = ''
+		///window.location.href = window.location.href.replace('&errorCheckComplete=true', '') + "&errorCheckComplete=true";
+	}
+
+	function showLoading() {
+		var x = document.getElementById("loading");
+		x.style.display = "block";
+	}
+
+	function rtb_ButtonClicking(sender, args) {
+		showLoading();
+	}
+</script>
+
+<script type="text/javascript">
+	function confirmRetractCallbackFn(arg) {
+		if (arg) //the user clicked OK
+		{
+			__doPostBack("ctl00$mainContent$ctlTabStrip$btnHiddenRetract", "");
+		}
+	}
+
+	(function (global) {
+		function promptCallBackFn(arg) {
+			if (arg != null) {
+				// Trim whitespace and convert to uppercase for case-insensitive comparison
+				var trimmedInput = arg.toString().trim().toUpperCase();
+				
+				if (trimmedInput === 'RETRACT') {
+					showLoading();
+					__doPostBack("ctl00$mainContent$ctlTabStrip$btnHiddenRetract", "");
+				}
+				else {
+					// Show validation error and allow retry instead of closing popup
+					var windowManager = $find("ctl00_mainContent_ctlTabStrip_rwmVendorResponse");
+					if (windowManager) {
+						windowManager.radprompt('Invalid confirmation text.<br/>Please type <b>RETRACT</b> to confirm', promptCallBackFn, 400, 250, null, 'Validation Error');
+					}
+				}
+			}
+		}
+
+		global.promptCallBackFn = promptCallBackFn;
+	})(window);
+
+	/*NEW HEADER STUFF*/
+	function showHideBidInfo() {
+		var divBidInfo = document.getElementById("divBidInfo");
+		var spanExpander = document.getElementById("spanExpander");
+		if (divBidInfo.className == "bidInfoHidden") {
+			divBidInfo.className = "bidInfoVisible";
+			spanExpander.className = "expandUp";
+			divDivider.className = "divDown";
+			divGradient.className = "divGradientHidden";
+		} else {
+			divBidInfo.className = "bidInfoHidden";
+			spanExpander.className = "expandDown";
+			divDivider.className = "divUp";
+			divGradient.className = "divGradientVisible";
+		}
+	}
+
+	/*SPLIT BUTTON STUFF*/
+	var rmbBidHeaderActions_contextMenu = null;
+
+	function rcmBidHeaderActions_ClientLoad(sender, args) {
+		rmbBidHeaderActions_contextMenu = sender;
+	}
+
+	function rbBidHeaderActions_ClientClicked(sender, args) {
+		if (args.IsSplitButtonClick() || !sender.get_commandName()) {
+			var currentLocation = $telerik.getBounds(sender.get_element());
+			rmbBidHeaderActions_contextMenu.showAt(currentLocation.x, currentLocation.y + currentLocation.height);
+		}
+	}
+
+	function rcmBidHeaderActions_ClientItemClicking(sender, args) {
+		showLoading();
+	}
+
+
+	var CountStepper = -1;
+	var CountActive = true;
+	function calcage(secs, num1, num2) {
+		s = ((Math.floor(secs / num1)) % num2).toString();
+		return s;
+	}
+
+	function CountBack(secs) {
+		if (secs < 0) {
+			document.getElementById("cntdwn").innerHTML = "<span class='msgError'>closed</span>";
+			return;
+		}
+
+		var DisplayStr = "";
+		var days = calcage(secs, 86400, 100000);
+		var hours = calcage(secs, 3600, 24);
+		var minutes = calcage(secs, 60, 60);
+		var seconds = calcage(secs, 1, 60);
+		if (days > 0) DisplayStr += days + " days ";
+		if (hours > 0) DisplayStr += hours + " hours ";
+		if (minutes > 0) DisplayStr += minutes + " minutes ";
+		if (seconds > 0) DisplayStr += seconds + " seconds ";
+
+		if (days == 0) DisplayStr = "<span class='msgError'>" + DisplayStr + "</span>";
+
+		document.getElementById("cntdwn").innerHTML = DisplayStr;
+		if (CountActive) setTimeout("CountBack(" + (secs + CountStepper) + ")", SetTimeOutPeriod);
+	}
+	CountStepper = Math.ceil(CountStepper);
+	if (CountStepper == 0) CountActive = false;
+	var SetTimeOutPeriod = (Math.abs(CountStepper) - 1) * 1000 + 990;
+
+	var dthen = new Date('9/17/2026 4:00:00 PM');
+	var dnow = new Date('9/15/2026 3:42:21 PM');
+	if (CountStepper > 0)
+		ddiff = new Date(dnow - dthen);
+	else
+		ddiff = new Date(dthen - dnow);
+	gsecs = Math.floor(ddiff.valueOf() / 1000);
+	CountBack(gsecs);
+
+</script>
+
+	<div>
+		<table style="width: 100%;">
+			<tbody><tr>
+				<td style="width: 50%; vertical-align: top;">
+					<h2>Bid Information</h2>
+					<table>
+						<tbody><tr>
+							<td class="fieldLabel" style="width: 125px;">Bid Type</td>
+							<td class="fieldValue">
+								<span id="ctl00_mainContent_lblType">Invitation for Bid</span>
+							</td>
+						</tr>
+						<tr>
+							<td class="fieldLabel">Status</td>
+							<td class="fieldValue">
+								<span id="ctl00_mainContent_lblStatus">Issued</span>
+							</td>
+						</tr>
+						<tr>
+							<td class="fieldLabel">Issue Date &amp; Time</td>
+							<td class="fieldValue">
+								<span id="ctl00_mainContent_lblIssue">8/17/2026 08:00:01 AM (PT)</span>
+							</td>
+						</tr>
+						<tr>
+							<td class="fieldLabel">Close Date &amp; Time</td>
+							<td class="fieldValue">
+								<span id="ctl00_mainContent_lblClose">9/17/2026 02:00:00 PM (PT)</span>
+							</td>
+						</tr>
+						<tr id="ctl00_mainContent_trQuestion">
+	<td class="fieldLabel">Question Cuttoff Date &amp; Time</td>
+	<td class="fieldValue">
+								<span id="ctl00_mainContent_lblQuestion">9/3/2026 02:00:00 PM (PT)</span>
+							</td>
+</tr>
+
+						<tr id="ctl00_mainContent_trNote">
+	<td class="fieldLabel">Notes</td>
+	<td class="fieldValue">
+								<span id="ctl00_mainContent_lblNotes"><p style="text-align: justify;"><strong><span style="text-decoration: underline; color: red;">PLEASE NOTE: FOR PUBLIC WORKS PROJECTS, A BIDDER MUST BE QUALIFIED AS A BIDDER WITH THE STATE PUBLIC WORKS DIVISION OF THE DEPARTMENT OF ADMINISTRATION FOR THE COST CATEGORY REQUIRED FOR THE PROJECT. PLEASE REFER TO http://publicworks.nv.gov/Bids/Bids/.</span></strong></p>
+<div style="text-align: justify;">Two (2) <strong>MANDATORY</strong> Pre-Bid Conference and Site Walks will be held: Wednesday, August 26, at 9 a.m., meet in the Front Reception Area at Campus Services Building <a href="https://www.unlv.edu/maps/csb">CSB Map</a>. Thursday, August 27, at 9 a.m., meet at Shadow Lane Dental School <a href="https://www.unlv.edu/maps/slc-a">Dental School Map</a>&nbsp;1001 Shadow Lane, Las Vegas, NV 89106, Building A/Dental School, outside near flag.</div>
+<div style="text-align: justify;">&nbsp;</div>
+<div style="text-align: justify;">Parking &amp; Transportation Services and the university police are authorized to enforce the parking rules and regulations. The university police have the additional duty to enforce federal, state, and municipal laws on all UNLV property in accordance with the provisions of NRS 396.325</div>
+<div style="text-align: justify;"><a href="http://https://www.unlv.edu/parking">parking information</a></div></span>
+							</td>
+</tr>
+
+					</tbody></table>
+ 				</td>
+				<td style="width: 50%; vertical-align: top; padding-left: 10px;">
+					
+<script type="text/javascript">
+
+    function returnToUrl() {
+        //debugger;
+        //Firefox does not like the below call. It prompts user to acknowledge that it is o.k. to do a "Resend". This makes sense
+        //as the popup is actually on the Default.aspx page and calling a reload makes it question whether or not it needs
+        //to resend data. Changed call to set href of window instead.
+        //Update:  setting the href when the popup control is not in the same directory and also not using the PID system for popups,
+        //does not completely replace the href, it just appends.  So, went back to Reload, but using window instead of document.
+        //verified that this does work in Firefox.
+        //document.location.reload(returnUrl);
+        window.location = window.location;
+        //window.location.reload(returnUrl);
+
+    }
+
+    function OnClientButtonClicked(sender, args) {
+
+        var item = args.get_item();
+        var value = item.get_value();
+
+
+        if (value === "CLEAR") {
+            var ok = confirm("Are you sure you want to clear?");
+            if (!ok) {
+                args.set_cancel(true);
+                return;
+            }
+        }
+        else if (value === "ADDBOOK") {
+            var el = item.get_element();
+            var url = item.get_commandArgument();
+            if (url && typeof OpenRadWindowModal === "function") {
+                OpenRadWindowModal(url, '850', '550');
+            } else {
+                console.warn("Address Book URL or OpenRadWindowModal is missing.");
+            }
+
+            args.set_cancel(true);
+        }
+    }
+</script>
+
+<!-- Skip link for accessibility -->
+<a href="#mainContent" class="sr-only" tabindex="0">Skip to main content</a>
+
+<h2>
+    <span id="ctl00_mainContent_CompanyAddress_lblHeader">Bid Contact Information</span>
+</h2>
+
+<!-- ARIA: Toolbar instructions for screen readers -->
+<span id="editAddrDesc" class="sr-only">Press Enter to edit the address.</span>
+<span id="defaultAddrDesc" class="sr-only">Press Enter to set the default address.</span>
+<span id="clearAddrDesc" class="sr-only">Press Enter to clear the address.</span>
+<span id="addBookDesc" class="sr-only">Press Enter to open the address book.</span>
+
+
+
+<!-- Main content region -->
+<div id="mainContent" role="main" aria-label="Event Address Details">
+    <table id="ctl00_mainContent_CompanyAddress_tblEventAddr" style="padding-bottom:10px" role="presentation">
+	<tbody><tr id="ctl00_mainContent_CompanyAddress_trWorkgroup">
+		<td class="fieldLabel" style="width:150px;" scope="row">Workgroup</td>
+		<td class="fieldValue">
+                <span id="ctl00_mainContent_CompanyAddress_lblWorkgroupName">UNLV (NSHE-Business Center South)</span>
+            </td>
+	</tr>
+	<tr id="ctl00_mainContent_CompanyAddress_trContactName">
+		<td class="fieldLabel" style="width:150px;" scope="row">Contact Name</td>
+		<td class="fieldValue">
+                <span id="ctl00_mainContent_CompanyAddress_lblContactName">Pat Example Purchasing Analyst</span>
+            </td>
+	</tr>
+	<tr id="ctl00_mainContent_CompanyAddress_trAddress">
+		<td class="fieldLabel" style="width:150px;" scope="row">Address</td>
+		<td>
+                <table role="presentation">
+                    
+                    
+                    <tbody><tr id="ctl00_mainContent_CompanyAddress_trCityStateZip">
+			<td class="fieldValue">
+                            <span id="ctl00_mainContent_CompanyAddress_lblCityStateZip">Las Vegas, NV 89154-1033 USA</span>
+                        </td>
+		</tr>
+		
+                </tbody></table>
+            </td>
+	</tr>
+	<tr id="ctl00_mainContent_CompanyAddress_trPhone">
+		<td class="fieldLabel" style="width:150px;" scope="row">Contact Phone</td>
+		<td class="fieldValue">
+                <span id="ctl00_mainContent_CompanyAddress_lblPhoneNumber">(702) 555-0100 </span>
+            </td>
+	</tr>
+	<tr id="ctl00_mainContent_CompanyAddress_trEmail">
+		<td class="fieldLabel" style="width:150px;" scope="row">Contact Email</td>
+		<td class="fieldValue">
+                <a id="ctl00_mainContent_CompanyAddress_lnkEmail" class="procLink" href="mailto:contact@example.gov?subject=5584-GS%20Addendum%201%20(Emergency%20Phone%20Tower%20Installations%20and%20Upgrades)">contact@example.gov</a>
+            </td>
+	</tr>
+</tbody></table>
+
+    
+</div>
+
+				</td>
+			</tr>
+			<tr>
+				<td style="vertical-align: top; padding-top: 10px;">
+					
+<script type="text/javascript">
+
+    function returnToUrl() {
+        //debugger;
+        //Firefox does not like the below call. It prompts user to acknowledge that it is o.k. to do a "Resend". This makes sense
+        //as the popup is actually on the Default.aspx page and calling a reload makes it question whether or not it needs
+        //to resend data. Changed call to set href of window instead.
+        //Update:  setting the href when the popup control is not in the same directory and also not using the PID system for popups,
+        //does not completely replace the href, it just appends.  So, went back to Reload, but using window instead of document.
+        //verified that this does work in Firefox.
+        //document.location.reload(returnUrl);
+        window.location = window.location;
+        //window.location.reload(returnUrl);
+
+    }
+
+    function OnClientButtonClicked(sender, args) {
+
+        var item = args.get_item();
+        var value = item.get_value();
+
+
+        if (value === "CLEAR") {
+            var ok = confirm("Are you sure you want to clear?");
+            if (!ok) {
+                args.set_cancel(true);
+                return;
+            }
+        }
+        else if (value === "ADDBOOK") {
+            var el = item.get_element();
+            var url = item.get_commandArgument();
+            if (url && typeof OpenRadWindowModal === "function") {
+                OpenRadWindowModal(url, '850', '550');
+            } else {
+                console.warn("Address Book URL or OpenRadWindowModal is missing.");
+            }
+
+            args.set_cancel(true);
+        }
+    }
+</script>
+
+<!-- Skip link for accessibility -->
+<a href="#mainContent" class="sr-only" tabindex="0">Skip to main content</a>
+
+<h2>
+    <span id="ctl00_mainContent_ShipToAddress_lblHeader">Ship to Information</span>
+</h2>
+
+<!-- ARIA: Toolbar instructions for screen readers -->
+<span id="editAddrDesc" class="sr-only">Press Enter to edit the address.</span>
+<span id="defaultAddrDesc" class="sr-only">Press Enter to set the default address.</span>
+<span id="clearAddrDesc" class="sr-only">Press Enter to clear the address.</span>
+<span id="addBookDesc" class="sr-only">Press Enter to open the address book.</span>
+
+
+
+<!-- Main content region -->
+<div id="mainContent" role="main" aria-label="Event Address Details">
+    
+    <div id="ctl00_mainContent_ShipToAddress_divEmptyList" aria-live="polite">
+        
+    </div>
+</div>
+
+				</td>
+				<td style="vertical-align: top; padding-top: 10px; padding-left: 10px;">
+					
+<script type="text/javascript">
+
+    function returnToUrl() {
+        //debugger;
+        //Firefox does not like the below call. It prompts user to acknowledge that it is o.k. to do a "Resend". This makes sense
+        //as the popup is actually on the Default.aspx page and calling a reload makes it question whether or not it needs
+        //to resend data. Changed call to set href of window instead.
+        //Update:  setting the href when the popup control is not in the same directory and also not using the PID system for popups,
+        //does not completely replace the href, it just appends.  So, went back to Reload, but using window instead of document.
+        //verified that this does work in Firefox.
+        //document.location.reload(returnUrl);
+        window.location = window.location;
+        //window.location.reload(returnUrl);
+
+    }
+
+    function OnClientButtonClicked(sender, args) {
+
+        var item = args.get_item();
+        var value = item.get_value();
+
+
+        if (value === "CLEAR") {
+            var ok = confirm("Are you sure you want to clear?");
+            if (!ok) {
+                args.set_cancel(true);
+                return;
+            }
+        }
+        else if (value === "ADDBOOK") {
+            var el = item.get_element();
+            var url = item.get_commandArgument();
+            if (url && typeof OpenRadWindowModal === "function") {
+                OpenRadWindowModal(url, '850', '550');
+            } else {
+                console.warn("Address Book URL or OpenRadWindowModal is missing.");
+            }
+
+            args.set_cancel(true);
+        }
+    }
+</script>
+
+<!-- Skip link for accessibility -->
+<a href="#mainContent" class="sr-only" tabindex="0">Skip to main content</a>
+
+<h2>
+    <span id="ctl00_mainContent_BillToAddress_lblHeader">Bill to Information</span>
+</h2>
+
+<!-- ARIA: Toolbar instructions for screen readers -->
+<span id="editAddrDesc" class="sr-only">Press Enter to edit the address.</span>
+<span id="defaultAddrDesc" class="sr-only">Press Enter to set the default address.</span>
+<span id="clearAddrDesc" class="sr-only">Press Enter to clear the address.</span>
+<span id="addBookDesc" class="sr-only">Press Enter to open the address book.</span>
+
+
+
+<!-- Main content region -->
+<div id="mainContent" role="main" aria-label="Event Address Details">
+    
+    <div id="ctl00_mainContent_BillToAddress_divEmptyList" aria-live="polite">
+        
+    </div>
+</div>
+
+				</td>
+			</tr>
+
+		</tbody></table>
+	</div>
+
+	</main>
+</div>
+		<input type="hidden" name="ctl00$hdnCompanyID" id="ctl00_hdnCompanyID">
+		<input type="hidden" name="ctl00$hdnParentForm" id="ctl00_hdnParentForm">
+		<input type="hidden" name="ctl00$hdnVendorID" id="ctl00_hdnVendorID">
+	
+<script type="text/javascript">
+//<![CDATA[
+var Page_ValidationSummaries =  new Array(document.getElementById("ctl00_valSummary"));
+//]]>
+</script>
+
+
+<script type="text/javascript">
+//<![CDATA[
+window.__TsmHiddenField = $get('ctl00_ScriptManager_TSM');
+(function(id) {
+    var e = document.getElementById(id);
+    if (e) {
+        e.dispose = function() {
+            Array.remove(Page_ValidationSummaries, document.getElementById(id));
+        }
+        e = null;
+    }
+})('ctl00_valSummary');
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadWindow, {"_dockMode":false,"_stylezindex":"11000","behaviors":37,"clientStateFieldID":"ctl00_rwPopUpModal_ClientState","enableAriaSupport":true,"formID":"aspnetForm","iconUrl":"","keepInScreenBounds":true,"minimizeIconUrl":"","modal":true,"name":"rwPopUpModal","shortcuts":"[[\u0027close\u0027,\u0027Esc\u0027]]","showContentDuringLoad":false,"skin":"Default","visibleStatusbar":false}, {"close":OnClientClose,"resizeEnd":clientShow}, null, $get("ctl00_rwPopUpModal"));
+});
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadWindow, {"_dockMode":false,"_stylezindex":"11000","behaviors":37,"clientStateFieldID":"ctl00_rwPopUpModalNoClientClose_ClientState","enableAriaSupport":true,"formID":"aspnetForm","iconUrl":"","keepInScreenBounds":true,"minimizeIconUrl":"","modal":true,"name":"rwPopUpModalNoClientClose","shortcuts":"[[\u0027close\u0027,\u0027Esc\u0027]]","showContentDuringLoad":false,"skin":"Default","visibleStatusbar":false}, {"resizeEnd":clientShow}, null, $get("ctl00_rwPopUpModalNoClientClose"));
+});
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadWindow, {"_dockMode":false,"_stylezindex":"11000","behaviors":33,"clientStateFieldID":"ctl00_rwPopUpProgress_ClientState","enableAriaSupport":true,"formID":"aspnetForm","iconUrl":"","keepInScreenBounds":true,"minimizeIconUrl":"","modal":true,"name":"rwPopUpProgress","shortcuts":"[[\u0027close\u0027,\u0027Esc\u0027]]","showContentDuringLoad":false,"skin":"Default","visibleStatusbar":false}, {"close":OnProgressClose,"resizeEnd":clientShow}, null, $get("ctl00_rwPopUpProgress"));
+});
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadWindow, {"_dockMode":false,"_stylezindex":"11000","behaviors":33,"clientStateFieldID":"ctl00_rwVendorBuyerTermsError_ClientState","enableAriaSupport":true,"formID":"aspnetForm","height":"600px","iconUrl":"","keepInScreenBounds":true,"minimizeIconUrl":"","modal":true,"name":"rwVendorBuyerTermsError","shortcuts":"[[\u0027close\u0027,\u0027Esc\u0027]]","showContentDuringLoad":false,"skin":"Default","visibleStatusbar":false,"width":"800px"}, {"close":OnClientClose}, null, $get("ctl00_rwVendorBuyerTermsError"));
+});
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadWindow, {"_dockMode":false,"_stylezindex":"11000","behaviors":33,"clientStateFieldID":"ctl00_rwVendorRecoveryEmailEdit_ClientState","enableAriaSupport":true,"formID":"aspnetForm","height":"270px","iconUrl":"","keepInScreenBounds":true,"minimizeIconUrl":"","modal":true,"name":"rwVendorRecoveryEmailEdit","shortcuts":"[[\u0027close\u0027,\u0027Esc\u0027]]","showContentDuringLoad":false,"skin":"Default","visibleStatusbar":false,"width":"750px"}, {"close":OnRecoveryEmailPopupClose}, null, $get("ctl00_rwVendorRecoveryEmailEdit"));
+});
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadWindow, {"_dockMode":false,"_stylezindex":"11000","behaviors":33,"clientStateFieldID":"ctl00_rwVendorBuyerTermsEdit_ClientState","enableAriaSupport":true,"formID":"aspnetForm","height":"950px","iconUrl":"","keepInScreenBounds":true,"minimizeIconUrl":"","modal":true,"name":"rwVendorBuyerTermsEdit","shortcuts":"[[\u0027close\u0027,\u0027Esc\u0027]]","showContentDuringLoad":false,"skin":"Default","visibleStatusbar":false,"width":"1060px"}, {"close":OnBuyerTermsPopupClose}, null, $get("ctl00_rwVendorBuyerTermsEdit"));
+});
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadWindow, {"_dockMode":false,"_stylezindex":"11000","behaviors":33,"clientStateFieldID":"ctl00_rwAcknowledgeMessages_ClientState","enableAriaSupport":true,"formID":"aspnetForm","height":"950px","iconUrl":"","keepInScreenBounds":true,"minimizeIconUrl":"","modal":true,"name":"rwAcknowledgeMessages","shortcuts":"[[\u0027close\u0027,\u0027Esc\u0027]]","showContentDuringLoad":false,"skin":"Default","visibleStatusbar":false,"width":"1060px"}, {"close":OnAcknowledgePopupClose}, null, $get("ctl00_rwAcknowledgeMessages"));
+});
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadButton, {"_accessKey":"","_hasIcon":false,"_hasImage":false,"_isClientSubmit":true,"_isImageButton":false,"_postBackReference":"__doPostBack('ctl00$confirmWindow$C$btnReturnToTerms','')","_renderMode":2,"autoPostBack":false,"clientStateFieldID":"ctl00_confirmWindow_C_btnReturnToTerms_ClientState","confirmSettings":{},"cssClass":"buttonPrimary","iconData":{},"imageData":{},"text":"Return to Terms Agreement","toggleStatesData":[],"uniqueGroupName":"","uniqueID":"ctl00$confirmWindow$C$btnReturnToTerms"}, {"clicked":ShowTermsCloseOrRenewOptions}, null, $get("ctl00_confirmWindow_C_btnReturnToTerms"));
+});
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadButton, {"_accessKey":"","_hasIcon":false,"_hasImage":false,"_isClientSubmit":true,"_isImageButton":false,"_postBackReference":"__doPostBack('ctl00$confirmWindow$C$btnCloseAndLogout','')","_renderMode":2,"autoPostBack":false,"clientStateFieldID":"ctl00_confirmWindow_C_btnCloseAndLogout_ClientState","confirmSettings":{},"cssClass":"buttonStandard","iconData":{},"imageData":{},"text":"Logout","toggleStatesData":[],"uniqueGroupName":"","uniqueID":"ctl00$confirmWindow$C$btnCloseAndLogout"}, {"clicked":ShowTermsCloseOrRenewOptions}, null, $get("ctl00_confirmWindow_C_btnCloseAndLogout"));
+});
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadWindow, {"_dockMode":true,"_stylezindex":"11000","behaviors":0,"clientStateFieldID":"ctl00_confirmWindow_ClientState","enableAriaSupport":true,"formID":"aspnetForm","height":"200px","iconUrl":"","keepInScreenBounds":true,"minimizeIconUrl":"","modal":true,"name":"confirmWindow","shortcuts":"[[\u0027close\u0027,\u0027Esc\u0027]]","showContentDuringLoad":false,"skin":"Default","visibleStatusbar":false,"visibleTitlebar":false,"width":"450px"}, null, null, $get("ctl00_confirmWindow"));
+});
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadWindowManager, {"clientStateFieldID":"ctl00_rwmMain_ClientState","enableAriaSupport":true,"formID":"aspnetForm","iconUrl":"","keepInScreenBounds":true,"minimizeIconUrl":"","modal":true,"name":"rwmMain","shortcuts":"[[\u0027close\u0027,\u0027Esc\u0027]]","showContentDuringLoad":false,"skin":"Default","visibleStatusbar":false,"windowControls":"['ctl00_rwPopUpModal','ctl00_rwPopUpModalNoClientClose','ctl00_rwPopUpProgress','ctl00_rwVendorBuyerTermsError','ctl00_rwVendorRecoveryEmailEdit','ctl00_rwVendorBuyerTermsEdit','ctl00_rwAcknowledgeMessages','ctl00_confirmWindow']"}, null, {"child":"ctl00_rwPopUpModal"}, $get("ctl00_rwmMain"));
+});
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadMenu, {"_childListElementCssClass":null,"_skin":"Proc","attributes":{},"clientStateFieldID":"ctl00_menuMain_ClientState","collapseAnimation":"{\"duration\":100}","expandAnimation":"{\"duration\":200}","expandDelay":200,"itemData":[{"items":[{"navigateUrl":"~/Vendor/VendorHome.aspx"},{"navigateUrl":"~/Vendor/VendorMessage.aspx"}],"value":"HOME","navigateUrl":"~/Vendor/VendorHome.aspx","enableImageSprite":true},{"value":"BIDEVENTS","navigateUrl":"~/VendorResponse/ResponseList.aspx?e=list12","enableImageSprite":true},{"value":"AUCTIONEVENTS","navigateUrl":"~/VendorResponse/AuctionList.aspx?e=list12","enableImageSprite":true},{"items":[{"value":"BUYERLIST","navigateUrl":"~/Vendor/BuyerList.aspx"},{"value":"REGISTRATIONS","navigateUrl":"~/VendorAdmin/RegistrationList.aspx"}],"value":"BUYERS","navigateUrl":"~/Vendor/BuyerList.aspx","enableImageSprite":true},{"items":[{"value":"VENDORPROFILE","navigateUrl":"~/VendorAdmin/VendorProfile.aspx"},{"value":"BUYERPROFILE","navigateUrl":"~/Vendor/BuyerProfile/ProfileCommodity.aspx?e=misc03"},{"value":"AUDITLOG","navigateUrl":"~/Vendor/VendorAuditHistory.aspx"}],"value":"ADMIN","enableImageSprite":true}]}, null, null, $get("ctl00_menuMain"));
+});
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadMenu, {"_childListElementCssClass":null,"_skin":"Proc","attributes":{},"clientStateFieldID":"ctl00_menuProfile_ClientState","collapseAnimation":"{\"duration\":100}","collapseDelay":100,"expandAnimation":"{\"duration\":200}","expandDelay":200,"itemData":[{"items":[{"navigateUrl":"~/VendorAdmin/MyProfile.aspx"},{"isSeparator":true},{"navigateUrl":"~/SessionLogout.aspx"}],"cssClass":"profileMenu"}]}, null, null, $get("ctl00_menuProfile"));
+});
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadButton, {"_accessKey":"","_hasIcon":false,"_hasImage":false,"_isClientSubmit":false,"_isImageButton":false,"_postBackReference":"","_renderMode":2,"autoPostBack":false,"clientStateFieldID":"ctl00_mainContent_ctlTabStrip_rbBidHeaderActions_ClientState","confirmSettings":{},"cssClass":"buttonPrimary","enableSplitButton":true,"iconData":{},"imageData":{},"text":"Actions","toggleStatesData":[],"uniqueGroupName":"","uniqueID":"ctl00$mainContent$ctlTabStrip$rbBidHeaderActions"}, {"clicked":rbBidHeaderActions_ClientClicked}, null, $get("ctl00_mainContent_ctlTabStrip_rbBidHeaderActions"));
+});
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadContextMenu, {"_childListElementCssClass":null,"_postBackReference":"__doPostBack(\u0027ctl00$mainContent$ctlTabStrip$rcmBidHeaderActions\u0027,\u0027arguments\u0027)","_renderMode":2,"_skin":"Default","clientStateFieldID":"ctl00_mainContent_ctlTabStrip_rcmBidHeaderActions_ClientState","collapseAnimation":"{\"duration\":450}","expandAnimation":"{\"duration\":450}","itemData":[{"navigateUrl":"https://supplier.ionwave.net/VendorResponse/Bid/VResponseBidAudit.aspx?e=misc04"},{"value":"VALIDATE"},{"value":"NOBID"}],"targets":[]}, {"itemClicking":rcmBidHeaderActions_ClientItemClicking,"load":rcmBidHeaderActions_ClientLoad}, null, $get("ctl00_mainContent_ctlTabStrip_rcmBidHeaderActions"));
+});
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadTabStrip, {"_selectedIndex":0,"_skin":"Proc","causesValidation":false,"clientStateFieldID":"ctl00_mainContent_ctlTabStrip_rts_ClientState","selectedIndexes":["0"],"tabData":[{"value":"EVENT"},{"value":"QUESTION"},{"value":"ACTIVITY"},{"value":"BIDATTACHMENTS"},{"value":"ATTRIBUTE"},{"value":"LINE"},{"value":"RESPONSEATTACHMENTS"},{"value":"SUBMISSION"}]}, {"tabSelected":onTabSelected}, null, $get("ctl00_mainContent_ctlTabStrip_rts"));
+});
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadWindow, {"_dockMode":false,"_stylezindex":"11000","behaviors":37,"clientStateFieldID":"ctl00_mainContent_ctlTabStrip_rwIntent_ClientState","formID":"aspnetForm","height":"525px","iconUrl":"","keepInScreenBounds":true,"minimizeIconUrl":"","modal":true,"name":"rwIntent","showContentDuringLoad":false,"skin":"Default","visibleStatusbar":false,"width":"525px"}, null, null, $get("ctl00_mainContent_ctlTabStrip_rwIntent"));
+});
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadWindow, {"_dockMode":false,"_stylezindex":"11000","behaviors":37,"clientStateFieldID":"ctl00_mainContent_ctlTabStrip_rwPlanHolderIntent_ClientState","formID":"aspnetForm","height":"525px","iconUrl":"","keepInScreenBounds":true,"minimizeIconUrl":"","modal":true,"name":"rwPlanHolderIntent","showContentDuringLoad":false,"skin":"Default","visibleStatusbar":false,"width":"525px"}, null, null, $get("ctl00_mainContent_ctlTabStrip_rwPlanHolderIntent"));
+});
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadWindow, {"_dockMode":false,"_stylezindex":"11000","behaviors":37,"clientStateFieldID":"ctl00_mainContent_ctlTabStrip_rwNoBid_ClientState","formID":"aspnetForm","height":"450px","iconUrl":"","keepInScreenBounds":true,"minimizeIconUrl":"","modal":true,"name":"rwNoBid","showContentDuringLoad":false,"skin":"Default","visibleStatusbar":false,"width":"800px"}, null, null, $get("ctl00_mainContent_ctlTabStrip_rwNoBid"));
+});
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadWindow, {"_dockMode":false,"_stylezindex":"11000","behaviors":37,"clientStateFieldID":"ctl00_mainContent_ctlTabStrip_rwCostCalc_ClientState","formID":"aspnetForm","height":"450px","iconUrl":"","keepInScreenBounds":true,"minimizeIconUrl":"","modal":true,"name":"rwCostCalc","showContentDuringLoad":false,"skin":"Default","visibleStatusbar":false,"width":"800px"}, null, null, $get("ctl00_mainContent_ctlTabStrip_rwCostCalc"));
+});
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadWindowManager, {"clientStateFieldID":"ctl00_mainContent_ctlTabStrip_rwmVendorResponse_ClientState","formID":"aspnetForm","iconUrl":"","keepInScreenBounds":true,"minimizeIconUrl":"","modal":true,"name":"rwmVendorResponse","showContentDuringLoad":false,"skin":"Default","visibleStatusbar":false,"windowControls":"['ctl00_mainContent_ctlTabStrip_rwIntent','ctl00_mainContent_ctlTabStrip_rwPlanHolderIntent','ctl00_mainContent_ctlTabStrip_rwNoBid','ctl00_mainContent_ctlTabStrip_rwCostCalc']"}, null, {"child":"ctl00_mainContent_ctlTabStrip_rwIntent"}, $get("ctl00_mainContent_ctlTabStrip_rwmVendorResponse"));
+});
+//]]>
+</script>
+</form>
+	<script type="text/javascript">
+		window.$ = $telerik.$;
+		var sLogout = 'https://supplier.ionwave.net/SessionLogout.aspx'
+		var sLogin = 'https://supplier.ionwave.net/Login.aspx'
+		GetSessionMinutesRemaining();
+	</script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon="{&quot;version&quot;:&quot;2024.11.0&quot;,&quot;token&quot;:&quot;a066d9046a79460d9647771312757e34&quot;,&quot;spa&quot;:2}" crossorigin="anonymous"></script>
+
+</body></html>

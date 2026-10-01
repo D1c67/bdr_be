@@ -69,11 +69,19 @@ WAGE_TEXT = {"prevailing_wage": "Prevailing Wage", "non_prevailing_wage": "Non-p
 
 
 class ProposalSendError(Exception):
-    """User-actionable failure; the router surfaces .args[0] as the detail."""
+    """User-actionable failure; the router surfaces .args[0] as the detail.
+    `code` is an optional machine-readable error code (app/core/error_codes)
+    for the refusals a frontend branches on; None for the rest."""
 
-    def __init__(self, message: str, status_code: int = 409):
+    def __init__(self, message: str, status_code: int = 409, code: str | None = None):
         super().__init__(message)
         self.status_code = status_code
+        self.code = code
+
+
+# The X-Error-Code a DELETE on a GC the RFP matcher added carries: the only
+# detach path for such a link is Unmerge (docs/RFP_MATCHING.md 3.7).
+RFP_MATCH_UNMERGE_REQUIRED = "rfp_match_unmerge_required"
 
 
 # ── amounts ────────────────────────────────────────────────────────────────
@@ -583,6 +591,16 @@ def _not_pending(query):
     return query.or_("pricing_approval_status.is.null,pricing_approval_status.neq.pending")
 
 
+def gone_out_rule(head: str | None, reverify_return_stage: str | None) -> bool:
+    """Pure: the bid has gone out when the send_out head is past the send, or
+    is parked at 'verify' by a post-submission re-verify bounce that will
+    return to such a head. `bid_has_gone_out` delegates here; callers that
+    already hold the project row (the list-route counts) evaluate it inline."""
+    if head in PRICING_APPROVAL_HEADS:
+        return True
+    return head == "verify" and reverify_return_stage in PRICING_APPROVAL_HEADS
+
+
 def bid_has_gone_out(sb, project_id: str, head: str | None) -> bool:
     """Whether the bid already went out to GCs, independent of a re-verify
     bounce. A post-submission pricing edit parks the send_out head at 'verify'
@@ -598,7 +616,122 @@ def bid_has_gone_out(sb, project_id: str, head: str | None) -> bool:
         sb.table("projects").select("reverify_return_stage").eq("id", project_id)
         .limit(1).execute()
     ).data or []
-    return bool(rows) and rows[0].get("reverify_return_stage") in PRICING_APPROVAL_HEADS
+    return bool(rows) and gone_out_rule(head, rows[0].get("reverify_return_stage"))
+
+
+def block_if_sending(project_id: str, gc_id: str, *, include_sent: bool = False) -> None:
+    """Refuse (409) while a proposal send to this GC is in flight, or, with
+    `include_sent`, once one has gone out. Dropping a GC mid-send would trip
+    the isolation assertions and mark the send failed; a sent proposal makes
+    an unmerge impossible. A pre-check only: `mark_submitted` writes 'sent'
+    with no 'sending' phase, so the guard that counts on removal is the
+    conditional delete in `remove_gc_link`."""
+    statuses = ["sending", "sent"] if include_sent else ["sending"]
+    rows = (
+        get_supabase()
+        .table("proposal_sends")
+        .select("id, status")
+        .eq("project_id", project_id)
+        .eq("gc_id", gc_id)
+        .in_("status", statuses)
+        .limit(1)
+        .execute()
+    ).data or []
+    if not rows:
+        return
+    if rows[0].get("status") == "sent":
+        raise ProposalSendError("This GC's proposal has already been sent.")
+    raise ProposalSendError(
+        "A proposal send to this GC is in progress or unresolved: wait or retry it first."
+    )
+
+
+def _open_system_link(sb, project_id: str, gc_id: str) -> dict | None:
+    """The open rfp_project_matches merge for this pair (regardless of
+    gc_added, so a crash-resume row is covered). None when the RFP feature is
+    off: the table may not exist on that deployment."""
+    if not get_settings().rfp_ingest_enabled:
+        return None
+    rows = (
+        sb.table("rfp_project_matches")
+        .select("id, gc_added, project_gc_id")
+        .eq("project_id", project_id)
+        .eq("gc_id", gc_id)
+        .eq("kind", "merged")
+        .is_("unmerged_at", "null")
+        .limit(1)
+        .execute()
+    ).data or []
+    return rows[0] if rows else None
+
+
+def remove_gc_link(
+    project_id: str,
+    gc_id: str,
+    *,
+    link_id: str | None = None,
+    refuse_if_sent: bool = False,
+    via_unmerge: bool = False,
+) -> bool:
+    """Detach one GC from a project (the body of DELETE /projects/{id}/gcs/{gc_id},
+    shared with the RFP unmerge; docs/RFP_MATCHING.md 3.7). Returns True when
+    a link was deleted, False when there was nothing left to delete.
+
+    a. `retire_unsent_proposals` FIRST: the claim. Its conditional update on
+       status in (generated, failed) touches the same rows, under the same
+       condition, that a send (claim to 'sending') or mark-submitted (claim
+       to 'sent') updates, so the row lock makes exactly one side win.
+    b. The SQL function remove_project_gc_unless_sent deletes the link in one
+       statement unless a proposal_sends row for the pair is 'sending' (or,
+       with `refuse_if_sent`, 'sent' too). By `link_id` when given, so a GC a
+       person removed and re-added after a merge (a new id) is never deleted.
+       A null return is disambiguated by re-selecting the link, never by
+       reading proposal_sends: a link still present means the function
+       refused because of a send (409); no link means already removed (False).
+    c. The GC's pending pricing-approval notifications are dismissed.
+
+    A GC the RFP matcher added (an open merged rfp_project_matches row) is
+    refused unless `via_unmerge`: Unmerge is its only detach path.
+    """
+    sb = get_supabase()
+    if not via_unmerge and _open_system_link(sb, project_id, gc_id):
+        raise ProposalSendError(
+            "This GC was added by RFP ingestion. Use Unmerge in the Merged by System "
+            "modal to detach it.",
+            code=RFP_MATCH_UNMERGE_REQUIRED,
+        )
+    retire_unsent_proposals(project_id, gc_id)
+    deleted = (
+        sb.rpc(
+            "remove_project_gc_unless_sent",
+            {
+                "p_link_id": link_id,
+                "p_project_id": project_id,
+                "p_gc_id": gc_id,
+                "p_refuse_if_sent": bool(refuse_if_sent),
+            },
+        ).execute()
+    ).data
+    if not deleted:
+        query = sb.table("project_gcs").select("id").eq("project_id", project_id)
+        query = query.eq("id", link_id) if link_id else query.eq("gc_id", gc_id)
+        if (query.limit(1).execute()).data:
+            if refuse_if_sent:
+                raise ProposalSendError(
+                    "A proposal to this GC has been sent or is sending, so it cannot be "
+                    "removed now."
+                )
+            raise ProposalSendError(
+                "A proposal send to this GC is in progress or unresolved: wait or retry "
+                "it first."
+            )
+        return False
+    # A removed GC leaves no dangling Executive task: its pending price-change
+    # request (if any) is gone with the row, so its notifications go too.
+    dismiss_notifications(
+        project_id=project_id, types=["gc_pricing.approval_requested"], gc_id=gc_id
+    )
+    return True
 
 
 def _gc_pending_now(sb, project_id: str, gc_id: str) -> bool:
@@ -763,11 +896,27 @@ def project_gc_rows(project_id: str) -> list[dict]:
             sb.table("profiles").select("id, full_name").in_("id", user_ids).execute()
         ).data or []
         names = {p["id"]: p.get("full_name") for p in profiles}
+    # A GC the RFP matcher added carries its open merge row (RFP_MATCHING 3.9):
+    # the panel shows the "Merged by System" chip with the provenance and
+    # swaps Remove for Unmerge. One read, skipped while the RFP feature is off
+    # (the table may not exist on that deployment).
+    system_added: dict[str, dict] = {}
+    if get_settings().rfp_ingest_enabled:
+        merges = (
+            sb.table("rfp_project_matches")
+            .select("id, gc_id, gc_match_kind, sender_address, invitation_method")
+            .eq("project_id", project_id)
+            .eq("kind", "merged")
+            .is_("unmerged_at", "null")
+            .execute()
+        ).data or []
+        system_added = {m["gc_id"]: m for m in merges if m.get("gc_id")}
     out = []
     for r in rows:
         gc = r.get("general_contractors")
         if not gc:
             continue
+        merge = system_added.get(gc["id"])
         contacts = sorted(gc.get("gc_contacts") or [], key=lambda c: (c.get("name") or "").lower())
         live_ids = {c["id"] for c in contacts}
         selected = [
@@ -795,6 +944,16 @@ def project_gc_rows(project_id: str) -> list[dict]:
                 "pricing_decided_by_name": names.get(r.get("pricing_decided_by")),
                 "pricing_decided_at": r.get("pricing_decided_at"),
                 "pricing_decision_note": r.get("pricing_decision_note"),
+                "rfp_match_id": merge["id"] if merge else None,
+                "rfp_system_added": (
+                    {
+                        "gc_match_kind": merge.get("gc_match_kind"),
+                        "sender_address": merge.get("sender_address"),
+                        "invitation_method": merge.get("invitation_method"),
+                    }
+                    if merge
+                    else None
+                ),
             }
         )
     return sorted(out, key=lambda g: g["name"].lower())

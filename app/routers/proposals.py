@@ -27,6 +27,7 @@ from app.models.schemas import (
     ProposalAmountsRequestIn,
     ProposalGenerateIn,
     ProposalLinesIn,
+    ProposalManualIn,
     ProposalMarkSubmittedIn,
     ProposalResendIn,
     ProposalSendIn,
@@ -145,6 +146,84 @@ def start_lines_generation(
     return _wire_shape(row)
 
 
+def _assert_lines_unlocked(sb, project_id: str) -> None:
+    """Any send at all freezes the scope lines: the documents the GCs hold
+    were built from them."""
+    blocked = (
+        sb.table("proposal_sends")
+        .select("id")
+        .eq("project_id", project_id)
+        .in_("status", ["sent", "sending"])
+        .limit(1)
+        .execute()
+    ).data
+    if blocked:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Proposals have already been sent (or a send is in progress): lines are locked.",
+        )
+
+
+def _drop_active_generation(sb, project_id: str) -> None:
+    """Best-effort: a queued model job for this project is canceled when the
+    team switches to manual entry (the queue marks its draft failed). A job
+    already running keeps going and finishes on its own row, which the
+    manual draft outranks by created_at."""
+    if not get_settings().llm_queue_enabled:
+        return
+    active = (
+        sb.table("proposal_drafts")
+        .select("id")
+        .eq("project_id", project_id)
+        .in_("status", ["pending", "running"])
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    ).data or []
+    if not active:
+        return
+    try:
+        job = llm_queue.active_job(llm_queue.JOB_PROPOSAL, active[0]["id"])
+        if job:
+            llm_queue.cancel(job["id"])
+    except Exception:  # noqa: BLE001 - a queue hiccup must not block manual entry
+        logger.exception("Proposal manual entry: could not cancel the queued job")
+
+
+@router.post("/proposal-lines/manual", status_code=status.HTTP_201_CREATED)
+def start_manual_lines(
+    project_id: str,
+    body: ProposalManualIn,
+    user: CurrentUser = Depends(_PA_PM),
+):
+    """Open the scope-lines editor without a BOQ or a model run: a `done`
+    draft with model='manual' and whatever lines the caller seeded (usually
+    none). The team types, saves and approves exactly as after a generation.
+    The escape hatch for a downed model instance, or a project whose scope
+    the team writes itself; Generate stays available beside it."""
+    sb = get_supabase()
+    _assert_lines_unlocked(sb, project_id)
+    _drop_active_generation(sb, project_id)
+    row = (
+        sb.table("proposal_drafts")
+        .insert(
+            {
+                "project_id": project_id,
+                "boq_file_id": None,
+                "status": "done",
+                "model": "manual",
+                "result_json": {"source": "manual", "notes": None},
+                "lines_json": body.lines,
+                "created_by": user.id,
+            }
+        )
+        .execute()
+    ).data[0]
+    audit(user.id, "proposal.lines_manual", "proposal_draft", row["id"],
+          {"line_count": len(body.lines)})
+    return _wire_shape(row)
+
+
 @router.get("/proposal-lines/latest")
 def latest_draft(project_id: str, user: CurrentUser = Depends(get_current_user)):
     _internal(user)
@@ -181,19 +260,7 @@ def save_lines(
 ):
     sb = get_supabase()
     _draft_or_404(project_id, draft_id)
-    blocked = (
-        sb.table("proposal_sends")
-        .select("id")
-        .eq("project_id", project_id)
-        .in_("status", ["sent", "sending"])
-        .limit(1)
-        .execute()
-    ).data
-    if blocked:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "Proposals have already been sent (or a send is in progress) — lines are locked.",
-        )
+    _assert_lines_unlocked(sb, project_id)
     updated = (
         sb.table("proposal_drafts")
         .update({"lines_json": body.lines, "approved_at": None, "approved_by": None})

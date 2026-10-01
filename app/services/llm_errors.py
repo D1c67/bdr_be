@@ -11,7 +11,18 @@ Every failed LLM call lands here twice:
 
 The model label comes from llm.active_model(), which prefixes
 "self-hosted:" when the self-hosted pool is active; messages use that to
-talk about "the local AI server" vs "the AI provider".
+talk about "the local AI server" vs "the AI provider". Non-LLM queue jobs
+(the RFP Ingestion sandbox) pass a plain label such as "sandbox"; every
+branch tolerates it, no branch dereferences the label beyond a prefix test.
+
+Non-LLM jobs on the same queue can declare their own kind instead of relying
+on the LLM-shaped heuristics below: an exception class (or instance) carrying
+`llm_error_kind = "<one of the kinds here>"` is bucketed as that kind before
+any other test runs. rfp_ingest uses it for RfpIngestTransient
+(infrastructure: a storage or spawn hiccup worth retrying) and
+RfpIngestPermanent (bad_input). The infrastructure kind is the one kind whose
+user_message is the exception's own text, because that text is app-authored
+by rfp_ingest (protocol.VERDICT_MESSAGES), never a child's output.
 """
 
 from typing import Any
@@ -31,12 +42,32 @@ KIND_NOT_CONFIGURED = "not_configured"  # missing key / URL / model env
 KIND_UNAUTHORIZED = "unauthorized"      # provider rejected the credentials
 KIND_BAD_INPUT = "bad_input"            # this input can never work (scanned PDF, ...)
 KIND_INVALID_OUTPUT = "invalid_output"  # model answered, but unusably
+KIND_INFRASTRUCTURE = "infrastructure"  # non-LLM job: storage / spawn / disk hiccup
 KIND_UNKNOWN = "unknown"
+
+_ALL_KINDS = frozenset(
+    {
+        KIND_UNREACHABLE,
+        KIND_TIMEOUT,
+        KIND_OVERLOADED,
+        KIND_RATE_LIMITED,
+        KIND_SERVER_ERROR,
+        KIND_OUT_OF_TOKENS,
+        KIND_NOT_CONFIGURED,
+        KIND_UNAUTHORIZED,
+        KIND_BAD_INPUT,
+        KIND_INVALID_OUTPUT,
+        KIND_INFRASTRUCTURE,
+        KIND_UNKNOWN,
+    }
+)
 
 # Kinds worth retrying automatically. unknown is treated as transient so a
 # never-seen-before failure gets the retry schedule rather than an instant
 # terminal failure; if it keeps happening it fails after the last attempt
 # anyway. invalid_output is transient because regeneration usually fixes it.
+# infrastructure is transient by definition (the raiser asserts the input is
+# fine and only the environment failed).
 _TRANSIENT_KINDS = frozenset(
     {
         KIND_UNREACHABLE,
@@ -45,9 +76,18 @@ _TRANSIENT_KINDS = frozenset(
         KIND_RATE_LIMITED,
         KIND_SERVER_ERROR,
         KIND_INVALID_OUTPUT,
+        KIND_INFRASTRUCTURE,
         KIND_UNKNOWN,
     }
 )
+
+# The attribute a non-LLM exception class sets to declare its own kind, and
+# the class-name fallback for the one raiser that predates the attribute.
+_DECLARED_KIND_ATTR = "llm_error_kind"
+_TRANSIENT_CLASS_NAMES = frozenset({"RfpIngestTransient"})
+# str(exc) is stored for the infrastructure kind only; cap it like every
+# other stored message (llm_queue._ERROR_MAX_CHARS).
+_INFRASTRUCTURE_MESSAGE_MAX_CHARS = 500
 
 _QUOTA_MARKERS = (
     "credit balance is too low",
@@ -99,12 +139,28 @@ def _is_connection_error(exc: BaseException) -> bool:
     return False
 
 
+def declared_kind(exc: BaseException) -> str | None:
+    """The kind an exception declares for itself via `llm_error_kind`, or by
+    class name for RfpIngestTransient; None when it declares nothing valid.
+    Only a known kind is honored, so a typo in a raiser degrades to the
+    heuristics below instead of inventing a kind the queue cannot act on."""
+    kind = getattr(exc, _DECLARED_KIND_ATTR, None)
+    if isinstance(kind, str) and kind in _ALL_KINDS:
+        return kind
+    if type(exc).__name__ in _TRANSIENT_CLASS_NAMES:
+        return KIND_INFRASTRUCTURE
+    return None
+
+
 def classify(exc: Exception) -> str:
     """Bucket an exception from an LLM call into a stable error kind."""
     # Late imports: llm/llm_gate import this module at load time.
     from app.services.llm import LlmBadOutput, LlmNotConfigured, SelfHostedUnreachable
     from app.services.llm_gate import LlmBusy
 
+    declared = declared_kind(exc)
+    if declared is not None:
+        return declared
     if is_out_of_tokens(exc):
         return KIND_OUT_OF_TOKENS
     if isinstance(exc, LlmNotConfigured):
@@ -153,9 +209,19 @@ def _service_name(model: str) -> str:
 
 
 def user_message(exc: Exception, model: str) -> str:
-    """User-facing error text for a failed LLM call against `model`."""
+    """User-facing error text for a failed LLM call against `model`.
+
+    `model` is only ever prefix-tested and interpolated, so a non-LLM label
+    such as "sandbox" (the RFP Ingestion queue jobs) is tolerated by every
+    branch.
+    """
     kind = classify(exc)
     service = _service_name(model)
+    if kind == KIND_INFRASTRUCTURE:
+        # The one kind whose raw text is stored: the raiser (rfp_ingest) writes
+        # it for users from protocol.VERDICT_MESSAGES, and nothing from a
+        # sandbox child or a filename ever reaches the message.
+        return str(exc)[:_INFRASTRUCTURE_MESSAGE_MAX_CHARS]
     if kind == KIND_OUT_OF_TOKENS:
         return (
             f"The AI service is out of API tokens for the {model} model. "

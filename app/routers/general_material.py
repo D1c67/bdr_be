@@ -26,6 +26,19 @@ router = APIRouter(prefix="/projects/{project_id}/general-material", tags=["gene
 _EDITOR = require_writer
 
 
+# After the bid is submitted (0138) the figure is frozen when it is part of what
+# the bid was sent with (see general_material.figure_locked).
+_FIGURE_LOCKED = (
+    "The General Material figure is part of the bid that was sent. It can't be "
+    "changed after the bid was submitted."
+)
+
+
+def _refuse_if_locked(sb, project_id: str) -> None:
+    if general_material.figure_locked(project_id, sb):
+        raise HTTPException(status.HTTP_409_CONFLICT, _FIGURE_LOCKED)
+
+
 def _get(project_id: str):
     rows = (
         get_supabase()
@@ -103,6 +116,8 @@ def get_general_material(
         row
         and user.role in WRITER_ROLES
         and general_material.needs_combination_upgrade(row)
+        # Never rewrite a figure the submitted bid was sent with (0138).
+        and not general_material.figure_locked(project_id)
     ):
         # A figure extracted before the combination change is wiring alone;
         # catch it up automatically instead of waiting for a manual re-run.
@@ -131,6 +146,7 @@ def rerun_extraction(
 ):
     """Queue a re-run of the estimate extraction (queue-start semantics,
     including the up-front tax-attestation reset, live in _start_extraction)."""
+    _refuse_if_locked(get_supabase(), project_id)
     _start_extraction(project_id, background, user.id, strict=True)
     audit(user.id, "general_material.extract", "project", project_id, None)
     return {"status": "pending"}
@@ -140,9 +156,13 @@ def rerun_extraction(
 def set_general_material(
     project_id: str, body: GeneralMaterialIn, user: CurrentUser = Depends(_EDITOR)
 ):
-    """Manually set / override the general-material price."""
+    """Manually set / override the general-material price. Locked after the
+    bid was submitted when it is the sent figure; otherwise no bounce then."""
+    sb = get_supabase()
+    _refuse_if_locked(sb, project_id)
+    window = workflow.in_post_submission_window(project_id, sb)
     row = (
-        get_supabase()
+        sb
         .table("general_material_estimates")
         .upsert(
             {
@@ -165,7 +185,8 @@ def set_general_material(
         project_id,
         {"amount": str(body.amount) if body.amount is not None else None},
     )
-    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "General material price changed", stale="materials")
+    if not window:
+        workflow.maybe_reopen_verify_after_edit(project_id, user.id, "General material price changed", stale="materials")
     return row
 
 
@@ -176,9 +197,13 @@ def set_general_material_tax(
     """Record whether the general-material figure already includes sales tax,
     and the rate to apply when it doesn't — same attestation vendor quotes get,
     because this number feeds the materials total all the same. Upserts so the
-    answer can be recorded even before an extraction has created the row."""
+    answer can be recorded even before an extraction has created the row.
+    Locked after the bid was submitted when it is the sent figure."""
+    sb = get_supabase()
+    _refuse_if_locked(sb, project_id)
+    window = workflow.in_post_submission_window(project_id, sb)
     row = (
-        get_supabase()
+        sb
         .table("general_material_estimates")
         .upsert(
             {
@@ -200,5 +225,6 @@ def set_general_material_tax(
     )
     # The tax-inclusive figure changes the materials price basis, so re-verify
     # if the project already passed Verify (mirrors the quote tax endpoint).
-    workflow.maybe_reopen_verify_after_edit(project_id, user.id, "General material tax changed", stale="materials")
+    if not window:
+        workflow.maybe_reopen_verify_after_edit(project_id, user.id, "General material tax changed", stale="materials")
     return row

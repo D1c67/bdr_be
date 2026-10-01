@@ -9,13 +9,16 @@ resort) delete the account outright.
 Two guardrails run across the destructive edits, since the same admins hold the
 only keys to this surface:
 
-* an admin may not delete or disable their OWN account, and
+* an admin may not delete or disable their OWN account, nor change their own
+  role or dev flag (another admin must do that, so elevation takes two
+  people), and
 * the last active account that can manage users may not be deleted, disabled or
   demoted, otherwise the deployment locks itself out of user management with
   no in-app recovery path.
 """
 
 import logging
+import uuid
 from datetime import datetime, timezone
 from urllib.parse import urlencode
 
@@ -26,7 +29,13 @@ from app.core.deps import CurrentUser, get_current_user, require_internal, requi
 from app.core.ratelimit import outbound_email_rate_limit
 from app.core.roles import INTERNAL_ROLES, Role
 from app.core.supabase_client import get_supabase
-from app.services import invite_email
+from app.services import graph_email, invite_email
+from app.services.email_branding import (
+    LOGO_CONTENT_ID,
+    LOGO_FILENAME,
+    logo_bytes,
+    render_notification_email,
+)
 from app.models.schemas import (
     AdminUpdateUserIn,
     InviteUserIn,
@@ -93,6 +102,26 @@ def _refuse_while_impersonating(user: CurrentUser) -> None:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "Not available while viewing as an estimator"
         )
+
+
+def _canonical_id(user_id: str) -> str:
+    """Lowercase, hyphenated form of a UUID path param.
+
+    Postgres matches a uuid column against uppercase, braced or hyphenless
+    spellings too, so a raw string compare against `admin.id` would let
+    `PATCH /users/<OWN-ID-UPPERCASE>` slip past the self-edit guards while the
+    lookup and update still hit the caller's own row. Every `/{user_id}`
+    handler normalises through here first. A value that is not a UUID is
+    returned unchanged (the DB lookup then finds nothing).
+    """
+    try:
+        return str(uuid.UUID(str(user_id)))
+    except ValueError:
+        return user_id
+
+
+def _is_self(user_id: str, admin: CurrentUser) -> bool:
+    return _canonical_id(user_id) == _canonical_id(admin.id)
 
 
 def _load_profile(user_id: str) -> dict:
@@ -397,6 +426,7 @@ def reinvite_user(
     user_id: str, admin: CurrentUser = Depends(_MANAGE_USERS)
 ):
     """Resend the invite email to a user who hasn't accepted yet."""
+    user_id = _canonical_id(user_id)
     sb = get_supabase()
     profile = _load_profile(user_id)
     if profile.get("invite_accepted_at") is not None:
@@ -460,14 +490,19 @@ def reset_user_mfa(
     for a locked-out user (Supabase TOTP has no backup codes). The user is forced
     to re-enroll on their next login.
 
-    NOTE: deleting factors does not revoke an already-issued aal2 token (it stays
-    valid up to its ~1h TTL); enforcement re-applies once that token expires and
-    the next sign-in finds no factor.
+    Every refresh token the user holds is revoked too (best effort), so a
+    browser signed in before the reset cannot keep minting new tokens. An
+    already-issued access token still lives out its ~1h TTL; enforcement
+    re-applies once it expires and the next sign-in finds no factor. Not done
+    when an admin resets their own factors, which would just sign them out.
     """
+    user_id = _canonical_id(user_id)
     _load_profile(user_id)
     _delete_user_factors(user_id)
     updated = sb_update(user_id, {"mfa_enrolled": False})
     audit(admin.id, "user.mfa.admin_reset", "profile", user_id, {})
+    if not _is_self(user_id, admin):
+        _revoke_sessions(user_id, reason="mfa_reset", actor_id=admin.id)
     return updated
 
 
@@ -490,6 +525,7 @@ def reset_user_password(user_id: str, admin: CurrentUser = Depends(_MANAGE_USERS
     `invite_accepted_at`, leaving the admin list showing "Invited" forever. Resend
     the invite instead.
     """
+    user_id = _canonical_id(user_id)
     profile = _load_profile(user_id)
     if profile.get("invite_accepted_at") is None:
         raise HTTPException(
@@ -572,16 +608,43 @@ def update_user(
     format, still used by older callers) and in the JSON body; the body wins when
     a field appears in both. Name and email are body-only, since an email does not
     belong in a query string that lands in access logs.
+
+    `rfp_mailboxes` is body-only too (docs/RFP_EMAIL_VISIBILITY.md 3.5): the
+    RFP mailboxes this person owns, which decide what they see in the review
+    queue. Already trimmed, lowercased, deduped and capped by the schema; `[]`
+    clears the mapping. Refused for the external estimator, who never reaches
+    that surface at all.
+
+    Self-edits: an admin may fix their own name, email and mailboxes here, but
+    not their own role or dev flag (403 `self_privilege_change`), so granting
+    either always takes a second admin. `is_dev` is only ever granted on an
+    internal role (400 `is_dev_internal_only`); demoting a dev to the external
+    estimator clears it. Dev-flag and mailbox changes get their own audit rows
+    (`user.dev_granted` / `user.dev_revoked`, `user.rfp_mailboxes_changed`).
+
+    An email change notifies the OLD address and revokes the user's sessions
+    (both best effort, both audited) so a rewrite cannot go unnoticed.
     """
+    user_id = _canonical_id(user_id)
     edit = body or AdminUpdateUserIn()
     role = edit.role if edit.role is not None else role
     is_active = edit.is_active if edit.is_active is not None else is_active
     is_dev = edit.is_dev if edit.is_dev is not None else is_dev
 
     target = _load_profile(user_id)
-    if user_id == admin.id and is_active is False:
+    is_self = _is_self(user_id, admin) or _is_self(target.get("id") or user_id, admin)
+    if is_self and is_active is False:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "You cannot disable your own account"
+        )
+    if is_self and (
+        (role is not None and role.value != target.get("role"))
+        or (is_dev is not None and is_dev != bool(target.get("is_dev")))
+    ):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "You cannot change your own role or dev access. Another admin must do it.",
+            headers={"X-Error-Code": "self_privilege_change"},
         )
     _guard_admin_coverage(target, role=role, is_active=is_active)
 
@@ -590,12 +653,43 @@ def update_user(
         patch["role"] = role.value
     if is_active is not None:
         patch["is_active"] = is_active
-    # Admin grant/revoke of the dev flag (the role-switch backdoor). Having a
-    # revocation path here means a stray is_dev can be cleared without a DB edit.
-    if is_dev is not None:
-        patch["is_dev"] = is_dev
     if edit.full_name is not None:
         patch["full_name"] = edit.full_name
+    # Against the role the PATCH is LEAVING the user in, not the one they had.
+    effective = role or Role(target["role"])
+    # Admin grant/revoke of the dev flag (the role-switch backdoor). Having a
+    # revocation path here means a stray is_dev can be cleared without a DB edit.
+    # Never granted to the external estimator: a dev flag lets its holder
+    # switch into any internal role and skips project-assignment scoping.
+    if is_dev is not None:
+        if is_dev and effective not in INTERNAL_ROLES:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Dev access can only be granted on an internal role.",
+                headers={"X-Error-Code": "is_dev_internal_only"},
+            )
+        patch["is_dev"] = is_dev
+    elif role is not None and effective not in INTERNAL_ROLES and target.get("is_dev"):
+        # Demotion to the external estimator drops the dev flag with it, for
+        # the same reason the mailbox mapping is cleared below.
+        patch["is_dev"] = False
+    if edit.rfp_mailboxes is not None:
+        # Granting mailboxes in the same call that demotes someone to
+        # estimator must be refused, not half-applied.
+        if effective not in INTERNAL_ROLES:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "RFP mailboxes can only be mapped onto an internal role.",
+                headers={"X-Error-Code": "rfp_mailboxes_internal_only"},
+            )
+        patch["rfp_mailboxes"] = edit.rfp_mailboxes
+    elif role is not None and effective not in INTERNAL_ROLES and target.get("rfp_mailboxes"):
+        # Demotion to the external estimator with no mention of the mapping:
+        # clear it in the SAME patch. Leaving it would keep RFP mail visible
+        # to someone who is no longer internal the moment they are promoted
+        # back, and would make the estimator the one profile whose mapping the
+        # refusal above says can never exist.
+        patch["rfp_mailboxes"] = []
 
     # GoTrue stores addresses lowercased; normalize to match so the profile row
     # and the auth identity can never drift apart (the email-ingest matcher and
@@ -624,6 +718,26 @@ def update_user(
         raise
 
     audit(admin.id, "user.update", "profile", user_id, patch)
+    if "is_dev" in patch and patch["is_dev"] != bool(target.get("is_dev")):
+        audit(
+            admin.id,
+            "user.dev_granted" if patch["is_dev"] else "user.dev_revoked",
+            "profile",
+            user_id,
+            {"email": target.get("email"), "role": effective.value},
+        )
+    if "rfp_mailboxes" in patch and patch["rfp_mailboxes"] != (target.get("rfp_mailboxes") or []):
+        audit(
+            admin.id,
+            "user.rfp_mailboxes_changed",
+            "profile",
+            user_id,
+            {"from": target.get("rfp_mailboxes") or [], "to": patch["rfp_mailboxes"]},
+        )
+    if new_email is not None:
+        _notify_old_email(target, new_email, admin_id=admin.id)
+        if not is_self:
+            _revoke_sessions(user_id, reason="email_change", actor_id=admin.id)
     return updated
 
 
@@ -638,7 +752,8 @@ def delete_user(user_id: str, admin: CurrentUser = Depends(_MANAGE_USERS)):
     survive is the person's go/no-go votes and estimator assignments, which is
     why disabling remains the recommended action for someone who has left.
     """
-    if user_id == admin.id:
+    user_id = _canonical_id(user_id)
+    if _is_self(user_id, admin):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "You cannot delete your own account"
         )
@@ -712,6 +827,64 @@ def _set_auth_email(user_id: str, email: str, *, best_effort: bool = False) -> N
             status.HTTP_400_BAD_REQUEST,
             "Could not change the email address. It may already be in use.",
         ) from exc
+
+
+def _revoke_sessions(user_id: str, *, reason: str, actor_id: str) -> None:
+    """Sign a user out everywhere by deleting their auth sessions (0144).
+
+    Best effort: the change that triggered it has already been applied, so a
+    failure is logged and audited rather than raised. Access tokens already
+    issued stay valid until they expire (~1h); no refresh token survives.
+    """
+    ok = True
+    try:
+        get_supabase().rpc(
+            "admin_revoke_user_sessions", {"p_user_id": user_id}
+        ).execute()
+    except Exception:  # noqa: BLE001
+        ok = False
+        logging.getLogger("bdr.users").exception("Session revocation failed")
+    audit(actor_id, "user.sessions_revoked", "profile", user_id, {"reason": reason, "ok": ok})
+
+
+def _notify_old_email(target: dict, new_email: str, *, admin_id: str) -> None:
+    """Tell the OLD address that the login email moved, so an admin rewrite of
+    someone's address (the first step of taking the account over) is seen by
+    the person who owned it. Best effort and audited; skipped without Graph.
+    """
+    old = (target.get("email") or "").strip()
+    sent = False
+    if old and invite_email.graph_configured():
+        try:
+            html = render_notification_email(
+                recipient_name=target.get("full_name"),
+                heading="Your BDR login email was changed",
+                message=(
+                    f"An administrator changed the login email on your BDR account "
+                    f"to {new_email}. If you did not expect this, contact G3 IT "
+                    f"right away."
+                ),
+                cta_label="Open BDR",
+                cta_url=get_settings().frontend_url,
+                linkify=False,
+            )
+            graph_email.send_mail(
+                to=[old],
+                subject="G3 BDR · Your login email was changed",
+                body_html=html,
+                inline_images=[(LOGO_CONTENT_ID, LOGO_FILENAME, logo_bytes(), "image/jpeg")],
+                sent_by=admin_id,
+            )
+            sent = True
+        except Exception:  # noqa: BLE001
+            logging.getLogger("bdr.users").exception("Old-address email notice failed")
+    audit(
+        admin_id,
+        "user.email_change_notice",
+        "profile",
+        target["id"],
+        {"to": old, "sent": sent},
+    )
 
 
 def sb_update(user_id: str, patch: dict) -> dict:

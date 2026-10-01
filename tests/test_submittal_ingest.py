@@ -9,7 +9,6 @@ once and never overwritten.
 
 from types import SimpleNamespace
 
-import pytest
 
 from app.services import email_ingest
 from app.services import submittal_ingest as si

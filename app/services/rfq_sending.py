@@ -1,12 +1,12 @@
-"""RFQ bulk sending — one individual email per vendor contact.
+"""RFQ bulk sending - one individual email per vendor contact.
 
 Each To contact gets their own Graph draft (so we capture its conversationId
 for reply matching), optionally with coworkers from the SAME vendor company
-CC'd on it, plus the category's default attachment set: the BOM split Excel
-and the project drawings (or a OneDrive link when they exceed the configured
-size). The Trenching category is the exception: its vendors price from the
-estimator's markup, so its default set swaps the BOM split for the markup
-files and keeps the drawings. From the Modify Files / confirm modals the PE
+CC'd on it, plus the category's default attachment set: the BOM split Excel,
+the project drawings and (since 0132) the project specifications (or a OneDrive
+link when they exceed the configured size). The Trenching category is the
+exception: its vendors price from the estimator's markup, so its default set
+swaps the BOM split for the markup files and keeps the drawings and specs. From the Modify Files / confirm modals the PE
 can override the attachment list per category and replace the generated body. The
 generated body is lightly varied per email by OpenAI, falling back to the base
 template on any failure; an edited body is sent as written. Either way the body
@@ -23,9 +23,10 @@ import re
 import time
 
 from app.core.config import get_settings
+from app.core.file_categories import category_label, exclude_source_set
 from app.services import email_branding, graph_email, office_preview, storage
-from app.services.datetime_format import _parse_ts, format_bid_datetime  # noqa: F401 — re-exported; formatter lives in datetime_format
-from app.services.email_branding import SIGNOFF
+from app.services.datetime_format import _parse_ts, format_bid_datetime  # noqa: F401 - re-exported; formatter lives in datetime_format
+from app.services.email_branding import DOCUMENTS_LINK_SENTENCE, SIGNOFF
 from app.services.notifications import audit
 from app.services.openai_text import vary_email_body
 
@@ -55,6 +56,10 @@ def build_subject(project: dict) -> str:
     )
 
 
+# DOCUMENTS_LINK_SENTENCE (imported above) carries the over-size folder link.
+# Every RFQ default set includes the specifications (0132), so it names both.
+
+
 def build_base_body(
     contact_name: str,
     due_str: str,
@@ -63,16 +68,21 @@ def build_base_body(
     trenching: bool = False,
 ) -> str:
     drawings_line = (
-        f"The drawings are available here: {drawings_link}\n\n" if drawings_link else ""
+        f"{DOCUMENTS_LINK_SENTENCE} {drawings_link}\n\n" if drawings_link else ""
     )
     # Trenching emails carry the markup + drawings, not a BOM. Say so, or the
     # vendor goes hunting for a counts workbook that isn't attached.
-    quoted_what = "the attached trench markup and drawings" if trenching else "the attached BOM"
+    quoted_what = (
+        "the attached trench markup and drawings" if trenching else "the attached BOM"
+    )
+    # The link leads the body (right under the greeting) so it is the first
+    # thing a vendor reads; the HTML shell also lifts it into a button card.
     return (
         f"Hello {contact_name},\n\n"
-        f"Can you please get me quotes for {quoted_what}, we need them by {due_str}?\n\n"
         f"{drawings_line}"
-        "If there are any other attachments/drawings, please review them as well.\n\n"
+        f"Can you please get me quotes for {quoted_what}, we need them by {due_str}?\n\n"
+        "If there are any other attachments, drawings or specifications, "
+        "please review them as well.\n\n"
         "Please also let me know what you are not able to quote.\n\n"
         f"{REPLY_NOTICE}\n\n"
         "Thank you,\n"
@@ -86,7 +96,10 @@ def build_custom_body(template: str, contact_name: str, drawings_link: str | Non
     silently dropped."""
     body = template.replace(CONTACT_NAME_PLACEHOLDER, contact_name)
     if drawings_link and drawings_link not in body:
-        body += f"\n\nThe drawings are available here: {drawings_link}"
+        # Under the greeting when there is one, so the link reads first.
+        greeting, sep, rest = body.partition("\n\n")
+        line = f"{DOCUMENTS_LINK_SENTENCE} {drawings_link}"
+        body = f"{greeting}\n\n{line}\n\n{rest}" if sep else f"{body}\n\n{line}"
     # Every outgoing RFQ must ask for the quote on this thread. Loose check so a
     # PE who worded the ask themselves does not get a duplicate sentence.
     if "reply" not in body.lower() and "this thread" not in body.lower():
@@ -106,7 +119,7 @@ def _as_immutable_pdf(f: dict) -> dict:
     """Convert an editable Office attachment (the BOM split .xlsx) to an
     immutable PDF so a vendor cannot alter our quantities. Non-Office files
     (drawings are already PDFs) pass through unchanged. Raises
-    office_preview.ConversionError on failure — the caller fails that group's
+    office_preview.ConversionError on failure - the caller fails that group's
     sends rather than emailing a malleable file."""
     if not office_preview.is_office_file(f.get("filename")):
         return f
@@ -150,7 +163,7 @@ def _resolve_cc(
     """CC contact rows per To-contact id, validated against the same-company
     rule: every CC contact must exist and share the To contact's vendor_id.
     Raises ValueError (-> 400, before anything sends) on a violation. A To id
-    that no longer resolves is skipped — no email will go to it anyway."""
+    that no longer resolves is skipped - no email will go to it anyway."""
     out: dict[str, list[dict]] = {}
     for to_id, cc_ids in (cc_map or {}).items():
         to = by_id.get(to_id)
@@ -187,62 +200,183 @@ def internal_cc(addresses: list[str]) -> list[str]:
     return [] if addr.lower() in lowered else [addr]
 
 
-def _load_files(sb, project_id: str, category: str) -> list[dict]:
-    """[{filename, content}] for all project files in a storage category.
-    Unsent estimator drafts are excluded — a vendor email must never carry a
-    markup the estimator hasn't actually sent to the team yet."""
+def _files_query(sb, project_id: str, category: str):
+    """The one project_files query every default-attachment read goes through:
+    this project, this category, no unsent estimator draft (a vendor email must
+    never carry a markup the estimator hasn't sent the team yet) and no split
+    source set (0132: the un-cut original of a set the vendor is already
+    getting, which would double every sheet)."""
     from app.services.estimator_rounds import exclude_unsent
 
     q = (
         sb.table("project_files")
-        .select("filename, storage_path")
+        .select("id, filename, storage_path, size_bytes")
         .eq("project_id", project_id)
         .eq("category", category)
     )
-    rows = exclude_unsent(q).execute().data or []
+    return exclude_source_set(exclude_unsent(q))
+
+
+def _load_files(sb, project_id: str, category: str) -> list[dict]:
+    """[{filename, content}] for all project files in a storage category."""
+    rows = _files_query(sb, project_id, category).execute().data or []
     return [
         {"filename": r["filename"], "content": storage.download_file(r["storage_path"])}
         for r in rows
     ]
 
 
+def _drawing_category(sb, project_id: str) -> str | None:
+    """Which drawing bucket the default set uses: the Electrical Drawings set
+    when one exists, otherwise the General Drawings/Plans set (projects that
+    predate the 0099 split have no electrical bucket yet). None = the project
+    has neither. The 0132 trade sets are NOT default RFQ attachments: an
+    electrical vendor prices from the electrical sheets, and the PE adds a
+    civil or structural set by hand through Modify Files when it matters."""
+    for category in ("electrical_drawing", "drawing"):
+        if (_files_query(sb, project_id, category).limit(1).execute().data or []):
+            return category
+    return None
+
+
 def _prepare_drawings(sb, project: dict) -> tuple[list[dict], str | None]:
-    """Download the drawings vendors get: the Electrical Drawings set when one
-    exists, otherwise the General Drawings/Plans set (projects that predate the
-    0099 split have no electrical bucket yet). If they exceed the inline limit,
-    push them to OneDrive and return a single anonymous folder link instead
-    (shared by every email)."""
+    """Download what every RFQ carries by default besides its counts: the
+    drawings (Electrical set when one exists, else General) AND the project's
+    specifications (0132 - every vendor prices against the spec sections, so
+    they ride along on every category including Trenching).
+
+    If together they exceed the inline limit, push them to OneDrive and return
+    a single anonymous folder link instead (shared by every email), exactly as
+    the drawings alone used to."""
     settings = get_settings()
     drawings = _load_files(sb, project["id"], "electrical_drawing")
     if not drawings:
         drawings = _load_files(sb, project["id"], "drawing")
-    total = sum(len(d["content"]) for d in drawings)
+    # Specs go through the same folder/link path as the drawings, never as a
+    # separate link: one link per email is what the body promises.
+    documents = drawings + _load_files(sb, project["id"], "specification")
+    total = sum(len(d["content"]) for d in documents)
     if total > settings.rfq_attachments_total_limit_mb * 1024 * 1024:
         raise ValueError(
-            f"The project drawings total {total // (1024 * 1024)} MB, over the "
+            f"The project drawings and specifications total "
+            f"{total // (1024 * 1024)} MB, over the "
             f"{settings.rfq_attachments_total_limit_mb} MB limit for one send. "
             "Use Modify Files to pick a smaller set."
         )
     if total <= settings.rfq_drawings_inline_limit_mb * 1024 * 1024:
-        return drawings, None
+        return documents, None
     folder = f"BDR/{_safe_component(str(project.get('number') or project['id']))}/drawings"
-    for d in drawings:
+    for d in documents:
         graph_email.drive_upload(f"{folder}/{_safe_component(d['filename'])}", d["content"])
     link = graph_email.drive_create_link(graph_email.drive_get_item_id(folder))
     return [], link
 
 
+# ── The default attachment set, as data (Modify Files) ──────────────────────
+#
+# The modal needs the SAME default list the send path builds, grouped so it can
+# render a heading per block. Computed here, from the same queries, so the modal
+# and the wire can never disagree about what a category sends by default.
+SECTION_COUNTS = "counts"
+SECTION_DRAWINGS = "drawings"
+SECTION_SPECIFICATIONS = "specifications"
+SECTION_MARKUP = "markup"
+
+_SECTION_LABELS = {
+    SECTION_COUNTS: "BOM split",
+    SECTION_DRAWINGS: "Drawings",
+    SECTION_SPECIFICATIONS: category_label("specification"),
+    SECTION_MARKUP: "Trench markup",
+}
+
+
+def default_attachments(sb, project_id: str) -> dict:
+    """What every RFQ in this project attaches by default, per RFQ.
+
+    Shape (docs/RFP_SPLIT.md section 9):
+
+        {
+          "drawings_category": "electrical_drawing" | "drawing" | null,
+          "by_rfq": {
+            "<rfq_id>": {
+              "trenching": bool,
+              "file_ids": ["<id>", ...],          # the whole set, in send order
+              "sections": [
+                {"key": "counts",         "label": "BOM split",     "file_ids": [...]},
+                {"key": "drawings",       "label": "Electrical drawings", "file_ids": [...]},
+                {"key": "specifications", "label": "Specifications", "file_ids": [...]},
+                {"key": "markup",         "label": "Trench markup", "file_ids": [...]}
+              ]
+            }
+          }
+        }
+
+    Every id listed is PRE-CHECKED in the modal (they are the defaults). Empty
+    sections are omitted. `file_ids` is the concatenation of the sections, in
+    the order the send path assembles them, so the modal can seed its list from
+    one key and still render headings from `sections`.
+    """
+    drawings_category = _drawing_category(sb, project_id)
+    drawing_ids = (
+        [r["id"] for r in _files_query(sb, project_id, drawings_category).execute().data or []]
+        if drawings_category
+        else []
+    )
+    spec_ids = [
+        r["id"]
+        for r in _files_query(sb, project_id, "specification").execute().data or []
+    ]
+    markup_ids = [
+        r["id"] for r in _files_query(sb, project_id, "markup").execute().data or []
+    ]
+    rfqs = (
+        sb.table("rfqs")
+        .select("id, split_file_id, material_categories(name)")
+        .eq("project_id", project_id)
+        .execute()
+    ).data or []
+
+    by_rfq: dict[str, dict] = {}
+    for rfq in rfqs:
+        trenching = _is_trenching(((rfq.get("material_categories") or {}).get("name")) or "")
+        groups: list[tuple[str, list[str]]] = [
+            (SECTION_COUNTS, [rfq["split_file_id"]] if rfq.get("split_file_id") and not trenching else []),
+            (SECTION_DRAWINGS, drawing_ids),
+            (SECTION_SPECIFICATIONS, spec_ids),
+            (SECTION_MARKUP, markup_ids if trenching else []),
+        ]
+        sections = [
+            {
+                "key": key,
+                "label": (
+                    category_label(drawings_category)
+                    if key == SECTION_DRAWINGS and drawings_category
+                    else _SECTION_LABELS[key]
+                ),
+                "file_ids": ids,
+            }
+            for key, ids in groups
+            if ids
+        ]
+        by_rfq[rfq["id"]] = {
+            "trenching": trenching,
+            "file_ids": [fid for section in sections for fid in section["file_ids"]],
+            "sections": sections,
+        }
+    return {"drawings_category": drawings_category, "by_rfq": by_rfq}
+
+
 class _ExplicitAttachments:
     """Pre-downloaded files for groups that customized their attachment list.
 
-    The oversize decision is per group — the inline limit is a per-email
-    constraint — and it counts EVERY selected file, not just drawings: Exchange
+    The oversize decision is per group - the inline limit is a per-email
+    constraint - and it counts EVERY selected file, not just drawings: Exchange
     rejects the whole message on total size, so a big markup or spec that
     slipped past a drawings-only check would sink the send. When one group's
     files exceed the limit, that group's non-Office files are uploaded into a
     OneDrive folder unique to that exact selection, so a vendor's link never
     exposes files the PE removed from their category. Office files (the BOM
-    split) always stay inline — they must go out converted to an immutable
+    split) always stay inline - they must go out converted to an immutable
     PDF, which a OneDrive copy would not be. Identical selections share one
     upload/link.
     """
@@ -276,7 +410,7 @@ class _ExplicitAttachments:
         inline = [i for i in ids if i not in set(link_ids)]
         if sum(len(self._files[i]["content"]) for i in inline) > limit:
             # Only Office files (which cannot ride the link) are left and they
-            # alone bust the email budget — sending would just bounce off
+            # alone bust the email budget - sending would just bounce off
             # Exchange after the vendor emails start going out.
             raise ValueError(
                 "The BOM/Office files selected for one category are too large "
@@ -320,7 +454,7 @@ def _prepare_explicit_attachments(sb, project: dict, groups: list[dict]) -> _Exp
         return _ExplicitAttachments({}, project)
     from app.services.estimator_rounds import exclude_unsent
 
-    # An unsent estimator draft can't be attached even explicitly — it drops
+    # An unsent estimator draft can't be attached even explicitly - it drops
     # out here and surfaces as "not found" before anything is sent.
     q = (
         sb.table("project_files")
@@ -354,9 +488,11 @@ def bulk_send(
 
     `groups` = [{"rfq_id": ..., "vendor_contact_ids": [...],
     "attachment_file_ids": [...] | None, "cc": {to_id: [cc_ids]} | None}]. A
-    None attachment list means the default set (BOM split + drawings; for
-    Trenching, markup + drawings and no BOM split); an explicit list is
-    exactly what the PE confirmed in the modal. `cc` copies extra contacts on a To contact's email — every CC must
+    None attachment list means the default set (BOM split + drawings + specs;
+    for Trenching, markup + drawings + specs and no BOM split - see
+    `default_attachments`, which is the same set as data for the Modify Files
+    modal); an explicit list is exactly what the PE confirmed in the modal and
+    is sent verbatim. `cc` copies extra contacts on a To contact's email - every CC must
     work at the same vendor company (validated up front, see _resolve_cc).
     `email_body` is an optional PE-edited template sent verbatim (see
     build_custom_body). Failures are per-contact: one bad address never aborts
@@ -369,7 +505,7 @@ def bulk_send(
     if not project.get("due_from_vendors_at"):
         raise ValueError("Set the vendor due date (due_from_vendors_at) before sending")
 
-    # A group with no recipients sends nothing — drop it before doing any
+    # A group with no recipients sends nothing - drop it before doing any
     # download/upload work on its behalf.
     groups = [g for g in groups if g.get("vendor_contact_ids")]
 
@@ -412,7 +548,9 @@ def bulk_send(
         ]
         cc_by_rfq[group["rfq_id"]] = _resolve_cc(by_id, cc_map)
 
-    # Default attachment set — only assembled when some group still uses it.
+    # Default attachment set - only assembled when some group still uses it.
+    # `drawings` here is drawings + specifications (0132): both ride the same
+    # inline/link decision, so one name covers them.
     use_defaults = any(g.get("attachment_file_ids") is None for g in groups)
     drawings, drawings_link = _prepare_drawings(sb, project) if use_defaults else ([], None)
     markup_files = _load_files(sb, project_id, "markup") if use_defaults else []
@@ -458,7 +596,7 @@ def bulk_send(
 
         # Convert the BOM (any editable Office attachment) to an immutable PDF
         # before sending. A conversion failure fails only this group's contacts
-        # — unrelated categories still go out — and never emails a malleable BOM.
+        # - unrelated categories still go out - and never emails a malleable BOM.
         try:
             attachments = [_as_immutable_pdf(f) for f in attachments]
         except office_preview.ConversionError as exc:
@@ -467,7 +605,7 @@ def bulk_send(
                 results.append(
                     _record_failed_send(
                         sb, rfq, contact, subject,
-                        f"Could not convert the BOM to PDF — retry. ({exc})", user_id,
+                        f"Could not convert the BOM to PDF - retry. ({exc})", user_id,
                     )
                 )
             continue
@@ -535,7 +673,7 @@ def _send_one(
     desk_cc = internal_cc([contact["email"], *cc_addrs])
     wire_cc = [*cc_addrs, *desk_cc]
     if custom_body is not None:
-        # The PE's words go out exactly as written — no AI variation.
+        # The PE's words go out exactly as written - no AI variation.
         body = build_custom_body(custom_body, contact["name"], drawings_link)
     else:
         trenching = _is_trenching(category_name)
@@ -543,7 +681,7 @@ def _send_one(
             contact["name"], due_str, drawings_link, trenching=trenching
         )
         # The link is the vendor's only route to the drawings when they were
-        # too big to attach — a rewrite must never drop it. Same for the
+        # too big to attach - a rewrite must never drop it. Same for the
         # trenching phrase: the vendor must be pointed at the markup, not sent
         # hunting for a BOM that isn't attached. And the reply-in-thread ask is
         # what keeps quotes attached to this send, so it is pinned too.
@@ -559,7 +697,7 @@ def _send_one(
         draft = graph_email.create_draft(
             contact["email"],
             subject,
-            email_branding.render_vendor_email(body),
+            email_branding.render_vendor_email(body, documents_link=drawings_link),
             html=True,
             cc=wire_cc or None,
         )
@@ -570,11 +708,20 @@ def _send_one(
             "image/jpeg",
             content_id=email_branding.LOGO_CONTENT_ID,
         )
+        if drawings_link:
+            # The animated card the body's documents button is drawn with.
+            graph_email.add_attachment(
+                draft["id"],
+                email_branding.DOCUMENTS_CARD_FILENAME,
+                email_branding.documents_card_bytes(),
+                "image/gif",
+                content_id=email_branding.DOCUMENTS_CARD_CONTENT_ID,
+            )
         for f in attachments:
             graph_email.add_attachment(
                 draft["id"], f["filename"], f["content"], _content_type(f["filename"])
             )
-        graph_email.send_draft(draft["id"])
+        graph_email.send_draft(draft["id"], project_id=project["id"], rfq_id=rfq["id"])
 
         log = (
             sb.table("email_log")
@@ -647,7 +794,7 @@ def _send_one(
             "status": "sent",
             "rfq_send_id": send_row["id"],
         }
-    except Exception as exc:  # noqa: BLE001 — record and continue with the batch
+    except Exception as exc:  # noqa: BLE001 - record and continue with the batch
         logger.exception("RFQ send failed for %s", contact["email"])
         try:
             sb.table("rfq_sends").insert(

@@ -1,0 +1,33 @@
+{
+ "id": "6ab8aab3a35e2a26f151918a",
+ "autodeskId": "ADSK-FIXTURE",
+ "emailVerified": true,
+ "employmentVerified": true,
+ "createdAt": "2015-08-01T00:00:00.000Z",
+ "firstName": "Fixture",
+ "lastName": "Admin",
+ "email": "fixture.admin@example.com",
+ "alternateEmails": [],
+ "avatarImageUrl": null,
+ "jobTitle": "Estimator",
+ "phoneNumber": null,
+ "companyId": "f4c80b7eae357d5623c5e34d",
+ "isAccountClaimed": true,
+ "bidBoardPermissions": {
+  "viewAll": true,
+  "reports": true,
+  "leaderboard": true,
+  "modifyPermissions": true
+ },
+ "offices": [
+  {
+   "id": "5a629dd75a2064aa95ab747f",
+   "isPrimary": true,
+   "hasBbPro": false,
+   "hasBcPro": false,
+   "officeLead": null,
+   "name": "Las Vegas",
+   "address": null
+  }
+ ]
+}

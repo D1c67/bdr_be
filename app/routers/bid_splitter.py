@@ -1,4 +1,4 @@
-"""Bid File Splitter — experimental AI file triage and PDF splitting.
+"""Bid File Splitter - experimental AI file triage and PDF splitting.
 
 Standalone tool (deliberately NOT wired into the bidding pipeline): the user
 uploads the raw PDFs a GC sent; a vision model first triages each FILE
@@ -32,14 +32,16 @@ from app.core.error_codes import ErrorCode, RateLimitScope
 from app.core.features import require_bid_file_splitter
 from app.core.ratelimit import ai_rate_limit, export_rate_limit, upload_rate_limit
 from app.core.supabase_client import get_supabase
-from app.routers.files import _export_lock, _read_capped
+from app.routers.files import _export_lock, _read_capped, handoff_locked
 from app.services import (
     bid_split,
     bid_split_training,
+    export_names,
     file_export,
     llm,
     llm_queue,
     pdf_split,
+    rfp_split,
     storage,
 )
 from app.services.notifications import audit
@@ -79,7 +81,8 @@ _FILE_COLUMNS = (
     "id, job_id, filename, storage_path, size_bytes, page_count, status, error, "
     "llm_calls, llm_ms, file_kind, file_kind_label, file_kind_confidence, "
     "file_kind_confidence_reason, "
-    "user_corrected, started_at, finished_at, created_at, updated_at"
+    "user_corrected, started_at, finished_at, created_at, updated_at, "
+    "rfp_sandbox_file_id, source_format, classified_from"
 )
 
 
@@ -109,6 +112,50 @@ def _training_io(sb, file_id: str) -> dict:
     return rows[0] if rows else {}
 
 
+def _is_pdf_row(frow: dict) -> bool:
+    """A row the splitter can cut: uploaded by hand, or staged from a PDF.
+    Non-PDF rows from the RFP split step (`classified_from` converted_pdf /
+    name) were identified, never split."""
+    return frow.get("classified_from") in (None, rfp_split.CLASSIFIED_PAGES)
+
+
+def _project_for_job(sb, job_id: str) -> str | None:
+    rows = (
+        sb.table("bid_split_jobs").select("id, project_id").eq("id", job_id).limit(1).execute()
+    ).data or []
+    return (rows[0].get("project_id") if rows else None) or None
+
+
+def _project_guard(sb, frow: dict) -> str | None:
+    """The correction lock (docs/RFP_SPLIT.md 3.3): a file whose job serves
+    an RFP-created project may be corrected only while that project's
+    hand-off package has not sent. Returns the project id (None on a manual
+    job) or raises 409 with the sentence."""
+    project_id = _project_for_job(sb, frow["job_id"])
+    if project_id and handoff_locked(str(project_id)):
+        raise HTTPException(status.HTTP_409_CONFLICT, rfp_split.MSG_PACKAGE_SENT)
+    return project_id
+
+
+def _resync(sb, project_id: str | None, file_id: str, user_id: str) -> dict | None:
+    """After a correction on a project-linked file: re-file the project's
+    rows (best effort; the correction stands and the response says what
+    the resync did or why it did not)."""
+    if not project_id:
+        return None
+    try:
+        result = rfp_split.resync_project_files(sb, file_id, actor_id=user_id)
+    except Exception as exc:  # noqa: BLE001 - the correction stands
+        logger.exception("bid_split: project resync failed for %s", file_id)
+        return {"project_id": project_id, "ok": False, "error": str(exc)[:300]}
+    if result is None:
+        return {"project_id": project_id, "ok": False, "error": "nothing to re-file"}
+    return {
+        "project_id": project_id, "ok": True, "documents": result.documents,
+        "inserted": result.inserted, "replaced": result.replaced, "skipped": result.skipped[:20],
+    }
+
+
 def _dispatch(
     background: BackgroundTasks,
     file_id: str,
@@ -130,7 +177,7 @@ def _dispatch(
                 created_by=user_id,
             )
             return
-        except Exception:  # noqa: BLE001 — queue outage degrades to inline dispatch
+        except Exception:  # noqa: BLE001 - queue outage degrades to inline dispatch
             logger.exception("bid_split enqueue failed; falling back to BackgroundTasks")
     background.add_task(bid_split.run_file, file_id, forced_kind)
 
@@ -168,8 +215,8 @@ def create_job(body: BidSplitJobIn, user: CurrentUser = Depends(require_writer))
 
     The files are NOT part of this request: each arrives individually via
     POST /jobs/{id}/files, because the global request-body cap
-    (max_request_body_bytes, 310 MB) is per REQUEST while the 300 MB upload
-    cap is per FILE — a legitimate multi-file bid set easily totals past the
+    (max_request_body_bytes, 460 MB) is per REQUEST while the 450 MB upload
+    cap is per FILE - a legitimate multi-file bid set easily totals past the
     body cap, so a single multipart batch would 413 in the middleware before
     this handler ever ran. One file per request mirrors every other upload
     surface (New Bid, drafts). file_count here is the plan (validated against
@@ -299,7 +346,7 @@ def list_jobs(
     so the list renders without a per-row fetch. `status` narrows to one job
     status: the app shell polls `?status=processing` for its in-flight
     marker, which must stay a cheap read."""
-    limit = max(1, min(limit, 100))
+    limit = max(1, min(limit, 250))
     if status_filter is not None and status_filter not in _JOB_STATUSES:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -330,7 +377,32 @@ def list_jobs(
         job["pages"] = sum(r["page_count"] or 0 for r in rows)
         job["files_done"] = sum(1 for r in rows if r["status"] == "done")
         job["files_failed"] = sum(1 for r in rows if r["status"] == "failed")
+    _attach_projects(sb, jobs)
     return jobs
+
+
+def _attach_projects(sb, jobs: list[dict]) -> None:
+    """The project an rfp job serves (docs/RFP_SPLIT.md 3.3): number, name
+    and whether its hand-off package has sent (corrections then answer
+    409). One projects query for the page; the lock is read once per
+    distinct project. Manual jobs carry nulls."""
+    project_ids = sorted({str(j["project_id"]) for j in jobs if j.get("project_id")})
+    projects: dict[str, dict] = {}
+    for i in range(0, len(project_ids), 200):
+        for p in (
+            sb.table("projects").select("id, number, name").in_("id", project_ids[i:i + 200]).execute()
+        ).data or []:
+            projects[str(p["id"])] = p
+    sent: dict[str, bool] = {}
+    for job in jobs:
+        pid = str(job.get("project_id") or "")
+        proj = projects.get(pid)
+        job.setdefault("source", rfp_split.SOURCE_MANUAL)
+        job["project_number"] = proj.get("number") if proj else None
+        job["project_name"] = proj.get("name") if proj else None
+        if proj and pid not in sent:
+            sent[pid] = handoff_locked(pid)
+        job["package_sent"] = bool(sent.get(pid)) if proj else False
 
 
 def _attach_segments(sb, files: list[dict]) -> list[dict]:
@@ -373,9 +445,10 @@ def get_job(job_id: str, _: CurrentUser = Depends(require_internal)):
         if f["status"] in ("pending", "running"):
             try:
                 f["queue"] = llm_queue.poll_info(llm_queue.JOB_BID_SPLIT, f["id"])
-            except Exception:  # noqa: BLE001 — detail is optional, polling must not break
+            except Exception:  # noqa: BLE001 - detail is optional, polling must not break
                 logger.exception("bid_split queue poll_info failed")
     job["files"] = files
+    _attach_projects(sb, [job])
     return job
 
 
@@ -385,7 +458,11 @@ def get_job(job_id: str, _: CurrentUser = Depends(require_internal)):
 @router.get("/files/{file_id}/download")
 def download_source(file_id: str, _: CurrentUser = Depends(require_internal)):
     rec = _file_or_404(get_supabase(), file_id)
-    return {"url": storage.signed_url(rec["storage_path"], download=rec["filename"] or True)}
+    name = rec["filename"] or True
+    if rec.get("classified_from") == rfp_split.CLASSIFIED_CONVERTED and isinstance(name, str):
+        # The staged object is the sandbox's converted PDF, not the .docx.
+        name = f"{name.rsplit('.', 1)[0] if '.' in name else name}.pdf"
+    return {"url": storage.signed_url(rec["storage_path"], download=name)}
 
 
 @router.get("/segments/{segment_id}/download")
@@ -410,6 +487,21 @@ def download_segment(segment_id: str, _: CurrentUser = Depends(require_internal)
 _EXPORT_TITLE = "BDR Bid File Splitter export"
 
 
+def _short_job_no(sb, job_id: str) -> str:
+    """The last 4 digits of the job number for export zip names: the linked
+    project's number (26.9.7126 -> 7126), else the last 4 of the job id for a
+    manual upload with no project."""
+    project_id = _project_for_job(sb, job_id)
+    if project_id:
+        rows = (
+            sb.table("projects").select("number").eq("id", project_id).limit(1).execute()
+        ).data or []
+        short = export_names.short_job_number(rows[0].get("number") if rows else None)
+        if short:
+            return short
+    return job_id.replace("-", "")[-4:]
+
+
 def _folder_for(filename: str) -> str:
     """Folder name for a source PDF: the name it was uploaded under, minus the
     .pdf extension (a folder called "BID SET.pdf" reads as a file)."""
@@ -431,7 +523,9 @@ def _unique(taken: set[str], name: str) -> str:
     return candidate
 
 
-def _tree_rows(files: list[dict]) -> tuple[list[dict], list[str]]:
+def _tree_rows(
+    files: list[dict], *, top_folder: bool = True
+) -> tuple[list[dict], list[str]]:
     """Shape source files (with their segments attached) into nested-ZIP rows.
 
     One folder per source file, a category folder inside it, and for a
@@ -442,9 +536,13 @@ def _tree_rows(files: list[dict]) -> tuple[list[dict], list[str]]:
 
     A file the triage identified and left intact contributes its own original
     object under its category folder (segments carry is_original and point at
-    the source path) — that IS the document the user wants out of it. Files
+    the source path) - that IS the document the user wants out of it. Files
     with nothing to hand back (still running, failed, no sections) become
     manifest notes instead, so the archive explains its own gaps.
+
+    `top_folder=False` drops the per-source folder (the one-file export): the
+    zip is already named after that file and Windows "Extract All" makes a
+    folder from the zip name, so keeping it would nest the same name twice.
     """
     taken: set[str] = set()
     rows: list[dict] = []
@@ -459,7 +557,9 @@ def _tree_rows(files: list[dict]) -> tuple[list[dict], list[str]]:
             continue
         folder = _unique(taken, _folder_for(f["filename"]))
         for seg in segments:
-            folders = [folder, bid_split.CATEGORY_LABELS.get(seg["category"], "Other")]
+            folders = [bid_split.CATEGORY_LABELS.get(seg["category"], "Other")]
+            if top_folder:
+                folders.insert(0, folder)
             if seg["category"] == "other" and seg.get("other_type"):
                 folders.append(seg["other_type"])
             rows.append(
@@ -478,6 +578,7 @@ async def _stream_tree_zip(
     notes: list[str],
     *,
     filename: str,
+    flat: bool = False,
     user: CurrentUser,
     target: str,
     target_id: str,
@@ -514,13 +615,14 @@ async def _stream_tree_zip(
             rows,
             title=_EXPORT_TITLE,
             notes=notes,
+            flat=flat,
         )
     finally:
         _export_lock.release()
 
     ok_count = sum(1 for m in manifest if m["status"] == "ok")
     if ok_count == 0:
-        # Every object was missing from storage — nothing to hand back.
+        # Every object was missing from storage - nothing to hand back.
         spool.close()
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No split files to export")
     await run_in_threadpool(
@@ -550,7 +652,11 @@ async def _stream_tree_zip(
 
 
 @router.get("/jobs/{job_id}/export", dependencies=[Depends(export_rate_limit)])
-async def export_job(job_id: str, user: CurrentUser = Depends(require_internal)):
+async def export_job(
+    job_id: str,
+    user: CurrentUser = Depends(require_internal),
+    flat: bool = False,
+):
     """Every split file of a job as one nested `.zip`.
 
     The tree mirrors what the splitter did: a folder per uploaded PDF, the
@@ -567,24 +673,30 @@ async def export_job(job_id: str, user: CurrentUser = Depends(require_internal))
         await run_in_threadpool(_job_or_404, sb, job_id)
         files = await run_in_threadpool(_job_files, sb, job_id)
         rows, notes = _tree_rows(files)
+        job_no = await run_in_threadpool(_short_job_no, sb, job_id)
         return await _stream_tree_zip(
             rows,
             notes,
-            filename=file_export.zip_filename(f"bid-split-{job_id[:8]}", "folders"),
+            filename=file_export.zip_filename(job_no, "split"),
+            flat=flat,
             user=user,
             target="bid_split_job",
             target_id=job_id,
         )
     except HTTPException:
         raise
-    except Exception as exc:  # noqa: BLE001 — keep CORS headers; never a raw 500
+    except Exception as exc:  # noqa: BLE001 - keep CORS headers; never a raw 500
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR, "Export failed"
         ) from exc
 
 
 @router.get("/files/{file_id}/export", dependencies=[Depends(export_rate_limit)])
-async def export_file(file_id: str, user: CurrentUser = Depends(require_internal)):
+async def export_file(
+    file_id: str,
+    user: CurrentUser = Depends(require_internal),
+    flat: bool = False,
+):
     """One source PDF's split files as a nested `.zip` (same tree, one top
     folder). This is also the way out of a job whose total trips the export
     size cap."""
@@ -592,18 +704,24 @@ async def export_file(file_id: str, user: CurrentUser = Depends(require_internal
         sb = get_supabase()
         rec = await run_in_threadpool(_file_or_404, sb, file_id)
         files = await run_in_threadpool(_attach_segments, sb, [rec])
-        rows, notes = _tree_rows(files)
+        rows, notes = _tree_rows(files, top_folder=False)
+        job_no = await run_in_threadpool(_short_job_no, sb, rec["job_id"])
+        label = export_names.fit(
+            f"{job_no} {export_names.short_name(_folder_for(rec['filename']))}",
+            export_names.FOLDER_MAX,
+        )
         return await _stream_tree_zip(
             rows,
             notes,
-            filename=file_export.zip_filename(_folder_for(rec["filename"]), "split"),
+            filename=file_export.zip_filename(label, "split"),
+            flat=flat,
             user=user,
             target="bid_split_file",
             target_id=file_id,
         )
     except HTTPException:
         raise
-    except Exception as exc:  # noqa: BLE001 — keep CORS headers; never a raw 500
+    except Exception as exc:  # noqa: BLE001 - keep CORS headers; never a raw 500
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR, "Export failed"
         ) from exc
@@ -636,7 +754,7 @@ def retry_file(
             )
     except HTTPException:
         raise
-    except Exception:  # noqa: BLE001 — queue lookup trouble must not block retries
+    except Exception:  # noqa: BLE001 - queue lookup trouble must not block retries
         logger.exception("bid_split active-job lookup failed")
     # A failed file carrying a user-corrected split kind can only have gotten
     # there through a forced reprocess (corrections need a done file; the only
@@ -657,7 +775,9 @@ def delete_job(job_id: str, user: CurrentUser = Depends(require_writer)):
     pile up fast while tuning; this keeps the history and the bucket clean.
     Refused while any of its files still has a live queue run."""
     sb = get_supabase()
-    _job_or_404(sb, job_id)
+    job = _job_or_404(sb, job_id)
+    if job.get("source") == rfp_split.SOURCE_RFP and job.get("project_id"):
+        raise HTTPException(status.HTTP_409_CONFLICT, rfp_split.MSG_JOB_HAS_PROJECT)
     active = (
         sb.table("bid_split_files")
         .select("id, status")
@@ -674,11 +794,11 @@ def delete_job(job_id: str, user: CurrentUser = Depends(require_writer)):
                 )
         except HTTPException:
             raise
-        except Exception:  # noqa: BLE001 — stale rows without a live job stay deletable
+        except Exception:  # noqa: BLE001 - stale rows without a live job stay deletable
             logger.exception("bid_split active-job lookup failed during delete")
     try:
         storage.delete_bid_split_prefix(job_id)
-    except Exception:  # noqa: BLE001 — the row delete stands; objects are retried never
+    except Exception:  # noqa: BLE001 - the row delete stands; objects are retried never
         logger.exception("bid_split: storage sweep failed for job %s", job_id)
     sb.table("bid_split_jobs").delete().eq("id", job_id).execute()
     audit(user.id, "bid_split.delete", "bid_split_job", job_id, {})
@@ -759,7 +879,11 @@ def correct_file_kind(
     ):
         # No-op: nothing changed, nothing to capture or audit.
         return _attach_segments(sb, [frow])[0]
-    if body.file_kind in bid_split.INTACT_KINDS and not frow.get("page_count"):
+    project_id = _project_guard(sb, frow)
+    pdf_row = _is_pdf_row(frow)
+    if not pdf_row and body.file_kind in bid_split.SPLIT_KINDS:
+        raise HTTPException(status.HTTP_409_CONFLICT, rfp_split.MSG_NOT_A_PDF)
+    if body.file_kind in bid_split.INTACT_KINDS and not frow.get("page_count") and pdf_row:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "This file has no recorded page count; re-run it first.",
@@ -776,9 +900,14 @@ def correct_file_kind(
         # A user verdict is not a model estimate: no score, marked Edited.
         # The score it overrode is the model's file-level verdict; older rows
         # without one fall back to the best-overlap segment score.
+        # A non-PDF row was never opened page by page: its one segment spans
+        # what the identification recorded (1..1 when nothing was opened).
+        page_end = frow.get("page_count") or max(
+            [int(sg.get("page_end") or 1) for sg in segments_before] or [1]
+        )
         prior = frow.get("file_kind_confidence")
         if prior is None:
-            prior = _prior_confidence(segments_before, 1, frow["page_count"])
+            prior = _prior_confidence(segments_before, 1, page_end)
         bid_split._delete_segments(file_id)
         sb.table("bid_split_segments").insert(
             {
@@ -795,7 +924,7 @@ def correct_file_kind(
                 "user_edited": True,
                 "prior_confidence": prior,
                 "page_start": 1,
-                "page_end": frow["page_count"],
+                "page_end": page_end,
                 "storage_path": frow["storage_path"],
                 "filename": frow["filename"],
                 "size_bytes": frow["size_bytes"],
@@ -821,8 +950,9 @@ def correct_file_kind(
         "bid_split.correct_kind",
         "bid_split_file",
         file_id,
-        {"from": frow.get("file_kind"), "to": body.file_kind},
+        {"from": frow.get("file_kind"), "to": body.file_kind, "project_id": project_id},
     )
+    updated["project_resync"] = _resync(sb, project_id, file_id, user.id)
     return updated
 
 
@@ -843,12 +973,17 @@ def reprocess_file(
     sb = get_supabase()
     rec = _file_or_404(sb, file_id)
     _require_done(rec)
+    if not _is_pdf_row(rec):
+        raise HTTPException(status.HTTP_409_CONFLICT, rfp_split.MSG_NOT_A_PDF)
     if rec.get("file_kind") not in bid_split.SPLIT_KINDS:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "Only a file marked as a drawing set or mixed package can be "
             "reprocessed for splitting. Change the file type first.",
         )
+    # The project's rows are re-filed when the run ends (bid_split._after_done),
+    # so the lock is checked here, before the run is queued.
+    project_id = _project_guard(sb, rec)
     try:
         if llm_queue.active_job(llm_queue.JOB_BID_SPLIT, file_id):
             raise HTTPException(
@@ -865,7 +1000,7 @@ def reprocess_file(
         "bid_split.reprocess",
         "bid_split_file",
         file_id,
-        {"job_id": rec["job_id"], "file_kind": rec["file_kind"]},
+        {"job_id": rec["job_id"], "file_kind": rec["file_kind"], "project_id": project_id},
     )
     return {"status": "pending"}
 
@@ -963,6 +1098,8 @@ def correct_segments(
     sb = get_supabase()
     frow = _file_or_404(sb, file_id)
     _require_done(frow)
+    if not _is_pdf_row(frow):
+        raise HTTPException(status.HTTP_409_CONFLICT, rfp_split.MSG_NOT_A_PDF)
     try:
         if llm_queue.active_job(llm_queue.JOB_BID_SPLIT, file_id):
             raise HTTPException(
@@ -973,6 +1110,7 @@ def correct_segments(
         raise
     except Exception:  # noqa: BLE001 - queue lookup trouble must not block the edit
         logger.exception("bid_split active-job lookup failed")
+    project_id = _project_guard(sb, frow)
     total_pages = frow.get("page_count")
     if not total_pages:
         raise HTTPException(
@@ -1107,8 +1245,9 @@ def correct_segments(
         "bid_split.correct_segments",
         "bid_split_file",
         file_id,
-        {"segments": len(segs), "was": len(segments_before)},
+        {"segments": len(segs), "was": len(segments_before), "project_id": project_id},
     )
+    updated["project_resync"] = _resync(sb, project_id, file_id, user.id)
     return updated
 
 
@@ -1129,7 +1268,7 @@ def analytics(days: int = 30, _: CurrentUser = Depends(require_internal)):
     """Throughput/quality readout over the last `days` (0 = everything):
     volumes, durations, per-page speed, category and confidence distributions,
     a per-day trend (LA calendar, company convention) and recent failures.
-    Aggregated in Python — dev-tool volumes, not a reporting warehouse."""
+    Aggregated in Python - dev-tool volumes, not a reporting warehouse."""
     days = max(0, min(days, 365))
     sb = get_supabase()
     jobs_q = sb.table("bid_split_jobs").select("id, status, created_at")

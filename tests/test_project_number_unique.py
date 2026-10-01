@@ -1,10 +1,12 @@
 """The projects.number unique index (migration 0052) makes numbers un-re-usable.
 
-A collision arrives from PostgREST as a 23505 error; _is_duplicate_number is the
-pure-logic classifier that turns it into a clean 409 rather than a raw 500. These
-tests pin the shapes it must recognize (and the ones it must not swallow)."""
+A collision arrives from PostgREST as a 23505 error; is_duplicate_number
+(services/project_numbers, where the creation loop retries on it and the
+router turns it into a clean 409 rather than a raw 500) is the pure-logic
+classifier. These tests pin the shapes it must recognize (and the ones it
+must not swallow)."""
 
-from app.routers.projects import _is_duplicate_number
+from app.services.project_numbers import is_duplicate_number as _is_duplicate_number
 
 
 def test_recognizes_the_number_index_by_name():

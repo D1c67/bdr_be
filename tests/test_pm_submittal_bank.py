@@ -14,7 +14,6 @@ select the resolver uses. Storage + the alias LLM are monkeypatched to no-ops.
 """
 
 import io
-import re
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -27,7 +26,6 @@ from app.core.deps import CurrentUser
 from app.core.roles import Role
 from app.models.schemas import PmAddToBankIn, PmBankPullIn
 from app.routers import pm_submittals
-from app.services import pm as pm_service
 from app.services import pm_submittal_bank as bank
 from app.services import storage
 from pydantic import ValidationError

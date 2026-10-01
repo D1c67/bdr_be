@@ -62,10 +62,34 @@ def enabled_map() -> dict[str, bool]:
     `bid_file_splitter` is NOT a sub-app (no switcher tile, no home route, not
     counted by the at-least-one-sub-app boot validator) — it is an experimental
     standalone tool whose flag simply rides along here so the frontend learns
-    about it the same way, with no rebuild when it flips.
+    about it the same way, with no rebuild when it flips. `rfp_ingest` (the
+    RFP Ingestion sandbox, dev accounts only) rides along for the same reason.
     """
+    settings = get_settings()
     flags = {sub_app.value: is_enabled(sub_app) for sub_app in SubApp}
-    flags["bid_file_splitter"] = get_settings().bid_file_splitter_enabled
+    flags["bid_file_splitter"] = settings.bid_file_splitter_enabled
+    flags["rfp_ingest"] = settings.rfp_ingest_enabled
+    flags["rfp_email_ingest"] = settings.rfp_email_ingestion_enabled
+    # The NGEM slice as the frontend gates it (the tab, the settings block,
+    # the project-side link and the bells): the two switches only, the same
+    # gate the /rfp-portal router uses. A configured account is NOT part of
+    # it: the settings block has to show "not configured" and Run now has to
+    # answer 503 on an unconfigured deployment, so the routes and the surface
+    # stay reachable. The scheduler loop and the queue's claim pass keep
+    # using `rfp_ngem_active` (docs/RFP_NGEM_PORTAL.md, section 11).
+    flags["rfp_ngem"] = bool(settings.rfp_ingest_enabled and settings.rfp_ngem_enabled)
+    # The BuildingConnected slice, same contract as rfp_ngem: the two
+    # switches only (the settings block shows "not configured" and offers
+    # Connect on a deployment without the APS client id and secret). The
+    # scheduler keeps using `rfp_bc_active` (docs/RFP_BUILDINGCONNECTED.md).
+    # getattr: fails closed on a settings stand-in without the field.
+    flags["rfp_buildingconnected"] = bool(
+        settings.rfp_ingest_enabled and getattr(settings, "rfp_bc_enabled", False)
+    )
+    # The RFP test bench (docs/RFP_TESTING.md 2): its own switch under the
+    # master switch. The frontend additionally requires a dev profile with
+    # the it_admin role, the same gate the /rfp-testing router enforces.
+    flags["rfp_testing"] = bool(settings.rfp_testing_enabled and settings.rfp_ingest_enabled)
     return flags
 
 
@@ -129,6 +153,19 @@ def require_bid_file_splitter() -> None:
     it was never implemented.
     """
     if not get_settings().bid_file_splitter_enabled:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+
+
+def require_rfp_ingest() -> None:
+    """Router-level dependency gating /rfp-ingest on its env flag.
+
+    Same contract as require_bid_file_splitter: while RFP_INGEST_ENABLED is
+    false every route 404s with the bare "Not Found" body before auth runs
+    (the router adds Depends(require_dev) per endpoint on top), so a
+    deployment that does not serve the sandbox is indistinguishable from one
+    where it was never implemented.
+    """
+    if not get_settings().rfp_ingest_enabled:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
 
 

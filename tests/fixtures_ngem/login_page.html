@@ -1,0 +1,1019 @@
+
+
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head><link href="App_Themes/Proc/v3/Ajax.Proc.css" type="text/css" rel="stylesheet" /><link href="App_Themes/Proc/v3/Calendar.Proc.css" type="text/css" rel="stylesheet" /><link href="App_Themes/Proc/v3/FontIcons/flaticon.css" type="text/css" rel="stylesheet" /><link href="App_Themes/Proc/v3/Grid.Proc.css" type="text/css" rel="stylesheet" /><link href="App_Themes/Proc/v3/Input.Proc.css" type="text/css" rel="stylesheet" /><link href="App_Themes/Proc/v3/Menu.Proc.css" type="text/css" rel="stylesheet" /><link href="App_Themes/Proc/v3/Proc.css" type="text/css" rel="stylesheet" /><link href="App_Themes/Proc/v3/Scheduler.Proc.css" type="text/css" rel="stylesheet" /><link href="App_Themes/Proc/v3/Support.css" type="text/css" rel="stylesheet" /><link href="App_Themes/Proc/v3/TabStrip.Proc.css" type="text/css" rel="stylesheet" /><title>
+
+</title><style type="text/css">
+body {
+background: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), white url(../images/SupplierLoginBackground.png) no-repeat center center fixed;
+background-size: cover;
+}
+#divHeaderLogo {
+margin-left: -1px;
+}
+#divWelcomeParagraph {
+margin-left: 0px;
+}
+#divLoginRegistration {
+min-width: 215px;
+max-width: 215px;
+}
+#rowWL_LoginRegistration {
+margin-left: 0px;
+}
+#divErrorMessage {
+min-width: 215px;
+max-width: 215px;
+}
+#divRegistration {
+}
+</style><style type="text/css">
+		* {
+			font-family: Verdana, Arial, sans-serif;
+		}
+
+		[class^="flaticon-tileDark_"]:before, [class*=" flaticon-tileDark_"]:before,
+		[class^="flaticon-tileDark_"]:after, [class*=" flaticon-tileDark_"]:after {
+			color: #29abe2;
+			font-size: 56px;
+		}
+
+		[class^="flaticon-tileLight_"]:before, [class*=" flaticon-tileLight_"]:before,
+		[class^="flaticon-tileLight_"]:after, [class*=" flaticon-tileLight_"]:after {
+			color: white;
+			font-size: 56px;
+		}
+
+		[class^="flaticon-registration_"]:before, [class*=" flaticon-registration_"]:before,
+		[class^="flaticon-registration_"]:after, [class*=" flaticon-registration_"]:after {
+			color: white;
+			font-size: 80px;
+		}
+
+		html, body {
+			height: 100%;
+			width: 100%;
+			padding: 0;
+			margin: 0;
+			-webkit-user-select: none;
+			-moz-user-select: none;
+			-ms-user-select: none;
+			user-select: none;
+		}
+
+		body {
+			display: flex;
+			flex-direction: column;
+			/*background: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.5)), white;*/
+		}
+
+		#divMaintenanceWarning {
+			padding: 8px;
+			background-color: red;
+			color: white;
+			font-weight: bold;
+			text-align: center;
+			font-size: 13px;
+		}
+
+		#divLoginMessage {
+			box-sizing: border-box;
+			width: 430px;
+			border-radius: 10px;
+			margin-top: 35px;
+			padding: 10px 15px;
+			background-color: #ffd4d4;
+			font-size: 12px;
+			color: #d80028;
+		}
+
+		header {
+			height: 70px;
+			min-height: 70px;
+			background: linear-gradient( rgba(0, 0, 0, .7), rgba(0, 0, 0, .7) );
+			padding: 0px;
+		}
+
+		#imgHead {
+			position: absolute;
+			top: 0;
+			right: 0;
+			bottom: 50px;
+			left: 0;
+			margin: auto;
+			max-width: 335px;
+			max-height: 133px;
+		}
+
+		#divHeader {
+			width: 956px;
+			margin-left: auto;
+			margin-right: auto;
+		}
+
+		#divHeaderLogo {
+			background-image: url(images/LoginBannerBackground.png);
+			position: relative;
+			width: 462px;
+			height: 228px;
+			line-height: 228px;
+			position: absolute;
+			vertical-align: bottom;
+			text-align: center;
+		}
+
+		#divWelcomeParagraph {
+			width: 400px;
+			margin-top: 100px;
+		}
+
+		#divLoginRegistration {
+			background-color: white;
+			border-radius: 10px;
+			margin: 0px;
+			padding: 20px;
+			display: block;
+			box-shadow: 0 0 30px black;
+			height: 220px;
+		}
+
+		#divErrorMessage {
+			position: absolute;
+			top: 0;
+			left: 0;
+			width: 100%;
+			height: 235px;
+			background-color: #ffd4d4;
+			border-radius: 10px;
+			vertical-align: middle;
+			text-align: center;
+		    padding-top: 15px;
+			padding-bottom: 10px;
+			padding-left: 20px;
+			padding-right: 20px;
+		}
+
+		main {
+			flex: auto;
+		}
+
+		footer {
+			height: 34px;
+			padding: 8px;
+		}
+
+		a {
+			color: inherit;
+			font-size: inherit;
+			font-weight: inherit;
+			text-decoration: none;
+		}
+
+			a:hover {
+				color: inherit;
+				font-size: inherit;
+				font-weight: inherit;
+				text-decoration: none;
+			}
+
+		#divFooter {
+			width: 956px;
+			margin-left: auto;
+			margin-right: auto;
+			border-radius: 10px;
+			background: linear-gradient( rgba(0, 0, 0, .7), rgba(0, 0, 0, .7) );
+			padding: 7px 20px 7px 20px;
+		}
+
+		.tdFooterText {
+			width: auto;
+			color: white;
+			padding: 0px 8px 0px 6px;
+			font-size: 12px;
+		}
+
+		#rowWL {
+			display: flex;
+			width: 996px;
+			margin: 50px auto 0px auto;
+		}
+
+		#rowWL_Welcome {
+			flex: 0 0 1;
+			padding: 0 0px 0 50px;
+			width: 496px;
+		}
+
+		#rowWL_LoginRegistration {
+			flex: 0 0 1;
+			padding: 0 20px 0 10px;
+			width: 500px;
+		}
+
+		#linkRegisterButton {
+			border-radius: 10px;
+			border: solid 2px white;
+			background-color: white;
+			color: #29abe2;
+			font-size: 13px;
+			padding: 5px 20px 7px 20px;
+			cursor: pointer;
+			display: inline-block;
+		}
+
+			#linkRegisterButton:hover {
+				border: solid 2px white;
+				background-color: #29abe2;
+				color: white;
+			}
+
+		.rowLinks {
+			display: flex;
+			width: 972px;
+			margin: 20px auto 0px auto;
+		}
+
+		.rowLinks_Cell {
+			flex: 1;
+			padding: 0 8px 0 8px;
+		}
+
+		.errorMessage {
+			color: #d80028;
+		}
+
+		#tblRegistration {
+			width: 175px;
+			height: 100%;
+			text-align: center;
+			background-color: #29abe2;
+			border-top-right-radius: 5px;
+			border-bottom-right-radius: 5px;
+			z-index: 1;
+		}
+
+		#tdRegistration {
+			padding: 0px 15px 10px 15px;
+			color: white;
+			font-size: 11px;
+		}
+
+		.divShortcut {
+			background-color: white;
+			border-radius: 10px;
+			margin: auto;
+			padding: 8px;
+			display: block;
+			height: 94px;
+			color: #29abe2;
+		}
+
+			.divShortcut:hover {
+				background-color: #29abe2;
+				color: white;
+				transition: .1s linear;
+			}
+
+			.divShortcut:hover {
+				background-color: #29abe2;
+				color: white;
+				transition: .1s linear;
+			}
+
+		.divShortcutImage {
+			text-align: center;
+		}
+
+		.tdShortcutText {
+			text-align: center;
+			padding-top: 4px;
+			font-size: 12px;
+			height: 30px;
+			vertical-align: middle;
+			color: inherit;
+		}
+
+		.buttonHidden {
+			visibility: hidden;
+			display: none;
+		}
+
+		.button {
+			border-radius: 10px;
+			border: solid 2px #29abe2;
+			background-color: #29abe2;
+			color: white;
+			font-size: 11px;
+			padding: 5px 20px 5px 20px;
+			width: 100%;
+		}
+
+			.button:focus {
+				border-radius: 10px;
+				border: solid 2px #29abe2;
+				background-color: #29abe2;
+				color: white;
+				font-size: 11px;
+				padding: 5px 20px 5px 20px;
+				width: 100%;
+			}
+
+			.button:hover {
+				border-radius: 10px;
+				border: solid 2px #29abe2;
+				background-color: white;
+				color: #29abe2;
+				font-size: 11px;
+				padding: 5px 20px 5px 20px;
+				width: 100%;
+				cursor: pointer;
+			}
+
+		.buttonReverse {
+			border-radius: 10px;
+			border: solid 2px white;
+			background-color: white;
+			color: #29abe2;
+			font-size: 11px;
+			padding: 5px 20px 5px 20px;
+			width: auto;
+			cursor: pointer;
+		}
+
+			.buttonReverse:hover {
+				border-radius: 10px;
+				border: solid 2px white;
+				background-color: #29abe2;
+				color: white;
+				font-size: 11px;
+				padding: 5px 20px 5px 20px;
+				width: auto;
+			}
+
+		.buttonAlt {
+			border-radius: 10px;
+			border: solid 2px #6fb76f;
+			background-color: #6fb76f;
+			color: white;
+			font-size: 11px;
+			padding: 5px 20px 5px 20px;
+			width: 100%;
+		}
+
+			.buttonAlt:focus {
+				border-radius: 10px;
+				border: solid 2px #6fb76f;
+				background-color: #6fb76f;
+				color: white;
+				font-size: 11px;
+				padding: 5px 20px 5px 20px;
+				width: 100%;
+			}
+
+			.buttonAlt:hover {
+				border-radius: 10px;
+				border: solid 2px #6fb76f;
+				background-color: white;
+				color: #6fb76f;
+				font-size: 11px;
+				padding: 5px 20px 5px 20px;
+				width: 100%;
+				cursor: pointer;
+			}
+
+		.buttonError {
+			border-radius: 10px;
+			border: solid 2px #d80028;
+			background-color: #d80028;
+			color: white;
+			font-size: 11px;
+			padding: 5px 20px 5px 20px;
+			width: 100%;
+		}
+
+			.buttonError:focus {
+				border-radius: 10px;
+				border: solid 2px #d80028;
+				background-color: #d80028;
+				color: #ffd4d4;
+				font-size: 11px;
+				padding: 5px 20px 5px 20px;
+				width: 100%;
+			}
+
+			.buttonError:hover {
+				border-radius: 10px;
+				border: solid 2px #d80028;
+				background-color: #ffd4d4;
+				color: #d80028;
+				font-size: 11px;
+				padding: 5px 20px 5px 20px;
+				width: 100%;
+				cursor: pointer;
+			}
+
+		.buttonErrorReverse {
+			border-radius: 10px;
+			border: solid 2px white;
+			background-color: white;
+			color: #d80028;
+			font-size: 11px;
+			padding: 5px 20px 5px 20px;
+			width: 100%;
+		}
+
+			.buttonErrorReverse:focus {
+				border-radius: 10px;
+				border: solid 2px white;
+				background-color: white;
+				color: #d80028;
+				font-size: 11px;
+				padding: 5px 20px 5px 20px;
+				width: 100%;
+			}
+
+			.buttonErrorReverse:hover {
+				border-radius: 10px;
+				border: solid 2px #d80028;
+				background-color: #d80028;
+				color: white;
+				font-size: 11px;
+				padding: 5px 20px 5px 20px;
+				width: 100%;
+				cursor: pointer;
+			}
+
+		.checkboxAgree {
+			background-color: white;
+			border-radius: 10px;
+			margin: auto;
+			padding: 8px;
+			height: 94px;
+			color: #29abe2;
+			visibility: hidden !important;
+			display: none !important;
+		}
+
+		.tdDivider {
+			width: 1px;
+			border-left: solid 1px white;
+		}
+
+		.link {
+			color: #29abe2;
+			text-decoration: underline;
+		}
+
+		.loginMessage {
+			font-size: 10pt;
+			font-weight: bold;
+			color: Red;
+		}
+
+		.loginMessageInfo {
+			font-size: 10pt;
+			font-weight: bold;
+			color: #AA0000;
+		}
+
+		.entryLabel {
+			font-size: 14px;
+			color: #29abe2;
+		}
+
+		.entryValue {
+			margin-top: 3px;
+		}
+
+		/* ANIMATION STUFF */
+		/* Generated by Animista on 2019-4-29 15:17:5
+		w: http://animista.net, t: @cssanimista
+		animation wobble-hor-bottom */
+		.wobble-hor-bottom {
+			-webkit-animation: wobble-hor-bottom 0.8s both;
+			animation: wobble-hor-bottom 0.8s both;
+		}
+
+		@-webkit-keyframes wobble-hor-bottom {
+			0%, 100% {
+				-webkit-transform: translateX(0%);
+				transform: translateX(0%);
+				-webkit-transform-origin: 50% 50%;
+				transform-origin: 50% 50%;
+			}
+
+			15% {
+				-webkit-transform: translateX(-30px) rotate(-6deg);
+				transform: translateX(-30px) rotate(-6deg);
+			}
+
+			30% {
+				-webkit-transform: translateX(15px) rotate(6deg);
+				transform: translateX(15px) rotate(6deg);
+			}
+
+			45% {
+				-webkit-transform: translateX(-15px) rotate(-3.6deg);
+				transform: translateX(-15px) rotate(-3.6deg);
+			}
+
+			60% {
+				-webkit-transform: translateX(9px) rotate(2.4deg);
+				transform: translateX(9px) rotate(2.4deg);
+			}
+
+			75% {
+				-webkit-transform: translateX(-6px) rotate(-1.2deg);
+				transform: translateX(-6px) rotate(-1.2deg);
+			}
+		}
+
+		@keyframes wobble-hor-bottom {
+			0%, 100% {
+				-webkit-transform: translateX(0%);
+				transform: translateX(0%);
+				-webkit-transform-origin: 50% 50%;
+				transform-origin: 50% 50%;
+			}
+
+			15% {
+				-webkit-transform: translateX(-30px) rotate(-6deg);
+				transform: translateX(-30px) rotate(-6deg);
+			}
+
+			30% {
+				-webkit-transform: translateX(15px) rotate(6deg);
+				transform: translateX(15px) rotate(6deg);
+			}
+
+			45% {
+				-webkit-transform: translateX(-15px) rotate(-3.6deg);
+				transform: translateX(-15px) rotate(-3.6deg);
+			}
+
+			60% {
+				-webkit-transform: translateX(9px) rotate(2.4deg);
+				transform: translateX(9px) rotate(2.4deg);
+			}
+
+			75% {
+				-webkit-transform: translateX(-6px) rotate(-1.2deg);
+				transform: translateX(-6px) rotate(-1.2deg);
+			}
+		}
+
+		/* Generated by Animista on 2019-4-29 15:39:16
+		w: http://animista.net, t: @cssanimista
+		animation slide-in-left */
+		.slide-in-left {
+			-webkit-animation: slide-in-left 0.33s ease-in both;
+			animation: slide-in-left 0.5s ease-in .33s both;
+		}
+
+		@-webkit-keyframes slide-in-left {
+			0% {
+				-webkit-transform: translateX(-250px);
+				transform: translateX(-250px);
+				opacity: 0;
+			}
+
+			100% {
+				-webkit-transform: translateX(0);
+				transform: translateX(0);
+				opacity: 1;
+			}
+		}
+
+		@keyframes slide-in-left {
+			0% {
+				-webkit-transform: translateX(-250px);
+				transform: translateX(-250px);
+				opacity: 0;
+			}
+
+			100% {
+				-webkit-transform: translateX(0);
+				transform: translateX(0);
+				opacity: 1;
+			}
+		}
+
+		/* Generated by Animista on 2019-4-29 16:13:48
+		w: http://animista.net, t: @cssanimista
+		animation slide-in-top */
+		.slide-in-top {
+			-webkit-animation: slide-in-top 0.5s ease-in both;
+			animation: slide-in-top 0.5s ease-in both;
+		}
+
+		@-webkit-keyframes slide-in-top {
+			0% {
+				-webkit-transform: translateY(-400px);
+				transform: translateY(-400px);
+				opacity: 1;
+			}
+
+			100% {
+				-webkit-transform: translateY(0);
+				transform: translateY(0);
+				opacity: 1;
+			}
+		}
+
+		@keyframes slide-in-top {
+			0% {
+				-webkit-transform: translateY(-90px);
+				transform: translateY(-400px);
+				opacity: 1;
+			}
+
+			100% {
+				-webkit-transform: translateY(0);
+				transform: translateY(0);
+				opacity: 1;
+			}
+		}
+	</style>
+	<script type="text/javascript">
+		function capLock(e) {
+			kc = e.keyCode ? e.keyCode : e.which;
+			sk = e.shiftKey ? e.shiftKey : ((kc == 16) ? true : false);
+			if (((kc >= 65 && kc <= 90) && !sk) || ((kc >= 97 && kc <= 122) && sk)) {
+				document.getElementById('spCapsLock').style.visibility = 'visible';
+				document.getElementById('spCapsLock').style.display = 'inline-block';
+			}
+			else {
+				document.getElementById('spCapsLock').style.visibility = 'hidden';
+				document.getElementById('spCapsLock').style.display = 'none';
+			}
+		}
+
+		function divLink_OnMouseOver(control) {
+			var span = control.getElementsByTagName("span")[0];
+			span.className = span.className.replace("-tileDark_", "-tileLight_")
+		}
+
+		function divLink_OnMouseOut(control) {
+			var span = control.getElementsByTagName("span")[0];
+			span.className = span.className.replace("-tileLight_", "-tileDark_")
+		}
+	</script>
+	
+		<script type="text/javascript">
+			function CheckIEVersion() {
+				var IEversion = detectIE();
+				if (IEversion !== false) {
+					if (IEversion <= 9) {
+						var oWnd = $find("modalPopupID");
+						oWnd.setUrl("BrowserWarning.aspx");
+						oWnd.center();
+						oWnd.show();
+					}
+				}
+			}
+
+			function tryMfa() {
+				var oWnd = $find("rwMfaPrompt");
+				oWnd.show();
+			}
+
+			function OpenMfaPopup() {
+				var win = $find("rwMfaPrompt"); 
+				win.setUrl("https://supplier.ionwave.net/MfaPromptPopup.aspx");
+				win.show();
+				return false;
+			}
+
+			/**
+			* detect IE
+			* returns version of IE or false, if browser is not Internet Explorer
+			*/
+			function detectIE() {
+				var ua = window.navigator.userAgent;
+
+				// Test values; Uncomment to check result …
+
+				// IE 10
+				// ua = 'Mozilla/5.0 (compatible; MSIE 10.0; Windows NT 6.2; Trident/6.0)';
+
+				// IE 11
+				// ua = 'Mozilla/5.0 (Windows NT 6.3; Trident/7.0; rv:11.0) like Gecko';
+
+				// IE 12 / Spartan
+				// ua = 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.71 Safari/537.36 Edge/12.0';
+
+				// Edge (IE 12+)
+				// ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/46.0.2486.0 Safari/537.36 Edge/13.10586';
+
+				var msie = ua.indexOf('MSIE ');
+				if (msie > 0) {
+					// IE 10 or older => return version number
+					return parseInt(ua.substring(msie + 5, ua.indexOf('.', msie)), 10);
+				}
+
+				var trident = ua.indexOf('Trident/');
+				if (trident > 0) {
+					// IE 11 => return version number
+					var rv = ua.indexOf('rv:');
+					return parseInt(ua.substring(rv + 3, ua.indexOf('.', rv)), 10);
+				}
+
+				var edge = ua.indexOf('Edge/');
+				if (edge > 0) {
+					// Edge (IE 12+) => return version number
+					return parseInt(ua.substring(edge + 5, ua.indexOf('.', edge)), 10);
+				}
+
+				// other browser
+				return false;
+			}
+
+			function peekPassword() {
+				document.getElementById('txtPassword').type = 'text';
+			}
+
+			function hidePassword() {
+				document.getElementById('txtPassword').type = 'password';
+			}
+		</script>
+	<script type="text/javascript">
+var _gaq = _gaq || [];
+_gaq.push(['_setAccount', 'UA-33168174-2']);
+_gaq.push(['_setDomainName', 'ionwave.net']);
+_gaq.push(['_trackPageview', '/VendorLogin.aspx']);
+(function () {
+var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+})();
+</script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-4NYWTSNZ2P"></script><script>window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());gtag('config', 'G-4NYWTSNZ2P', {page_location: 'https://supplier.ionwave.net/VendorLogin.aspx'});</script><link href="/WebResource.axd?d=QKX1AO1vX8ebWKfbb4eOTB7Jb-B9Cl2T3yeeItUBRzLQBeOBUsfM9EPI56SQ5rfhlAzROoEdvBliGUPM72LDgEDY2q1I0UXbltOOIlm7RfiNQ3pCzqoWG40w02pOAZI30&amp;t=639221014900000000" type="text/css" rel="stylesheet" class="Telerik_stylesheet" /><link href="/WebResource.axd?d=abSXP-RgNuAsfhlSYpnpbChFbZ_cO5M8BPaEtSuSsVncNMCTQO_x4TIzP670QJ__E8lWlh3xKAMafVssIIzb6-nQFpQG8CrnKVdc8ecwukYr-xDMdkqZmNd0vYrOA4X3dI3JtBwS2DOEzWhlBa_1uA2&amp;t=639221014900000000" type="text/css" rel="stylesheet" class="Telerik_stylesheet" /><link href="/WebResource.axd?d=VdPoLqp1pEU6N0-IfFplZPkDwO-MisjbRLhypAJwrvNwmKkOZq7D6hqIzmI4-HndQ4og6G3NzL1qx0jwd9f3sCg0UfQbnsD7d9N5rLwh_-_O8uYs8z8JH1meOnGEZJvmr0TsiFyOdBL0aJRS_CWejw2&amp;t=639221014900000000" type="text/css" rel="stylesheet" class="Telerik_stylesheet" /><link href="/WebResource.axd?d=qpDogBCh8B2zFH7Wt5kgoJjjW4N6hIYOYFfdfMapZFhzXa4hLUR8szPMSiTv02TewDkCXXmrRTyO5L5nRv1XjBDFnm_7PY3VGxYVzjideIqcCnOD5TmR3k7LhhUyO2VHlAVDX6JtSZJ_DbtFLkfWkw2&amp;t=639221014900000000" type="text/css" rel="stylesheet" class="Telerik_stylesheet" /><link href="/WebResource.axd?d=NZp3oGkpijSHfvYvEXDUvI9MTBlp7SAXWuzbdUTBSwCsqmJuUyYcecD_qZrk0QmctkrR9O6PwbMehrvbXFU9xk4VZJk4QpBcSW5Vs-shJd6Sjx_6NfxwTDa0O92VtR-i1fdGjswkBmATGNkXpoAf9NZYKAjzDRbrEosK9B84udY1&amp;t=639221014900000000" type="text/css" rel="stylesheet" class="Telerik_stylesheet" /></head>
+<body>
+	
+	<header>
+		<div id="divHeader">
+			<div id="divHeaderLogo">
+				<img src="images/Euna_Procurement-IonWave_Primary-RGB.png" id="imgHead" />
+			</div>
+		</div>
+	</header>
+	<main>
+		<form method="post" action="./VendorLogin.aspx" onkeypress="javascript:return WebForm_FireDefaultButton(event, 'btnLogin')" id="Form1">
+<div class="aspNetHidden">
+<input type="hidden" name="ScriptManager_TSM" id="ScriptManager_TSM" value="" />
+<input type="hidden" name="__EVENTTARGET" id="__EVENTTARGET" value="" />
+<input type="hidden" name="__EVENTARGUMENT" id="__EVENTARGUMENT" value="" />
+<input type="hidden" name="__VIEWSTATE" id="__VIEWSTATE" value="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" />
+</div>
+
+<script type="text/javascript">
+//<![CDATA[
+var theForm = document.forms['Form1'];
+if (!theForm) {
+    theForm = document.Form1;
+}
+function __doPostBack(eventTarget, eventArgument) {
+    if (!theForm.onsubmit || (theForm.onsubmit() != false)) {
+        theForm.__EVENTTARGET.value = eventTarget;
+        theForm.__EVENTARGUMENT.value = eventArgument;
+        theForm.submit();
+    }
+}
+//]]>
+</script>
+
+
+<script src="/WebResource.axd?d=pynGkmcFUV13He1Qd6_TZJPr2k25angMO4awhtK5XjYxJ_iizFZYTXESeXRu55iKO2VaYhnaDv6qOPA8JgIGtg2&amp;t=639190653332169432" type="text/javascript"></script>
+
+
+<script type="text/javascript">
+//<![CDATA[
+const APP_INSIGHTS_ENABLED=false;//]]>
+</script>
+
+<script src="/ScriptResource.axd?d=NJmAwtEo3Ipnlaxl6CMhvugheA-hufiLx9kbN4Jlqu5rkKfhD4EMInQys2Qpj1Sz0r3zQr9-l0CklXsGRekKCvOuELJf73919iQAhfk3fsYr4Cf203DtHVELC-K1QBUx_wSWNnezyhKxoXUMk-5_z2-J2UItmfPjGXf0GVGRm4I1&amp;t=ffffffffbec1863d" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=dwY9oWetJoJoVpgL6Zq8OJ9soJVOJCKfm3YmA6zFsGJrir1J6pskA31SwIrzDcHW0Qr_m4ztj46osjYDIhAdUKsHEjrc3SFToGHcZ5LV7zyuGPpr2YpusIes7uVV6jbP3WtkqwSHzZyN4dIw2aLMYEQF_IPaO1Nc3O0cZ0q9-MQ1&amp;t=ffffffffbec1863d" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=TDVjdgRbdvNAY3tnbizUcAW7Sh0-gIu7AedUypKlxDjDvZG88ZgBC29EjPOmriSY1HRLX2Ykd8YmbKwxceifDs3yUo8tRgwv-68R0M0UIrE7bHso2HlL1FA5rCIxBD-50&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=mbGZm65DzNC0tMTq0ElbcYlpBgUKTSrh_kIXka-mPZ7T2Y1ziKhVIFeNrFNDvlYwbxuIJyFpjLr8JoBlcyZkt93sokigKIqFKzvb3Z6E6KRSONsjM567iF8myhjU7VJi_Gn8ksSFWy1TDxJsIeqq_w2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=cmIcXiVJ__exjjpjrN730uZVEt4NjcyGAGJCcGC-sPNUQWXfQ75ZiY26NqDeoApul58dLbmluiOSfvYpRslxddA8KkFyeMuJdCqXhkQFg5-hmwcn1hqyr51WmLBFCsPeNiG7a--E_vS14dnTKyCCyw2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=aoSSiMnLNTC20U5L7LFIKhluoA2fAkafvTV_bhzsEmO-fwAtunXT1Al1gwu52fNPbkB3xIX4fYMj-xYqdKXZDN5OOLcZ98D2lNsJoV7k0PG1uxTajlXvLI2J30NkL6AaqVjv-Y4CLKwNb6FPt1bkmR5qh6J50wSp2s4c9nhsqJc1&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=GUyLPMOEFhffuIMm6XZ0oEVYA5TXJGfTbqTsZU0FScXZIWlTwjTN_2hp3wuMzPJ_YmOLdUWFp2OuozbzJtO4YRvX-O1qp8Igvn2tY5SqRJAa5VnbPP2gEY8gSCW5axjRj5VyvANq5ZBp86VXKvhaT0X1nVkvQt7SlX0uw96pIAE1&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=A22-SyJgKhJ5FWUJePaPlEF_GLx_zIp6mRUz7-Cryfubhytfpz5HXh7fsZ4HAXMucO8mbP4H2u76pvn3KQr_gH-yA9_XiUHEGpwcou7F10fmdds2b-r194beAacBYcfsuTj9KDmG5VPTzC9LW1Klcg2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=mxxObI9nroQxDBLgf-QlAkaZ5rQuiYH6_YJZjPO4Wpofnm4PSGuZ8DUNWnVcXgl6s9jnPEfUGhbyYgiglknm8f2LO52ikNBoaGRY1T_i3fC8BPpz3DniuMwu73ZoLLujFQ17LzsOvUcRG8wSBHcrW8Ahte9a9tXuUC3_3TVrEz81&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=utaAJrK4EroNO-KNr3p19JLHxeTPXsjnEnkYF22hjGY6-QtY7mQmZo1CKuhS8aM7_v9HFCwvbur1KIqr5fsz_DI27rflmwlye1Uy7EGk3aEKBAsinDRMroAZji0yJElM-AcynxZHTJAiJthYzWfWWA2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=ei_BvuPu_kfWuvcXX4wAOBC4FenN62Y4j0MMnn-tzlBhwcXwOIgDUr37hUlCiFwTuk6RSvuQgKaEf3QUcL--4C6eJMAR85xvTxXikdmjB7dXJ6kW76KIhhmQxnMjobANbOq-i2pd4wKWj70ELBHuzw2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=qsRpKh5Y3Y02fhrPxQCAxRMe6bf9vzusVYBvXeUmnLPZCEzrNl4_nWFx5YiRbZPkC58hEbAdnwpGB7F8qTvDeNzF20mu-IBi42WDuIQumRcX6_9Ael2cK0oQcLF0SGtPV6dXJ3V85egmE-dBy7swvQ2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=LxjRs3XOu8Cy2bbYGMzbCtdSxWgvDqWCMPLSILT9mWDwXmh5dUpqIeQpomqMNgO_ickY9vqDoXQWJF6xMVS7pOup0wKrhx4anT-x3jx7MFu8BB_-hQepx91MV-a5KKpez7TCWmdBmvrLnqiAIlwCnlBXxaBdB7aCB5Dvwilc7kNK2BKcNMmbpila_zMMz7NU0&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=86EhAqQjfuMKlbK4FWyenA7ol18m67XDcV5DY1Me1DrJajRvUNpwfnraMU9ZGrDsZRUbEs-gZwn_hCkgKuSeXoVuWsdStcSaICOLimB2H5SMEZNPZFp6cZfbS_-0ogBx-Ui6bL9_OOOr0ZrInanjwvseFe8IRiC57w6LOwPtZE81&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=wl5RKBCXTWDacHhxsSq8Qzht-GjahPOExDvEPZknDesgoaI6flMVm4PCyKm4dtpawyzoqikF4zuFbhrXsCuoSVBqzgmBlRETTSpZXRie0u3vV37xGmL39MdRVTb0u0CfDY_893_zbctI1Ad_RsBRBg2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=OhiQVM8i2feYV04aiMKgwsVZ00jkl5xb0QYuF60IDr2OyMJaddBz5rcvK7ofDYMNauTe3tMl8OL5YhHRerTQkfcgMGOuFLxsFtlZcNpaavr0bewKNbM8Rys7oxz8hWjamwNO2vJ9hVKBXGSqm7JA8A2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/ScriptResource.axd?d=6cZcu819zlBI2GnZAKr8cf2_XivAGwvBV_nwDeHhWFJLeFqeGvp89ukBDbqCWoV02vU6Tc0M2B1m0LgmR3FxiE9LjXodImZT2s6BrbLFpxjIMW8-_Ir-BKzSi8wVd84MIxtHCrsJNVxIAQ-bwjeNoQ2&amp;t=ffffffffb5cfdbde" type="text/javascript"></script>
+<script src="/WebResource.axd?d=JoBkLzP19aTuxbWOhHobYoLQYAmDDh9L3uKgWq56SEOdLh6l7kn5THh8kdoSRz5k1ME0z8AtkDjrAf-8Ilxb9A2&amp;t=639190653332169432" type="text/javascript"></script>
+<div class="aspNetHidden">
+
+	<input type="hidden" name="__VIEWSTATEGENERATOR" id="__VIEWSTATEGENERATOR" value="563744BC" />
+	<input type="hidden" name="__VIEWSTATEENCRYPTED" id="__VIEWSTATEENCRYPTED" value="" />
+</div>
+			<script type="text/javascript">
+//<![CDATA[
+Sys.WebForms.PageRequestManager._initialize('ScriptManager', 'Form1', [], [], [], 90, '');
+//]]>
+</script>
+
+			<div id="RadWindowManager1" style="z-index:11000;display:none;">
+	<!-- 2026.3.812.462 --><div id="modalPopupID" style="z-index:11000;display:none;">
+		<div id="modalPopupID_C" style="display:none;">
+
+		</div><input id="modalPopupID_ClientState" name="modalPopupID_ClientState" type="hidden" />
+	</div><div id="rwMfaPrompt" style="z-index:11000;display:none;">
+		<div id="rwMfaPrompt_C" style="display:none;">
+
+		</div><input id="rwMfaPrompt_ClientState" name="rwMfaPrompt_ClientState" type="hidden" />
+	</div><div id="RadWindowManager1_alerttemplate" style="display:none;">
+        <div class="rwDialogPopup radalert">
+            <div class="rwDialogText" role="alert">
+            {1}
+            </div>
+
+            <div>
+                <a  onclick="$find('{0}').close(true);"
+                class="rwPopupButton" href="javascript:void(0);">
+                    <span class="rwOuterSpan">
+                        <span class="rwInnerSpan">##LOC[OK]##</span>
+                    </span>
+                </a>
+            </div>
+        </div>
+        </div><div id="RadWindowManager1_prompttemplate" style="display:none;">
+         <div class="rwDialogPopup radprompt">
+                <div class="rwDialogText">
+                {1}
+                </div>
+                <div>
+                    <script type="text/javascript">
+                    function RadWindowprompt_detectenter(id, ev, input)
+                    {
+                        if (!ev) ev = window.event;
+                        if (ev.keyCode == 13)
+                        {
+                            var but = input.parentNode.parentNode.getElementsByTagName("A")[0];
+                            if (but)
+                            {
+                                if (but.click) but.click();
+                                else if (but.onclick)
+                                {
+                                    but.focus(); var click = but.onclick; but.onclick = null; if (click) click.call(but);
+                                }
+                            }
+                           return false;
+                        }
+                        else return true;
+                    }
+                    </script>
+                    <input title="Enter Value" aria-label="Enter Value" onkeydown="return RadWindowprompt_detectenter('{0}', event, this);" type="text"  class="rwDialogInput" value="{2}" />
+                </div>
+                <div>
+                    <a onclick="$find('{0}').close(this.parentNode.parentNode.getElementsByTagName('input')[0].value);"
+                        class="rwPopupButton" href="javascript:void(0);" ><span class="rwOuterSpan"><span class="rwInnerSpan">##LOC[OK]##</span></span></a>
+                    <a onclick="$find('{0}').close(null);" class="rwPopupButton"  href="javascript:void(0);"><span class="rwOuterSpan"><span class="rwInnerSpan">##LOC[Cancel]##</span></span></a>
+                </div>
+            </div>
+        </div><div id="RadWindowManager1_confirmtemplate" style="display:none;">
+        <div class="rwDialogPopup radconfirm">
+            <div class="rwDialogText">
+            {1}
+            </div>
+            <div>
+                <a onclick="$find('{0}').close(true);"  class="rwPopupButton" href="javascript:void(0);" ><span class="rwOuterSpan"><span class="rwInnerSpan">##LOC[OK]##</span></span></a>
+                <a onclick="$find('{0}').close(false);" class="rwPopupButton"  href="javascript:void(0);"><span class="rwOuterSpan"><span class="rwInnerSpan">##LOC[Cancel]##</span></span></a>
+            </div>
+        </div>
+        </div><input id="RadWindowManager1_ClientState" name="RadWindowManager1_ClientState" type="hidden" />
+</div>
+			<div id="rowWL">
+				<div id="rowWL_Welcome">
+					<div id="divWelcomeParagraph">
+						<div style="font-size: 20px; color: white; font-weight: bold;">
+							<span id="lblHeadline">Welcome to Euna Procurement!</span>
+						</div>
+						<div style="margin-top: 5px; font-size: 12px; color: white;">
+							<span id="lblParagraph"></span>
+						</div>
+					</div>
+				</div>
+				<div id="rowWL_LoginRegistration">
+					<div id="divLoginRegistration" style="float: left; position: relative; z-index: 2" class="slide-in-top">
+						
+						<div style="font-size: 18px; color: #29abe2;">Login</div>
+						<div id="divLoginEntry">
+							<div id="divUserName" style="margin-top: 12px;">
+								<div class="entryLabel">Username</div>
+								<div class="entryValue" style="margin-top: 3px; display:grid;grid-template-columns:75% 24% 1%;grid-template-rows:5% 90% 5%;">
+									<input name="txtUserName" type="text" maxlength="100" id="txtUserName" style="grid-column-start:1;grid-column-end:4;grid-row-start:1;grid-row-end:4;" />
+								</div>
+							</div>
+							<div style="margin-top: 12px;">
+								<div style="font-size: 14px; color: #29abe2;">Password</div>
+								<div style="margin-top: 3px; display:grid;grid-template-columns:85% 14% 1%;grid-template-rows:7.5% 0.5% 84% 0.5% 7.5%;">
+									<input name="txtPassword" type="password" maxlength="100" id="txtPassword" onkeypress="javascript:capLock(event)" style="grid-column-start:1;grid-column-end:4;grid-row-start:1;grid-row-end:6;" />
+									<div id="divPeekPassword" onmousedown="javascript:peekPassword()" onmouseup="javascript:hidePassword()" onmouseout="javascript:hidePassword()" style="background:linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,1), rgba(255,255,255,1), rgba(255,255,255,1)); grid-column-start:2;grid-column-end:3;grid-row-start:2;grid-row-end:5;display:flex;flex-direction:column;justify-content:center;align-items:center;">
+										<svg width="100%" height="13px" xmlns="http://www.w3.org/2000/svg">
+											<g transform="translate(4, 0) scale(0.85)">
+												<path d="M 4 8 C 10 0, 20 0, 26 8" stroke="rgba(126,126,126,1.0)" stroke-width="1.4" fill="transparent"/>
+												<path d="M 4 8 C 10 16, 20 16, 26 8" stroke="rgba(126,126,126,1.0)" stroke-width="1.4" fill="transparent"/>
+												<circle cx="15" cy="8" r="5" fill="transparent" stroke="rgba(126,126,126,1.0)" stroke-width="1.65" />
+												<circle cx="15" cy="8" r="2.2" fill="rgba(126,126,126,1.0)" />
+												<circle cx="16" cy="8" r="1" fill="white" />
+											</g>
+										</svg>
+									</div>
+								</div>
+								<div style="margin-top: 1px; text-align: right;">
+									<span style="font-size: 16px;">&nbsp;</span>
+									<span id="spCapsLock" style="visibility: hidden; display: none;">
+										<span class="flaticon-fieldError_Error"></span>
+										<span class="errorMessage" style="font-style: italic;">Caps Lock is on</span>
+									</span>
+								</div>
+							</div>
+							<div class="checkboxAgree">
+								<button type="button" name="chkAgree" value="I agree to the terms and conditions of using this website" id="chkAgree" tabindex="-1" class="RadCheckBox RadButton RadButton_Default rbCheckBox rbRounded rbIconButton"><span class="rbIcon p-icon p-i-checkbox rbToggleCheckbox"></span><span class="rbText">I agree to the terms and conditions of using this website</span><input id="chkAgree_ClientState" name="chkAgree_ClientState" type="hidden" /></button>
+							</div>
+							<div style="margin-top: 2px;">
+								
+								<input type="submit" name="btnLogin" value="Login" id="btnLogin" class="button" />
+							</div>
+							<div style="margin-top: 10px;">
+								<input type="submit" name="btnForgotPassword" value="Trouble Logging In?" id="btnForgotPassword" class="buttonAlt" />
+							</div>
+						</div>
+						
+					</div>
+				</div>
+			</div>
+			<div class="rowLinks"><div class="rowLinks_Cell"><a href="https://eunasolutions.com/solutions/procurement" onmouseover="divLink_OnMouseOver(this)" onmouseout="divLink_OnMouseOut(this)"><div class="divShortcut" style="max-width:300px;"><div class="divShortcutImage"><span class="flaticon-tileDark_WWW"></span></div><table style="width:100%;">
+	<tr>
+		<td class="tdShortcutText">Euna Procurement Solutions</td>
+	</tr>
+</table>
+</div></a></div></div>
+			<div style="clear: both;"></div>
+			<div style="margin-top: 40px; text-align: center;">
+				<a href="https://ionwave.net">
+					<img src="images/Euna_Procurement-IonWave_White-RGB.png" width="245" />
+				</a>
+			</div>
+			<input type="submit" name="hdnBtnLogin" value="" id="hdnBtnLogin" style="display:none" />
+			<input type="submit" name="hdnBtnMfa" value="" id="hdnBtnMfa" style="display:none" />
+			<input type="hidden" name="hdnCaptchaResponse" id="hdnCaptchaResponse" />
+		
+
+<script type="text/javascript">
+//<![CDATA[
+Sys.Application.add_load(CheckIEVersion);window.__TsmHiddenField = $get('ScriptManager_TSM');WebForm_AutoFocus('txtUserName');Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadWindow, {"_dockMode":false,"_stylezindex":"11000","behaviors":37,"clientStateFieldID":"modalPopupID_ClientState","formID":"Form1","height":"210px","iconUrl":"","keepInScreenBounds":true,"minimizeIconUrl":"","modal":true,"name":"modalPopupID","navigateUrl":"BrowserWarning.aspx","showContentDuringLoad":false,"skin":"Default","visibleStatusbar":false,"width":"450px"}, null, null, $get("modalPopupID"));
+});
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadWindow, {"_dockMode":false,"_stylezindex":"11000","behaviors":0,"clientStateFieldID":"rwMfaPrompt_ClientState","formID":"Form1","height":"350px","iconUrl":"","keepInScreenBounds":true,"minimizeIconUrl":"","modal":true,"name":"rwMfaPrompt","navigateUrl":"MfaPromptPopup.aspx","showContentDuringLoad":false,"skin":"Default","visibleStatusbar":false,"width":"650px"}, {"close":tryMfa}, null, $get("rwMfaPrompt"));
+});
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadWindowManager, {"clientStateFieldID":"RadWindowManager1_ClientState","formID":"Form1","iconUrl":"","keepInScreenBounds":true,"minimizeIconUrl":"","modal":true,"name":"RadWindowManager1","showContentDuringLoad":false,"skin":"Default","visibleStatusbar":false,"windowControls":"['modalPopupID','rwMfaPrompt']"}, null, {"child":"modalPopupID"}, $get("RadWindowManager1"));
+});
+Sys.Application.add_init(function() {
+    $create(Telerik.Web.UI.RadCheckBox, {"_accessKey":"","_isClientSubmit":true,"_postBackReference":"__doPostBack('chkAgree','')","clientStateFieldID":"chkAgree_ClientState","confirmSettings":{},"tabIndex":-1,"text":"I agree to the terms and conditions of using this website","uniqueID":"chkAgree"}, null, null, $get("chkAgree"));
+});
+//]]>
+</script>
+</form>
+		
+			<script type="text/javascript">
+				var canAccessCdn = false;
+			</script>
+			<script type="text/javascript" src="https://d2i2wahzwrm1n5.cloudfront.net/beacon.js?ts=202609151543455385881"></script>
+			
+		
+	</main>
+
+	<footer>
+		<div id="divFooter">
+			<table style="margin: auto;">
+				<tr>
+					<td class="tdFooterText link"><a href="BrowserCompatibility.html" target="_blank">Browser Requirements</a></td>
+					<td class="tdDivider" />
+					<td class="tdFooterText">Use of website indicates agreement with <span class="link"><a href="SiteTerms.aspx" target="_blank">Terms of Use</a></span></td>
+					<td class="tdDivider" />
+					<td class="tdFooterText">Version 2026.Q2 [Production]</td>
+					<td class="tdDivider" />
+					<td class="tdFooterText">
+						­&copy; 
+						<span id="lblCurYear">2026</span>
+						Ion Wave Technologies, LLC
+					</td>
+				</tr>
+			</table>
+		</div>
+	</footer>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"a066d9046a79460d9647771312757e34","spa":2}' crossorigin="anonymous"></script>
+</body>
+</html>

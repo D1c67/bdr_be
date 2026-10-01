@@ -223,10 +223,15 @@ def report(
             # send also counts as answered when a quotes row points at it; quotes
             # not tied to any send (fully manual) still count toward "received".
             for q in _in(
-                lambda: sb.table("quotes").select("rfq_id, rfq_send_id"),
+                lambda: sb.table("quotes").select(
+                    "rfq_id, rfq_send_id, received_after_submission"
+                ),
                 "rfq_id",
                 rfq_ids,
             ):
+                # Late quotes (0138) are on record only: not bid-time coverage.
+                if q.get("received_after_submission"):
+                    continue
                 if q.get("rfq_send_id"):
                     quoted_send_ids.add(q["rfq_send_id"])
                 else:

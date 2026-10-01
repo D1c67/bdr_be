@@ -15,7 +15,6 @@ from app.services import graph_email, storage
 from app.services.email_branding import (
     LOGO_CONTENT_ID,
     LOGO_FILENAME,
-    _BORDER,
     _MUTED,
     _NAVY,
     logo_bytes,

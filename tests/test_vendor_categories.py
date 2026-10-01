@@ -20,7 +20,7 @@ from fastapi import HTTPException
 
 from app.core.deps import CurrentUser
 from app.core.roles import WRITER_ROLES, Role
-from app.models.schemas import VendorContactIn, VendorContactUpdate
+from app.models.schemas import VendorContactIn, VendorContactUpdate, VendorIn, VendorUpdate
 from app.routers import vendors as v
 
 # Real UUIDs: the router rejects anything that isn't one before it reaches PG.
@@ -58,6 +58,10 @@ class _Query:
         self._op = "delete"
         return self
 
+    def update(self, payload):
+        self._op, self._payload = "update", payload
+        return self
+
     def eq(self, col, val):
         self._eq[col] = val
         return self
@@ -92,6 +96,12 @@ class _Query:
                 rows.append(row)
                 made.append(dict(row))
             return _Result(made)
+        if self._op == "update":
+            hit = [r for r in rows if self._match(r)]
+            for r in hit:
+                r.update(self._payload)
+            return _Result(copy.deepcopy(hit))
+
         if self._op == "delete":
             removed = [r for r in rows if self._match(r)]
             self.db.tables[self.name] = [r for r in rows if not self._match(r)]
@@ -108,7 +118,7 @@ class _Query:
             return _Result(
                 [{"vendor_contacts": self.db.contact(r["vendor_contact_id"])} for r in out]
             )
-        if "vendors(name)" in self._sel:
+        if "vendors(name" in self._sel:
             return _Result([self.db.contact(r["id"]) for r in out])
         return _Result(copy.deepcopy(out))
 
@@ -127,11 +137,14 @@ class _DB:
         for r in self.tables.get("vendor_contacts", []):
             if r["id"] == contact_id:
                 row = copy.deepcopy(r)
-                name = next(
-                    (x["name"] for x in self.tables.get("vendors", []) if x["id"] == r["vendor_id"]),
-                    None,
+                vendor = next(
+                    (x for x in self.tables.get("vendors", []) if x["id"] == r["vendor_id"]),
+                    {},
                 )
-                row["vendors"] = {"name": name}
+                row["vendors"] = {
+                    "name": vendor.get("name"),
+                    "is_national_account": bool(vendor.get("is_national_account")),
+                }
                 return row
         return None
 
@@ -366,6 +379,61 @@ def test_editing_categories_needs_a_writer_role():
     import asyncio
 
     guard = inspect.signature(v.update_contact_categories).parameters["_"].default.dependency
+    for role in WRITER_ROLES:
+        assert asyncio.run(guard(_user(role))) is not None
+    for role in (Role.ACCOUNTANT, Role.ESTIMATOR):
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(guard(_user(role)))
+        assert exc.value.status_code == 403
+
+
+# ── National account vendors (0139) ─────────────────────────────────────────
+
+
+def test_a_vendor_can_be_marked_a_national_account(db):
+    out = v.update_vendor(VENDOR_A, VendorUpdate(is_national_account=True), _=_user())
+    assert out == {"id": VENDOR_A, "is_national_account": True}
+    assert db.tables["vendors"][0]["is_national_account"] is True
+    # Only the one company moves.
+    assert not db.tables["vendors"][1].get("is_national_account")
+
+
+def test_the_flag_can_be_cleared(db):
+    v.update_vendor(VENDOR_A, VendorUpdate(is_national_account=True), _=_user())
+    out = v.update_vendor(VENDOR_A, VendorUpdate(is_national_account=False), _=_user())
+    assert out["is_national_account"] is False
+
+
+def test_marking_a_missing_vendor_is_404(db):
+    with pytest.raises(HTTPException) as exc:
+        v.update_vendor(str(uuid4()), VendorUpdate(is_national_account=True), _=_user())
+    assert exc.value.status_code == 404
+
+
+def test_marking_a_non_uuid_vendor_is_400(db):
+    with pytest.raises(HTTPException) as exc:
+        v.update_vendor("nope", VendorUpdate(is_national_account=True), _=_user())
+    assert exc.value.status_code == 400
+
+
+def test_a_new_vendor_defaults_to_not_national():
+    assert VendorIn(name="Acme").is_national_account is False
+    assert VendorIn(name="Acme", is_national_account=True).is_national_account is True
+
+
+def test_contacts_carry_their_vendors_national_flag(db):
+    v.update_vendor(VENDOR_A, VendorUpdate(is_national_account=True), _=_user())
+    _add(db, VENDOR_A, "Jane Doe", [SWITCHGEAR])
+    _add(db, VENDOR_B, "Bob Lee", [SWITCHGEAR])
+    rows = v.list_contacts(material_category_id=SWITCHGEAR, _=_user())
+    flags = {r["name"]: r["vendors"]["is_national_account"] for r in rows}
+    assert flags == {"Jane Doe": True, "Bob Lee": False}
+
+
+def test_marking_a_national_account_needs_a_writer_role():
+    import asyncio
+
+    guard = inspect.signature(v.update_vendor).parameters["_"].default.dependency
     for role in WRITER_ROLES:
         assert asyncio.run(guard(_user(role))) is not None
     for role in (Role.ACCOUNTANT, Role.ESTIMATOR):

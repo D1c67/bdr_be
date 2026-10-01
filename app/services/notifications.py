@@ -122,6 +122,7 @@ def dismiss_notifications(
     type_prefixes: list[str] | None = None,
     user_id: str | None = None,
     gc_id: str | None = None,
+    metadata_eq: dict[str, str] | None = None,
 ) -> None:
     """Soft-dismiss matching notifications so they drop out of the bell.
 
@@ -133,6 +134,9 @@ def dismiss_notifications(
     (for the `due.<kind>.<offset>` family). `gc_id` narrows to rows whose
     metadata names that GC (the gc_pricing.* family), so approving one GC's
     price change never clears the request for another GC on the same project.
+    `metadata_eq` is the general form of that: each key narrows to rows whose
+    metadata carries that exact value (the external_submission.* family keys
+    its rows by {"request_id"}, 0140).
     Requires a project_id or rfq_id scope so a dismissal can never sweep the
     whole table. The email mirror is already sent and is intentionally left
     untouched.
@@ -158,6 +162,8 @@ def dismiss_notifications(
         if gc_id:
             # PostgREST JSON path: metadata->>gc_id = <gc_id>.
             q = q.eq("metadata->>gc_id", gc_id)
+        for key, value in (metadata_eq or {}).items():
+            q = q.eq(f"metadata->>{key}", value)
         return q
 
     if types:

@@ -1,4 +1,18 @@
-"""llm_errors: out-of-tokens detection and the IT Director message."""
+"""llm_errors: out-of-tokens detection, the IT Director message, and the
+self-classifying kinds the non-LLM queue jobs use.
+
+The RFP Ingestion sandbox runs on the LLM queue but never calls a model, so
+its failures cannot be bucketed by the SDK-shaped heuristics. Pinned here:
+
+  * an exception carrying `llm_error_kind` is bucketed as that kind before
+    any heuristic runs (class attribute or instance attribute), a typo'd kind
+    is ignored, and the class name RfpIngestTransient is a fallback;
+  * `infrastructure` is transient, and it is the ONE kind whose user_message
+    is the raiser's own text (app-authored), capped at 500 characters;
+  * every user_message branch tolerates a non-LLM model label ("sandbox").
+"""
+
+import pytest
 
 from app.services import llm_errors
 
@@ -8,6 +22,20 @@ class _FakeApiError(Exception):
         super().__init__(message)
         self.code = code
         self.body = body
+
+
+class _StatusError(Exception):
+    def __init__(self, message: str, status_code: int):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class _Transient(RuntimeError):
+    llm_error_kind = "infrastructure"
+
+
+class _Permanent(ValueError):
+    llm_error_kind = "bad_input"
 
 
 def test_anthropic_credit_exhaustion_detected():
@@ -63,3 +91,77 @@ def test_user_message_generic_for_unrecognized_errors():
     assert "Model response" not in msg
     assert "Something unexpected went wrong" in msg
     assert "IT Director" in msg
+
+
+# ── Self-classifying kinds (non-LLM queue jobs) ──────────────────────────
+
+
+def test_infrastructure_is_a_transient_kind():
+    assert llm_errors.KIND_INFRASTRUCTURE == "infrastructure"
+    assert llm_errors.is_transient_kind(llm_errors.KIND_INFRASTRUCTURE)
+    # The existing policy is untouched.
+    assert not llm_errors.is_transient_kind(llm_errors.KIND_BAD_INPUT)
+
+
+def test_declared_kind_wins_over_the_heuristics():
+    assert llm_errors.classify(_Transient("storage hiccup")) == "infrastructure"
+    # A ValueError would be bad_input anyway; the declaration makes it explicit.
+    assert llm_errors.classify(_Permanent("The PDF has no pages.")) == "bad_input"
+    # A RuntimeError is normally "unknown"; a declaration on the INSTANCE
+    # is honored too.
+    exc = RuntimeError("x")
+    exc.llm_error_kind = "infrastructure"
+    assert llm_errors.classify(exc) == "infrastructure"
+    # Even text that would otherwise trip the quota markers defers to it.
+    assert llm_errors.classify(_Permanent("credit balance is too low")) == "bad_input"
+
+
+def test_a_typoed_declared_kind_falls_back_to_the_heuristics():
+    class _Typo(RuntimeError):
+        llm_error_kind = "banana"
+
+    class _NotAString(ValueError):
+        llm_error_kind = 7
+
+    assert llm_errors.declared_kind(_Typo("x")) is None
+    assert llm_errors.classify(_Typo("x")) == "unknown"
+    assert llm_errors.classify(_NotAString("x")) == "bad_input"
+
+
+def test_rfp_ingest_transient_is_recognized_by_class_name_alone():
+    class RfpIngestTransient(RuntimeError):
+        pass
+
+    assert llm_errors.classify(RfpIngestTransient("spawn failed")) == "infrastructure"
+    assert llm_errors.is_transient(RfpIngestTransient("spawn failed"))
+
+
+def test_infrastructure_message_is_the_raisers_text_capped_at_500():
+    text = "A storage operation failed; retry the run."
+    assert llm_errors.user_message(_Transient(text), "sandbox") == text
+    long = "x" * 600
+    assert llm_errors.user_message(_Transient(long), "sandbox") == "x" * 500
+    # Only this kind gets the pass-through: an undeclared RuntimeError with
+    # the same text is still the generic message.
+    assert "Something unexpected" in llm_errors.user_message(RuntimeError(text), "sandbox")
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        _StatusError("slow down", 429),
+        _StatusError("unavailable", 503),
+        _StatusError("boom", 500),
+        _StatusError("bad key", 401),
+        _StatusError("bad request", 400),
+        _FakeApiError("Error code: 429", code="insufficient_quota"),
+        RuntimeError("???"),
+        ValueError("The PDF has no pages."),
+        _Transient("A storage operation failed; retry the run."),
+        _Permanent("The file is not a PDF."),
+    ],
+)
+def test_user_message_tolerates_a_non_llm_model_label(exc):
+    msg = llm_errors.user_message(exc, "sandbox")
+    assert isinstance(msg, str) and msg
+    assert "self-hosted" not in msg and "local AI server" not in msg

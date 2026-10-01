@@ -1,15 +1,18 @@
 """Project file upload / list / signed-download.
 
 Storage objects live in the private `project-files` bucket; downloads are served
-as short-TTL signed URLs. The estimator is restricted: they may only read
-`drawing`/`specification` files plus the `revision`/`additional`/`addendum`
-updates that were actually sent to them (an uploaded-but-unsent update is still
-a draft), only write their own `estimate`/`boq`/`markup` deliverables, and only
-for projects they are actively assigned to.
+as short-TTL signed URLs. The estimator is restricted: they may only read the
+package categories (every drawing set, `specification`, `rfp` and `other`: see
+app/core/file_categories.py, which is where the sets live) plus the
+`revision`/`additional`/`addendum` updates that were actually sent to them (an
+uploaded-but-unsent update is still a draft), only write their own
+`estimate`/`boq`/`markup` deliverables, and only for projects they are actively
+assigned to. A split source set (0132: `other` with `is_source_set = true`) is
+never estimator-visible, whatever its category.
 
 Once the initial package has actually been SENT to an estimator (see
-`handoff_locked` — a package sent, not merely an assignment created), the
-initial `drawing`/`specification` blocks lock — no uploads or deletes. New
+`handoff_locked` - a package sent, not merely an assignment created), the
+initial drawing/specification/RFP blocks lock: no uploads or deletes. New
 material goes in as `revision` ("Changes/Revisions") or `additional`
 ("Additional files"), each requiring a per-file note; once emailed to the
 estimators those files become undeletable too (their notes stay editable).
@@ -48,12 +51,16 @@ from app.core.file_categories import (  # re-exported: tests import these from f
     DOC_TYPE_CATEGORIES,
     DOC_TYPE_REQUIRED_CATEGORIES,
     DOC_TYPES,
+    DRAWING_CATEGORIES,
     ESTIMATOR_READ,
     ESTIMATOR_WRITE,
     FILE_NOTE_MAX_CHARS,
     INITIAL_CATEGORIES,
     UPDATE_CATEGORIES,
     VALID_CATEGORIES,
+    category_label,
+    exclude_source_set,
+    is_source_set,
 )
 from app.core.file_categories import (
     # `X as X` marks these as deliberate re-exports (pyflakes/ruff F401), not
@@ -64,11 +71,17 @@ from app.core.file_categories import (
     PACKAGE_CATEGORIES as PACKAGE_CATEGORIES,
     SENT_GATED_CATEGORIES as SENT_GATED_CATEGORIES,
 )
-from app.core.ratelimit import estimator_rate_limit, export_rate_limit, upload_rate_limit
+from app.core.ratelimit import (
+    estimator_rate_limit,
+    export_rate_limit,
+    large_upload_slot,
+    rate_limit,
+    upload_rate_limit,
+)
 from app.core.roles import WRITER_ROLES, Role
 from app.core.supabase_client import get_supabase
 from app.models.schemas import FilesExportIn
-from app.services import estimator_rounds, file_export, office_preview, storage
+from app.services import estimator_rounds, file_export, files_needed, office_preview, storage
 from app.services.notifications import audit, notify_role, notify_user
 
 # Rate limit estimator file traffic (no-op for internal roles).
@@ -78,7 +91,7 @@ router = APIRouter(
     dependencies=[Depends(estimator_rate_limit)],
 )
 
-# The category sets now live in ONE place, app/core/file_categories.py — see
+# The category sets now live in ONE place, app/core/file_categories.py - see
 # that module's docstring for what each set means and why `addendum` belongs to
 # neither INITIAL_CATEGORIES nor UPDATE_CATEGORIES. They are re-exported here
 # verbatim because tests/test_file_updates.py and tests/test_estimator_rounds.py
@@ -88,6 +101,13 @@ router = APIRouter(
 # compresses every file; letting several run concurrently is the export OOM
 # vector. Non-blocking acquire → 429 if one is already in flight.
 _export_lock = threading.BoundedSemaphore(1)
+
+# Deleting a drawing post-intake fans out drawing_changed bells and mirror
+# emails to both engineer roles and every active estimator, so the delete route
+# carries the generic per-account budget (the upload route already has its own).
+file_delete_rate_limit = rate_limit(
+    RateLimitScope.DEFAULT, lambda: get_settings().default_rate_limit_per_min
+)
 
 # Canonical, safe content-types keyed by extension. An uploaded object's stored
 # mime_type is derived from its extension via this map (never trusted from the
@@ -119,7 +139,13 @@ def _safe_content_type(filename: str | None) -> str:
 
 async def _read_capped(upload: UploadFile, max_bytes: int) -> bytes:
     """Read the upload into memory, aborting past `max_bytes` instead of
-    buffering an unbounded body (single-request OOM defence)."""
+    buffering an unbounded body (single-request OOM defence).
+
+    ONE copy: Starlette has already spooled the multipart part to disk (past
+    1 MB), so a single bounded `read(max_bytes + 1)` lands the body in memory
+    exactly once and the result is returned as-is. The old bytearray
+    accumulator plus `bytes(buf)` held two copies at the end (about 900 MB for a
+    450 MB file), which doubled the per-request peak."""
     limit_mb = max_bytes // (1024 * 1024)
     # Fast path: reject up front when the multipart part advertises its size.
     if upload.size is not None and upload.size > max_bytes:
@@ -127,28 +153,32 @@ async def _read_capped(upload: UploadFile, max_bytes: int) -> bytes:
             status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             f"File is too large (limit {limit_mb} MB).",
         )
-    buf = bytearray()
-    while chunk := await upload.read(1024 * 1024):
-        buf += chunk
-        if len(buf) > max_bytes:
-            raise HTTPException(
-                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                f"File is too large (limit {limit_mb} MB).",
-            )
-    return bytes(buf)
+    data = await upload.read(max_bytes + 1)
+    # A short read (a non-file source) is completed here; a spooled part
+    # returns everything above and the next read is empty. The request is
+    # never 0 while `data` is within the cap, so an over-cap body always
+    # surfaces as len > max_bytes.
+    while len(data) <= max_bytes and (more := await upload.read(max_bytes + 1 - len(data))):
+        data += more
+    if len(data) > max_bytes:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            f"File is too large (limit {limit_mb} MB).",
+        )
+    return data
 
 LOCKED_MESSAGE = (
-    "Drawings & specifications are locked once an estimator is assigned — "
+    "Drawings & specifications are locked once an estimator is assigned - "
     "add the file under Changes/Revisions or Additional files instead"
 )
 NOTE_REQUIRED_MESSAGE = "A note describing this file is required"
 NOT_LOCKED_MESSAGE = (
-    "No estimator hand-off yet — upload to Drawings & plans or Specifications instead"
+    "No estimator hand-off yet - upload to Drawings & plans or Specifications instead"
 )
 SENT_IMMUTABLE_MESSAGE = "Files already sent to the estimators cannot be deleted"
 # The estimator→team mirror of the two rules above (estimator_rounds.py):
 ROUND_SEALED_MESSAGE = (
-    "Files already sent to the team cannot be removed — upload a revision instead"
+    "Files already sent to the team cannot be removed - upload a revision instead"
 )
 ADDITIONAL_TOO_EARLY_MESSAGE = (
     "Additional files are available after your first submission"
@@ -161,7 +191,7 @@ DOC_TYPE_REQUIRED_MESSAGE = (
     "Say whether this revision is to the plans/drawings or to the specifications"
 )
 DOC_TYPE_ONLY_MESSAGE = (
-    "Plans/specifications only apply to revisions and addenda — "
+    "Plans/specifications only apply to revisions and addenda - "
     "the initial package says which it is by its own category"
 )
 
@@ -212,6 +242,11 @@ def handoff_locked(project_id: str) -> bool:
 
 def _estimator_visible(rec: dict, user_id: str) -> bool:
     """Category-level read gate for the external estimator."""
+    # A split source set is the team's reference copy of a drawing set the
+    # estimator already has, cut into trade sets. Never readable, whatever its
+    # category says (0132).
+    if is_source_set(rec):
+        return False
     if rec["category"] in ESTIMATOR_READ:
         return True
     if rec["category"] in ESTIMATOR_WRITE:
@@ -220,7 +255,7 @@ def _estimator_visible(rec: dict, user_id: str) -> bool:
         # must never read a competitor's estimate workbook. Delete was already
         # uploader-scoped; read was not.
         return rec.get("uploaded_by") == user_id
-    # Updates AND addenda only become visible once actually emailed — an
+    # Updates AND addenda only become visible once actually emailed - an
     # uploaded-but-unsent revision or addendum is still a draft. `.get`, never
     # `[]`: some callers pass a dict with no such key.
     return rec["category"] in SENT_GATED_CATEGORIES and bool(
@@ -230,7 +265,7 @@ def _estimator_visible(rec: dict, user_id: str) -> bool:
 
 def _get_file_checked(project_id: str, file_id: str, user: CurrentUser) -> dict:
     """Load a file row, 404 if missing, and enforce the estimator category guard
-    (auditing denials — an important signal for the external estimator)."""
+    (auditing denials - an important signal for the external estimator)."""
     rec = (
         get_supabase()
         .table("project_files")
@@ -254,13 +289,30 @@ def list_files(
 ):
     q = get_supabase().table("project_files").select("*").eq("project_id", project_id)
     if user.role == Role.ESTIMATOR:
-        q = q.in_("category", list(ESTIMATOR_QUERY_CATEGORIES))
+        q = exclude_source_set(q.in_("category", list(ESTIMATOR_QUERY_CATEGORIES)))
     rows = q.order("created_at", desc=True).execute().data or []
+    # A document the RFP creation step promoted from the ingestion sandbox
+    # (0130, docs/RFP_CREATE.md section 8): the "From RFP" badge.
+    for r in rows:
+        r["from_rfp"] = r.get("rfp_sandbox_file_id") is not None
+    # A row the Bid File Splitter step produced (0132, docs/RFP_SPLIT.md 6)
+    # carries the splitter job it came from, resolved through its source
+    # file in one query, for the "Open in splitter" link (/bid-splitter?job=).
+    split_file_ids = sorted({str(r["bid_split_file_id"]) for r in rows if r.get("bid_split_file_id")})
+    job_by_file: dict[str, str] = {}
+    for i in range(0, len(split_file_ids), 200):
+        for f in (
+            get_supabase().table("bid_split_files").select("id, job_id")
+            .in_("id", split_file_ids[i:i + 200]).execute()
+        ).data or []:
+            job_by_file[str(f["id"])] = f.get("job_id")
+    for r in rows:
+        r["bid_split_job_id"] = job_by_file.get(str(r.get("bid_split_file_id") or "")) or None
     if user.role == Role.ESTIMATOR:
         rows = [r for r in rows if _estimator_visible(r, user.id)]
         # The log is the estimator's only view of send history, and it is scoped
         # to batches addressed to THEM. Leaving the raw stamp here hands a
-        # re-assigned estimator send timestamps that predate their assignment —
+        # re-assigned estimator send timestamps that predate their assignment -
         # i.e. proof that other sends, and therefore other recipients, exist.
         # The column stays in the query so _estimator_visible still gates on it;
         # only the serialized value is blanked.
@@ -274,7 +326,7 @@ def lock_state(
     project_id: str, user: CurrentUser = Depends(require_project_assignment)
 ):
     """Whether the initial drawing/spec blocks are locked (package actually
-    sent) — lets the UI collapse the blocks and reroute uploads to
+    sent) - lets the UI collapse the blocks and reroute uploads to
     Changes/Revisions. Role-branched: the estimator gets only facts about
     themselves; project-wide counts would leak that earlier sends (and therefore
     other recipients) exist."""
@@ -297,13 +349,13 @@ def lock_state(
 def send_batches(
     project_id: str, user: CurrentUser = Depends(require_project_assignment)
 ):
-    """The Plans & Specs Log — every send batch this caller is entitled to see.
+    """The Plans & Specs Log - every send batch this caller is entitled to see.
 
     Two role-shaped projections built entirely inside `file_sends.build_log`
     (never one payload post-filtered): the internal viewer sees recipients and
     the sender; the estimator sees only batches addressed to them, with the
     recipient/sender keys ABSENT and 'reassign' collapsed to 'initial'. Returned
-    as the raw role-shaped dict — no response_model — so the estimator's absent
+    as the raw role-shaped dict - no response_model - so the estimator's absent
     keys stay absent rather than serializing as null.
     """
     from app.services import file_sends
@@ -352,7 +404,7 @@ async def upload_file(
     if user.role not in WRITER_ROLES and user.role != Role.ESTIMATOR:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
     if user.role == Role.ESTIMATOR and category == "estimator_additional":
-        # Additional files only make sense as part of a revision round — the
+        # Additional files only make sense as part of a revision round - the
         # original hand-off is estimate/boq/markup.
         if await run_in_threadpool(estimator_rounds.latest_submission, project_id) is None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, ADDITIONAL_TOO_EARLY_MESSAGE)
@@ -364,7 +416,7 @@ async def upload_file(
     if category == ADDENDUM_CATEGORY:
         # Estimators never reach here: 'addendum' is not in ESTIMATOR_WRITE, so
         # the ESTIMATOR_WRITE gate above already 403s them. This is the only
-        # thing enforcing "estimators view addenda but never upload them" — an
+        # thing enforcing "estimators view addenda but never upload them" - an
         # addendum carries a number + issue date instead of a note, and is
         # uploadable on BOTH sides of the hand-off lock (neither UPDATE_CATEGORIES
         # nor INITIAL_CATEGORIES contains it, so the lock branches below skip it).
@@ -384,10 +436,10 @@ async def upload_file(
                 status.HTTP_400_BAD_REQUEST, "The addendum issue date cannot be in the future"
             )
     elif addendum_number or addendum_issued_on:
-        # Addendum metadata on a non-addendum — mirrors the DB CHECK.
+        # Addendum metadata on a non-addendum - mirrors the DB CHECK.
         raise HTTPException(status.HTTP_400_BAD_REQUEST, ADDENDUM_META_ONLY_MESSAGE)
 
-    # doc_type — WHICH DOCUMENT SET a post-hand-off file belongs to (0077).
+    # doc_type - WHICH DOCUMENT SET a post-hand-off file belongs to (0077).
     # Orthogonal to `category`: it splits the one "Changes/Revisions" bucket into
     # revised plans vs revised specs so the modal, the email and the log can keep
     # them apart. Required for revisions (the Revisions modal always knows which
@@ -405,7 +457,7 @@ async def upload_file(
 
     if category in UPDATE_CATEGORIES:
         # Updates only exist relative to a hand-off, and each must say what it
-        # is — the note travels with the file to the estimators.
+        # is - the note travels with the file to the estimators.
         if not note:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, NOTE_REQUIRED_MESSAGE)
         if not await run_in_threadpool(handoff_locked, project_id):
@@ -413,12 +465,26 @@ async def upload_file(
     elif category in INITIAL_CATEGORIES and await run_in_threadpool(handoff_locked, project_id):
         raise HTTPException(status.HTTP_409_CONFLICT, LOCKED_MESSAGE)
 
-    content = await _read_capped(file, get_settings().upload_max_bytes)
+    settings = get_settings()
+    # The external estimator (the one untrusted role) gets a lower per-file cap;
+    # internal callers keep upload_max_bytes.
+    max_bytes = (
+        settings.estimator_upload_max_bytes
+        if user.role == Role.ESTIMATOR
+        else settings.upload_max_bytes
+    )
     # Never trust the client-supplied content-type: derive a safe, canonical one
     # from the extension so a stored file can't later be served as active HTML.
     stored_mime = _safe_content_type(file.filename)
     path = storage.build_object_path(project_id, category, file.filename or "upload")
-    await run_in_threadpool(storage.upload_file, path, content, stored_mime)
+    # A large body holds an in-flight slot (per account and process-wide) for
+    # exactly as long as it is resident: buffered here, pushed to storage, then
+    # dropped. Saturation is a fast 429, never a pile of bodies in RAM.
+    with large_upload_slot(user.id, file.size):
+        content = await _read_capped(file, max_bytes)
+        await run_in_threadpool(storage.upload_file, path, content, stored_mime)
+        size_bytes = len(content)
+        del content
 
     convertible = office_preview.is_convertible(file.filename, category)
     insert = (
@@ -433,7 +499,7 @@ async def upload_file(
                 "material_category_id": material_category_id,
                 "uploaded_by": user.id,
                 "mime_type": stored_mime,
-                "size_bytes": len(content),
+                "size_bytes": size_bytes,
                 "preview_status": "pending" if convertible else "none",
                 "note": note,
                 # NULL for everything except revisions/addenda (0077 CHECK).
@@ -445,7 +511,7 @@ async def upload_file(
                 "addendum_issued_on": (
                     issued_on.isoformat() if category == ADDENDUM_CATEGORY else None
                 ),
-                # Estimator deliverables start as drafts of the open round —
+                # Estimator deliverables start as drafts of the open round -
                 # sealed (submission_round stamped) only when they press Send.
                 "estimator_deliverable": user.role == Role.ESTIMATOR
                 and category in ESTIMATOR_WRITE,
@@ -457,7 +523,7 @@ async def upload_file(
     except Exception:
         # The object was PUT before this insert; without its row nothing would
         # ever reclaim it (e.g. the project was discarded mid-upload, making the
-        # insert fail its FK). Best-effort — the original error is the answer.
+        # insert fail its FK). Best-effort - the original error is the answer.
         try:
             await run_in_threadpool(storage.delete_file, path)
         except Exception:  # noqa: BLE001
@@ -477,9 +543,17 @@ async def upload_file(
 
     # Adding a drawing after intake means whoever prices off the drawings should
     # re-check their work. (Multiple drawings per project are legitimate.)
-    if category in ("drawing", "electrical_drawing"):
+    if category in DRAWING_CATEGORIES:
         await run_in_threadpool(
             _notify_drawing_changed, project_id, user, "added", category
+        )
+
+    # The "files were not pulled from BuildingConnected" flag clears on the
+    # first drawing or specification (docs/RFP_BUILDINGCONNECTED.md 3.8). The
+    # service is best effort and never raises; the upload is already in.
+    if category in files_needed.CLEAR_CATEGORIES:
+        await run_in_threadpool(
+            files_needed.clear_if_satisfied, get_supabase(), project_id, category, user.id
         )
 
     return row
@@ -491,9 +565,10 @@ def _notify_drawing_changed(
     """Alert the Estimating Engineer + assigned estimator that a project's drawings
     changed, post-intake.
 
-    `verb` is "added" or "removed"; `category` is 'drawing' (General) or
-    'electrical_drawing'. During intake nothing is sent — the Estimating
-    Admin is still assembling the package and no one is pricing off it yet.
+    `verb` is "added" or "removed"; `category` is any member of
+    DRAWING_CATEGORIES (General, Electrical, and the seven trade sets 0132
+    added). During intake nothing is sent - the Estimating Admin is still
+    assembling the package and no one is pricing off it yet.
     """
     from app.services import workflow
 
@@ -505,7 +580,7 @@ def _notify_drawing_changed(
         .single()
         .execute()
     ).data
-    # During intake nothing is sent — the Estimating Admin is still assembling the
+    # During intake nothing is sent - the Estimating Admin is still assembling the
     # package and no one is pricing off it yet. Suppress until intake completes.
     if not proj or not workflow.is_category_complete(
         workflow.load_category_state(project_id), "intake"
@@ -513,9 +588,12 @@ def _notify_drawing_changed(
         return
 
     label = f"{proj.get('number') or ''} {proj.get('name') or ''}".strip() or "a project"
-    noun = "Electrical drawing" if category == "electrical_drawing" else "General drawing"
+    # One label per category, from file_categories.CATEGORY_LABELS, so the
+    # notice names the set that actually changed ("Civil drawings removed for
+    # 26.9.7201") instead of collapsing nine sets into two nouns.
+    noun = category_label(category)
     msg = f"{noun} {verb} for {label} - re-check anything priced off it."
-    # A drawing change can invalidate material pricing AND labor counts — both
+    # A drawing change can invalidate material pricing AND labor counts - both
     # engineer focuses need the re-check ping.
     notify_role(Role.ESTIMATING_ENGINEER_MATERIALS, project_id, "drawing_changed", msg)
     notify_role(Role.ESTIMATING_ENGINEER_LABOR, project_id, "drawing_changed", msg)
@@ -556,7 +634,7 @@ def update_note(
     user: CurrentUser = Depends(require_project_assignment),
 ):
     """Edit an update file's note. Notes stay editable even after the file is
-    sent (the file is immutable, its description isn't) — the estimators keep
+    sent (the file is immutable, its description isn't) - the estimators keep
     the emailed wording; the app always shows the latest."""
     if user.role not in WRITER_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
@@ -608,13 +686,14 @@ async def export_files(
     project_id: str,
     body: FilesExportIn | None = Body(default=None),
     user: CurrentUser = Depends(require_project_assignment),
+    flat: bool = False,
 ):
     """Bundle the project's files into a single `.zip` download.
 
     No body (or `{}`) exports every file the caller may read; pass
     `{"file_ids": [...]}` for a subset. Estimators are restricted to the same
     categories they may read elsewhere (drawings + their estimate/boq/markup),
-    so a foreign or forbidden id simply doesn't match — no leak, no IDOR.
+    so a foreign or forbidden id simply doesn't match - no leak, no IDOR.
 
     The whole body is guarded so any failure surfaces as an HTTPException (which
     keeps CORS headers) rather than a raw 500 that the browser reports as the
@@ -630,14 +709,15 @@ async def export_files(
             # own deliverables silently drop from their ZIP (a 404 below).
             .select(
                 "id, category, storage_path, filename, size_bytes, "
-                "sent_to_estimators_at, uploaded_by"
+                "sent_to_estimators_at, uploaded_by, is_source_set"
             )
             .eq("project_id", project_id)
         )
         if user.role == Role.ESTIMATOR:
-            q = q.in_("category", list(ESTIMATOR_QUERY_CATEGORIES))
+            # Source sets never ride an estimator's ZIP either (0132).
+            q = exclude_source_set(q.in_("category", list(ESTIMATOR_QUERY_CATEGORIES)))
         else:
-            # Internal exports must never bundle an unsent estimator draft —
+            # Internal exports must never bundle an unsent estimator draft -
             # the team only receives files the estimator actually sent.
             q = estimator_rounds.exclude_unsent(q)
         if body and body.file_ids is not None:
@@ -648,7 +728,7 @@ async def export_files(
         if not rows:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "No files to export")
 
-        # size_bytes is nullable (added in 0021 with no default) — coalesce so a
+        # size_bytes is nullable (added in 0021 with no default) - coalesce so a
         # legacy NULL can't crash or silently defeat the OOM guard.
         total = sum((r.get("size_bytes") or 0) for r in rows)
         max_bytes = get_settings().export_max_total_bytes
@@ -659,7 +739,7 @@ async def export_files(
                 "select fewer files.",
             )
 
-        # Only one archive builds per process at a time — concurrent builds are
+        # Only one archive builds per process at a time - concurrent builds are
         # the export OOM vector. Fail fast with a retriable, code-tagged 429
         # rather than let builds pile up and exhaust RAM.
         if not _export_lock.acquire(blocking=False):
@@ -672,20 +752,20 @@ async def export_files(
             # Build into a spooled temp file (spills to disk past 8MB) so the whole
             # archive is never resident in RAM; stream it out afterwards.
             spool, manifest, size = await run_in_threadpool(
-                file_export.build_export_spooled, rows
+                file_export.build_export_spooled, rows, flat=flat
             )
         finally:
             _export_lock.release()
 
         ok_count = sum(1 for m in manifest if m["status"] == "ok")
         if ok_count == 0:
-            # Every object was missing from storage — nothing to hand back.
+            # Every object was missing from storage - nothing to hand back.
             spool.close()
             raise HTTPException(status.HTTP_404_NOT_FOUND, "No files to export")
 
         proj_q = sb.table("projects").select("number, name").eq("id", project_id).single()
         proj = (await run_in_threadpool(proj_q.execute)).data or {}
-        # files_exported_at drives the internal "export your files" banner —
+        # files_exported_at drives the internal "export your files" banner -
         # only an internal export may clear it, never the external estimator
         # downloading their own package.
         if user.role != Role.ESTIMATOR:
@@ -726,7 +806,7 @@ async def export_files(
         )
     except HTTPException:
         raise
-    except Exception as exc:  # noqa: BLE001 — keep CORS headers; never a raw 500
+    except Exception as exc:  # noqa: BLE001 - keep CORS headers; never a raw 500
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR, "Export failed"
         ) from exc
@@ -777,7 +857,11 @@ def preview_file(
     return {"filename": rec["filename"], "rows": rows}
 
 
-@router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{file_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(file_delete_rate_limit)],
+)
 def delete_file(
     project_id: str,
     file_id: str,
@@ -801,14 +885,14 @@ def delete_file(
             audit(user.id, "access.denied", "project_file", file_id, {"category": rec["category"]})
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
         # Deliverables already sent to the team are what the team is pricing
-        # from — immutable to the estimator (mirror of SENT_IMMUTABLE_MESSAGE).
+        # from - immutable to the estimator (mirror of SENT_IMMUTABLE_MESSAGE).
         if rec.get("submission_round") is not None:
             raise HTTPException(status.HTTP_409_CONFLICT, ROUND_SEALED_MESSAGE)
     elif user.role not in WRITER_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
 
     # Once the hand-off has begun, the initial package is what the estimators
-    # are pricing off — it can't quietly shrink. Post-hand-off corrections go
+    # are pricing off - it can't quietly shrink. Post-hand-off corrections go
     # in as Changes/Revisions instead.
     if rec["category"] in INITIAL_CATEGORIES and handoff_locked(project_id):
         raise HTTPException(status.HTTP_409_CONFLICT, LOCKED_MESSAGE)
@@ -817,7 +901,7 @@ def delete_file(
     if rec["category"] in SENT_GATED_CATEGORIES and rec.get("sent_to_estimators_at"):
         raise HTTPException(status.HTTP_409_CONFLICT, SENT_IMMUTABLE_MESSAGE)
 
-    # Sent proposals are evidence of what we bid — immutable; and only a writer
+    # Sent proposals are evidence of what we bid - immutable; and only a writer
     # role may delete even an unsent generated proposal.
     if rec["category"] == "proposal":
         if user.role not in WRITER_ROLES:
@@ -840,7 +924,7 @@ def delete_file(
         # Row first, and conditionally: a Send racing this delete seals the row,
         # the condition then matches nothing, and the file stays part of its
         # announced round. (Better a possible orphaned storage object than a
-        # sealed round row whose object is gone — so storage cleanup below is
+        # sealed round row whose object is gone - so storage cleanup below is
         # best-effort.)
         deleted = (
             get_supabase()
@@ -856,7 +940,7 @@ def delete_file(
     else:
         storage.delete_file(rec["storage_path"])
         cleanup_paths = set()
-    # The derivative path is deterministic — delete it unconditionally (not just
+    # The derivative path is deterministic - delete it unconditionally (not just
     # when preview_path is set) so a conversion racing this delete can't leave
     # an orphan behind. Best-effort: an orphan must never block the delete.
     cleanup_paths |= {
@@ -873,5 +957,5 @@ def delete_file(
     audit(user.id, "file.delete", "project_file", file_id, {"category": rec["category"]})
 
     # Removing a drawing after intake is a change downstream pricers must know about.
-    if rec["category"] in ("drawing", "electrical_drawing"):
+    if rec["category"] in DRAWING_CATEGORIES:
         _notify_drawing_changed(project_id, user, "removed", rec["category"])

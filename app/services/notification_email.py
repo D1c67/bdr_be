@@ -22,6 +22,7 @@ home page.
 
 import logging
 import threading
+from urllib.parse import quote, urlsplit
 
 from app.core.config import get_settings
 from app.core.features import SubApp, home_path, is_enabled, notification_sub_app
@@ -55,6 +56,9 @@ _TYPE_META: dict[str, tuple[str, str]] = {
     "estimate_revised": ("Estimator sent changes/revisions", "Review changes"),
     "rfq.reply_received": ("A vendor replied to an RFQ", "View quotes"),
     "quote.received": ("A vendor quote came in", "View quotes"),
+    # A quote recorded after the bid was submitted (0138): on record only, the
+    # sent price is unchanged. Both Estimating engineer focuses hear it.
+    "late_quote.received": ("A quote came in after the bid was submitted", "View quotes"),
     "bid_outcome": ("Bid outcome recorded", "Open project"),
     "submitted": ("Bid submitted", "Open project"),
     "proposal_send_failed": ("A proposal send failed", "Open Send Out"),
@@ -79,9 +83,119 @@ _TYPE_META: dict[str, tuple[str, str]] = {
     "gc_pricing.approval_requested": ("GC pricing change needs your approval", "Review pricing"),
     "gc_pricing.approved": ("GC pricing change approved", "Send the proposal"),
     "gc_pricing.rejected": ("GC pricing change rejected", "Open project"),
+    # Mark submitted from the side menu (0140): a non-approver's permission
+    # request to the approvers, the decision back to them, and the undo
+    # notice. All deep-link to the project's Mark submitted box.
+    "external_submission.requested": (
+        "Permission requested to mark a bid submitted",
+        "Review the request",
+    ),
+    "external_submission.granted": ("Mark submitted permission granted", "Open Mark submitted"),
+    "external_submission.denied": ("Mark submitted permission denied", "Open project"),
+    "external_submission.revoked": ("Mark submitted permission revoked", "Open project"),
+    "external_submission.undone": ("A marked submission was undone", "Open project"),
+    # RFP matching (docs/RFP_MATCHING.md 3.9): one bell row per sweep tick that
+    # merged anything. Created with mirror_email=False and no project, so this
+    # entry only gives the type a title if the mirror is ever enabled.
+    "rfp_match.merged": ("New RFP matches merged", "Open RFP emails"),
+    # NGEM portal invitations (docs/RFP_NGEM_PORTAL.md section 5): bell rows
+    # only (mirror_email=False); these entries give the types a title in the
+    # notification log and a heading if the mirror is ever enabled.
+    "rfp_ngem.login_failed": ("NGEM login failed", "Open RFP ingestion settings"),
+    "rfp_ngem.new_invitations": ("New NGEM invitations", "Open the NGEM tab"),
+    "rfp_ngem.invitation_changed": ("An NGEM invitation changed", "Open the NGEM tab"),
+    "rfp_ngem.scan_failed": ("An NGEM scan failed", "Open RFP ingestion settings"),
+    # BuildingConnected Bid Board (docs/RFP_BUILDINGCONNECTED.md): the first
+    # three are bell rows only; `rfp_bc.disconnected` also mirrors to email
+    # (IT Admins and Executives, who can reconnect from Settings).
+    "rfp_bc.new_invitations": (
+        "New BuildingConnected invitations",
+        "Open the BuildingConnected tab",
+    ),
+    "rfp_bc.invitation_changed": (
+        "A BuildingConnected invitation changed",
+        "Open the BuildingConnected tab",
+    ),
+    "rfp_bc.scan_failed": ("A BuildingConnected scan failed", "Open RFP ingestion settings"),
+    "rfp_bc.disconnected": ("BuildingConnected disconnected", "Open RFP ingestion settings"),
+    # RFP project creation (docs/RFP_CREATE.md section 7): the Executive's
+    # notice of a project parked in Go/No-Go and the Estimating Admin's
+    # intake task, both mirrored. The intake subject names the missing
+    # fields in plain words (see _subject and intake_missing_phrase).
+    "rfp_create.created": ("Project created from an RFP invitation", "Open project"),
+    "rfp_create.intake_needed": ("Intake details needed", "Open project"),
+    # RFP processing alerts to IT Admin (docs/RFP_EMAIL_INGESTION.md,
+    # "Failures and alerts"): a row that ran out of retries, and the model
+    # being away long enough to matter, then back. All land on /rfp-processing.
+    "rfp_processing.step_failed": ("An RFP item failed after every retry", "Open RFP processing"),
+    "rfp_processing.model_away": ("The RFP AI model is unavailable", "Open RFP processing"),
+    "rfp_processing.model_back": ("The RFP AI model is back", "Open RFP processing"),
+    # Calling In (docs/CALLING_IN.md section 5): once when a project lands on
+    # each call list, to Executives and Estimating Engineers (Labor). Both
+    # deep-link to the Calling In page opened on the project (see _deep_link).
+    "call_in_pre_bid": ("A project is ready for before-bid calls", "Open Calling In"),
+    "call_in_post_bid": ("A project is ready for after-bid calls", "Open Calling In"),
 }
 
+# Calling In notification type -> the call round its link opens.
+_CALL_IN_ROUNDS = {"call_in_pre_bid": "pre_bid", "call_in_post_bid": "post_bid"}
+
 _DEFAULT_META = ("BDR notification", "Open BDR")
+
+# Plain-word labels for the intake fields the RFP creation step can leave
+# empty (project_intake.missing_intake_fields names them by projects column).
+# The nine Go/No-Go rubric answers collapse into one phrase: the subject line
+# is a to-do list, not a form.
+INTAKE_FIELD_LABELS: dict[str, str] = {
+    "internal_bid_at": "internal bid date",
+    "due_from_estimator_at": "estimator due",
+    "due_from_vendors_at": "vendor due",
+    "bid_time": "bid time",
+}
+INTAKE_RUBRIC_LABEL = "Go/No-Go answers"
+_INTAKE_TYPE = "rfp_create.intake_needed"
+# Types whose message is mostly a quote of an outside sender (the project name
+# came from an RFP email or a portal, a failure alert names the email's
+# subject): rendered as plain text, no URL ever linkified.
+_NO_LINKIFY_PREFIX = ("rfp_create.", "rfp_processing.")
+
+
+def linkify_for(type_: str | None) -> bool:
+    """Whether a notification type's message gets the linkify pass at all:
+    the RFP creation notices (`rfp_create.*`) and processing alerts
+    (`rfp_processing.*`) never do. For every other type the pass is keyed by
+    the SOURCE of each URL, not by the type (see `link_hosts_for`): any
+    message can interpolate outside text (an RFP-derived project name, an
+    estimator note preview, a vendor name), so only app links are anchored."""
+    return not (type_ or "").startswith(_NO_LINKIFY_PREFIX)
+
+
+def link_hosts_for() -> frozenset[str]:
+    """The only hosts a notification mirror email renders as a link: the
+    app's own frontend. The house writes no other URL into a notification
+    message, so any other URL came from an outside source and stays plain
+    escaped text."""
+    host = (urlsplit(get_settings().frontend_url or "").hostname or "").lower()
+    return frozenset({host}) if host else frozenset()
+
+
+def intake_missing_phrase(missing) -> str:
+    """The missing intake fields as one comma-separated phrase in the order
+    the list carries them: the dates by their labels, the rubric answers
+    collapsed into one phrase at the position of the first, anything
+    unknown by its column name. Empty list -> empty string."""
+    from app.services import project_intake
+
+    rubric = set(project_intake.RUBRIC_KEYS)
+    words: list[str] = []
+    for key in missing or []:
+        if key in rubric:
+            label = INTAKE_RUBRIC_LABEL
+        else:
+            label = INTAKE_FIELD_LABELS.get(str(key), str(key).replace("_", " "))
+        if label not in words:
+            words.append(label)
+    return ", ".join(words)
 
 
 def heading_for(type_: str) -> str:
@@ -133,8 +247,29 @@ def _deep_link(
             gc_id = (metadata or {}).get("gc_id") if (type_ or "").startswith("gc_pricing.") else None
             if gc_id:
                 return f"{base}/projects/{project_id}?box=gcs&gc={gc_id}"
+            # Mark submitted (0140) opens its side-menu box on arrival.
+            if (type_ or "").startswith("external_submission."):
+                return f"{base}/projects/{project_id}?box=mark_submitted"
+            # A late quote (0138) lands on Receive Quotes, where it was recorded.
+            if type_ == "late_quote.received":
+                return f"{base}/projects/{project_id}?step=receive_quotes"
+            # Calling In (0142) opens the list on that project's detail.
+            if type_ in _CALL_IN_ROUNDS:
+                return (
+                    f"{base}/calling-in?round={_CALL_IN_ROUNDS[type_]}"
+                    f"&project={quote(str(project_id))}"
+                )
         prefix = "/estimator/projects" if is_estimator else "/projects"
         return f"{base}{prefix}/{project_id}"
+    # RFP processing alerts: the Stuck lane, opened on the failed row when the
+    # alert names one (an email row, or a portal invitation).
+    if (type_ or "").startswith("rfp_processing.") and not is_estimator:
+        meta = metadata or {}
+        row_id = meta.get("row_id")
+        if type_ == "rfp_processing.step_failed" and row_id:
+            param = "invitation" if meta.get("source") == "portal" else "email"
+            return f"{base}/rfp-processing?lane=stuck&{param}={quote(str(row_id))}"
+        return f"{base}/rfp-processing?lane=stuck"
     # A nudge isn't tied to a project — send the recipient straight to their list.
     if type_ == "nudge":
         return f"{base}/todos"
@@ -150,7 +285,22 @@ def _project_label(project: dict | None) -> str | None:
     return name or (f"#{number}" if number else None)
 
 
-def _subject(heading: str, project: dict | None) -> str:
+def _subject(
+    heading: str,
+    project: dict | None,
+    type_: str | None = None,
+    metadata: dict | None = None,
+) -> str:
+    if type_ == _INTAKE_TYPE:
+        # The intake task's subject is the task itself: which fields the
+        # Estimating Admin still has to fill on which project, so the mail
+        # reads complete in an inbox list without being opened.
+        meta = metadata or {}
+        number = (project or {}).get("number") or meta.get("number")
+        name = (project or {}).get("name")
+        label = " ".join(str(part) for part in (number, name) if part) or "a new project"
+        phrase = intake_missing_phrase(meta.get("missing"))
+        return f"G3 BDR · {heading} for {label}" + (f": {phrase}" if phrase else "")
     if project:
         number, name = project.get("number"), project.get("name")
         tag = f"#{number} {name}" if number and name else (name or (f"#{number}" if number else ""))
@@ -233,10 +383,12 @@ def _send_one(row: dict, profile: dict | None, project: dict | None) -> None:
             row.get("project_id"), profile.get("role"), type_, row.get("metadata")
         ),
         project_label=_project_label(project),
+        linkify=linkify_for(type_),
+        link_hosts=link_hosts_for(),
     )
     log = graph_email.send_mail(
         to=[profile["email"]],
-        subject=_subject(heading, project),
+        subject=_subject(heading, project, type_, row.get("metadata")),
         body_html=html,
         inline_images=[(LOGO_CONTENT_ID, LOGO_FILENAME, logo_bytes(), "image/jpeg")],
         project_id=row.get("project_id"),

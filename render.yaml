@@ -1,3 +1,5 @@
+# STALE / DEPRECATED: production and dev run on Railway, not Render. Kept only
+# as a reference; do not deploy without reviewing every value below.
 # Render blueprint for the BDR FastAPI backend.
 # Deploy: push to GitHub, then "New + → Blueprint" in Render and point at this repo.
 # Set the secret env vars (marked sync:false) in the Render dashboard.
@@ -16,8 +18,11 @@ services:
       # silently disabled by dashboard drift. Flip only for break-glass.
       - key: MFA_REQUIRED
         value: "true"
+      # Never hardcode a project URL here: this blueprint is STALE (production
+      # runs on Railway) and a committed dev URL would pair ENVIRONMENT=production
+      # with the dev database. The operator must enter the correct project URL.
       - key: SUPABASE_URL
-        value: https://bpidntbyvoooqvaispup.supabase.co
+        sync: false
       - key: SUPABASE_ANON_KEY
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY

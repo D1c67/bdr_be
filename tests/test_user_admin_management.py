@@ -19,7 +19,7 @@ from fastapi import HTTPException
 from app.core.roles import Role
 from app.models.schemas import AdminUpdateUserIn
 from app.routers import users
-from app.services import invite_email
+from app.services import graph_email, invite_email
 
 
 # ── Supabase stub ──────────────────────────────────────────────────────────
@@ -130,6 +130,12 @@ class _SB:
     def table(self, name):
         return _Query(self._store)
 
+    def rpc(self, name, params):
+        self._store["rpcs"].append((name, params))
+        if self._store.get("rpc_fails"):
+            raise RuntimeError("rpc blew up")
+        return SimpleNamespace(execute=lambda: SimpleNamespace(data=1))
+
 
 def _profile(uid, **over):
     base = {
@@ -156,6 +162,8 @@ def _setup(monkeypatch, *rows, graph=True, send_raises=False):
         "supabase_resets": [],
         "sent": [],
         "audits": [],
+        "rpcs": [],
+        "graph_mail": [],
     }
     monkeypatch.setattr(users, "get_supabase", lambda: _SB(store))
     monkeypatch.setattr(
@@ -169,6 +177,11 @@ def _setup(monkeypatch, *rows, graph=True, send_raises=False):
             raise RuntimeError("graph down")
 
     monkeypatch.setattr(invite_email, "send_password_reset_email", _fake_send)
+    # The old-address notice on an email change goes through Graph directly;
+    # never let a test reach the real send.
+    monkeypatch.setattr(
+        graph_email, "send_mail", lambda **k: store["graph_mail"].append(k)
+    )
     return store
 
 
@@ -393,3 +406,159 @@ def test_reset_password_surfaces_a_send_failure(monkeypatch):
         users.reset_user_password(user_id="u1", admin=_ADMIN)
     assert ei.value.status_code == 502
     assert store["audits"] == []  # nothing recorded for an email that never went
+
+
+# ── RFP mailboxes (docs/RFP_EMAIL_VISIBILITY.md 3.5) ───────────────────────
+# Which RFP review-queue rows a person sees is decided by the mailboxes mapped
+# onto their profile here, so this field is the whole access-control surface of
+# that page: it normalizes hard and refuses the external estimator outright.
+
+
+def test_admin_maps_rfp_mailboxes_onto_a_user(monkeypatch):
+    store = _setup(monkeypatch, _profile("u1"))
+    out = users.update_user(
+        user_id="u1",
+        body=AdminUpdateUserIn(
+            rfp_mailboxes=["  TMoore@G3Electrical.com ", "tmoore@g3electrical.com", ""]
+        ),
+        admin=_ADMIN,
+    )
+    # Trimmed, lowercased, blanks dropped and deduped by the schema.
+    assert out["rfp_mailboxes"] == ["tmoore@g3electrical.com"]
+    # Audited in the ordinary user.update patch, so the mapping has a trail.
+    ((args, _),) = [a for a in store["audits"] if a[0][1] == "user.update"]
+    assert args[4] == {"rfp_mailboxes": ["tmoore@g3electrical.com"]}
+
+
+def test_an_empty_list_clears_the_mapping(monkeypatch):
+    _setup(monkeypatch, _profile("u1", rfp_mailboxes=["tmoore@g3electrical.com"]))
+    out = users.update_user(
+        user_id="u1", body=AdminUpdateUserIn(rfp_mailboxes=[]), admin=_ADMIN
+    )
+    assert out["rfp_mailboxes"] == []
+
+
+def test_leaving_the_field_out_does_not_touch_the_mapping(monkeypatch):
+    _setup(monkeypatch, _profile("u1", rfp_mailboxes=["tmoore@g3electrical.com"]))
+    out = users.update_user(
+        user_id="u1", body=AdminUpdateUserIn(full_name="Pat Rivera"), admin=_ADMIN
+    )
+    assert out["rfp_mailboxes"] == ["tmoore@g3electrical.com"]
+
+
+def test_an_external_estimator_is_refused_a_mailbox(monkeypatch):
+    _setup(monkeypatch, _profile("u1", role="estimator"))
+    with pytest.raises(HTTPException) as exc:
+        users.update_user(
+            user_id="u1",
+            body=AdminUpdateUserIn(rfp_mailboxes=["tmoore@g3electrical.com"]),
+            admin=_ADMIN,
+        )
+    assert exc.value.status_code == 400
+    assert exc.value.headers["X-Error-Code"] == "rfp_mailboxes_internal_only"
+
+
+def test_the_refusal_reads_the_role_the_patch_leaves_the_user_in(monkeypatch):
+    """Demoting someone to estimator and granting a mailbox in one call must
+    be refused whole, not half-applied."""
+    store = _setup(monkeypatch, _profile("u1"), _profile("u2", role="it_admin"))
+    with pytest.raises(HTTPException) as exc:
+        users.update_user(
+            user_id="u1",
+            body=AdminUpdateUserIn(
+                role=Role.ESTIMATOR, rfp_mailboxes=["tmoore@g3electrical.com"]
+            ),
+            admin=_ADMIN,
+        )
+    assert exc.value.status_code == 400
+    assert store["profiles"]["u1"]["role"] == "estimating_admin"
+    # The mirror case: promoting an estimator and mapping a mailbox is allowed.
+    _setup(monkeypatch, _profile("u3", role="estimator"), _profile("u4", role="it_admin"))
+    out = users.update_user(
+        user_id="u3",
+        body=AdminUpdateUserIn(
+            role=Role.ACCOUNTANT, rfp_mailboxes=["tiesha@g3electrical.com"]
+        ),
+        admin=_ADMIN,
+    )
+    assert out["rfp_mailboxes"] == ["tiesha@g3electrical.com"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        ["not-an-address"],
+        ["two words@g3electrical.com"],
+        ["no-domain@g3electrical"],
+        [f"m{i}@g3electrical.com" for i in range(11)],   # eleven is over the cap
+    ],
+)
+def test_malformed_or_oversized_mailbox_lists_never_reach_the_router(value):
+    with pytest.raises(ValueError):
+        AdminUpdateUserIn(rfp_mailboxes=value)
+
+
+def test_ten_addresses_are_still_accepted():
+    body = AdminUpdateUserIn(rfp_mailboxes=[f"m{i}@g3electrical.com" for i in range(10)])
+    assert len(body.rfp_mailboxes) == 10
+
+
+def test_profile_out_carries_the_mapping_and_defaults_to_empty():
+    """GET /users and GET /users/me both answer ProfileOut, and both degrade
+    gracefully on a database where 0134 has not been applied yet."""
+    from app.models.schemas import ProfileOut
+
+    base = _profile("u1")
+    assert ProfileOut(**base).rfp_mailboxes == []
+    mapped = ProfileOut(**_profile("u2", rfp_mailboxes=["tmoore@g3electrical.com"]))
+    assert mapped.rfp_mailboxes == ["tmoore@g3electrical.com"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "a,tmoore@g3electrical.com",   # a comma would separate the ov.{} literal
+        'a"b@g3electrical.com',
+        "a'b@g3electrical.com",
+        "a{b@g3electrical.com",
+        "a}b@g3electrical.com",
+        "a\\b@g3electrical.com",
+        "a\tb@g3electrical.com",
+    ],
+)
+def test_a_value_that_could_corrupt_the_array_literal_is_refused(value):
+    """These reach PostgREST as `mailboxes=ov.{a,b}`, built by joining the
+    values raw, so a separator character inside one value would widen the
+    scope of every list query the holder makes."""
+    with pytest.raises(ValueError):
+        AdminUpdateUserIn(rfp_mailboxes=[value])
+
+
+def test_demoting_to_estimator_clears_the_mapping_in_the_same_patch(monkeypatch):
+    store = _setup(
+        monkeypatch,
+        _profile("u1", rfp_mailboxes=["tmoore@g3electrical.com"]),
+        _profile("u2", role="it_admin"),
+    )
+    out = users.update_user(user_id="u1", body=AdminUpdateUserIn(role=Role.ESTIMATOR),
+                            admin=_ADMIN)
+    assert out["role"] == "estimator" and out["rfp_mailboxes"] == []
+    ((args, _),) = [a for a in store["audits"] if a[0][1] == "user.update"]
+    assert args[4]["rfp_mailboxes"] == []
+
+
+def test_a_role_change_between_internal_roles_leaves_the_mapping_alone(monkeypatch):
+    _setup(monkeypatch, _profile("u1", rfp_mailboxes=["tmoore@g3electrical.com"]),
+           _profile("u2", role="it_admin"))
+    out = users.update_user(user_id="u1", body=AdminUpdateUserIn(role=Role.ACCOUNTANT),
+                            admin=_ADMIN)
+    assert out["rfp_mailboxes"] == ["tmoore@g3electrical.com"]
+
+
+def test_demoting_a_user_who_owns_nothing_writes_no_mapping_key(monkeypatch):
+    """Nothing to clear means nothing in the patch, so "Nothing to update"
+    stays reachable and the audit does not gain a noise field."""
+    store = _setup(monkeypatch, _profile("u1"), _profile("u2", role="it_admin"))
+    users.update_user(user_id="u1", body=AdminUpdateUserIn(role=Role.ESTIMATOR), admin=_ADMIN)
+    ((args, _),) = [a for a in store["audits"] if a[0][1] == "user.update"]
+    assert "rfp_mailboxes" not in args[4]

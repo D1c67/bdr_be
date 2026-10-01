@@ -1,0 +1,19 @@
+# Installed by setup.sh (__DOMAIN__ replaced). TLS via Let's Encrypt HTTP-01:
+# port 80 must stay open to the world for issuance + renewal (it serves only
+# the ACME challenge and a redirect). 443 is restricted to Railway's static
+# egress IPs in the security group; the API key is the real auth.
+__DOMAIN__ {
+	reverse_proxy 127.0.0.1:8000 {
+		# A BOQ run can legitimately take minutes; never cut a streaming reply.
+		transport http {
+			response_header_timeout 1800s
+		}
+		flush_interval -1
+	}
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 50mb
+			roll_keep 5
+		}
+	}
+}

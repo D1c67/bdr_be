@@ -936,11 +936,42 @@ def test_export_job_streams_the_whole_nested_tree(monkeypatch):
     assert response.headers["X-Export-File-Count"] == "3"
     assert "attachment" in response.headers["content-disposition"]
     assert _zip_names(response) == {
-        "BID SET/Electrical Drawings/E-Sheets (pages 1-4).pdf",
-        "BID SET/Other/Geotechnical Report/Soils (pages 5-6).pdf",
-        "SPECS/Specifications/SPECS.pdf",
+        "BID SET/Elec Dwgs/E- p1-4.pdf",
+        "BID SET/Other/Geotech Rpt/Soils p5-6.pdf",
+        "SPECS/Spec/SPECS.pdf",
         "MANIFEST.txt",
     }
+    # No linked project: the zip carries the last 4 of the job id.
+    assert 'filename="j1_split.zip"' in response.headers["content-disposition"]
+
+
+def test_export_job_flat_puts_everything_in_one_folder(monkeypatch):
+    from types import SimpleNamespace
+
+    files = [{"id": "f1", "job_id": "j1", "filename": "BID SET.pdf", "status": "done", "error": None}]
+    segments = [
+        {
+            "file_id": "f1",
+            "category": "low_voltage_drawings",
+            "other_type": None,
+            "filename": "T-Sheets (pages 1-4).pdf",
+            "storage_path": "bid-splits/j1/output/t.pdf",
+            "size_bytes": 4,
+        },
+    ]
+    monkeypatch.setattr(bs, "get_supabase", lambda: _ExportSb({"id": "j1"}, files, segments))
+    monkeypatch.setattr(bs.file_export.storage, "download_file", lambda p: b"pdf!")
+    monkeypatch.setattr(bs, "audit", lambda *_a, **_k: None)
+
+    response = asyncio.run(bs.export_job("j1", user=SimpleNamespace(id="u1"), flat=True))
+    assert _zip_names(response) == {"BID SET - LV Dwgs - T- p1-4.pdf", "MANIFEST.txt"}
+
+
+def test_tree_rows_single_file_export_drops_the_source_folder():
+    rows, _notes = bs._tree_rows(
+        [_export_file("BID SET.pdf", [_export_seg("rfp", "RFP.pdf")])], top_folder=False
+    )
+    assert rows[0]["folders"] == ["RFP"]
 
 
 # ── refresh_job: completion notification fires once, on the way out ──────

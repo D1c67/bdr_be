@@ -88,6 +88,52 @@ def test_target_selects_ec2_pair():
     assert route.api_key == "ec2-key"
 
 
+def test_target_selects_ec2b_pair():
+    s = _sh(
+        self_hosted_llm_target="ec2b",
+        self_hosted_llm_ec2_base_url="https://a.example.com/v1",
+        self_hosted_llm_ec2_api_key="a-key",
+        self_hosted_llm_ec2b_base_url="https://b.example.com/v1/",
+        self_hosted_llm_ec2b_api_key="b-key",
+    )
+    route = llm.resolve("boq", s)
+    assert route.base_url == "https://b.example.com/v1"
+    assert route.api_key == "b-key"
+
+
+def test_target_model_is_the_default_for_every_feature():
+    # Flipping the target moves every feature to that box's model in one line.
+    a = _sh(
+        self_hosted_llm_target="ec2",
+        self_hosted_llm_ec2_base_url="https://a.example.com/v1",
+        self_hosted_llm_ec2_model="qwen-3.5-4b",
+        self_hosted_llm_ec2b_base_url="https://b.example.com/v1",
+        self_hosted_llm_ec2b_model="qwen-3.8-27b",
+    )
+    b = _s(**{**a.model_dump(), "self_hosted_llm_target": "ec2b"})
+    for feature in ("boq", "quote_pdf", "bid_split", "rfp_extract"):
+        assert llm.resolve(feature, a).model == "qwen-3.5-4b"
+        assert llm.resolve(feature, b).model == "qwen-3.8-27b"
+    assert llm.active_model("boq", b) == "self-hosted:qwen-3.8-27b"
+
+
+def test_feature_model_overrides_target_model_and_off_disables():
+    s = _sh(
+        self_hosted_llm_local_model="target-model",
+        self_hosted_boq_model="feature-model",
+        self_hosted_quote_pdf_model="OFF",
+    )
+    assert llm.resolve("boq", s).model == "feature-model"
+    assert llm.resolve("estimate", s).model == "target-model"
+    assert llm.resolve("quote_pdf", s).model == ""
+    assert not llm.is_configured("quote_pdf", s)
+    assert llm.is_configured("estimate", s)
+    # "off" on the classify model also switches off the features that fall
+    # back to it, instead of silently landing on the target model.
+    s2 = _sh(self_hosted_llm_local_model="target-model", self_hosted_rfp_classify_model="off")
+    assert llm.resolve("rfp_extract", s2).model == ""
+
+
 # ── is_configured / active_model ────────────────────────────────────────────
 
 

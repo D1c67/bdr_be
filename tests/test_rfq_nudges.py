@@ -253,7 +253,7 @@ def _patch_graph(monkeypatch, *, fail_send_for=frozenset()):
         calls["create"].append((message_id, draft["id"]))
         return draft
 
-    def send(message_id):
+    def send(message_id, **_k):
         if message_id in fail_send_for:
             raise RuntimeError("graph send blew up")
         calls["send"].append(message_id)
@@ -348,7 +348,7 @@ def test_nudge_row_exists_before_the_draft_is_sent(nudge_env, monkeypatch):
     calls = _patch_graph(monkeypatch)
     seen = []
 
-    def send(message_id):
+    def send(message_id, **_k):
         seen.extend(dict(n) for n in db.tables.get("rfq_nudges", []))
         calls["send"].append(message_id)
 

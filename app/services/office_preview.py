@@ -4,7 +4,7 @@ Office files (.xlsx/.xlsm/.docx/.doc) can't be rendered natively by browsers, so
 at upload time we convert them to PDF and store the derivative next to the
 original in the same private bucket ({project_id}/previews/{file_id}.pdf). The
 frontend then previews them through the existing PDF modal via the same
-short-TTL signed-URL path — estimator hardening applies unchanged.
+short-TTL signed-URL path - estimator hardening applies unchanged.
 
 Engine-agnostic (settings.preview_engine):
   - "gotenberg": LibreOffice via a Gotenberg sidecar (default, fully in-house).
@@ -14,7 +14,7 @@ Engine-agnostic (settings.preview_engine):
                  files rejected with 406.
   - "off":       pipeline disabled; uploads keep preview_status="none".
 
-Drawings are never converted — they are already PDFs and are the estimator's
+Drawings are never converted - they are already PDFs and are the estimator's
 read surface; that path stays byte-identical to the upload.
 """
 
@@ -28,6 +28,7 @@ from typing import Protocol
 import httpx
 
 from app.core.config import get_settings
+from app.core.file_categories import DRAWING_CATEGORIES
 from app.core.supabase_client import get_supabase
 from app.services import storage
 
@@ -51,8 +52,8 @@ def is_convertible(filename: str | None, category: str) -> bool:
     """Whether this file should get a PDF preview derivative."""
     if get_settings().preview_engine == "off":
         return False
-    # Both drawing buckets are PDFs; never enter a converter.
-    if category in ("drawing", "electrical_drawing"):
+    # Every drawing bucket is PDFs; never enter a converter.
+    if category in DRAWING_CATEGORIES:
         return False
     return _ext(filename) in CONVERTIBLE_EXTS
 
@@ -72,7 +73,7 @@ class GotenbergConverter:
         s = get_settings()
         data: dict[str, str] = {}
         if _ext(filename) in _SPREADSHEET_EXTS:
-            # One PDF page per sheet — wide BOQ sheets don't get chopped up by
+            # One PDF page per sheet - wide BOQ sheets don't get chopped up by
             # Excel print-layout pagination.
             data["singlePageSheets"] = "true"
         try:
@@ -104,7 +105,7 @@ class GraphConverter:
         # Must match drive_upload's owner resolution (MS_DRIVE_OWNER override)
         # so the content/DELETE calls hit the same drive the scratch upload did.
         sender = get_settings().ms_drive_owner or get_settings().ms_sender
-        # The scratch path is interpolated into a Graph URL — restrict the
+        # The scratch path is interpolated into a Graph URL - restrict the
         # untrusted filename to URL-safe characters (cf. rfq_sending's
         # _safe_component) so '#', '?' or ':' can't break the request path.
         safe = re.sub(r"[^A-Za-z0-9._-]", "_", filename or "file") or "file"
@@ -131,7 +132,7 @@ class GraphConverter:
                 graph_email.graph_request(
                     "DELETE", f"/users/{sender}/drive/items/{item_id}"
                 )
-            except Exception:  # noqa: BLE001 — scratch leaks are cosmetic
+            except Exception:  # noqa: BLE001 - scratch leaks are cosmetic
                 logger.warning("Failed to delete Graph scratch item %s", item_id)
 
 
@@ -148,13 +149,13 @@ def get_converter() -> Converter | None:
 #
 # Distinct from generate_preview below: the preview pipeline deliberately
 # swallows every failure into preview_status so a bad convert never breaks an
-# upload. The send path is the opposite — a failed conversion MUST fail the send
+# upload. The send path is the opposite - a failed conversion MUST fail the send
 # (never fall back to emailing the malleable office file), so these RAISE.
 
 
 def is_office_file(filename: str | None) -> bool:
     """True for the editable Office formats we convert to PDF before emailing.
-    Unlike is_convertible this is NOT gated on preview_engine or category — a
+    Unlike is_convertible this is NOT gated on preview_engine or category - a
     send must convert (or fail), regardless of the in-app preview setting."""
     return _ext(filename) in CONVERTIBLE_EXTS
 
@@ -180,7 +181,7 @@ def convert_for_send(content: bytes, filename: str) -> bytes:
     """
     converter = get_converter()
     if converter is None:  # preview_engine == "off"
-        raise ConversionError("PDF conversion is disabled (preview_engine='off') — cannot send.")
+        raise ConversionError("PDF conversion is disabled (preview_engine='off') - cannot send.")
 
     s = get_settings()
     if len(content) > s.preview_max_convert_mb * 1024 * 1024:
@@ -221,7 +222,7 @@ def generate_preview(file_id: str) -> None:
 
     Safe everywhere it's called from (BackgroundTasks threadpool, the inbox
     poller thread, the backfill script): idempotent, single retry, and no
-    exception ever escapes — failures land in preview_status/preview_error.
+    exception ever escapes - failures land in preview_status/preview_error.
     """
     try:
         rec = (
@@ -259,7 +260,7 @@ def generate_preview(file_id: str) -> None:
             try:
                 pdf = converter.convert_to_pdf(content, filename)
                 break
-            except Exception as exc:  # noqa: BLE001 — recorded, retried once
+            except Exception as exc:  # noqa: BLE001 - recorded, retried once
                 last_error = exc
                 if attempt == 1:
                     time.sleep(2)
@@ -272,7 +273,7 @@ def generate_preview(file_id: str) -> None:
             )
             return
 
-        # The file may have been deleted while we were converting — don't
+        # The file may have been deleted while we were converting - don't
         # upload an orphan derivative for a row that no longer exists.
         still_exists = (
             get_supabase()
@@ -288,7 +289,7 @@ def generate_preview(file_id: str) -> None:
         # upsert: a retried/backfilled conversion may overwrite a stale derivative
         storage.upload_file(path, pdf, "application/pdf", upsert=True)
         _mark(file_id, preview_path=path, preview_status="ready", preview_error=None)
-    except Exception:  # noqa: BLE001 — never break the caller (poller/bg task)
+    except Exception:  # noqa: BLE001 - never break the caller (poller/bg task)
         logger.exception("Preview generation crashed for file %s", file_id)
         try:
             _mark(file_id, preview_status="failed", preview_error="internal error")

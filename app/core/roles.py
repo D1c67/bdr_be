@@ -76,3 +76,32 @@ ACTUAL_BID_VIEWER_ROLES = frozenset(
 ACTUAL_BID_EDITOR_ROLES = frozenset(
     {Role.ESTIMATING_ADMIN, Role.EXECUTIVE, Role.IT_ADMIN}
 )
+
+# Who works the RFP Ingestion review queue (docs/RFP_EMAIL_INGESTION.md section
+# 1): the Estimating Admin primarily, with the IT Admin, the Executive and both
+# engineer focuses able to act. routers/rfp_emails.py keeps REVIEW_QUEUE_ROLES
+# equal to this tuple; it lives here so routers/projects.py can gate the email
+# block of the project-side match route without a router-to-router import.
+# The accountant is read-only and the estimator is external, so neither is
+# here: email content never leaves this set.
+RFP_REVIEW_ROLES = (
+    Role.ESTIMATING_ADMIN,
+    Role.IT_ADMIN,
+    Role.EXECUTIVE,
+    Role.ESTIMATING_ENGINEER_MATERIALS,
+    Role.ESTIMATING_ENGINEER_LABOR,
+)
+
+# Who may READ the queue (docs/RFP_EMAIL_VISIBILITY.md 3.3). Wider than the
+# set above by exactly the accountant: since 0134 every read is scoped to the
+# mailboxes the viewer owns plus the shared list, so letting the read-only
+# accountant open the page shows them their own mail and nothing else. They
+# still hit RFP_REVIEW_ROLES (403) on every action.
+RFP_VIEW_ROLES = RFP_REVIEW_ROLES + (Role.ACCOUNTANT,)
+
+# Who may DELETE a project (docs/PROJECT_DELETE.md 3): the same three roles
+# that clear rows on the "Created from RFP Ingestion" page
+# (routers/rfp_created.PAGE_ROLES). Only the IT Admin sees the Deleted
+# Projects page and restores.
+PROJECT_DELETE_ROLES = (Role.ESTIMATING_ADMIN, Role.EXECUTIVE, Role.IT_ADMIN)
+PROJECT_RESTORE_ROLES = (Role.IT_ADMIN,)

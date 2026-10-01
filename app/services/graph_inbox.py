@@ -12,12 +12,18 @@ window) so existing callers are unchanged; the email-ingestion poller passes
 mailbox/folder/select explicitly.
 """
 
+import os
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import httpx
 
 from app.core.config import get_settings
-from app.services.graph_email import graph_request
+from app.services.graph_email import graph_request, graph_stream
+
+# Streamed attachment downloads are written in 1 MB chunks.
+_DOWNLOAD_CHUNK = 1024 * 1024
 
 _DELTA_SELECT = (
     "id,conversationId,internetMessageId,from,subject,bodyPreview,"
@@ -30,6 +36,17 @@ _MESSAGE_SELECT = (
 
 class DeltaExpired(Exception):
     """The stored deltaLink was rejected (HTTP 410); a fresh initial sync is needed."""
+
+
+class AttachmentTooLarge(RuntimeError):
+    """A streamed attachment exceeded the caller's byte cap mid-download; the
+    response was closed and the partial file removed."""
+
+
+class AttachmentNotStored(RuntimeError):
+    """Graph no longer serves the attachment content (HTTP 404 or 410): the
+    message or attachment was deleted, or the id belongs to a different
+    mailbox."""
 
 
 def initial_delta_url(
@@ -125,12 +142,42 @@ def list_reference_links(message_id: str, *, mailbox: str | None = None) -> list
     return links
 
 
+_IMAGE_EXTS = {"png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp", "emz", "wmz"}
+
+
+def is_inline_image(att: dict) -> bool:
+    """An image embedded in the message body (signature logo, social icon,
+    pasted picture) rather than a file the sender attached. Outlook carries
+    every earlier message's inline images forward on each reply, so a long
+    thread piles up dozens of them. Needs `isInline` in the listing $select."""
+    if not att.get("isInline"):
+        return False
+    content_type = (att.get("contentType") or "").lower()
+    name = (att.get("name") or "").lower()
+    ext = name.rsplit(".", 1)[-1] if "." in name else ""
+    return content_type.startswith("image/") or ext in _IMAGE_EXTS
+
+
+# Body images at or above this size are kept as files. Signature art on real
+# RFQ threads topped out near 300 KB (animated banner GIFs); a screenshot or
+# photo of a quote pasted into the body is usually larger, and is the one
+# inline image worth keeping.
+INLINE_IMAGE_KEEP_BYTES = 512 * 1024
+
+
+def is_signature_art(att: dict) -> bool:
+    """A body image small enough to be signature art (see is_inline_image)."""
+    return is_inline_image(att) and (att.get("size") or 0) < INLINE_IMAGE_KEEP_BYTES
+
+
 def list_attachments(
     message_id: str,
     *,
     mailbox: str | None = None,
     max_count: int | None = None,
     max_bytes: int | None = None,
+    skip_inline_images: bool = False,
+    rank: Callable[[dict], int] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Return (fetched, skipped) attachments for a message.
 
@@ -144,12 +191,19 @@ def list_attachments(
     how many file attachments are pulled — so a hostile inbound message can't
     force an unbounded number of large downloads. Item/reference attachments
     (attached emails, links) are never fetched.
+
+    `skip_inline_images` drops small body-embedded images (signature art, see
+    is_signature_art) before they count toward `max_count`: Graph lists them
+    ahead of the real attachments, so on a deep reply thread they used to fill
+    the cap and push the actual file off the end. `rank` orders the listing before the cap is
+    applied (lowest first, stable), so the files the caller cares about most
+    are the ones fetched when a message carries more than the cap.
     """
     user = mailbox or get_settings().ms_sender
     listing = graph_request(
         "GET",
         f"/users/{user}/messages/{message_id}/attachments",
-        params={"$select": "id,name,contentType,size"},
+        params={"$select": "id,name,contentType,size,isInline"},
     ).json()
     fetched: list[dict] = []
     skipped: list[dict] = []
@@ -162,13 +216,22 @@ def list_attachments(
                 "contentType": att.get("contentType"),
                 "size": att.get("size"),
                 "reason": reason,
+                # Tells a reference attachment (a cloud link, which callers
+                # may resolve another way) from an attached email or item.
+                "odata_type": att.get("@odata.type"),
             }
         )
 
-    for att in listing.get("value", []):
+    entries = listing.get("value", [])
+    if rank is not None:
+        entries = sorted(entries, key=rank)
+    for att in entries:
         listed_type = att.get("@odata.type")
         if listed_type and listed_type != "#microsoft.graph.fileAttachment":
             _skip(att, "item_attachment")
+            continue
+        if skip_inline_images and is_signature_art(att):
+            _skip(att, "inline_image")
             continue
         if max_count is not None and len(fetched) >= max_count:
             _skip(att, "too_many")
@@ -185,3 +248,81 @@ def list_attachments(
         else:
             _skip(att, "item_attachment")
     return fetched, skipped
+
+
+def _open_excl(dest: Path):
+    """Create `dest` for writing, refusing an existing path (FileExistsError)
+    and never following a symlink at it. Returns a buffered writer."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(dest, flags, 0o644)
+    try:
+        return os.fdopen(fd, "wb")
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _unlink_quietly(path: Path) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def download_attachment_to_file(
+    message_id: str,
+    attachment_id: str,
+    *,
+    mailbox: str,
+    max_bytes: int,
+    dest: Path,
+) -> int:
+    """Stream one file attachment's raw content (`.../attachments/{id}/$value`)
+    into `dest`, which is created O_EXCL, in 1 MB chunks under a running byte
+    cap. Returns the bytes written.
+
+    Unlike `list_attachments` this never decodes base64 in memory and never
+    trusts Graph's `size` (the MIME-encoded size): the cap is enforced on the
+    bytes actually received. Over the cap the response is closed at once and
+    AttachmentTooLarge is raised; HTTP 404/410 raise AttachmentNotStored; any
+    other non-2xx propagates as httpx.HTTPStatusError (a 3xx included, since
+    `graph_stream` refuses redirects). On every failure the partial `dest`
+    this call created is removed, so a retry's O_EXCL open succeeds. An
+    existing `dest` raises FileExistsError before any request is made and is
+    left untouched.
+
+    `mailbox` is required and must be the `ingested_emails.mailbox` of the
+    stored row: the default ms_sender mailbox is a different mailbox and the
+    stored (immutable) ids do not resolve there.
+    """
+    if not mailbox or not isinstance(mailbox, str):
+        raise ValueError("mailbox is required")
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes <= 0:
+        raise ValueError("max_bytes must be a positive int")
+    dest = Path(dest)
+    path = f"/users/{mailbox}/messages/{message_id}/attachments/{attachment_id}/$value"
+    out = _open_excl(dest)
+    written = 0
+    try:
+        with out:
+            try:
+                with graph_stream("GET", path) as resp:
+                    for chunk in resp.iter_bytes(_DOWNLOAD_CHUNK):
+                        written += len(chunk)
+                        if written > max_bytes:
+                            # Stop reading before the next chunk arrives.
+                            resp.close()
+                            raise AttachmentTooLarge(
+                                "The attachment is larger than the per-file limit."
+                            )
+                        out.write(chunk)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code in (404, 410):
+                    raise AttachmentNotStored(
+                        "The attachment content is no longer available."
+                    ) from exc
+                raise
+    except BaseException:
+        _unlink_quietly(dest)
+        raise
+    return written

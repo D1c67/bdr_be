@@ -704,6 +704,8 @@ def test_general_material_amount_changed_is_numeric_aware():
 
 def test_general_material_maybe_bounce_only_on_change(monkeypatch):
     called = []
+    # Not post-submission: the send_out lane sits at send_out (0138 window check).
+    monkeypatch.setattr(gm, "get_supabase", lambda: FakeDB({"project_category_state": _cat_rows()}))
     monkeypatch.setattr(
         workflow, "maybe_reopen_verify_after_edit",
         lambda pid, actor, reason, stale: called.append((pid, actor, reason, stale)),

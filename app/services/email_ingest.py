@@ -52,7 +52,7 @@ from datetime import datetime, timedelta, timezone
 from app.core.config import get_settings
 from app.core.roles import Role
 from app.core.supabase_client import get_supabase
-from app.services import email_match, graph_inbox, llm, openai_text, storage
+from app.services import email_match, graph_inbox, llm, openai_text, rfp_test, storage
 from app.services.llm_errors import is_out_of_tokens, user_message
 from app.services.notifications import audit, notify_role
 
@@ -93,7 +93,10 @@ _FETCH_SELECT = "id,body,bodyPreview,hasAttachments"
 
 _SWEEP_SELECT = (
     "id, mailbox, folder, direction, graph_message_id, conversation_id, "
-    "from_address, subject, status, attempts, has_attachments, project_id"
+    "from_address, subject, status, attempts, has_attachments, project_id, "
+    # The RFP test bench's tag (docs/RFP_TESTING.md 4.2): the sweep filter
+    # and the guard on every capture point.
+    "test_session_id"
 )
 
 
@@ -101,46 +104,69 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _pipeline_tick() -> None:
+def _pipeline_tick() -> bool:
     """One poll tick with LLM calls tagged as pipeline tier: R3 matcher calls
     ride the background lane of the concurrency gate (and the call log) rather
-    than the reserved interactive slots."""
+    than the reserved interactive slots. Returns whether the tick ran in
+    test mode (the loop shortens its sleep)."""
     from app.services import llm_gate
 
     with llm_gate.tier(llm_gate.TIER_PIPELINE):
-        poll_once()
+        return bool(poll_once())
 
 
 async def polling_loop() -> None:
-    interval = get_settings().email_ingest_poll_interval_seconds
+    """The interval is read every iteration: RFP_TESTING_POLL_SECONDS while
+    a test session is active (docs/RFP_TESTING.md 4.2), the filer's own
+    interval otherwise."""
     while True:
+        test_mode = False
         try:
-            await asyncio.to_thread(_pipeline_tick)
+            test_mode = await asyncio.to_thread(_pipeline_tick)
         except Exception:  # noqa: BLE001 — the loop must survive any tick failure
             logger.exception("Email ingest poll failed")
-        await asyncio.sleep(interval)
+        settings = get_settings()
+        await asyncio.sleep(
+            rfp_test.poll_seconds(settings, settings.email_ingest_poll_interval_seconds, test_mode)
+        )
 
 
-def poll_once() -> None:
+def poll_once() -> bool:
+    """One tick. While an RFP test session is active (docs/RFP_TESTING.md
+    4.2) the mailbox is the session's, Inbox only, and the sweep touches
+    only the session's rows; the filer's own mailbox and its pending rows
+    wait. Returns True when the tick ran in test mode."""
     settings = get_settings()
     mailbox = (settings.email_ingest_mailbox or "").strip().lower()
-    if not mailbox or not settings.ms_client_id:
-        return
+    if not settings.ms_client_id:
+        return False
+    if not mailbox and not settings.rfp_testing_enabled:
+        return False
     sb = get_supabase()
-
+    session = rfp_test.active_session(sb)
+    if session is not None:
+        mailbox = session["mailbox"]
+        folders: tuple[str, ...] = ("inbox",)
+    elif not mailbox or not settings.email_ingest_enabled:
+        return False
+    else:
+        folders = _FOLDERS
     lease_key = f"{_SYNC_PREFIX}:{mailbox}:lease"
     if not _acquire_lease(sb, lease_key):
-        return
+        return session is not None
 
-    for folder in _FOLDERS:
+    for folder in folders:
         try:
-            _sync_folder(sb, mailbox, folder)
+            _sync_folder(sb, mailbox, folder, session=session)
         except Exception:  # noqa: BLE001 — one folder failing must not stall the other
             logger.exception("Email ingest delta sync failed for %s/%s", mailbox, folder)
         if not _renew_lease(sb, lease_key):
-            return  # lease stolen (we stalled too long) — stand down this tick
+            return session is not None  # lease stolen (we stalled too long): stand down this tick
+    if session is not None:
+        rfp_test.heartbeat(sb, session["id"], "filer_last_tick_at")
 
-    process_pending(sb, lease_key=lease_key)
+    process_pending(sb, lease_key=lease_key, session=session)
+    return session is not None
 
 
 def _lease_until() -> str:
@@ -197,24 +223,31 @@ def _renew_lease(sb, key: str) -> bool:
     return True
 
 
-def _sync_folder(sb, mailbox: str, folder: str) -> None:
+def _sync_folder(sb, mailbox: str, folder: str, *, session: dict | None = None) -> None:
     """Pull the folder's delta and insert raw rows (status 'received').
 
     The new delta token is persisted ONLY when every message either inserted
     or was a known duplicate — a genuine insert failure leaves the old token
     so the next tick re-pulls the batch (already-inserted rows dedup).
+
+    Test mode (`session`, docs/RFP_TESTING.md 4.2): only messages from the
+    session's sender received at or after it started are inserted (tagged);
+    the rest are recorded as `filer.ignored` events. The initial pull looks
+    back one day only; older mail is dropped by the filter anyway.
     """
     settings = get_settings()
     key = f"{_SYNC_PREFIX}:{mailbox}:{folder}"
     rows = (sb.table("graph_sync_state").select("*").eq("id", key).execute()).data
     delta_link = rows[0].get("delta_link") if rows else None
+    lookback = settings.email_ingest_lookback_days if session is None else 1
+    reset_lookback = settings.email_ingest_reset_lookback_days if session is None else 1
 
     try:
         messages, new_delta = graph_inbox.delta_inbox(
             delta_link,
             mailbox=mailbox,
             folder=folder,
-            since_days=settings.email_ingest_lookback_days,
+            since_days=lookback,
             select=_DELTA_SELECT,
         )
     except graph_inbox.DeltaExpired:
@@ -222,14 +255,14 @@ def _sync_folder(sb, mailbox: str, folder: str) -> None:
             None,
             mailbox=mailbox,
             folder=folder,
-            since_days=settings.email_ingest_reset_lookback_days,
+            since_days=reset_lookback,
             select=_DELTA_SELECT,
         )
 
     batch_failed = False
     for msg in messages:
         try:
-            _insert_from_delta(sb, mailbox, folder, msg)
+            _insert_from_delta(sb, mailbox, folder, msg, session=session)
         except Exception:  # noqa: BLE001 — isolate; the batch flag re-pulls it next tick
             logger.exception("Failed to persist message %s", msg.get("id"))
             batch_failed = True
@@ -255,11 +288,24 @@ def _recipients(entries: list | None) -> list[dict]:
     return out
 
 
-def _insert_from_delta(sb, mailbox: str, folder: str, msg: dict) -> None:
+def _insert_from_delta(
+    sb, mailbox: str, folder: str, msg: dict, *, session: dict | None = None
+) -> None:
     if "@removed" in msg or not msg.get("id"):
         return  # delta tombstone / bare change marker
     from_name, from_address = _addr(msg.get("from"))
-    if folder == "inbox" and (from_address or "").lower() == mailbox:
+    if session is not None:
+        reason = rfp_test.message_filter(session, from_address, msg.get("receivedDateTime"))
+        if reason is not None:
+            rfp_test.record(
+                sb, session_id=session["id"], source=rfp_test.SOURCE_FILER, kind="ignored",
+                title=f"Ignored ({reason}): {msg.get('subject') or '(no subject)'}",
+                detail={"from": from_address, "from_name": from_name, "subject": msg.get("subject"),
+                        "received_at": msg.get("receivedDateTime"), "reason": reason,
+                        "graph_message_id": msg["id"]},
+            )
+            return
+    elif folder == "inbox" and (from_address or "").lower() == mailbox:
         # Self-sent mail: the Sent Items copy is the record (self-conversation
         # dedup — otherwise a mail to yourself would ingest twice).
         return
@@ -279,30 +325,40 @@ def _insert_from_delta(sb, mailbox: str, folder: str, msg: dict) -> None:
         if direction == "outbound"
         else msg.get("receivedDateTime") or msg.get("sentDateTime")
     )
+    row = {
+        "mailbox": mailbox,
+        "folder": folder,
+        "direction": direction,
+        "graph_message_id": msg["id"],
+        "internet_message_id": msg.get("internetMessageId"),
+        "conversation_id": msg.get("conversationId"),
+        "from_name": from_name,
+        "from_address": from_address,
+        "to_recipients": _recipients(msg.get("toRecipients")),
+        "cc_recipients": _recipients(msg.get("ccRecipients")),
+        "subject": msg.get("subject"),
+        "body_preview": msg.get("bodyPreview"),
+        "message_at": message_at,
+        "has_attachments": bool(msg.get("hasAttachments")),
+        "status": "received",
+    }
+    if session is not None:
+        row["test_session_id"] = session["id"]
     try:
-        sb.table("ingested_emails").insert(
-            {
-                "mailbox": mailbox,
-                "folder": folder,
-                "direction": direction,
-                "graph_message_id": msg["id"],
-                "internet_message_id": msg.get("internetMessageId"),
-                "conversation_id": msg.get("conversationId"),
-                "from_name": from_name,
-                "from_address": from_address,
-                "to_recipients": _recipients(msg.get("toRecipients")),
-                "cc_recipients": _recipients(msg.get("ccRecipients")),
-                "subject": msg.get("subject"),
-                "body_preview": msg.get("bodyPreview"),
-                "message_at": message_at,
-                "has_attachments": bool(msg.get("hasAttachments")),
-                "status": "received",
-            }
-        ).execute()
+        inserted = sb.table("ingested_emails").insert(row).execute().data or []
     except Exception as exc:  # noqa: BLE001
         if _is_unique_violation(exc):
             return  # lost a race with another runner — the row exists, fine
         raise
+    if session is not None:
+        rfp_test.record(
+            sb, session_id=session["id"], source=rfp_test.SOURCE_FILER, kind="listed",
+            title=f"Filer listed: {msg.get('subject') or '(no subject)'}",
+            ingested_email_id=(inserted[0].get("id") if inserted else None),
+            detail={"from": from_address, "from_name": from_name, "subject": msg.get("subject"),
+                    "received_at": message_at, "has_attachments": row["has_attachments"],
+                    "graph_message_id": msg["id"], "conversation_id": msg.get("conversationId")},
+        )
 
 
 def _is_unique_violation(exc: Exception) -> bool:
@@ -313,16 +369,26 @@ def _is_unique_violation(exc: Exception) -> bool:
 # ── Pipeline sweep ─────────────────────────────────────────────────────────────
 
 
-def process_pending(sb, lease_key: str | None = None) -> None:
+def process_pending(sb, lease_key: str | None = None, *, session: dict | None = None) -> None:
     """Advance every non-terminal email whose backoff gate has passed. Runs
     every tick — this is crash recovery and retry in one query. Renews the
-    runner lease periodically and aborts if another runner took it."""
+    runner lease periodically and aborts if another runner took it. Normal
+    mode touches only untagged rows; test mode (`session`) only the active
+    session's (docs/RFP_TESTING.md 4.2)."""
     now_iso = _now().isoformat()
-    rows = (
+    query = (
         sb.table("ingested_emails")
         .select(_SWEEP_SELECT)
         .in_("status", list(_PENDING))
         .or_(f"next_attempt_at.is.null,next_attempt_at.lte.{now_iso}")
+    )
+    if session is not None:
+        query = query.eq("test_session_id", session["id"])
+    elif get_settings().rfp_testing_enabled:
+        # Only a deployment with the bench on has the column.
+        query = query.is_("test_session_id", "null")
+    rows = (
+        query
         .order("created_at", desc=False)
         .limit(_SWEEP_BATCH)
         .execute()
@@ -464,6 +530,20 @@ def _step_received(sb, email: dict) -> str | None:
         "error": None,
         "next_attempt_at": None,
     })
+    if ok and rfp_test.session_for_email(email):
+        atts = (
+            sb.table("ingested_email_attachments")
+            .select("filename, mime_type, size_bytes, skipped_reason")
+            .eq("email_id", email["id"])
+            .execute()
+        ).data or []
+        rfp_test.record(
+            sb, session_id=email["test_session_id"], source=rfp_test.SOURCE_FILER, kind="fetched",
+            title=f"Filer fetched: {email.get('subject') or '(no subject)'}",
+            ingested_email_id=email["id"],
+            detail={"attachments": atts, "body_truncated": truncated,
+                    "body_preview": body[:rfp_test.PREVIEW_MAX_CHARS]},
+        )
     return "id_r1" if ok else None
 
 
@@ -504,15 +584,18 @@ def _ingest_attachments(sb, email: dict) -> None:
     )
     import base64
 
+    from app.routers.files import _safe_content_type
+
     rows: list[dict] = []
     for att in fetched:
         name = att.get("name") or "attachment"
         content = base64.b64decode(att.get("contentBytes") or "")
         path = _attachment_path(email["id"], att.get("id"), name)
-        storage.upload_file(
-            path, content, att.get("contentType") or "application/octet-stream",
-            upsert=True,
-        )
+        # The stored object's content type comes from the extension allowlist
+        # (octet-stream otherwise), never the sender-declared contentType, so an
+        # attacker's text/html or image/svg+xml can't be stored renderable. The
+        # declared value stays in the mime_type metadata column below.
+        storage.upload_file(path, content, _safe_content_type(name), upsert=True)
         rows.append(
             {
                 "email_id": email["id"],
@@ -577,6 +660,8 @@ def _step_r1(sb, email: dict) -> str | None:
             .execute()
         ).data
         if hit:
+            _record_round(sb, email, "r1", "hit: the conversation map knows this thread",
+                          {"project_id": hit[0]["project_id"]})
             outcome = _assign(
                 sb,
                 email,
@@ -586,13 +671,30 @@ def _step_r1(sb, email: dict) -> str | None:
                 update_map=False,  # the map already knows this conversation
             )
             return "processed" if outcome else None
+    _record_round(sb, email, "r1", "miss: no conversation map entry", {"conversation_id": conversation_id})
     return "id_r2" if _cas(sb, email["id"], "id_r1", {"status": "id_r2"}) else None
+
+
+def _record_round(sb, email: dict, round_: str, outcome: str, detail: dict | None = None) -> None:
+    """Test rows: the `filer.r1` / `r2` / `r3` event (docs/RFP_TESTING.md 7.2)."""
+    if not rfp_test.session_for_email(email):
+        return
+    rfp_test.record(
+        sb, session_id=email["test_session_id"], source=rfp_test.SOURCE_FILER, kind=round_,
+        title=f"Filer {round_.upper()} {outcome}", ingested_email_id=email["id"],
+        detail={"round": round_, "outcome": outcome, **(detail or {})},
+    )
 
 
 def _step_r2(sb, email: dict) -> str | None:
     """Deterministic subject match against all projects."""
     projects = _all_projects(sb)
     project_id = email_match.r2_match(email.get("subject") or "", projects)
+    _record_round(
+        sb, email, "r2",
+        "found a project number in the subject" if project_id else "no project number in the subject",
+        {"project_id": project_id, "subject": email.get("subject")},
+    )
     if project_id:
         outcome = _assign(
             sb, email, project_id, matched_by="subject", expected_status="id_r2"
@@ -607,6 +709,7 @@ def _step_r3(sb, email: dict) -> tuple[str | None, bool]:
     if not llm.is_configured("email_match", settings):
         # R3 disabled without a configured model — finalize as Unknown; manual
         # triage (and the R1 learn-back it feeds) still works.
+        _record_round(sb, email, "r3", "skipped: no model configured")
         return _finalize_r3(sb, email, {}), False
 
     projects = _all_projects(sb)
@@ -639,6 +742,19 @@ def _step_r3(sb, email: dict) -> tuple[str | None, bool]:
     idx = result.get("candidate_index")
     confidence = _safe_float(result.get("confidence"))
     valid = isinstance(idx, int) and 0 <= idx < len(candidates)
+    if rfp_test.session_for_email(email):
+        chosen = candidates[idx] if valid else None
+        _record_round(
+            sb, email, "r3",
+            (f"matched {chosen.get('number')} at {confidence:.2f}"
+             if valid and confidence >= settings.email_match_confidence_threshold
+             else f"below the threshold ({confidence:.2f})" if valid else "no candidate"),
+            {"candidates": [{"id": c.get("id"), "number": c.get("number"), "name": c.get("name")}
+                            for c in candidates[:50]],
+             "candidate_count": len(candidates), "verdict": result, "confidence": confidence,
+             "threshold": settings.email_match_confidence_threshold,
+             "model": llm.active_model("email_match", settings)},
+        )
     if valid and confidence >= settings.email_match_confidence_threshold:
         outcome = _assign(
             sb,
@@ -674,6 +790,14 @@ def _finalize_r3(sb, email: dict, extra_fields: dict) -> str | None:
         **extra_fields,
     }
     if _cas(sb, email["id"], "id_r3", fields, only_unassigned=True):
+        if rfp_test.session_for_email(email):
+            rfp_test.record(
+                sb, session_id=email["test_session_id"], source=rfp_test.SOURCE_FILER, kind="unknown",
+                level=rfp_test.LEVEL_WARN, title="Filer: no confident match; Unknown",
+                ingested_email_id=email["id"],
+                detail={"suggested_project_id": extra_fields.get("suggested_project_id"),
+                        "suggested_confidence": extra_fields.get("suggested_confidence")},
+            )
         return "processed"
     if _finalize_if_assigned(sb, email["id"], "id_r3"):
         return "processed"
@@ -748,6 +872,14 @@ def _assign(
             _upsert_conversation_map(
                 sb, email["mailbox"], email["conversation_id"], project_id,
                 source=matched_by if matched_by in ("subject", "llm", "manual") else "llm",
+            )
+        if rfp_test.session_for_email(email):
+            rfp_test.record(
+                sb, session_id=email["test_session_id"], source=rfp_test.SOURCE_FILER, kind="assigned",
+                title=f"Filer assigned by {matched_by}", ingested_email_id=email["id"],
+                project_id=project_id,
+                detail={"project_id": project_id, "matched_by": matched_by, "confidence": confidence,
+                        "model": model, "round": fields["pipeline_round"]},
             )
         return True
     return _finalize_if_assigned(sb, email["id"], expected_status)
@@ -865,6 +997,14 @@ def assign_manual(sb, email: dict, project_id: str, user_id: str) -> tuple[dict,
         email["id"],
         {"project_id": project_id, "retro_assigned": retro_count},
     )
+    if rfp_test.session_for_email(email):
+        rfp_test.record(
+            sb, session_id=email["test_session_id"], source=rfp_test.SOURCE_HUMAN, kind="manual_assigned",
+            title=f"Human: filed to a project by {user_id}", ingested_email_id=email["id"],
+            project_id=project_id,
+            detail={"action": "manual_assigned", "actor": user_id,
+                    "request": {"project_id": project_id}, "retro_assigned": retro_count},
+        )
     return updated, retro_count
 
 
@@ -972,6 +1112,13 @@ def unassign(sb, email: dict, user_id: str) -> dict:
 
     audit(user_id, "email.unassign", "ingested_email", email["id"],
           {"project_id": removed_project})
+    if rfp_test.session_for_email(email):
+        rfp_test.record(
+            sb, session_id=email["test_session_id"], source=rfp_test.SOURCE_HUMAN, kind="unassigned",
+            title=f"Human: returned to Unknown by {user_id}", ingested_email_id=email["id"],
+            project_id=removed_project,
+            detail={"action": "unassigned", "actor": user_id, "request": {"project_id": removed_project}},
+        )
     return updated
 
 

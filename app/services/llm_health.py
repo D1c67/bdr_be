@@ -77,6 +77,9 @@ FEATURE_LABELS: dict[str, str] = {
     "aliases": "Submittal alternate names",
     "translate": "Interface translation",
     "bid_split": "Bid file splitting",
+    "rfp_classify": "RFP email classification",
+    "rfp_extract": "RFP field extraction",
+    "rfp_match": "RFP project matching",
 }
 
 _PROVIDER_LABELS = {
@@ -124,10 +127,14 @@ class Snapshot:
 # ── Probing ──────────────────────────────────────────────────────────────────
 
 
+# SELF_HOSTED_LLM_TARGET -> the short place name shown in the status modal.
+_TARGET_LABELS = {"local": "local", "ec2": "EC2 box A", "ec2b": "EC2 box B"}
+
+
 def _provider_label(provider: str, settings: Settings) -> str:
     if provider != "self_hosted":
         return _PROVIDER_LABELS[provider]
-    where = "EC2" if settings.self_hosted_llm_target == "ec2" else "local"
+    where = _TARGET_LABELS.get(settings.self_hosted_llm_target, "local")
     return f"Self-hosted model server ({where})"
 
 

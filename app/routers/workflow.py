@@ -2,11 +2,11 @@
 
 The generic `/advance` endpoint moves a project forward one legal step. Any
 writer role (every internal role except the read-only accountant) may advance any
-stage — the per-stage owner is only a "whose task" hint. The sole exception is
+stage - the per-stage owner is only a "whose task" hint. The sole exception is
 `verify`, which is restricted to the Executive (with IT Admin as override).
 
 Advancing into `go_no_go` runs the score gate (services/gono): score >= 30 goes
-straight through to To Estimator, below 20 is declined, 20-29 parks in review —
+straight through to To Estimator, below 20 is declined, 20-29 parks in review -
 unless the sender pushes review/go/no_go explicitly (TransitionIn.gono_action).
 Leaving `go_no_go` is refused here: a project leaves it only through a decision
 (the gate or the gono decide endpoint).
@@ -15,6 +15,7 @@ Leaving `go_no_go` is refused here: a project leaves it only through a decision
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.deps import CurrentUser, get_current_user
+from app.core.file_categories import DRAWING_CATEGORIES
 from app.core.roles import INTERNAL_ROLES, WRITER_ROLES
 from app.core.supabase_client import get_supabase
 from app.models.schemas import TransitionIn
@@ -64,12 +65,12 @@ def advance(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
     if proj["current_stage"] == "declined":
         raise HTTPException(status.HTTP_409_CONFLICT, "Project was declined at Go/No-Go")
-    # An abandoned bid is frozen where it died — it can't be advanced (which would
+    # An abandoned bid is frozen where it died - it can't be advanced (which would
     # also be the door into Go/No-Go). Reactivate first.
     if proj.get("abandoned_at"):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "This project is abandoned — reactivate it before advancing",
+            "This project is abandoned - reactivate it before advancing",
         )
 
     state = workflow.load_category_state(project_id)
@@ -93,23 +94,23 @@ def advance(
             f"'{workflow.STAGES[head].label}' is completed from its own panel, not the generic advance",
         )
 
-    # To Estimator (last intake task) can't be left until a drawing exists (either
-    # bucket: General or Electrical) - a hard rule mirrored in the UI. This gates
-    # the intake → material/labor unlock.
+    # To Estimator (last intake task) can't be left until a drawing exists (any
+    # drawing bucket: General, Electrical or one of the 0132 trade sets) - a hard
+    # rule mirrored in the UI. This gates the intake → material/labor unlock.
     if category == "intake" and head == "to_estimator":
         has_drawing = (
             get_supabase()
             .table("project_files")
             .select("id")
             .eq("project_id", project_id)
-            .in_("category", ["drawing", "electrical_drawing"])
+            .in_("category", sorted(DRAWING_CATEGORIES))
             .limit(1)
             .execute()
         ).data
         if not has_drawing:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
-                "Upload at least one General or Electrical drawing/plan before completing Intake",
+                "Upload at least one drawing/plan before completing Intake",
             )
 
     # Select Vendors can't be left until EVERY category has a price behind it. This is
@@ -119,7 +120,7 @@ def advance(
     #
     # A category is satisfied by any of:
     #   • a hand-entered custom price (covers an RFQ never sent, or whose sends all
-    #     failed — no vendor ever quoted it, so someone types the number in),
+    #     failed - no vendor ever quoted it, so someone types the number in),
     #   • a selected vendor quote, or
     #   • for General Material, the estimate's wiring figure, which is its default
     #     price when no vendor quote is chosen instead.
@@ -140,14 +141,26 @@ def advance(
             "Read-only or insufficient role to advance this category",
         )
 
+    # Leaving the intake task enters Go/No-Go, where any action but 'review' decides
+    # at once. An RFP-created project decides nothing until its intake is complete
+    # (docs/RFP_CREATE.md section 7), so refuse BEFORE the lane moves; the gate
+    # (gono.apply_entry_action) checks again after the move.
+    if category == "intake" and head == "intake" and body.gono_action != "review":
+        full = (
+            get_supabase().table("projects").select("*").eq("id", project_id).single().execute()
+        ).data or {}
+        gono.ensure_intake_complete(full, user.role)
+
     updated = workflow.advance_category(project_id, category, user.id, body.note)
 
     # Advancing intake's first task moves it INTO go_no_go, which runs the score gate:
     # the project may pass straight through (>= 30), be declined (< 20), or park in
-    # review — or the sender may push an outcome. When the gate moves it on, its own
+    # review - or the sender may push an outcome. When the gate moves it on, its own
     # notifications/audit cover the handoff, so return early.
     if head == "intake":
-        outcome, moved = gono.apply_entry_action(project_id, user.id, body.gono_action)
+        outcome, moved = gono.apply_entry_action(
+            project_id, user.id, body.gono_action, role=user.role
+        )
         if outcome is not None:
             return {**redact_for_role(moved or updated, user.role), "gono_outcome": outcome}
 

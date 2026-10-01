@@ -61,6 +61,12 @@ class CurrentUser:
     # `is_dev=False`, so every gate behaves exactly as it would for them) and
     # this holds the real dev profile id behind the request.
     impersonated_by: str | None = None
+    # The RFP mailboxes this person owns (profiles.rfp_mailboxes, 0134), used
+    # by app/services/rfp_email_visibility to scope every read and every
+    # action on the review queue. Empty for the impersonated estimator and for
+    # the users the unit tests build by hand, which is the safe direction: an
+    # empty tuple sees only the shared mailboxes.
+    rfp_mailboxes: tuple[str, ...] = ()
 
 
 def get_current_user(
@@ -96,7 +102,10 @@ def get_current_user(
     resp = (
         get_supabase()
         .table("profiles")
-        .select("id, email, role, is_active, is_dev, mfa_enrolled, invite_accepted_at")
+        .select(
+            "id, email, role, is_active, is_dev, mfa_enrolled, "
+            "invite_accepted_at, rfp_mailboxes"
+        )
         .eq("id", user_id)
         .single()
         .execute()
@@ -155,6 +164,13 @@ def get_current_user(
         is_dev=profile.get("is_dev", False),
         aal=aal,
         mfa_enrolled=mfa_enrolled,
+        # Lowercased and de-blanked here, once, so every visibility check
+        # downstream can compare without re-normalizing (0134).
+        rfp_mailboxes=tuple(
+            m.strip().lower()
+            for m in (profile.get("rfp_mailboxes") or [])
+            if isinstance(m, str) and m.strip()
+        ),
     )
 
 
@@ -216,6 +232,9 @@ def _impersonated_estimator(
         aal=aal,
         mfa_enrolled=True,
         impersonated_by=dev["id"],
+        # Explicit, not just the field default: an estimator owns no RFP
+        # mailbox, and the dev's own mailboxes must not follow them in here.
+        rfp_mailboxes=(),
     )
 
 

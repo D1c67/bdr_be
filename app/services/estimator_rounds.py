@@ -240,13 +240,17 @@ def _estimate_stale(sb, project_id: str) -> bool:
 def _boq_stale(sb, project_id: str) -> bool:
     rows = (
         sb.table("boq_analyses")
-        .select("boq_file_id")
+        .select("boq_file_id, model")
         .eq("project_id", project_id)
         .order("created_at", desc=True)
         .limit(1)
         .execute()
     ).data or []
     if not rows:
+        return False
+    # A hand-entered list was never derived from a BOQ file, so no BOQ can
+    # make it stale.
+    if rows[0].get("model") == "manual":
         return False
     newest = _newest_visible(sb, project_id, "boq")
     return bool(newest and newest["id"] != rows[0].get("boq_file_id"))

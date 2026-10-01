@@ -127,6 +127,28 @@ _FEATURES: dict[str, _Feature] = {
         ),
         lambda s: s.self_hosted_bid_split_model,
     ),
+    # RFP email intake: is this message inviting us to bid? Small JSON answer
+    # (yes/no/undetermined + confidence). Waits, never falls back, while the
+    # self-hosted box is off (see services/rfp_email_ingest).
+    "rfp_classify": _Feature(
+        "openai",
+        lambda s: s.openai_rfp_classify_model,
+        lambda s: s.self_hosted_rfp_classify_model,
+    ),
+    # RFP field extraction and project matching (services/rfp_match): the two
+    # steps after classify, same vendor and the same wait-never-fall-back
+    # behavior while the box is off. An empty model setting falls back to the
+    # classify model so no new env is required to run them.
+    "rfp_extract": _Feature(
+        "openai",
+        lambda s: s.openai_rfp_extract_model or s.openai_rfp_classify_model,
+        lambda s: s.self_hosted_rfp_extract_model or s.self_hosted_rfp_classify_model,
+    ),
+    "rfp_match": _Feature(
+        "openai",
+        lambda s: s.openai_rfp_match_model or s.openai_rfp_classify_model,
+        lambda s: s.self_hosted_rfp_match_model or s.self_hosted_rfp_classify_model,
+    ),
 }
 
 
@@ -138,6 +160,25 @@ class Route:
     base_url: str = ""
 
 
+# Sentinel for SELF_HOSTED_<FEATURE>_MODEL: switch that feature off in
+# self-hosted mode even though the live target names a model.
+SELF_HOSTED_MODEL_OFF = "off"
+
+
+def _self_hosted_model(spec: _Feature, s: Settings) -> str:
+    """The model a feature uses on the live self-hosted target.
+
+    Per-feature SELF_HOSTED_<FEATURE>_MODEL wins when set (an override, or the
+    literal "off" to disable the feature); otherwise the target's own
+    SELF_HOSTED_LLM_<TARGET>_MODEL, so flipping SELF_HOSTED_LLM_TARGET moves
+    every feature to the new box's model in one line. Empty on both = off.
+    """
+    explicit = (spec.sh_model(s) or "").strip()
+    if explicit.lower() == SELF_HOSTED_MODEL_OFF:
+        return ""
+    return explicit or s.self_hosted_llm_target_model
+
+
 def resolve(feature: str, settings: Settings | None = None) -> Route:
     """Resolve a feature to (provider, model, credentials) from the env."""
     s = settings or get_settings()
@@ -145,7 +186,7 @@ def resolve(feature: str, settings: Settings | None = None) -> Route:
     if s.full_self_hosted_llms_enabled:
         return Route(
             provider="self_hosted",
-            model=spec.sh_model(s),
+            model=_self_hosted_model(spec, s),
             api_key=s.self_hosted_llm_api_key,
             base_url=s.self_hosted_llm_base_url,
         )
@@ -156,7 +197,7 @@ def resolve(feature: str, settings: Settings | None = None) -> Route:
         # one-way: true forces EVERY feature self-hosted, never the reverse.
         return Route(
             provider="self_hosted",
-            model=spec.sh_model(s),
+            model=_self_hosted_model(spec, s),
             api_key=s.self_hosted_llm_api_key,
             base_url=s.self_hosted_llm_base_url,
         )
@@ -196,7 +237,8 @@ def _require_route(feature: str, settings: Settings | None) -> tuple[Route, Sett
         if not route.model:
             raise LlmNotConfigured(
                 "Self-hosted LLM mode is enabled but no model is configured for "
-                f"this feature (set SELF_HOSTED_{feature.upper()}_MODEL)."
+                f"this feature (set SELF_HOSTED_LLM_{s.self_hosted_llm_target.upper()}"
+                f"_MODEL for the whole target, or SELF_HOSTED_{feature.upper()}_MODEL)."
             )
     elif not route.api_key:
         var = "ANTHROPIC_API_KEY" if route.provider == "anthropic" else "OPENAI_API_KEY"
@@ -214,10 +256,13 @@ _clients: dict[tuple, Any] = {}
 def _client_for(route: Route, settings: Settings) -> Any:
     """Cached SDK client for a route. Key includes everything that shapes the
     client so env changes (tests, restarts of the model server) re-create it."""
-    if route.provider == "anthropic":
-        key: tuple = ("anthropic", route.api_key)
-    elif route.provider == "openai":
-        key = ("openai", route.api_key)
+    if route.provider in ("anthropic", "openai"):
+        key: tuple = (
+            route.provider,
+            route.api_key,
+            settings.third_party_llm_timeout_seconds,
+            settings.third_party_llm_max_retries,
+        )
     else:
         key = (
             "self_hosted",
@@ -237,9 +282,19 @@ def _build_client(route: Route, settings: Settings) -> Any:
     if route.provider == "anthropic":
         from anthropic import Anthropic
 
-        return Anthropic(api_key=route.api_key)
+        # Explicit bounds: the SDK defaults (600s read, 2 retries) could
+        # outlive the RFP sweep lease; config.py sizes the lease from these.
+        return Anthropic(
+            api_key=route.api_key,
+            timeout=float(settings.third_party_llm_timeout_seconds),
+            max_retries=settings.third_party_llm_max_retries,
+        )
     if route.provider == "openai":
-        return openai.OpenAI(api_key=route.api_key)
+        return openai.OpenAI(
+            api_key=route.api_key,
+            timeout=float(settings.third_party_llm_timeout_seconds),
+            max_retries=settings.third_party_llm_max_retries,
+        )
 
     # Self-hosted: OpenAI-compatible endpoint. TLS verification stays on unless
     # explicitly disabled; a private CA (internal ALB certs) is the right way

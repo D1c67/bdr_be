@@ -7,14 +7,14 @@ package files (drawings, specifications, and the Changes/Revisions, Additional
 and Addendum files that were actually sent to them).
 
 Assigning ONE estimator emails them the full branded package immediately and
-records a send batch (`file_sends.claim_batch`) BEFORE the email goes out — so a
+records a send batch (`file_sends.claim_batch`) BEFORE the email goes out - so a
 double-click can't double-send the initial package and a failed email leaves a
 clean retry with nothing recorded as sent. Graph must be configured (503
 otherwise), which removes the old unrecoverable "assigned but never sent" state.
 From then on the initial drawing/spec blocks are locked (files.py) and new
 material flows through `revision`/`additional`/`addendum` files sent via
 /send-file-updates as their own batch. Every outbound send goes one email per
-recipient — never a single to=[all], which would leak every estimator's address
+recipient - never a single to=[all], which would leak every estimator's address
 to the others (graph_email has no BCC path).
 
 The batch-wide `message` on a send is mirrored into the Project notes thread
@@ -35,10 +35,14 @@ from app.core.deps import (
     require_writer,
 )
 from app.core.file_categories import (
+    DRAWING_CATEGORIES,
+    INITIAL_CATEGORIES,
+    PACKAGE_CATEGORIES,
     SECTION_NOTE_KEYS,
     SECTION_NOTE_MAX_CHARS,
     SECTION_NOTE_REQUIRED_KEYS,
     SENT_GATED_CATEGORIES,
+    exclude_source_set,
     section_key,
 )
 from app.core.ratelimit import estimator_rate_limit, outbound_email_rate_limit
@@ -59,16 +63,15 @@ router = APIRouter(tags=["estimator"])
 
 logger = logging.getLogger(__name__)
 
-# A project must have at least one drawing (General or Electrical bucket) before
-# it can be handed to the estimator — enforced here (not just in the UI) because
+# A project must have at least one drawing (any of the drawing buckets) before
+# it can be handed to the estimator - enforced here (not just in the UI) because
 # it's a hard rule: you can't assign or email an estimator a package with no
 # drawings.
-NO_DRAWING_MESSAGE = "Upload at least one General or Electrical drawing/plan first"
+NO_DRAWING_MESSAGE = "Upload at least one drawing/plan first"
 
-# The two drawing buckets. 'drawing' is the general/full plan set (labelled
-# "General Drawings/Plans" in the UI); 'electrical_drawing' (0099) is the
-# electrical-only set that RFQs attach. Either satisfies the drawing gates.
-DRAWING_CATEGORIES = ("drawing", "electrical_drawing")
+# DRAWING_CATEGORIES is imported from app/core/file_categories.py: the general
+# set, the electrical set (0099) and the seven trade sets (0132). Any of them
+# satisfies the drawing gates.
 
 
 def _queue_general_material(project_id: str, user_id: str, background: BackgroundTasks) -> None:
@@ -105,7 +108,7 @@ def project_has_drawing(project_id: str) -> bool:
         .table("project_files")
         .select("id")
         .eq("project_id", project_id)
-        .in_("category", list(DRAWING_CATEGORIES))
+        .in_("category", sorted(DRAWING_CATEGORIES))
         .limit(1)
         .execute()
     ).data or []
@@ -123,32 +126,22 @@ _FILE_FIELDS = (
 def _package_files(project_id: str) -> list[dict]:
     """Everything the estimators work from: the initial drawings/specifications
     plus the updates (revisions, additional files, addenda) that were actually
-    sent (an unsent update is still a draft — it goes out via /send-file-updates,
+    sent (an unsent update is still a draft - it goes out via /send-file-updates,
     not with a package)."""
-    rows = (
+    q = (
         get_supabase()
         .table("project_files")
         .select(_FILE_FIELDS)
         .eq("project_id", project_id)
-        .in_(
-            "category",
-            [
-                "drawing",
-                "electrical_drawing",
-                "specification",
-                "addendum",
-                "revision",
-                "additional",
-            ],
-        )
-        .order("created_at")
-        .execute()
-    ).data or []
+        .in_("category", sorted(PACKAGE_CATEGORIES))
+    )
+    # A split source set is `other` with is_source_set = true: the team's copy
+    # of the un-cut drawing set, never part of what the estimator receives.
+    rows = exclude_source_set(q).order("created_at").execute().data or []
     return [
         r
         for r in rows
-        if r["category"] in ("drawing", "electrical_drawing", "specification")
-        or r.get("sent_to_estimators_at")
+        if r["category"] in INITIAL_CATEGORIES or r.get("sent_to_estimators_at")
     ]
 
 
@@ -170,7 +163,7 @@ def _unsent_updates(project_id: str) -> list[dict]:
 
 def _active_assignments(project_id: str) -> list[dict]:
     """Active assignees with their profile email/name. Active = not revoked AND
-    not expired — the same definition `require_project_assignment` enforces, so
+    not expired - the same definition `require_project_assignment` enforces, so
     an estimator whose access window lapsed never receives another file email."""
     return (
         get_supabase()
@@ -185,13 +178,13 @@ def _active_assignments(project_id: str) -> list[dict]:
 
 def _refuse_if_abandoned(proj: dict) -> None:
     """409 once the bid is abandoned. Nothing may be pushed AT an estimator for a
-    dead bid — no new assignment, no package, no revision email — and the portal
+    dead bid - no new assignment, no package, no revision email - and the portal
     already refuses to open it (`require_project_assignment`). Reversible: the
     marker clears on /reactivate and every one of these paths reopens."""
     if proj.get("abandoned_at"):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "This project is abandoned — reactivate it before sending anything to an estimator",
+            "This project is abandoned - reactivate it before sending anything to an estimator",
         )
 
 
@@ -215,7 +208,7 @@ def _recipient_dicts(assigns: list[dict]) -> list[dict]:
 
 
 def _category_counts(files: list[dict]) -> dict[str, int]:
-    """Plain {category: count} for a set of files — the audit `counts` payload."""
+    """Plain {category: count} for a set of files - the audit `counts` payload."""
     counts: dict[str, int] = {}
     for f in files:
         counts[f["category"]] = counts.get(f["category"], 0) + 1
@@ -275,7 +268,7 @@ def impersonation_targets(user: CurrentUser = Depends(get_current_user)):
     Feeds the portal header's "View as" picker. Allowed for dev accounts and for
     a dev currently impersonating (their effective user is the estimator, so
     `is_dev` alone would lock them out of switching targets or exiting). Dev
-    accounts themselves are excluded — they're not external estimators.
+    accounts themselves are excluded - they're not external estimators.
     """
     if not (user.is_dev or user.impersonated_by):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Dev account required")
@@ -343,7 +336,7 @@ def assign_estimator(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
     _refuse_if_abandoned(proj)
 
-    # Only the profiles the /estimators picker offers are assignable — same
+    # Only the profiles the /estimators picker offers are assignable - same
     # filter server-side so a stale/handcrafted id can't hand project files to a
     # deactivated or non-estimator account. (.limit(1), not .single(): a missing
     # row must be a clean 404, not an APIError 500.)
@@ -363,7 +356,7 @@ def assign_estimator(
     ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Estimator not found")
 
-    # An estimator already actively assigned must not be added twice — that
+    # An estimator already actively assigned must not be added twice - that
     # doubles the recipient and the card row. Active = not revoked AND not
     # expired (same predicate as _active_assignments / require_project_assignment).
     active_dupe = (
@@ -475,32 +468,32 @@ def assign_estimator(
             kind=kind,
             prior=file_sends.prior_batches(project_id) if kind == "reassign" else None,
         )
-    except Exception as exc:  # noqa: BLE001 — a failed email must leave a clean retry
+    except Exception as exc:  # noqa: BLE001 - a failed email must leave a clean retry
         file_sends.abandon_batch(batch["id"])
-        # Only undo an assignment THIS request inserted — never a row we merely
+        # Only undo an assignment THIS request inserted - never a row we merely
         # reactivated (recover that via Re-send to active assignees).
         if inserted:
             sb.table("estimator_assignments").delete().eq("id", row["id"]).execute()
         raise HTTPException(
             status.HTTP_502_BAD_GATEWAY,
-            "Could not email the file package — the assignment was rolled back; try again",
+            "Could not email the file package - the assignment was rolled back; try again",
         ) from exc
 
     # Post-send, all best-effort (the mail is out; a lost write must not 500 or
     # tempt a rollback of a delivered email):
     file_sends.attach_email_log(batch["id"], est["email"], log["id"])
     # Start this assignee's turnaround clock, NULL-guarded so a reactivated row's
-    # original send timestamp — and its honest turnaround — survives.
+    # original send timestamp - and its honest turnaround - survives.
     try:
         sb.table("estimator_assignments").update({"sent_to_estimator_at": "now()"}).eq(
             "id", row["id"]
         ).is_("sent_to_estimator_at", "null").execute()
     except Exception:  # noqa: BLE001
         logger.warning("assign_estimator: sent_to_estimator_at stamp failed", exc_info=True)
-    # The drafts just rode along in the package — stamp them sent (first-send-wins,
+    # The drafts just rode along in the package - stamp them sent (first-send-wins,
     # NULL-guarded inside stamp_sent).
     file_sends.stamp_sent([f["id"] for f in pending])
-    # Mirror the message into the Project notes thread — silently, since it just
+    # Mirror the message into the Project notes thread - silently, since it just
     # went out at the top of this package email. Once per request, even when the
     # ride-along below re-sends the same message to the other assignees: the
     # thread is per project, not per batch.
@@ -512,7 +505,7 @@ def assign_estimator(
     )
 
     # Ride-along: the pre-existing assignees never received these drafts. Send
-    # them their own 'revision' batch — actually emailed, not merely belled, so
+    # them their own 'revision' batch - actually emailed, not merely belled, so
     # the files are reachable from their log. Best-effort as a whole: the primary
     # package is delivered, so a hiccup here must not 502 the assign.
     if pending:
@@ -557,7 +550,7 @@ def assign_estimator(
                         )
             label = f"{proj.get('number') or ''} {proj.get('name') or ''}".strip() or "a project"
             ride_msg = (
-                f"{estimator_email.updates_label(pending)} sent for {label} — "
+                f"{estimator_email.updates_label(pending)} sent for {label} - "
                 "review before continuing your estimate."
             )
             for a in others:
@@ -608,7 +601,7 @@ def assign_estimator(
             "revoked": revoked,
         },
     )
-    # One uniform line per batch-producing send — keeps the activity feed
+    # One uniform line per batch-producing send - keeps the activity feed
     # continuous now that this action's old writer (send-to-estimator) records a
     # batch of its own instead of being the sole source.
     audit(
@@ -685,7 +678,7 @@ def project_handoff(
     Served to BOTH roles as a server-side discriminated union
     (`file_sends.build_handoff`): the estimator's payload is scoped to their own
     batches/assignment, their `assignees` list holds exactly their own row with
-    the email blanked, and `staged` is empty — so no other estimator's identity,
+    the email blanked, and `staged` is empty - so no other estimator's identity,
     nor the project-wide send count, can leak. `require_project_assignment` (not
     `require_writer`) so the read-only accountant and the external estimator both
     reach it; the estimator's own assignment gate still applies.
@@ -745,7 +738,7 @@ def send_to_estimator(
     project_id: str,
     user: CurrentUser = Depends(require_writer),
 ):
-    """Re-email the full branded package to every active assignee — the
+    """Re-email the full branded package to every active assignee - the
     bounced-address / lost-mail recovery path, surfaced as "Re-send" on a log
     batch. New assignees already get the package at assign time; this re-sends the
     current package unchanged, one email per recipient (never BCC), and records it
@@ -788,7 +781,7 @@ def send_to_estimator(
         summary=_batch_summary(files),
     )
 
-    # One email per recipient — a single to=[all] would leak every estimator's
+    # One email per recipient - a single to=[all] would leak every estimator's
     # address to the others. On the FIRST failure (nothing delivered) abandon the
     # batch and 502 for a clean retry; a later failure after a delivery leaves the
     # batch standing (some recipients did receive it).
@@ -808,7 +801,7 @@ def send_to_estimator(
                 file_sends.abandon_batch(batch["id"])
                 raise HTTPException(
                     status.HTTP_502_BAD_GATEWAY,
-                    "Could not email the file package — try again",
+                    "Could not email the file package - try again",
                 ) from exc
             logger.warning(
                 "send_to_estimator: re-send to a later recipient failed", exc_info=True
@@ -845,13 +838,13 @@ def send_to_estimator(
 
 class UpdatesIn(BaseModel):
     # Optional overall message included at the top of the updates email, above
-    # the per-file notes — and mirrored into the notes thread after the send.
+    # the per-file notes - and mirrored into the notes thread after the send.
     message: str | None = Field(default=None, max_length=4000)
     # Send exactly this staged subset. `None` keeps the legacy "everything unsent"
     # behaviour; an explicit list stops the modal from sweeping a colleague's
     # in-progress draft into this batch (and is the double-click guard).
     file_ids: list[str] | None = Field(default=None, max_length=200)
-    # 0077 — one "what changed" note per SECTION of the Revisions modal, keyed by
+    # 0077 - one "what changed" note per SECTION of the Revisions modal, keyed by
     # file_categories.section_key(): "revision:drawing" ("what changed in the
     # plans"), "revision:specification", "addendum", "additional". Sits between
     # the batch-wide `message` and each file's own `note`; validated in the
@@ -865,7 +858,7 @@ def _clean_section_notes(raw: dict[str, str] | None, files: list[dict]) -> dict[
     contents.
 
     Rejects (400) an unknown key, an over-long note, and a note for a section
-    this batch has no files in — a note nothing renders is a note the author
+    this batch has no files in - a note nothing renders is a note the author
     believes was delivered. Requires one for every revision section present, the
     same rule the per-file note already enforces for revisions at upload time.
     Blank/whitespace values are dropped, so "" never counts as an answer.
@@ -914,7 +907,7 @@ def send_file_updates(
     """Email the not-yet-sent Changes/Revisions, Additional files and addenda
     (each revision/additional with its required note, plus an optional overall
     message) to every active assignee as one 'revision' send batch, then stamp
-    them sent — which makes them visible in the estimator portal and undeletable.
+    them sent - which makes them visible in the estimator portal and undeletable.
 
     The batch is claimed BEFORE any email, one email is sent per recipient (never
     BCC), and the send exactly follows the staged `file_ids` when given.
@@ -940,7 +933,7 @@ def send_file_updates(
     if not recipients:
         raise HTTPException(status.HTTP_409_CONFLICT, "Assign an estimator first")
 
-    # The Revisions batch only exists relative to an initial hand-off — the button
+    # The Revisions batch only exists relative to an initial hand-off - the button
     # only appears post-send, so enforce it server-side too.
     if not file_sends.has_initial_send(project_id):
         raise HTTPException(
@@ -950,7 +943,7 @@ def send_file_updates(
     pending = _unsent_updates(project_id)
     if body and body.file_ids is not None:
         # Send EXACTLY the staged subset. A requested id that isn't an unsent
-        # update of this project is rejected — the double-click guard too.
+        # update of this project is rejected - the double-click guard too.
         by_id = {f["id"]: f for f in pending}
         selected: list[dict] = []
         for fid in body.file_ids:
@@ -1001,7 +994,7 @@ def send_file_updates(
                 file_sends.abandon_batch(batch["id"])
                 raise HTTPException(
                     status.HTTP_502_BAD_GATEWAY,
-                    "Could not email the file updates — try again",
+                    "Could not email the file updates - try again",
                 ) from exc
             logger.warning(
                 "send_file_updates: update to a later recipient failed", exc_info=True
@@ -1013,7 +1006,7 @@ def send_file_updates(
             first_log_id = lg["id"]
 
     file_sends.stamp_sent(sent_ids)
-    # Same mirror as the package send: the batch-wide message only — the
+    # Same mirror as the package send: the batch-wide message only - the
     # per-section "what changed" notes stay in the Plans & Specs Log.
     estimator_notes.mirror_send_message(
         project_id=project_id,
@@ -1032,7 +1025,7 @@ def send_file_updates(
     )
     label = f"{proj.get('number') or ''} {proj.get('name') or ''}".strip() or "a project"
     msg = (
-        f"{estimator_email.updates_label(pending)} sent for {label} — "
+        f"{estimator_email.updates_label(pending)} sent for {label} - "
         "review before continuing your estimate."
     )
     for estimator_id in {a["estimator_id"] for a in assigns}:
@@ -1066,14 +1059,14 @@ def _iso(ts: str | None) -> datetime | None:
 
 @router.get("/estimator/projects", dependencies=[Depends(estimator_rate_limit)])
 def my_assigned_projects(user: CurrentUser = Depends(get_current_user)):
-    """An estimator's assigned projects — one dashboard row each.
+    """An estimator's assigned projects - one dashboard row each.
 
     The portal dashboard mirrors the internal one minus everything internal
     (stage, task-for, bid due) and adds the estimator's own clock instead:
     assigned_at / due_at / turned_in_at plus a four-value `status`
     (assigned / sent / changes / withdrawn).
 
-    `status` is "changes" only AFTER a hand-off — a package that lands before
+    `status` is "changes" only AFTER a hand-off - a package that lands before
     the estimator has submitted anything is just their package, not a change to
     review (the same rule the project page's "New" badge uses). Note the
     comparison is against their LATEST round while `turned_in_at` is their
@@ -1101,7 +1094,7 @@ def my_assigned_projects(user: CurrentUser = Depends(get_current_user)):
     # `abandoned_at` rides along because an abandoned bid KEEPS its row, reported
     # as `withdrawn`: the row is the portal's durable record that G3 stopped work
     # (the bell notice explaining it can be read and forgotten). The portal
-    # renders that row inert — `require_project_assignment` still 403s the
+    # renders that row inert - `require_project_assignment` still 403s the
     # project itself. The assignment is deliberately left alone either way, so
     # /reactivate brings the work back exactly as it was.
     projs = (
@@ -1111,7 +1104,7 @@ def my_assigned_projects(user: CurrentUser = Depends(get_current_user)):
         .execute()
     ).data or []
 
-    # My own rounds only — first submitted_at backs up a null returned_at on
+    # My own rounds only - first submitted_at backs up a null returned_at on
     # assignments predating 0036, last one dates the "changes" comparison.
     subs = (
         sb.table("estimator_submissions")
@@ -1207,7 +1200,7 @@ def submit_deliverables(
 
     Files are already uploaded as drafts; this seals them into a numbered
     submission round (estimator_rounds). Round 1 is the original hand-off;
-    every later round is "Changes/Revisions & Additional files" — those alert
+    every later round is "Changes/Revisions & Additional files" - those alert
     the whole review team (high-importance email + bell + per-user banner)
     instead of the round-1 estimate_submitted notification.
     """
@@ -1230,7 +1223,7 @@ def submit_deliverables(
     summary = ", ".join(f"{n} {c}" for c, n in counts.items())
 
     # Stamp the return so analytics can measure received → returned turnaround.
-    # First submit wins — revision rounds carry their own submitted_at on
+    # First submit wins - revision rounds carry their own submitted_at on
     # estimator_submissions, so they must not stretch the measured turnaround.
     sb.table("estimator_assignments").update({"returned_at": "now()"}).eq(
         "project_id", project_id
@@ -1251,7 +1244,7 @@ def submit_deliverables(
             _queue_general_material(project_id, user.id, background)
         return {"submitted": True, "round": round_no, "counts": counts}
 
-    # Round ≥ 2 — the round stands even if alerting hiccups, so notifications
+    # Round ≥ 2 - the round stands even if alerting hiccups, so notifications
     # and the email are each isolated. Bell rows skip the generic email mirror;
     # revision_email sends the one high-importance alert instead.
     audit(
@@ -1288,7 +1281,7 @@ def estimator_project_detail(
 ):
     if user.role != Role.ESTIMATOR:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Estimators only")
-    # Minimal projection — never pricing/markup/quotes.
+    # Minimal projection - never pricing/markup/quotes.
     proj = (
         get_supabase()
         .table("projects")
@@ -1297,7 +1290,7 @@ def estimator_project_detail(
         .single()
         .execute()
     ).data
-    # Sent rounds, oldest first — drives the post-submit portal UI (locked round
+    # Sent rounds, oldest first - drives the post-submit portal UI (locked round
     # history + the Changes/Revisions and Additional Files boxes). Scoped to the
     # caller's own submissions: with more than one active assignee, estimator B
     # must never read A's round count, timestamps or per-category summary (which

@@ -30,6 +30,9 @@ dependencies = [
     "pandas>=2.2,<3",
     "xlrd>=2.0.1",
     "pypdfium2>=5.13.0",
+    # HTML parsing for the NGEM (Ionwave) supplier portal scraper
+    # (services/ngem_client.py). Only imported when RFP NGEM runs.
+    "beautifulsoup4>=4.12",
 ]
 
 [dependency-groups]

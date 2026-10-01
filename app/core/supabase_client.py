@@ -28,7 +28,7 @@ def get_supabase() -> Client:
     # handlers that never touched storage. With HTTP/1.1 each request checks out
     # its own pooled connection, so a dropped connection fails only itself.
     # The single Timeout replaces the per-sub-client defaults; storage's default
-    # was 20s, too tight for a 300 MB body (write= is per socket send, not the
+    # was 20s, too tight for a 450 MB body (write= is per socket send, not the
     # whole upload, so large bodies need no special casing here).
     http_client = httpx.Client(
         follow_redirects=True,

@@ -1,7 +1,7 @@
 """Unified project-documents hub: fold the three document stores into one flat
 set of business folders.
 
-A PM project's Documents tab shows *everything* — PM uploads (`pm_documents`,
+A PM project's Documents tab shows *everything* - PM uploads (`pm_documents`,
 the only writable store), bidding files (`project_files`, read-only mirror), and
 certified-payroll files (`cp_record_files`, read-only, tagged to this project via
 `cp_record_file_projects`). Each source category maps into a business folder
@@ -59,7 +59,7 @@ FOLDER_ORDER: list[str] = [
     "other",
 ]
 
-# Human labels — used as ZIP directory names. The frontend has its own i18n
+# Human labels - used as ZIP directory names. The frontend has its own i18n
 # labels for the UI; keep these two in rough sync.
 FOLDER_LABELS: dict[str, str] = {
     "plans": "Plans",
@@ -109,8 +109,20 @@ _PM_CATEGORY_FOLDER: dict[str, str] = {
 # project_files.category (bidding, read-only) → folder.
 _BID_CATEGORY_FOLDER: dict[str, str] = {
     "drawing": "plans",
+    # The 0132 trade sets are still plans: the splitter cut them out of the
+    # drawing set, so the hub files them beside it.
+    "civil_drawing": "plans",
+    "structural_drawing": "plans",
+    "architectural_drawing": "plans",
+    "mechanical_drawing": "plans",
+    "plumbing_drawing": "plans",
     "electrical_drawing": "plans",
+    "fire_protection_drawing": "plans",
+    "low_voltage_drawing": "plans",
     "specification": "specifications",
+    # The RFP / bid invitation itself belongs with the specs it comes bound to;
+    # the hub has no bid-documents folder of its own.
+    "rfp": "specifications",
     "quote": "quotes",
     "rfq_split": "quotes",
     "estimate": "estimates",
@@ -176,7 +188,7 @@ def _bidding_documents(project_id: str) -> list[dict]:
     # Deliberately NOT gated on BIDDING_ENABLED, unlike _cp_documents below: these
     # are the project's own plans, specs and quotes, and a PM crew must keep them
     # when the bidding module is dark. The CP asymmetry is about content, not
-    # symmetry — payroll files are employee pay data that has no business
+    # symmetry - payroll files are employee pay data that has no business
     # reaching a PM reader once that module is switched off.
     q = (
         get_supabase()
@@ -209,7 +221,7 @@ def _cp_documents(project_id: str) -> list[dict]:
     Files are associated with projects at generation time (cp_record_file_projects,
     migration 0066). An aggregate file (PVW/eComply) that covers several projects
     is tagged to each; per-project LCPtracker/paper files to their one project. We
-    show only the newest revision of each weekly report to keep the hub tidy —
+    show only the newest revision of each weekly report to keep the hub tidy -
     older revisions live in the Payroll module. Degrades to [] (logged) if the CP
     tagging table isn't present, so the hub never hard-fails on a partial deploy.
 
@@ -217,8 +229,8 @@ def _cp_documents(project_id: str) -> list[dict]:
     boundary for the CP flag, not a cosmetic one: the hub's /documents/file and
     /documents/export routes resolve through this same list, so without the
     check a deployment with Payroll switched off would still hand every PM
-    reader signed URLs to certified-payroll files — employee names,
-    classifications and pay data — through the PM module.
+    reader signed URLs to certified-payroll files - employee names,
+    classifications and pay data - through the PM module.
     """
     if not is_enabled(SubApp.CERTIFIED_PAYROLL):
         return []
@@ -233,7 +245,7 @@ def _cp_documents(project_id: str) -> list[dict]:
     except Exception as exc:  # noqa: BLE001
         # Degrade to "no CP folder" ONLY when the tagging table isn't deployed
         # (a partial-deploy signature). A transient error (timeout, network) must
-        # propagate — swallowing it would silently hide real CP files and read as
+        # propagate - swallowing it would silently hide real CP files and read as
         # "this project has no certified payroll".
         if not _is_missing_relation(exc):
             raise
@@ -307,7 +319,7 @@ def list_project_documents(project_id: str) -> list[dict]:
     """The unified hub read: PM + bidding + certified-payroll documents for a
     project, each carrying its business `folder`, a stable `key` ("source:id"),
     and `writable` (only PM uploads are). Rows include `storage_path` for the
-    server-side download/export resolvers — the API layer strips it before
+    server-side download/export resolvers - the API layer strips it before
     returning to the client.
 
     Sorted by folder order, then filename, so grouping on the frontend is stable.

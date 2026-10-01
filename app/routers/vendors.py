@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.deps import CurrentUser, require_internal, require_writer
 from app.core.supabase_client import get_supabase
-from app.models.schemas import VendorContactIn, VendorContactUpdate, VendorIn
+from app.models.schemas import VendorContactIn, VendorContactUpdate, VendorIn, VendorUpdate
 from app.services.directory import (
     clean_company_name,
     duplicate_company_message,
@@ -131,6 +131,30 @@ def create_vendor(body: VendorIn, _: CurrentUser = Depends(require_writer)):
     return row
 
 
+@router.patch("/vendors/{vendor_id}")
+def update_vendor(
+    vendor_id: str,
+    body: VendorUpdate,
+    _: CurrentUser = Depends(require_writer),
+):
+    """Mark or unmark a vendor company as a national account (0139).
+
+    The flag is company-wide, so every contact at the vendor carries it. It is
+    display only: a badge on Receive Quotes and Select Vendors.
+    """
+    sb = get_supabase()
+    _as_uuid(vendor_id, "vendor id")
+    rows = (
+        sb.table("vendors")
+        .update({"is_national_account": body.is_national_account})
+        .eq("id", vendor_id)
+        .execute()
+    ).data
+    if not rows:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Vendor not found")
+    return {"id": vendor_id, "is_national_account": rows[0]["is_national_account"]}
+
+
 @router.get("/vendor-contacts")
 def list_contacts(
     material_category_id: str | None = None,
@@ -148,7 +172,7 @@ def list_contacts(
         _as_uuid(material_category_id, "material category id")
         rows = (
             sb.table("vendor_contact_categories")
-            .select("vendor_contacts(*, vendors(name))")
+            .select("vendor_contacts(*, vendors(name, is_national_account))")
             .eq("material_category_id", material_category_id)
             .execute()
         ).data or []
@@ -156,7 +180,10 @@ def list_contacts(
         contacts.sort(key=lambda c: (c.get("name") or "").casefold())
     else:
         contacts = (
-            sb.table("vendor_contacts").select("*, vendors(name)").order("name").execute()
+            sb.table("vendor_contacts")
+            .select("*, vendors(name, is_national_account)")
+            .order("name")
+            .execute()
         ).data or []
     links = _categories_by_contact(sb, [c["id"] for c in contacts])
     for c in contacts:

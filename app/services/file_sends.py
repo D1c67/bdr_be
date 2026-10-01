@@ -4,11 +4,11 @@ A *send batch* is one outbound "team → estimator" delivery of files. Before th
 module the send was not a record at all: `estimator_assignments.sent_to_estimator_at`
 (0036) stored only *when* the initial package went out, and
 `project_files.sent_to_estimators_at` (0048) only *when* a revision/additional
-file was emailed — never *who* received *which* files. The three tables added in
+file was emailed - never *who* received *which* files. The three tables added in
 0076 (`file_send_batches`, `file_send_recipients`, `file_send_batch_files`) close
 that gap, and this module is the only writer/reader of them.
 
-Write ordering — claim-before-send (do NOT reorder)
+Write ordering - claim-before-send (do NOT reorder)
 ---------------------------------------------------
 `claim_batch()` writes the batch row AND its recipient rows AND its batch-file
 links in one call, BEFORE the email is composed. This is what makes the flow
@@ -19,18 +19,18 @@ safe:
     a double-click cannot double-send the initial package.
   * The estimator's entire file surface (the portal is the log after this
     feature) depends on the recipient/file child rows, so they must exist before
-    delivery — never in a best-effort post-send patch that could leave a "sent"
+    delivery - never in a best-effort post-send patch that could leave a "sent"
     batch with zero recipients and an estimator staring at an empty portal.
 
 Only two things are left as best-effort post-send updates, because both are
 genuinely safe to lose:
-  * `attach_email_log()` — the mail is already delivered; a lost link is cosmetic.
-  * `stamp_sent()` — `build_log`/`_estimator_visible` filter an estimator's file
+  * `attach_email_log()` - the mail is already delivered; a lost link is cosmetic.
+  * `stamp_sent()` - `build_log`/`_estimator_visible` filter an estimator's file
     list on the stamp, so a file whose stamp was lost renders as *absent* rather
     than as a dead link that 403s on download.
 
 On the first email failure the caller calls `abandon_batch()` (children cascade),
-rolls back any assignment it inserted, and re-raises — leaving a clean retry with
+rolls back any assignment it inserted, and re-raises - leaving a clean retry with
 `package_sent_at` still null and "Upload plans and specs" still visible.
 
 sync SDK
@@ -50,6 +50,7 @@ from app.core.file_categories import (
     INITIAL_CATEGORIES,
     PACKAGE_CATEGORIES,
     SENT_GATED_CATEGORIES,
+    exclude_source_set,
 )
 from app.core.roles import Role
 from app.core.supabase_client import get_supabase
@@ -57,7 +58,7 @@ from app.core.supabase_client import get_supabase
 logger = logging.getLogger(__name__)
 
 # The three live send kinds. `reconstructed` is a boolean flag on the row, NOT a
-# fourth kind (0076) — a backfilled initial send still sorts/labels as initial.
+# fourth kind (0076) - a backfilled initial send still sorts/labels as initial.
 KINDS = ("initial", "revision", "reassign")
 
 # project_files projection the log/handoff readers need. Includes the fields
@@ -69,7 +70,7 @@ _FILE_FIELDS = (
 )
 
 _INITIAL_CLAIM_RACE_MESSAGE = (
-    "The initial package was just sent — refresh to see the result"
+    "The initial package was just sent - refresh to see the result"
 )
 
 
@@ -79,7 +80,7 @@ def _is_unique_violation(exc: Exception) -> bool:
 
 
 def _recipient_batch_ids(sb, estimator_id: str) -> set[str]:
-    """The set of batch ids that carry a recipient row for this estimator — the
+    """The set of batch ids that carry a recipient row for this estimator - the
     scope for every estimator-facing read (log, stats, handoff)."""
     rows = (
         sb.table("file_send_recipients")
@@ -107,7 +108,7 @@ def _counts_from_summary(summary: dict | None) -> dict[str, int]:
 
 
 def has_initial_send(project_id: str) -> bool:
-    """EXISTS a batch with kind='initial'. This — not batch_count > 0 — is the
+    """EXISTS a batch with kind='initial'. This - not batch_count > 0 - is the
     "Upload plans and specs" predicate: requirement 2 gates that one-shot button
     on the INITIAL send, and the unique partial index guarantees at most one."""
     rows = (
@@ -127,7 +128,7 @@ def batch_stats(project_id: str, estimator_id: str | None = None) -> dict:
 
     package_sent_at = sent_at of the initial batch (None when there is none).
     When `estimator_id` is given every field is scoped to the batches that
-    estimator actually received — a project-wide count would leak to a
+    estimator actually received - a project-wide count would leak to a
     late-added estimator that earlier sends (and therefore other recipients)
     exist.
     """
@@ -157,7 +158,7 @@ def last_sent_at_by_project(
     project_ids: list[str], estimator_id: str
 ) -> dict[str, str]:
     """{project_id: newest sent_at} across the batches addressed to THIS
-    estimator — `batch_stats` for a whole list in two queries.
+    estimator - `batch_stats` for a whole list in two queries.
 
     Scoped by `_recipient_batch_ids` exactly like `batch_stats` and
     `build_handoff`, so a project the estimator was added to late reports only
@@ -203,7 +204,7 @@ def claim_batch(
     BEFORE the email goes out. Returns the batch row (`{"id": ..., ...}`).
 
     Everything needed is known before the email is composed, so nothing is lost
-    by writing early — and the estimator's entire file surface depends on these
+    by writing early - and the estimator's entire file surface depends on these
     child rows, so they must not live in a best-effort post-send patch.
 
     `recipients` items: `{estimator_id, email, full_name}`; de-duped on `email`
@@ -212,7 +213,7 @@ def claim_batch(
     category counts plus `{"addendum_numbers": [...]}`, stored verbatim.
 
     `section_notes` (0077) is the per-section "what changed" text keyed by
-    `file_categories.section_key(category, doc_type)` — a property of THIS send,
+    `file_categories.section_key(category, doc_type)` - a property of THIS send,
     stored once on the batch rather than copied onto every file in the section.
     Already validated by the caller; `{}` when the send has none.
 
@@ -238,7 +239,7 @@ def claim_batch(
         ).data[0]
     except HTTPException:
         raise
-    except Exception as exc:  # noqa: BLE001 — unique violation → racing initial send
+    except Exception as exc:  # noqa: BLE001 - unique violation → racing initial send
         if _is_unique_violation(exc):
             raise HTTPException(
                 status.HTTP_409_CONFLICT, _INITIAL_CLAIM_RACE_MESSAGE
@@ -246,7 +247,7 @@ def claim_batch(
         raise
     batch_id = batch["id"]
 
-    # Recipients — de-dupe on the delivered address (the (batch_id, email) PK),
+    # Recipients - de-dupe on the delivered address (the (batch_id, email) PK),
     # so a double-add of the same person never trips a 23505 mid-write.
     seen: set[str] = set()
     recipient_rows: list[dict] = []
@@ -266,7 +267,7 @@ def claim_batch(
     if recipient_rows:
         sb.table("file_send_recipients").insert(recipient_rows).execute()
 
-    # Batch-file links — de-dupe on the (batch_id, file_id) PK, preserving order.
+    # Batch-file links - de-dupe on the (batch_id, file_id) PK, preserving order.
     file_rows = [
         {"batch_id": batch_id, "file_id": fid}
         for fid in dict.fromkeys(fid for fid in (file_ids or []) if fid)
@@ -279,7 +280,7 @@ def claim_batch(
 
 def abandon_batch(batch_id: str) -> None:
     """Delete a claimed batch whose email failed; recipients and file links
-    cascade. Best-effort — a failed cleanup only leaves a harmless empty batch,
+    cascade. Best-effort - a failed cleanup only leaves a harmless empty batch,
     never a wrong send."""
     try:
         get_supabase().table("file_send_batches").delete().eq("id", batch_id).execute()
@@ -288,7 +289,7 @@ def abandon_batch(batch_id: str) -> None:
 
 
 def attach_email_log(batch_id: str, email: str, email_log_id: str) -> None:
-    """Post-send patch of ONE recipient row's email_log_id. Best-effort — the
+    """Post-send patch of ONE recipient row's email_log_id. Best-effort - the
     mail is already delivered, so a failed write is logged and swallowed."""
     try:
         (
@@ -328,7 +329,7 @@ def stamp_sent(file_ids: list[str]) -> None:
 
 
 def prior_batches(project_id: str) -> list[dict]:
-    """[{kind, sent_at, summary}] oldest-first — the catch-up (reassign) email's
+    """[{kind, sent_at, summary}] oldest-first - the catch-up (reassign) email's
     "Update history" table."""
     rows = (
         get_supabase()
@@ -378,7 +379,7 @@ def _file_out(rec: dict, available: bool) -> dict:
     return {
         "file_id": rec["id"],
         "category": rec["category"],
-        # 'drawing' | 'specification' | None — which document set a revision or
+        # 'drawing' | 'specification' | None - which document set a revision or
         # addendum belongs to (0077). None on the initial package (its category
         # already says) and on rows predating the column.
         "doc_type": rec.get("doc_type"),
@@ -396,7 +397,7 @@ def build_log(project_id: str, user: CurrentUser) -> dict:
 
     TWO code paths, never one payload post-filtered. The estimator path never
     selects the recipient/profile join, and its batch dicts omit the
-    `recipients` and `sent_by_name` keys entirely (absent, not null) — so a
+    `recipients` and `sent_by_name` keys entirely (absent, not null) - so a
     router that returns this dict as-is cannot leak a co-assignee's identity.
 
     Returns `{"viewer": "internal"|"estimator", "batches": [...]}` newest-first.
@@ -582,7 +583,7 @@ def build_handoff(project_id: str, user: CurrentUser) -> dict:
                 "issued_on": best["addendum_issued_on"],
             }
 
-    # Assignments — internal sees every row newest-first with emails; the
+    # Assignments - internal sees every row newest-first with emails; the
     # estimator sees exactly their own row with the email blanked.
     assign_rows = (
         sb.table("estimator_assignments")
@@ -613,13 +614,15 @@ def build_handoff(project_id: str, user: CurrentUser) -> dict:
     staged: dict[str, int] = {}
     if not is_estimator:
         package_sent = package_sent_at is not None
-        pkg_rows = (
+        pkg_q = (
             sb.table("project_files")
             .select("category, sent_to_estimators_at")
             .eq("project_id", project_id)
-            .in_("category", list(PACKAGE_CATEGORIES))
-            .execute()
-        ).data or []
+            .in_("category", sorted(PACKAGE_CATEGORIES))
+        )
+        # A split source set is never part of the package, so it must not count
+        # as staged either (0132).
+        pkg_rows = exclude_source_set(pkg_q).execute().data or []
         for r in pkg_rows:
             cat = r["category"]
             if cat in INITIAL_CATEGORIES:

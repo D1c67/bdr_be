@@ -22,7 +22,7 @@ from app.core.config import get_settings
 from app.core.deps import CurrentUser, require_writer
 from app.core.ratelimit import ai_rate_limit
 from app.core.supabase_client import get_supabase
-from app.models.schemas import BoqAnalysisStart, BoqConfirmIn, BoqDraftIn
+from app.models.schemas import BoqAnalysisStart, BoqConfirmIn, BoqDraftIn, BoqManualIn
 from app.services import (
     boq_extraction,
     boq_training,
@@ -133,6 +133,109 @@ def start_analysis(
     else:
         background.add_task(boq_extraction.run_extraction, row["id"])
     audit(user.id, "boq.analyze", "boq_analysis", row["id"], {"boq_file_id": boq_file_id})
+    return row
+
+
+def _cancel_queued_job(sb, project_id: str) -> None:
+    """Best-effort: a queued model job for this project is canceled when the
+    team switches to manual entry (the queue marks its analysis failed). A
+    job already running finishes on its own row, which the manual analysis
+    outranks by created_at."""
+    if not get_settings().llm_queue_enabled:
+        return
+    rows = (
+        sb.table("boq_analyses")
+        .select("id")
+        .eq("project_id", project_id)
+        .in_("status", ["pending", "running"])
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    ).data or []
+    if not rows:
+        return
+    try:
+        job = llm_queue.active_job(llm_queue.JOB_BOQ, rows[0]["id"])
+        if job:
+            llm_queue.cancel(job["id"])
+    except Exception:  # noqa: BLE001 - a queue hiccup must not block manual entry
+        logger.exception("BOQ manual entry: could not cancel the queued job")
+
+
+def _json_number(value) -> int | float | None:
+    if value is None:
+        return None
+    f = float(value)
+    return int(f) if f.is_integer() else f
+
+
+@router.post("/manual", status_code=status.HTTP_201_CREATED)
+def start_manual_analysis(
+    project_id: str,
+    body: BoqManualIn,
+    user: CurrentUser = Depends(_PE),
+):
+    """The reviewer's own item list, landed as a `done` analysis with
+    model='manual' in the exact shape the model produces (one site, one group
+    per category, group_name = category name). Review, corrections and confirm
+    then work unchanged; confirm skips training capture for these rows. The
+    escape hatch for a downed model instance, or a project whose list the
+    team builds itself; Analyze stays available beside it."""
+    sb = get_supabase()
+    cat_ids = [g.material_category_id for g in body.groups]
+    cats = (
+        sb.table("material_categories").select("id, name").in_("id", cat_ids).execute()
+    ).data or []
+    names = {c["id"]: c["name"] for c in cats}
+    for cid in cat_ids:
+        if cid not in names:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown material category: {cid}")
+
+    groups = []
+    total = 0
+    for g in body.groups:
+        items = [
+            {
+                "description": it.description,
+                "quantity": _json_number(it.quantity),
+                "unit": it.unit,
+                "notes": it.notes,
+            }
+            for it in g.items
+        ]
+        total += len(items)
+        groups.append({"group_name": names[g.material_category_id], "items": items})
+    result = {
+        "sites": [{"site_name": None, "material_groups": groups}],
+        "summary": None,
+        "total_material_count": total,
+    }
+    # The mapping is pinned in the draft so a later category rename can never
+    # un-resolve a hand-entered group.
+    mapping = {names[g.material_category_id]: g.material_category_id for g in body.groups}
+    now = datetime.now(timezone.utc).isoformat()
+
+    _cancel_queued_job(sb, project_id)
+    row = (
+        sb.table("boq_analyses")
+        .insert(
+            {
+                "project_id": project_id,
+                "boq_file_id": None,
+                "status": "done",
+                "model": "manual",
+                "result_json": result,
+                "draft_json": {"overrides": [], "group_mappings": mapping},
+                "draft_updated_by": user.id,
+                "draft_updated_at": now,
+                "created_by": user.id,
+            }
+        )
+        .execute()
+    ).data[0]
+    audit(user.id, "boq.manual", "boq_analysis", row["id"],
+          {"groups": len(groups), "items": total})
+    row.pop("input_snapshot", None)
     return row
 
 
@@ -322,7 +425,8 @@ def confirm_analysis(
             .limit(1)
             .execute()
         ).data or []
-        if analysis:
+        # A hand-entered list has no model output to learn from.
+        if analysis and analysis[0].get("model") != "manual":
             boq_training.capture_example(analysis[0], project_id, body, user.id, names)
     except Exception:
         logger.exception("BOQ training capture failed (analysis %s)", analysis_id)

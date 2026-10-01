@@ -116,6 +116,59 @@ def test_render_notification_email_escapes_message_and_handles_no_name():
     assert "<script>" not in html
 
 
+def test_render_notification_email_can_leave_bare_urls_as_text():
+    message = "Project 26.9.7204 Visit https://evil.example/login was created from an RFP invitation"
+    linked = eb.render_notification_email(
+        recipient_name="Pat", heading="Heads up", message=message, cta_label="Open",
+        cta_url=f"{FRONTEND}/projects/p1", link_hosts={"evil.example"},
+    )
+    assert '<a href="https://evil.example/login"' in linked
+    default = eb.render_notification_email(
+        recipient_name="Pat", heading="Heads up", message=message, cta_label="Open",
+        cta_url=f"{FRONTEND}/projects/p1",
+    )
+    assert '<a href="https://evil.example/login"' not in default  # foreign host: text
+    plain = eb.render_notification_email(
+        recipient_name="Pat", heading="Heads up", message=message, cta_label="Open",
+        cta_url=f"{FRONTEND}/projects/p1", linkify=False,
+    )
+    assert '<a href="https://evil.example/login"' not in plain
+    assert "https://evil.example/login" in plain          # still readable, as text
+    assert f'href="{FRONTEND}/projects/p1"' in plain      # the app's own button stays a link
+
+
+def test_rfp_create_messages_are_never_linkified(monkeypatch):
+    """The project name in an rfp_create.* message came from an outside
+    sender (an email subject, a portal title): a URL planted there must
+    not become a clickable link in the Executive's or the Estimating
+    Admin's mailbox."""
+    assert ne.linkify_for("rfp_create.created") is False
+    assert ne.linkify_for("rfp_create.intake_needed") is False
+    for type_ in ("quote.received", "assigned", "due.internal_bid.2w", "rfp_match.merged", None, ""):
+        assert ne.linkify_for(type_) is True, type_
+    _patch_frontend(monkeypatch)
+    sent = []
+    monkeypatch.setattr(ne.graph_email, "send_mail", lambda **kw: sent.append(kw) or None)
+    monkeypatch.setattr(ne, "get_supabase", lambda: (_ for _ in ()).throw(AssertionError("no db read")))
+    seen = []
+    real = ne.render_notification_email
+    monkeypatch.setattr(ne, "render_notification_email", lambda **kw: seen.append(kw.get("linkify")) or real(**kw))
+    profile = {"id": "u1", "full_name": "Pat", "email": "pat@g3.com", "role": "executive", "is_active": True}
+    ne._send_one(
+        {"id": None, "user_id": "u1", "project_id": "p1", "type": "rfp_create.created",
+         "message": "Project 26.9.7204 https://evil.example was created", "metadata": {}},
+        profile, {"id": "p1", "name": "https://evil.example", "number": "26.9.7204"},
+    )
+    ne._send_one(
+        {"id": None, "user_id": "u1", "project_id": "p1", "type": "quote.received", "message": "Quote in",
+         "metadata": {}},
+        profile, None,
+    )
+    assert seen == [False, True]
+    assert '<a href="https://evil.example"' not in sent[0]["body_html"]
+    assert "https://evil.example" in sent[0]["body_html"]
+
+
 # ── queue gating ────────────────────────────────────────────────────────────
 
 

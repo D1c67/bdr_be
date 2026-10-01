@@ -11,6 +11,13 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
+# How long boot waits for the RFP Ingestion sandbox self-test (a child spawn
+# on the embedded one-page PDF). A healthy self-test takes a few seconds; the
+# bound only matters when something is badly wrong (a hung spawn, a uid slot
+# held by a stuck worker), and then the worker must still come up: the thread
+# finishes on its own and caches its verdict for GET /status and execute().
+_RFP_SELF_TEST_BOOT_SECONDS = 120
+
 
 @contextlib.asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -50,20 +57,90 @@ async def lifespan(_: FastAPI):
         from app.services import due_digest
 
         digest_task = asyncio.create_task(due_digest.polling_loop())
+    # Calling In (docs/CALLING_IN.md section 5): claims a call_in_entries row
+    # when a project lands on a call list and notifies Executive + Estimating
+    # Engineer Labor once, then closes the row when the project leaves.
+    # Multi-worker safe: the partial unique index on call_in_entries is the
+    # claim, so only the worker whose insert wins notifies. Bidding-only.
+    call_in_task: asyncio.Task | None = None
+    if settings.bidding_enabled and settings.call_in_enabled and settings.supabase_url:
+        from app.services import calling_in as calling_in_service
+
+        call_in_task = asyncio.create_task(calling_in_service.polling_loop())
     # PM mailbox email ingestion — polls the configured mailbox (Inbox + Sent
     # Items) and runs the project-identification pipeline. Multi-worker safe
     # via the graph_sync_state lease. Deliberately NOT tied to PM_ENABLED: it
     # files mail against ANY project, bidding included (/emails is shared), and
     # EMAIL_INGEST_ENABLED is already its own switch.
+    # The RFP test bench (docs/RFP_TESTING.md 4.2) drives the same loop at
+    # the test mailbox while a session is active, so the loop also starts
+    # when the bench is on and the filer's own mailbox is unset or off.
     email_task: asyncio.Task | None = None
-    if (
-        settings.email_ingest_enabled
-        and settings.email_ingest_mailbox
-        and settings.ms_client_id
+    rfp_testing = settings.rfp_testing_enabled and settings.rfp_ingest_enabled
+    if settings.ms_client_id and (
+        (settings.email_ingest_enabled and settings.email_ingest_mailbox) or rfp_testing
     ):
         from app.services import email_ingest
 
         email_task = asyncio.create_task(email_ingest.polling_loop())
+    # RFP Ingestion email intake: watches the RFP_EMAIL_INGESTION_INBOXES_ALLOWED
+    # mailboxes under the shared RFP_INGESTION_ENABLED switch. Multi-worker
+    # safe via its own graph_sync_state lease (docs/RFP_EMAIL_INGESTION.md).
+    # The test bench (docs/RFP_TESTING.md 4.1) drives the same loop at the
+    # test mailbox, so it also starts with no real mailbox listed.
+    rfp_email_task: asyncio.Task | None = None
+    if (settings.rfp_email_ingestion_enabled or rfp_testing) and settings.ms_client_id:
+        from app.core.supabase_client import get_supabase
+        from app.services import rfp_email_ingest
+
+        # Once, before the first sweep tick: rows the intake slice parked at
+        # `done` and never extracted move to `extract` (docs/RFP_MATCHING.md
+        # section 4). Idempotent, and a failure must never block boot: the
+        # sweep still runs, and the next boot repeats the pass.
+        try:
+            moved = await asyncio.to_thread(rfp_email_ingest.backfill_parked_rows, get_supabase())
+            if moved:
+                logging.getLogger(__name__).info(
+                    "rfp email ingest: %d parked row(s) moved to extract at boot", moved
+                )
+        except Exception:  # noqa: BLE001 - the backfill must never block boot
+            logging.getLogger(__name__).exception("rfp email ingest startup backfill failed")
+        rfp_email_task = asyncio.create_task(rfp_email_ingest.polling_loop())
+    # Portal invitations: NGEM (docs/RFP_NGEM_PORTAL.md) and BuildingConnected
+    # (docs/RFP_BUILDINGCONNECTED.md) share one scheduler loop that claims
+    # each portal's scan slots and runs the invitation sweep, every worker
+    # (the slot ledger and the sweep lease keep the workers disjoint). The
+    # loop starts when EITHER portal is active (master switch, its own
+    # switch, a configured account or APS app, and the queue that runs its
+    # jobs); poll_once gates each portal on its own. The boot lines say
+    # whether each is configured; passwords and secrets are never logged.
+    rfp_portal_task: asyncio.Task | None = None
+    if settings.rfp_ingest_enabled and settings.rfp_ngem_enabled:
+        logging.getLogger(__name__).info(
+            "rfp portal (NGEM): enabled, account %s, entry url %s, schedule %s",
+            "configured" if settings.ngem_configured else "NOT configured",
+            "set" if settings.ngem_entry_url.strip() else "unset",
+            settings.rfp_ngem_schedule_times,
+        )
+    if settings.rfp_ingest_enabled and settings.rfp_bc_enabled:
+        logging.getLogger(__name__).info(
+            "rfp portal (BuildingConnected): enabled, APS app %s, redirect url %s, "
+            "poll every %s min, full sync %s PT%s",
+            "configured" if settings.bc_configured else "NOT configured",
+            "set" if settings.rfp_bc_redirect_url.strip() else "unset",
+            settings.rfp_bc_poll_minutes,
+            settings.rfp_bc_full_sync_time,
+            ", TEST MODE" if settings.rfp_bc_test_mode else "",
+        )
+    if settings.rfp_portal_any_active and settings.supabase_url:
+        from app.services import rfp_portal_ingest
+
+        rfp_portal_task = asyncio.create_task(rfp_portal_ingest.polling_loop())
+    elif settings.rfp_portal_any_enabled:
+        logging.getLogger(__name__).warning(
+            "rfp portal: the scheduler is not running (no portal account or APS app "
+            "configured, or the LLM queue is off); the /rfp-portal routes still answer"
+        )
     # AI model health — keeps the sidebar's Model status indicator warm by
     # probing the active LLM pool (see services/llm_health). No sub-app gate:
     # the features it covers span Bidding and PM. Each worker polls its own
@@ -94,15 +171,78 @@ async def lifespan(_: FastAPI):
             await asyncio.to_thread(llm_queue.release_stranded_for_disabled_mode)
         except Exception:  # noqa: BLE001 - cleanup must never block boot
             logging.getLogger(__name__).exception("llm queue disabled-mode cleanup failed")
+    # RFP Ingestion sandbox self-test (docs/RFP_INGESTION_SANDBOX.md 3.6): with
+    # the flag on, spawn the sandbox child once on the embedded page so a
+    # broken image (pypdfium2 missing, an unusable uid pool, a scratch dir
+    # that cannot be written) shows up in the boot log instead of on the
+    # first real run. The service caches the verdict and refuses to start
+    # runs while it reads failed; GET /status?self_test=1 re-runs it (a plain
+    # /status read serves the cached verdict instead of spawning a child).
+    # Bounded and best-effort: a failure is logged LOUDLY, never raised, and
+    # boot never waits longer than _RFP_SELF_TEST_BOOT_SECONDS for it.
+    if settings.rfp_ingest_enabled:
+        from app.services import rfp_ingest as rfp_ingest_service
+
+        boot_logger = logging.getLogger(__name__)
+        try:
+            verdict = await asyncio.wait_for(
+                asyncio.to_thread(rfp_ingest_service.self_test),
+                timeout=_RFP_SELF_TEST_BOOT_SECONDS,
+            )
+        except TimeoutError:
+            boot_logger.error(
+                "RFP INGEST SELF-TEST did not finish within %d s; the sandbox may be "
+                "unusable on this worker (check GET /rfp-ingest/status?self_test=1)",
+                _RFP_SELF_TEST_BOOT_SECONDS,
+            )
+        except Exception:  # noqa: BLE001 - the self-test must never block boot
+            boot_logger.exception("RFP INGEST SELF-TEST could not run")
+        else:
+            if verdict.get("ok"):
+                boot_logger.info(
+                    "rfp ingest self-test ok in %s ms (uid switch %s)",
+                    verdict.get("elapsed_ms"),
+                    "applied" if verdict.get("uid_switch_applied") else "not applied",
+                )
+            else:
+                boot_logger.error(
+                    "RFP INGEST SELF-TEST FAILED: %s (runs will be refused until "
+                    "GET /rfp-ingest/status?self_test=1 passes)",
+                    verdict.get("detail"),
+                )
     yield
-    for task in (poll_task, reminder_task, digest_task, email_task, llm_health_task, llm_queue_task):
+    # Tell a sandbox run in flight to stop cleanly BEFORE its queue task is
+    # cancelled: the runner's monitor loop sees the event from its worker
+    # thread (a CancelledError never reaches a thread), kills the child,
+    # leaves the file running and requeues its job, so a redeploy mid-file
+    # resumes on the next worker instead of waiting out a lease expiry.
+    # Always set, flag or not: it is inert when nothing is running.
+    from app.services import rfp_ingest as rfp_ingest_service
+
+    rfp_ingest_service.SHUTTING_DOWN.set()
+    for task in (
+        poll_task, reminder_task, digest_task, email_task, rfp_email_task,
+        rfp_portal_task, llm_health_task, llm_queue_task, call_in_task,
+    ):
         if task:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+    # Free the RFP intake and NGEM sweep leases this process holds, so the
+    # next worker (a redeploy, or the dev server's --reload) does not wait
+    # out a dead process's lease before it can sync a mailbox.
+    if rfp_email_task or rfp_portal_task:
+        from app.core.supabase_client import get_supabase as _sb
+        from app.services import rfp_email_ingest as _intake
+
+        try:
+            await asyncio.to_thread(_intake.release_leases, _sb())
+        except Exception:  # noqa: BLE001 - shutdown must never fail on this
+            logging.getLogger(__name__).exception("RFP intake lease release failed on shutdown")
 
 
-_is_prod = settings.environment == "production"
+# Fail closed: anything but an explicit dev ENVIRONMENT gets the prod posture.
+_is_prod = settings.is_production
 
 app = FastAPI(
     title="BDR API",
@@ -123,9 +263,19 @@ app = FastAPI(
 from app.core.middleware import (  # noqa: E402
     MaxBodySizeMiddleware,
     SecurityHeadersMiddleware,
+    form_routes_matcher,
 )
 
-app.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_request_body_bytes)
+# The 460 MB allowance applies only to the routes that declare Form/File body
+# params (read lazily from app.routes on the first request, after every
+# include_router below). Every other route, whatever Content-Type the client
+# sends, gets the 16 MB cap: FastAPI buffers those bodies in RAM before auth.
+app.add_middleware(
+    MaxBodySizeMiddleware,
+    max_bytes=settings.max_request_body_bytes,
+    max_json_bytes=settings.max_json_body_bytes,
+    upload_routes=form_routes_matcher(app),
+)
 
 _security_headers = {
     "X-Content-Type-Options": "nosniff",
@@ -143,15 +293,18 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    # Let the browser read the export download's filename + file count, and the
+    # Let the browser read the export download's filename + file count, the
     # rate-limit signals (so a throttled client can show "retry in Ns" and the
-    # scope code). allow_headers only governs *request* headers; response headers
-    # must be explicitly exposed.
+    # scope code) and the machine-readable error code a refusal carries (the
+    # frontend branches on it, e.g. rfp_match_unmerge_required opens the
+    # Merged by System modal). allow_headers only governs *request* headers;
+    # response headers must be explicitly exposed.
     expose_headers=[
         "Content-Disposition",
         "X-Export-File-Count",
         "Retry-After",
         "X-RateLimit-Scope",
+        "X-Error-Code",
     ],
 )
 
@@ -231,6 +384,26 @@ import httpx  # noqa: E402
 _upstream_logger = logging.getLogger("app.upstream")
 
 
+def _log_upstream_error(exc: BaseException, message: str, *args: object) -> None:
+    """Log an upstream failure with its stack but never its raw text: httpx
+    quotes the full request URL (query string included) in str(exc), and
+    Graph upload-session URLs carry a pre-authenticated token there. The
+    exception text goes through redact_text and the traceback is formatted
+    frames only, so no logger.exception / exc_info that would re-print it."""
+    import traceback
+
+    from app.core.redact import redact_text
+
+    frames = "".join(traceback.format_tb(exc.__traceback__))
+    _upstream_logger.error(
+        message + ": %s: %s\nTraceback (most recent call last):\n%s",
+        *args,
+        type(exc).__name__,
+        redact_text(exc),
+        frames,
+    )
+
+
 @app.exception_handler(httpx.TransportError)
 async def _upstream_transport_error_handler(
     request: Request, exc: httpx.TransportError
@@ -241,7 +414,8 @@ async def _upstream_transport_error_handler(
         host = exc.request.url.host
     except RuntimeError:  # httpx raises when no request was attached
         host = "<unknown host>"
-    _upstream_logger.exception(
+    _log_upstream_error(
+        exc,
         "Upstream transport error (%s) from %s while handling %s %s",
         type(exc).__name__,
         host,
@@ -266,16 +440,18 @@ async def _upstream_transport_error_handler(
 # uploaded to OneDrive before any email goes out): a Graph 429/5xx there escaped
 # as an unhandled 500 that lost its CORS headers and reached the browser as a
 # bare "Failed to fetch". Same treatment: 502, CORS-safe, retry guidance. The
-# request URL is deliberately not echoed to the client — Graph upload URLs embed
-# pre-authenticated tokens — and the full detail is logged here instead, because
-# a registered handler bypasses ServerErrorMiddleware's traceback logging.
+# request URL is deliberately not echoed to the client (Graph upload URLs embed
+# pre-authenticated tokens) and the detail is logged here instead (URLs
+# redacted to scheme, host and path by _log_upstream_error), because a
+# registered handler bypasses ServerErrorMiddleware's traceback logging.
 
 
 @app.exception_handler(httpx.HTTPStatusError)
 async def _upstream_http_status_error_handler(
     request: Request, exc: httpx.HTTPStatusError
 ) -> JSONResponse:
-    _upstream_logger.exception(
+    _log_upstream_error(
+        exc,
         "Upstream HTTP %s from %s while handling %s %s",
         exc.response.status_code,
         exc.request.url.host,
@@ -294,9 +470,33 @@ async def _upstream_http_status_error_handler(
     )
 
 
+# A `.single()` read that found no row (PostgREST PGRST116) is a missing
+# record, not a server fault: a deleted project's stale tab or link
+# (docs/PROJECT_DELETE.md) reaches many project-scoped GETs that read the
+# project with `.single()`. Answer 404, CORS-safe. Any other PostgREST error
+# is re-raised untouched and keeps today's behavior.
+from postgrest.exceptions import APIError as _PostgrestAPIError  # noqa: E402
+
+
+@app.exception_handler(_PostgrestAPIError)
+async def _postgrest_not_found_handler(request: Request, exc: _PostgrestAPIError) -> JSONResponse:
+    if getattr(exc, "code", None) == "PGRST116":
+        return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content={"detail": "Not found"})
+    # A write into a project deleted from another tab (e.g. a file upload)
+    # trips the projects foreign key: same missing record, same 404.
+    if getattr(exc, "code", None) == "23503" and 'table "projects"' in str(
+        getattr(exc, "details", "") or ""
+    ):
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND, content={"detail": "Project not found"}
+        )
+    raise exc
+
+
 @app.get("/health", tags=["meta"])
 async def health() -> dict[str, str]:
-    return {"status": "ok", "environment": settings.environment}
+    # Unauthenticated: never reveal which environment (and so which guards) is live.
+    return {"status": "ok"}
 
 
 from app.core.deps import CurrentUser, get_current_user  # noqa: E402
@@ -322,9 +522,12 @@ from app.routers import (  # noqa: E402
     bid_drafts,
     bid_splitter,
     boq_analysis,
+    calling_in,
     change_review,
+    deleted_projects,
     emails,
     estimator,
+    external_submission,
     files,
     general_material,
     gono,
@@ -351,6 +554,13 @@ from app.routers import (  # noqa: E402
     projects,
     proposals,
     reference,
+    rfp_bc,
+    rfp_created,
+    rfp_ingest,
+    rfp_emails,
+    rfp_portal,
+    rfp_processing,
+    rfp_testing,
     rfqs,
     submittals,
     todos,
@@ -404,6 +614,38 @@ app.include_router(llm_monitor.router)
 # it is not connected to the bidding pipeline yet, so it must not ride the
 # BIDDING flag. The dependency lives on the router itself (core/features.py).
 app.include_router(bid_splitter.router)
+# RFP Ingestion sandbox: the out-of-process PDF sanitizer's dev-only bench,
+# gated by its OWN env flag (RFP_INGEST_ENABLED, default off: every route
+# 404s) on the router itself, plus require_dev on every endpoint. Not a
+# sub-app and not connected to the bidding pipeline, so it must not ride the
+# BIDDING flag either (splitter precedent).
+app.include_router(rfp_ingest.router)
+# RFP Ingestion email intake: review queue + authorized-sender rules. Same
+# master switch as the sandbox (gated on the router itself), internal roles
+# only; not tied to BIDDING for the same reason as the sandbox.
+app.include_router(rfp_emails.router)
+# RFP Processing: the operations view over every in-flight intake row, in
+# lanes, plus Retry on a stuck email row (docs/RFP_PROCESSING.md). Same gate
+# as /rfp-emails (the email intake served, on the router itself) and the same
+# roles; not tied to BIDDING for the same reason as the router above.
+app.include_router(rfp_processing.router)
+# NGEM portal invitations: the NGEM tab of /rfp-emails and its settings
+# block. Gated on the router itself (RFP_INGESTION_ENABLED and
+# RFP_NGEM_ENABLED), review-queue roles only; not tied to BIDDING for the
+# same reason as the two routers above.
+app.include_router(rfp_portal.router)
+app.include_router(rfp_bc.router)  # BuildingConnected: connect/status/run/aliases (RFP_BC_ENABLED)
+app.include_router(rfp_bc.callback_router)  # the OAuth callback: gate + state only, no auth
+# "Created from RFPs": every bidding project the RFP creation step made and
+# its flags (docs/RFP_CREATE.md 8). Gated on the router itself (the email
+# intake OR the NGEM slice served), Estimating Admin / Executive / IT Admin
+# only; not tied to BIDDING for the same reason as the three routers above.
+app.include_router(rfp_created.router)
+# RFP test bench: the dev-only test mode and monitor (docs/RFP_TESTING.md).
+# Gated on the router itself (RFP_TESTING_ENABLED under RFP_INGESTION_ENABLED,
+# every route 404s while off) plus a dev it_admin caller on every endpoint;
+# not tied to BIDDING for the same reason as the routers above.
+app.include_router(rfp_testing.router)
 
 # Bidding — the bid pipeline, its files/notes, and the external estimator portal.
 app.include_router(workflow.router, dependencies=_BIDDING)
@@ -417,6 +659,15 @@ app.include_router(general_material.router, dependencies=_BIDDING)
 app.include_router(pricing.router, dependencies=_BIDDING)
 app.include_router(proposals.router, dependencies=_BIDDING)
 app.include_router(outcome.router, dependencies=_BIDDING)
+# Mark submitted from the project side menu (0140): a proposal sent outside the app.
+app.include_router(external_submission.router, dependencies=_BIDDING)
+# Calling In (docs/CALLING_IN.md): the two call lists, plus the read-only
+# project-page call log mounted under /projects (bidding-only like the lists).
+app.include_router(calling_in.router, dependencies=_BIDDING)
+app.include_router(calling_in.project_router, dependencies=_BIDDING)
+# Deleted Projects (0141, docs/PROJECT_DELETE.md): the IT Admin's archive of
+# deleted projects and the restore. The delete itself lives on /projects.
+app.include_router(deleted_projects.router, dependencies=_BIDDING)
 # NOTE: /analytics goes with Bidding as a whole, including its /activity feed.
 # That feed is the one audit surface spanning all three modules (it reads the
 # shared audit_log, pm.* and cp.* rows included), so a future PM-only deployment

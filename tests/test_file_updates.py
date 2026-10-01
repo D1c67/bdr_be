@@ -163,6 +163,136 @@ def test_electrical_drawing_category_membership():
     assert "electrical_drawing" not in SENT_GATED_CATEGORIES
 
 
+# ── 0132: the eight new categories, `other`, and split source sets ─────────
+
+_NEW_0132 = [
+    "civil_drawing",
+    "structural_drawing",
+    "architectural_drawing",
+    "mechanical_drawing",
+    "plumbing_drawing",
+    "fire_protection_drawing",
+    "low_voltage_drawing",
+    "rfp",
+]
+
+
+def test_the_eight_0132_categories_are_first_class_package_blocks():
+    """Uploadable by hand, estimator-readable at once, frozen by the hand-off
+    lock, and never estimator-authored or sent-gated - exactly like
+    'electrical_drawing' before them."""
+    for cat in _NEW_0132:
+        assert cat in VALID_CATEGORIES, cat
+        assert cat in INITIAL_CATEGORIES, cat
+        assert cat in ESTIMATOR_READ, cat
+        assert cat not in ESTIMATOR_WRITE, cat
+        assert cat not in UPDATE_CATEGORIES, cat
+        assert cat not in SENT_GATED_CATEGORIES, cat
+
+
+def test_drawing_categories_holds_every_drawing_set():
+    from app.core.file_categories import DRAWING_CATEGORIES
+
+    assert DRAWING_CATEGORIES == {
+        "drawing",
+        "civil_drawing",
+        "structural_drawing",
+        "architectural_drawing",
+        "mechanical_drawing",
+        "plumbing_drawing",
+        "electrical_drawing",
+        "fire_protection_drawing",
+        "low_voltage_drawing",
+    }
+    # Every drawing set is an initial package block, and none is a deliverable.
+    assert DRAWING_CATEGORIES <= INITIAL_CATEGORIES
+    assert not (DRAWING_CATEGORIES & ESTIMATOR_WRITE)
+
+
+def test_other_is_estimator_readable_but_not_a_frozen_package_block():
+    """0132: 'other' joined ESTIMATOR_READ ("all file types"). It is NOT in
+    INITIAL_CATEGORIES - the RFQ Modify Files, GC proposal and Send Out modals
+    all upload ad-hoc files as 'other' AFTER the hand-off, and freezing it
+    would 409 them. Deviation recorded in docs/RFP_SPLIT.md section 9."""
+    assert "other" in ESTIMATOR_READ
+    assert "other" not in INITIAL_CATEGORIES
+    assert "other" not in UPDATE_CATEGORIES
+    assert "other" not in SENT_GATED_CATEGORIES
+
+
+def test_display_order_and_labels_cover_every_category():
+    from app.core.file_categories import (
+        CATEGORY_DISPLAY_ORDER,
+        CATEGORY_LABELS,
+        category_label,
+    )
+
+    for cat in VALID_CATEGORIES | {"proposal"}:
+        assert cat in CATEGORY_DISPLAY_ORDER, cat
+        assert cat in CATEGORY_LABELS, cat
+    assert len(CATEGORY_DISPLAY_ORDER) == len(set(CATEGORY_DISPLAY_ORDER))
+    # 'other' stays the trailing bucket; the RFP document leads.
+    assert CATEGORY_DISPLAY_ORDER[0] == "rfp" and CATEGORY_DISPLAY_ORDER[-1] == "other"
+    assert category_label("civil_drawing") == "Civil drawings"
+    # An unmapped value renders as itself rather than blowing up.
+    assert category_label("not_a_category") == "not_a_category"
+
+
+def test_package_email_sections_match_the_category_sets():
+    """estimator_email keeps its own literals (leaf module); they must not
+    drift from file_categories."""
+    from app.core.file_categories import CATEGORY_LABELS
+
+    assert ee._INITIAL == INITIAL_CATEGORIES
+    titled = {cat for cat, _doc, _title in ee.SECTION_TITLES}
+    assert INITIAL_CATEGORIES <= titled
+    for cat, doc_type, title in ee.SECTION_TITLES:
+        if doc_type is None and cat in INITIAL_CATEGORIES:
+            assert title == CATEGORY_LABELS[cat], cat
+    contents = {cat for cat, _labels in ee._CONTENTS_LABELS}
+    assert INITIAL_CATEGORIES <= contents
+
+
+def test_source_set_helpers():
+    from app.core.file_categories import exclude_source_set, is_source_set
+
+    assert is_source_set({"is_source_set": True}) is True
+    assert is_source_set({"is_source_set": False}) is False
+    # A row selected before 0132 existed has no such key: never a source set.
+    assert is_source_set({"category": "other"}) is False
+
+    calls = []
+
+    class _Q:
+        def eq(self, column, value):
+            calls.append((column, value))
+            return self
+
+    assert isinstance(exclude_source_set(_Q()), _Q)
+    assert calls == [("is_source_set", False)]
+
+
+def test_estimator_sees_other_but_never_a_split_source_set():
+    uid = "me"
+    assert _estimator_visible({"category": "other", "sent_to_estimators_at": None}, uid) is True
+    assert (
+        _estimator_visible(
+            {"category": "other", "is_source_set": True, "sent_to_estimators_at": None}, uid
+        )
+        is False
+    )
+    # The flag beats the category, whatever the category is.
+    assert (
+        _estimator_visible({"category": "drawing", "is_source_set": True}, uid) is False
+    )
+
+
+def test_estimator_sees_every_new_drawing_set():
+    uid = "me"
+    for cat in _NEW_0132:
+        assert _estimator_visible({"category": cat, "sent_to_estimators_at": None}, uid) is True
+
+
 # ── _estimator_visible (now takes user_id) ─────────────────────────────────
 
 
@@ -200,8 +330,11 @@ def test_estimator_sees_sent_updates_and_addenda():
 
 
 def test_estimator_never_sees_internal_categories():
+    # 'other' LEFT this list in 0132: the user's "all file types" decision put
+    # it in ESTIMATOR_READ, so a writer's 'other' upload is visible at once.
+    # See test_estimator_sees_other_but_never_a_split_source_set.
     uid = "me"
-    for cat in ["rfq_split", "quote", "proposal", "other"]:
+    for cat in ["rfq_split", "quote", "proposal"]:
         assert _estimator_visible({"category": cat, "sent_to_estimators_at": None}, uid) is False
 
 
@@ -479,6 +612,50 @@ def test_list_files_keeps_sent_stamp_for_internal(monkeypatch):
     assert out[0]["sent_to_estimators_at"] == "2026-07-01T00:00:00Z"
 
 
+class _RecordingListSB(_ListSB):
+    """_ListSB that also records the filters the handler applied."""
+
+    def __init__(self, rows):
+        super().__init__(rows)
+        self.calls: list[tuple] = []
+
+    def eq(self, *a, **k):
+        self.calls.append(("eq", a))
+        return self
+
+    def in_(self, *a, **k):
+        self.calls.append(("in_", a))
+        return self
+
+
+def test_list_files_filters_source_sets_for_the_estimator(monkeypatch):
+    """0132: an estimator's list query is category-scoped AND source-set free,
+    and the row-level gate drops one that slipped through anyway."""
+    sb = _RecordingListSB(
+        [
+            {"id": "f1", "category": "drawing", "sent_to_estimators_at": None, "uploaded_by": "x"},
+            {"id": "f2", "category": "other", "is_source_set": True,
+             "sent_to_estimators_at": None, "uploaded_by": "x"},
+        ]
+    )
+    monkeypatch.setattr(files_mod, "get_supabase", lambda: sb)
+    out = list_files("p1", _estimator())
+    assert [r["id"] for r in out] == ["f1"]
+    assert ("eq", ("is_source_set", False)) in sb.calls
+
+
+def test_list_files_keeps_source_sets_for_internal(monkeypatch):
+    """The team keeps its reference copy of the un-cut set."""
+    sb = _RecordingListSB(
+        [{"id": "f2", "category": "other", "is_source_set": True,
+          "sent_to_estimators_at": None, "uploaded_by": "x"}]
+    )
+    monkeypatch.setattr(files_mod, "get_supabase", lambda: sb)
+    out = list_files("p1", _writer())
+    assert [r["id"] for r in out] == ["f2"]
+    assert ("eq", ("is_source_set", False)) not in sb.calls
+
+
 # ── updates_label ──────────────────────────────────────────────────────────
 # _UPDATE_LABELS order (addendum, revision, additional) is LOAD-BEARING: it keeps
 # an addenda-only batch from mislabelling as "Changes/Revisions" and fixes the
@@ -663,3 +840,29 @@ def test_updates_email_includes_message_and_notes():
 def test_updates_email_omits_empty_message_block():
     html = ee.render_updates_email(proj=PROJ, files=FILES[2:], message="  ", signer=signer)
     assert "MESSAGE FROM THE G3 TEAM" not in html
+
+
+# ── the package query (estimator.py) ───────────────────────────────────────
+
+
+def test_package_files_query_is_source_set_free_and_package_scoped(monkeypatch):
+    """0132: what the hand-off email and the send batch are built from. Package
+    categories only, no split source set, and an unsent update is still a draft.
+    """
+    from app.core.file_categories import PACKAGE_CATEGORIES
+    from app.routers import estimator as est_mod
+
+    sb = _RecordingListSB(
+        [
+            {"id": "f1", "category": "rfp", "sent_to_estimators_at": None},
+            {"id": "f2", "category": "low_voltage_drawing", "sent_to_estimators_at": None},
+            {"id": "f3", "category": "revision", "sent_to_estimators_at": None},
+            {"id": "f4", "category": "addendum",
+             "sent_to_estimators_at": "2026-07-01T00:00:00Z"},
+        ]
+    )
+    monkeypatch.setattr(est_mod, "get_supabase", lambda: sb)
+    out = est_mod._package_files("p1")
+    assert [r["id"] for r in out] == ["f1", "f2", "f4"]
+    assert ("eq", ("is_source_set", False)) in sb.calls
+    assert ("in_", ("category", sorted(PACKAGE_CATEGORIES))) in sb.calls

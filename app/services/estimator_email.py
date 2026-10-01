@@ -1,11 +1,11 @@
 """Branded G3 emails for the estimator hand-off.
 
 Two emails live here:
-- the **file package** — every file the estimator works from (initial drawings
+- the **file package** - every file the estimator works from (initial drawings
   and specifications, plus any Changes/Revisions and Additional files already
   sent). Sent automatically to a newly-assigned estimator, or re-sent manually
   to all active assignees.
-- the **file updates** email — the not-yet-sent Changes/Revisions and
+- the **file updates** email - the not-yet-sent Changes/Revisions and
   Additional files (each with its required note) plus an optional message,
   sent to every active assignee.
 
@@ -35,7 +35,7 @@ from app.services.email_branding import (
 # updates.
 #
 # The 0077 doc_type axis is what splits one "Changes/Revisions" list into revised
-# PLANS and revised SPECS — the estimator prices those from different documents,
+# PLANS and revised SPECS - the estimator prices those from different documents,
 # so they must arrive as different sections, not as one pile the reader has to
 # sort by filename. Each split category keeps a trailing `None` row for files
 # uploaded before 0077 (and for addenda sent from the initial modal, which never
@@ -44,11 +44,22 @@ from app.services.email_branding import (
 # ORDER IS THE RENDER ORDER. `doc_type` None on a SPLIT category means "no
 # document set recorded", never "any".
 SECTION_TITLES: list[tuple[str, str | None, str]] = [
+    # The initial-package sections, in CATEGORY_DISPLAY_ORDER. The seven trade
+    # drawing sets and `rfp` arrive with 0132; the titles are the strings in
+    # file_categories.CATEGORY_LABELS (a test pins them to it).
+    ("rfp", None, "RFP / bid documents"),
     ("drawing", None, "General drawings/plans"),
+    ("civil_drawing", None, "Civil drawings"),
+    ("structural_drawing", None, "Structural drawings"),
+    ("architectural_drawing", None, "Architectural drawings"),
+    ("mechanical_drawing", None, "Mechanical drawings"),
+    ("plumbing_drawing", None, "Plumbing drawings"),
     ("electrical_drawing", None, "Electrical drawings"),
+    ("fire_protection_drawing", None, "Fire protection drawings"),
+    ("low_voltage_drawing", None, "Low voltage drawings"),
     ("specification", None, "Specifications"),
-    ("addendum", "drawing", "Addenda — plans/drawings"),
-    ("addendum", "specification", "Addenda — specifications"),
+    ("addendum", "drawing", "Addenda - plans/drawings"),
+    ("addendum", "specification", "Addenda - specifications"),
     ("addendum", None, "Addenda"),
     ("revision", "drawing", "Revised plans/drawings"),
     ("revision", "specification", "Revised specifications"),
@@ -57,7 +68,21 @@ SECTION_TITLES: list[tuple[str, str | None, str]] = [
 ]
 INITIAL_TAG = "Initial files"
 UPDATE_TAG = "Sent after hand-off"
-_INITIAL = {"drawing", "electrical_drawing", "specification"}
+# Mirrors file_categories.INITIAL_CATEGORIES (literal for the same
+# leaf-module reason as _SPLIT_CATEGORIES below; pinned by a test).
+_INITIAL = {
+    "drawing",
+    "civil_drawing",
+    "structural_drawing",
+    "architectural_drawing",
+    "mechanical_drawing",
+    "plumbing_drawing",
+    "electrical_drawing",
+    "fire_protection_drawing",
+    "low_voltage_drawing",
+    "specification",
+    "rfp",
+}
 # Addenda carry no "Initial files"/"Sent after hand-off" pill: they exist in the
 # initial package AND in later batches, so either tag would be wrong. Each
 # addendum line shows its number + issue date, which is more informative anyway.
@@ -69,7 +94,7 @@ _SPLIT_CATEGORIES = {"revision", "addendum"}
 
 PORTAL_LINE_PACKAGE = "Please upload your Estimate, BOQ, and markups via the BDR portal."
 PORTAL_LINE_UPDATES = (
-    "Please review these against your estimate — the full file package is in the BDR portal."
+    "Please review these against your estimate - the full file package is in the BDR portal."
 )
 
 
@@ -80,7 +105,7 @@ def graph_configured() -> bool:
 
 
 # Ordered so an addenda-only batch never mislabels as "Changes/Revisions".
-# ORDER IS LOAD-BEARING — do not reorder.
+# ORDER IS LOAD-BEARING - do not reorder.
 _UPDATE_LABELS = [
     ("addendum", "Addenda"),
     ("revision", "Changes/Revisions"),
@@ -89,7 +114,7 @@ _UPDATE_LABELS = [
 
 
 def updates_label(files: list[dict]) -> str:
-    """Human label for what an updates send contains — drives the subject and
+    """Human label for what an updates send contains - drives the subject and
     heading ("whichever were sent")."""
     cats = {f["category"] for f in files}
     return " & ".join(label for c, label in _UPDATE_LABELS if c in cats) or "Changes/Revisions"
@@ -133,7 +158,7 @@ def _file_item(f: dict, url: str) -> str:
 
 def section_key(category: str, doc_type: str | None) -> str:
     """The key one section's note is filed under. MUST stay identical to
-    `app.core.file_categories.section_key` — that module owns the definition and
+    `app.core.file_categories.section_key` - that module owns the definition and
     the API validates against it; this copy keeps the renderer a leaf."""
     if category in _SPLIT_CATEGORIES and doc_type in ("drawing", "specification"):
         return f"{category}:{doc_type}"
@@ -160,7 +185,7 @@ def render_sections(files: list[dict], signer, section_notes: dict | None = None
     stays pure and testable.
 
     A file matches a split-category section only when its doc_type matches
-    EXACTLY — including the `None` row, which collects the pre-0077 files that
+    EXACTLY - including the `None` row, which collects the pre-0077 files that
     never recorded one. So every file lands in exactly one section and none is
     silently dropped."""
     notes = section_notes or {}
@@ -197,7 +222,7 @@ def render_sections(files: list[dict], signer, section_notes: dict | None = None
 
 
 def _labeled_block(label: str, text: str | None) -> str:
-    """The navy-ruled callout used for free text from the team — the batch-wide
+    """The navy-ruled callout used for free text from the team - the batch-wide
     message on a package/updates send, the reason on a withdrawal notice."""
     if not (text or "").strip():
         return ""
@@ -245,8 +270,16 @@ def render_package_email(
 # The catch-up "Update history" table's Contents column renders each batch's
 # summary snapshot, in display order, as e.g. "12 drawings, 3 specs, 1 addendum".
 _CONTENTS_LABELS: list[tuple[str, tuple[str, str]]] = [
+    ("rfp", ("RFP document", "RFP documents")),
     ("drawing", ("general drawing", "general drawings")),
+    ("civil_drawing", ("civil drawing", "civil drawings")),
+    ("structural_drawing", ("structural drawing", "structural drawings")),
+    ("architectural_drawing", ("architectural drawing", "architectural drawings")),
+    ("mechanical_drawing", ("mechanical drawing", "mechanical drawings")),
+    ("plumbing_drawing", ("plumbing drawing", "plumbing drawings")),
     ("electrical_drawing", ("electrical drawing", "electrical drawings")),
+    ("fire_protection_drawing", ("fire protection drawing", "fire protection drawings")),
+    ("low_voltage_drawing", ("low voltage drawing", "low voltage drawings")),
     ("specification", ("spec", "specs")),
     ("addendum", ("addendum", "addenda")),
     ("revision", ("revision", "revisions")),
@@ -263,14 +296,14 @@ _KIND_LABELS = {
 
 def _summary_contents(summary: dict | None) -> str:
     """Render a batch's summary-count snapshot as a human phrase in display
-    order — "12 drawings, 3 specs, 1 addendum". Empty -> em dash."""
+    order - "12 drawings, 3 specs, 1 addendum". Empty -> em dash."""
     summary = summary or {}
     parts: list[str] = []
     for cat, (one, many) in _CONTENTS_LABELS:
         n = summary.get(cat) or 0
         if n:
             parts.append(f"{n} {one if n == 1 else many}")
-    return ", ".join(parts) if parts else "—"
+    return ", ".join(parts) if parts else "-"
 
 
 def _history_table(prior: list[dict] | None) -> str:
@@ -328,7 +361,7 @@ def render_reassign_email(
     oldest-first, rendered as the compact "Update history" table so the
     chronology is visible without fragmenting the plan set into per-batch lists.
 
-    Everything renders through the branded shell — navy/silver, inline logo,
+    Everything renders through the branded shell - navy/silver, inline logo,
     (702) 916-3355 signature. No red anywhere (red stays reserved for
     revision_email's high-importance banner)."""
     due = proj.get("due_from_estimator_at") or "TBD"
@@ -347,7 +380,7 @@ def render_reassign_email(
         + _history_table(prior)
         + f'<p style="margin:18px 0 0;">{html.escape(PORTAL_LINE_PACKAGE)}</p>'
     )
-    return render_branded_html(body, subtitle="ESTIMATE FILES — CATCH-UP")
+    return render_branded_html(body, subtitle="ESTIMATE FILES - CATCH-UP")
 
 
 def render_updates_email(
@@ -431,7 +464,7 @@ def send_package(
         subject_suffix = ""
     return graph_email.send_mail(
         to=to,
-        subject=f"[BDR] Estimate request{subject_suffix} — {proj['name']} ({proj['number']})",
+        subject=f"[BDR] Estimate request{subject_suffix} - {proj['name']} ({proj['number']})",
         body_html=body_html,
         inline_images=[(LOGO_CONTENT_ID, LOGO_FILENAME, logo_bytes(), "image/jpeg")],
         project_id=proj["id"],
@@ -441,7 +474,7 @@ def send_package(
 
 # ── Lifecycle notices (withdrawn / reactivated) ─────────────────────────────
 # No file links: these say the WORK changed state, not that files did. The
-# button lands on the portal home rather than the project — a withdrawn project
+# button lands on the portal home rather than the project - a withdrawn project
 # 403s on its detail route (deps.require_project_assignment), so deep-linking
 # into it would only dead-end the reader.
 
@@ -465,7 +498,7 @@ def render_withdrawn_email(
     it. `note` is the internal reason, included only when the team wrote one."""
     body = (
         f'<p style="margin:0 0 14px;color:{_MUTED};">{_greeting(recipient_name)}</p>'
-        + _project_line(proj, "has been <b>withdrawn</b> — G3 is no longer bidding it.")
+        + _project_line(proj, "has been <b>withdrawn</b> - G3 is no longer bidding it.")
         + _labeled_block("REASON", note)
         + '<p style="margin:0 0 14px;">Please stop work on this estimate. Nothing '
         "further is due from us or from you.</p>"
@@ -482,7 +515,7 @@ def render_reactivated_email(*, proj: dict, recipient_name: str | None) -> str:
     due = proj.get("due_from_estimator_at") or "TBD"
     body = (
         f'<p style="margin:0 0 14px;color:{_MUTED};">{_greeting(recipient_name)}</p>'
-        + _project_line(proj, "is <b>active again</b> — G3 is bidding it after all.")
+        + _project_line(proj, "is <b>active again</b> - G3 is bidding it after all.")
         + '<p style="margin:0 0 6px;">Due back from estimator: '
         f"<b>{html.escape(str(due))}</b></p>"
         + '<p style="margin:14px 0;">Your assignment was never revoked, so the '
@@ -504,7 +537,7 @@ def send_withdrawn(
     """Email one estimator that the bid they hold has been abandoned."""
     return graph_email.send_mail(
         to=to,
-        subject=f"[BDR] Project withdrawn — {proj['name']} ({proj['number']})",
+        subject=f"[BDR] Project withdrawn - {proj['name']} ({proj['number']})",
         body_html=render_withdrawn_email(proj=proj, recipient_name=recipient_name, note=note),
         inline_images=[(LOGO_CONTENT_ID, LOGO_FILENAME, logo_bytes(), "image/jpeg")],
         project_id=proj["id"],
@@ -522,7 +555,7 @@ def send_reactivated(
     """Email one estimator that a withdrawn bid is back on."""
     return graph_email.send_mail(
         to=to,
-        subject=f"[BDR] Project reactivated — {proj['name']} ({proj['number']})",
+        subject=f"[BDR] Project reactivated - {proj['name']} ({proj['number']})",
         body_html=render_reactivated_email(proj=proj, recipient_name=recipient_name),
         inline_images=[(LOGO_CONTENT_ID, LOGO_FILENAME, logo_bytes(), "image/jpeg")],
         project_id=proj["id"],
@@ -554,7 +587,7 @@ def send_updates(
     )
     return graph_email.send_mail(
         to=to,
-        subject=f"[BDR] {updates_label(files)} — {proj['name']} ({proj['number']})",
+        subject=f"[BDR] {updates_label(files)} - {proj['name']} ({proj['number']})",
         body_html=body_html,
         inline_images=[(LOGO_CONTENT_ID, LOGO_FILENAME, logo_bytes(), "image/jpeg")],
         project_id=proj["id"],

@@ -1,0 +1,22 @@
+# vLLM OpenAI-compatible server. Installed by setup.sh (placeholders replaced).
+# The command line lives in __HOME__/vllm/run.sh and every tunable in
+# __HOME__/vllm/vllm.env; edit either and `sudo systemctl restart vllm.service`.
+[Unit]
+Description=vLLM OpenAI-compatible server (self-hosted BDR models)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=__USER__
+WorkingDirectory=__HOME__/vllm
+EnvironmentFile=__HOME__/vllm/vllm.env
+Environment=HOME=__HOME__
+ExecStart=__HOME__/vllm/run.sh
+Restart=always
+RestartSec=10
+# Cold start = weight load + online FP8 quantisation of a 27B model.
+TimeoutStartSec=1800
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

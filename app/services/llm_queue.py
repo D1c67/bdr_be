@@ -27,17 +27,41 @@ fails the job without guessing what happened.
 The domain status rows keep their existing vocabularies: 'pending' covers
 queued and waiting-for-retry, 'running' an attempt in flight. The FE keeps
 polling exactly as before and gets the queue detail alongside.
+
+The RFP Ingestion sandbox (job type 'rfp_ingest', one row per run) rides the
+same table and the same lease/retry machinery but is NOT an LLM job: it
+spawns a subprocess per file for up to hours. Three things keep it from
+starving or blocking the AI work:
+
+- The worker claims in TWO passes per tick, each with its own capacity: the
+  LLM job types against llm_queue_worker_concurrency, then ['rfp_ingest']
+  against rfp_ingest_sandbox_concurrency minus the sandbox runs already in
+  flight here. The claim RPC's job_types filter is what keeps the passes
+  disjoint, so a sandbox run never occupies an LLM slot and vice versa.
+- A running job is exposed to its runner through the `current_job`
+  contextvar so the sandbox monitor loop can renew_lease() every 30 s (a
+  lost renewal means the sweep already handed the job to another worker:
+  the runner kills its child and stops) and requeue_self() on shutdown so
+  the next worker resumes the run instead of waiting out the lease.
+- Failures inside the sandbox runner arrive as app-authored exceptions that
+  declare their own kind (llm_errors.declared_kind); _handle_failure uses
+  the spec's model_label ("sandbox") instead of resolving an LLM route, and
+  its whole body is guarded so an internal error there still reaches the
+  terminal CAS. The spec also supplies its own error_message, so an exception
+  the sandbox never declared is recorded with a sandbox-authored sentence
+  rather than one about "the AI provider" and "the model".
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 from app.core.config import Settings, get_settings
 from app.core.supabase_client import get_supabase
@@ -52,13 +76,50 @@ JOB_BOQ = "boq_extraction"
 JOB_GENERAL_MATERIAL = "general_material"
 JOB_PROPOSAL = "proposal_lines"
 JOB_BID_SPLIT = "bid_split"
+JOB_RFP_INGEST = "rfp_ingest"
+JOB_RFP_HARVEST = "rfp_harvest"
+JOB_PORTAL_SCAN = "rfp_portal_scan"
+JOB_PORTAL_HARVEST = "rfp_portal_harvest"
+JOB_RFP_CREATE_FILES = "rfp_create_files"
+
+# The job types that spend an LLM slot. The sandbox, harvest, portal and
+# promotion types are deliberately not here: each family is claimed in its
+# own pass with its own capacity (see worker_loop).
+LLM_JOB_TYPES = (JOB_BOQ, JOB_GENERAL_MATERIAL, JOB_PROPOSAL, JOB_BID_SPLIT)
+# The portal request stream (docs/RFP_NGEM_PORTAL.md 2.2): the scan and the
+# portal harvest share the harvest capacity with the Procore harvest, one
+# human-paced session per worker at a time.
+PORTAL_JOB_TYPES = (JOB_PORTAL_SCAN, JOB_PORTAL_HARVEST)
+HARVEST_JOB_TYPES = (JOB_RFP_HARVEST,) + PORTAL_JOB_TYPES
+# The RFP creation slice's document promotion (docs/RFP_CREATE.md 5): a
+# storage-streaming job that rides the third pass beside the harvests and
+# counts against the same capacity (minutes of streaming per project).
+CREATE_JOB_TYPES = (JOB_RFP_CREATE_FILES,)
+THIRD_PASS_JOB_TYPES = HARVEST_JOB_TYPES + CREATE_JOB_TYPES
+NON_LLM_JOB_TYPES = (JOB_RFP_INGEST,) + THIRD_PASS_JOB_TYPES
+
+# Model label recorded for sandbox jobs in place of an LLM model name.
+SANDBOX_MODEL_LABEL = "sandbox"
 
 _FEATURE_BY_TYPE = {
     JOB_BOQ: "boq",
     JOB_GENERAL_MATERIAL: "estimate",
     JOB_PROPOSAL: "proposal",
     JOB_BID_SPLIT: "bid_split",
+    JOB_RFP_INGEST: "rfp_ingest",
+    JOB_RFP_HARVEST: "rfp_harvest",
+    JOB_PORTAL_SCAN: "rfp_portal",
+    JOB_PORTAL_HARVEST: "rfp_portal",
+    JOB_RFP_CREATE_FILES: "rfp_create",
 }
+
+# The job whose spec.run is executing on this thread (None outside _execute,
+# including the BackgroundTasks fallback, where renew_lease/requeue_self are
+# no-ops). Set per _execute call; asyncio.to_thread copies the context, so
+# concurrent jobs never see each other's row.
+current_job: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "llm_queue_current_job", default=None
+)
 
 _ACTIVE_STATUSES = ("queued", "running")
 _ERROR_MAX_CHARS = 500
@@ -92,6 +153,29 @@ class _JobSpec:
     run: Callable[[dict], None]  # raises on failure; owns running/done marks
     mark: Callable[[str, dict], None]  # patch the domain status row
     current_status: Callable[[str], str | None]  # domain row's status, None if gone
+    # Label stored with failure messages. Defaults to the feature's active LLM
+    # model (llm.active_model); non-LLM jobs supply their own so no route is
+    # resolved for a feature llm.py has never heard of.
+    model_label: Callable[[Settings], str] | None = None
+    # (exception, model_label) -> the sentence stored in last_error and in the
+    # domain row's error column. Defaults to llm_errors.user_message, which
+    # talks about the AI provider and the model; a non-LLM job supplies its own
+    # so an exception it never declared cannot describe a sandbox run as an
+    # LLM call (or leak developer-facing text from a raw ValueError).
+    error_message: Callable[[Exception, str], str] | None = None
+
+    def __post_init__(self) -> None:
+        if self.error_message is None:
+            object.__setattr__(self, "error_message", llm_errors.user_message)
+        if self.model_label is None:
+            feature = self.feature
+
+            def _active_model(s: Settings) -> str:
+                from app.services import llm
+
+                return llm.active_model(feature, s)
+
+            object.__setattr__(self, "model_label", _active_model)
 
 
 def _row_status(table: str, key_column: str, target_id: str) -> str | None:
@@ -147,6 +231,107 @@ def _spec(job_type: str) -> _JobSpec:
             lambda p: m.execute(p["file_id"], forced_kind=p.get("forced_kind")),
             lambda target, fields: m._mark(target, **fields),
             lambda target: _row_status("bid_split_files", "id", target),
+        )
+    if job_type == JOB_RFP_INGEST:
+        from app.sandbox import protocol
+        from app.services import rfp_ingest as m
+
+        def _rfp_message(exc: Exception, _label: str) -> str:
+            """Sandbox-authored text for every sandbox failure.
+
+            The runner's two exception classes carry sentences the service
+            wrote for users, so those pass through. Anything else escaping
+            execute (a postgrest APIError from a mark, an httpx timeout, a
+            raw ValueError) would otherwise be described by llm_errors as a
+            problem with "the AI provider" and "the model" for a run that
+            never touched an LLM, or stored verbatim as developer-facing
+            text. Same mapping as rfp_ingest.run_in_background, so the queue
+            path and the BackgroundTasks fallback record the same thing.
+            """
+            if isinstance(exc, (m.RfpIngestTransient, m.RfpIngestPermanent)):
+                return str(exc)
+            return protocol.VERDICT_MESSAGES[protocol.FAIL_INTERRUPTED]
+
+        return _JobSpec(
+            "rfp_ingest",
+            # One job per RUN; the payload carries only the run id.
+            lambda p: m.execute(p["run_id"]),
+            # The queue only ever marks {"status": pending|failed, "error"}; the
+            # service's mark is a CAS that ignores marks a canceled or finished
+            # run must not take.
+            lambda target, fields: m.mark_from_queue(
+                target, fields.get("status"), fields.get("error")
+            ),
+            # Maps every terminal run status to 'done' so the AI monitor's
+            # retry refuses; /rfp-ingest/runs/{id}/retry is the only retry path.
+            lambda target: m.current_status(target),
+            model_label=lambda s: SANDBOX_MODEL_LABEL,
+            error_message=_rfp_message,
+        )
+    if job_type == JOB_RFP_HARVEST:
+        from app.services import rfp_harvest as m
+
+        return _JobSpec(
+            "rfp_harvest",
+            # One job per EMAIL row; `force` refreshes a complete harvest.
+            lambda p: m.execute(p["email_id"], force=bool(p.get("force"))),
+            lambda target, fields: m.mark_from_queue(
+                target, fields.get("status"), fields.get("error")
+            ),
+            lambda target: m.current_status(target),
+            model_label=lambda s: m.MODEL_LABEL,
+            error_message=m.error_message,
+        )
+    if job_type == JOB_PORTAL_SCAN:
+        from app.services import rfp_portal_ingest as m
+
+        return _JobSpec(
+            "rfp_portal",
+            # One job per RUN row (docs/RFP_NGEM_PORTAL.md 2.2).
+            lambda p: m.execute_scan(p["run_id"]),
+            lambda target, fields: m.mark_scan_from_queue(
+                target, fields.get("status"), fields.get("error")
+            ),
+            # Every terminal run status maps to 'done' so the AI monitor's
+            # retry refuses; Run now is the retry path.
+            lambda target: m.scan_status(target),
+            model_label=lambda s: m.MODEL_LABEL,
+            error_message=m.error_message,
+        )
+    if job_type == JOB_PORTAL_HARVEST:
+        from app.services import rfp_portal_ingest as m
+
+        return _JobSpec(
+            "rfp_portal",
+            # One job per INVITATION row; `force` refreshes a complete harvest.
+            lambda p: m.execute_harvest(p["invitation_id"], force=bool(p.get("force"))),
+            lambda target, fields: m.mark_harvest_from_queue(
+                target, fields.get("status"), fields.get("error")
+            ),
+            lambda target: m.current_status(target),
+            model_label=lambda s: m.MODEL_LABEL,
+            error_message=m.error_message,
+        )
+    if job_type == JOB_RFP_CREATE_FILES:
+        from app.services import rfp_create_files as m
+
+        return _JobSpec(
+            "rfp_create",
+            # One job per PROJECT (docs/RFP_CREATE.md 5): the harvest's
+            # verified documents into the project's files. `harvest_id` names
+            # the harvest to promote when the payload carries one (4.6's
+            # recent-project link promotes ITS invitation's harvest into a
+            # project whose record belongs to another's); without it the job
+            # falls back to the record's harvest, as it always has.
+            lambda p: m.execute(p["project_id"], harvest_id=p.get("harvest_id")),
+            lambda target, fields: m.mark_from_queue(
+                target, fields.get("status"), fields.get("error")
+            ),
+            # complete and failed both map to 'done' so the AI monitor's
+            # retry refuses; "Retry documents" on the page is the retry path.
+            lambda target: m.current_status(target),
+            model_label=lambda s: m.MODEL_LABEL,
+            error_message=m.error_message,
         )
     raise KeyError(f"Unknown llm job type: {job_type}")
 
@@ -287,16 +472,63 @@ def poll_info(job_type: str, target_id: str) -> dict | None:
 # ── Worker ───────────────────────────────────────────────────────────────
 
 
-def _claim(s: Settings, max_jobs: int) -> list[dict]:
-    resp = get_supabase().rpc(
-        "claim_llm_jobs",
-        {
-            "worker_id": _WORKER_TOKEN,
-            "lease_seconds": s.llm_queue_lease_seconds,
-            "max_jobs": max_jobs,
-        },
-    ).execute()
+def _claim(s: Settings, max_jobs: int, job_types: list[str] | None = None) -> list[dict]:
+    """Claim up to max_jobs due jobs through the claim_llm_jobs RPC. job_types
+    narrows the claim to those types (the RPC's 4th parameter, migration
+    0119); None claims any type, which only the tests and ad-hoc tooling use:
+    the worker loop always names a pass."""
+    params: dict[str, Any] = {
+        "worker_id": _WORKER_TOKEN,
+        "lease_seconds": s.llm_queue_lease_seconds,
+        "max_jobs": max_jobs,
+    }
+    if job_types is not None:
+        params["job_types"] = list(job_types)
+    resp = get_supabase().rpc("claim_llm_jobs", params).execute()
     return resp.data or []
+
+
+def _claim_tick(s: Settings, running_types: Iterable[str]) -> list[dict]:
+    """One tick's claims, in two passes with independent capacities: the LLM
+    job types against llm_queue_worker_concurrency, then the sandbox type
+    against rfp_ingest_sandbox_concurrency. `running_types` is the job type of
+    every job still executing in this process. The sandbox pass is skipped
+    while the feature flag is off (a disabled feature must never spawn a
+    child; its queued jobs wait for the flag or an operator cancel)."""
+    types = list(running_types)
+    claimed: list[dict] = []
+    llm_capacity = s.llm_queue_worker_concurrency - sum(
+        1 for jt in types if jt not in NON_LLM_JOB_TYPES
+    )
+    if llm_capacity > 0:
+        claimed.extend(_claim(s, llm_capacity, list(LLM_JOB_TYPES)))
+    if s.rfp_ingest_enabled:
+        rfp_capacity = s.rfp_ingest_sandbox_concurrency - sum(
+            1 for jt in types if jt == JOB_RFP_INGEST
+        )
+        if rfp_capacity > 0:
+            claimed.extend(_claim(s, rfp_capacity, [JOB_RFP_INGEST]))
+    # Third pass: the harvests (docs/RFP_HARVEST.md 2.2 and
+    # docs/RFP_NGEM_PORTAL.md 2.2), one job per worker by default so each
+    # platform sees one human-paced session at a time. The Procore harvest,
+    # the two portal jobs and the document promotion (docs/RFP_CREATE.md 5)
+    # share the capacity; each family is claimed only while its slice is on
+    # (queued jobs wait for the flag or a cancel). The promotion needs only
+    # the master switch: it streams from storage, never from a platform.
+    harvest_types: list[str] = []
+    if s.rfp_ingest_enabled and s.rfp_harvest_enabled:
+        harvest_types.append(JOB_RFP_HARVEST)
+    if s.rfp_portal_any_enabled:  # NGEM or BuildingConnected (one shared scan job type)
+        harvest_types.extend(PORTAL_JOB_TYPES)
+    if s.rfp_ingest_enabled:
+        harvest_types.extend(CREATE_JOB_TYPES)
+    if harvest_types:
+        harvest_capacity = s.rfp_harvest_concurrency - sum(
+            1 for jt in types if jt in THIRD_PASS_JOB_TYPES
+        )
+        if harvest_capacity > 0:
+            claimed.extend(_claim(s, harvest_capacity, harvest_types))
+    return claimed
 
 
 def _cas_job(sb: Any, job: dict, fields: dict) -> bool:
@@ -319,6 +551,68 @@ def _cas_job(sb: Any, job: dict, fields: dict) -> bool:
     return bool(resp.data)
 
 
+def renew_lease(job: dict | None = None) -> bool:
+    """Extend the lease of the job executing on this thread (or `job`) by
+    another llm_queue_lease_seconds. Long runners (the sandbox monitor loop)
+    call this every 30 s so the sweep never mistakes live work for a crash.
+
+    Returns False when the CAS loses: the attempt is stale (the lease expired
+    and the job was requeued and reclaimed, possibly by this very process
+    with a higher attempts count), the job is no longer running, or it is not
+    ours. The runner must treat False as "stop now": its writes would be
+    fenced out anyway and a second worker may already own the run. Returns
+    True with no write when no job is current (the BackgroundTasks fallback).
+
+    Never raises. A transport failure is not a lost lease: the lease still
+    has most of its window left, the next renewal retries, and the sweep is
+    the backstop if the database stays unreachable for the whole lease.
+    """
+    job = job if job is not None else current_job.get()
+    if job is None:
+        return True
+    try:
+        lease = (_now() + timedelta(seconds=get_settings().llm_queue_lease_seconds)).isoformat()
+        return _cas_job(get_supabase(), job, {"lease_expires_at": lease})
+    except Exception:  # noqa: BLE001 - a DB hiccup must not abort hours of work
+        logger.exception("llm queue: lease renewal for %s errored; keeping the lease", job["id"])
+        return True
+
+
+def requeue_self(job: dict | None = None) -> bool:
+    """Hand the job executing on this thread (or `job`) back to the queue as
+    interrupted, due immediately, so the next worker (or this one after a
+    restart) resumes it. Used by the sandbox runner on shutdown: it kills its
+    child, leaves the domain rows as they are (the run's own CAS marks carry
+    the resume state) and returns normally; _execute then sees the job is no
+    longer running and skips its success mark.
+
+    The requeue is fenced like every other write (status running, our token,
+    our attempt), so a job the sweep already requeued is left alone. Returns
+    the CAS outcome; True with no write when no job is current.
+    """
+    job = job if job is not None else current_job.get()
+    if job is None:
+        return True
+    ok = _cas_job(
+        get_supabase(),
+        job,
+        {
+            "status": "queued",
+            "next_attempt_at": _now().isoformat(),
+            "claimed_by": None,
+            "lease_expires_at": None,
+            "error_kind": "interrupted",
+            "last_error": _INTERRUPTED_MESSAGE,
+        },
+    )
+    if ok:
+        # Mirror the row locally so _execute's success path knows the job
+        # was handed on and does not log a spurious lost-lease warning.
+        job["status"] = "queued"
+        logger.warning("llm queue: job %s requeued itself (shutdown)", job["id"])
+    return ok
+
+
 def _mark_domain(spec: _JobSpec, job: dict, fields: dict) -> None:
     try:
         spec.mark(job["target_id"], fields)
@@ -329,40 +623,125 @@ def _mark_domain(spec: _JobSpec, job: dict, fields: dict) -> None:
 
 
 def _execute(job: dict) -> None:
-    """Run one claimed job to a terminal or requeued state. Never raises."""
+    """Run one claimed job to a terminal or requeued state. Never raises:
+    the failure handler is guarded end to end and the success mark's own
+    database error is logged (the sweep requeues the job when its lease
+    expires, and the rerun is idempotent)."""
     s = get_settings()
     spec = _spec(job["job_type"])
     sb = get_supabase()
+    token = current_job.set(job)
     try:
         with llm_gate.tier(llm_gate.TIER_JOB, job_id=job["id"]):
             spec.run(job.get("payload") or {})
     except Exception as exc:  # noqa: BLE001 - classified below
         _handle_failure(sb, job, spec, exc, s)
         return
-    if not _cas_job(
-        sb,
-        job,
-        {
-            "status": "succeeded",
-            "finished_at": _now().isoformat(),
-            "lease_expires_at": None,
-            "claimed_by": None,
-        },
-    ):
+    finally:
+        current_job.reset(token)
+    if job.get("status") == "queued":
+        # requeue_self() handed the job on (shutdown); nothing left to mark.
+        return
+    try:
+        succeeded = _cas_job(
+            sb,
+            job,
+            {
+                "status": "succeeded",
+                "finished_at": _now().isoformat(),
+                "lease_expires_at": None,
+                "claimed_by": None,
+            },
+        )
+    except Exception:  # noqa: BLE001 - _execute never raises
+        logger.exception("llm queue: success mark for %s errored", job["id"])
+        return
+    if not succeeded:
         # The lease expired mid-run and the sweep requeued the job. The work
         # itself completed (the domain row says done); the requeued run will
         # re-do it idempotently. Rare: lease >> real runtimes.
         logger.warning("llm queue: lost lease on %s before completion", job["id"])
 
 
+_HANDLER_FAILED_MESSAGE = (
+    "The run failed and its error could not be recorded. Run it again; if "
+    "this keeps happening, contact your IT Director."
+)
+
+
+def _is_lease_lost(exc: BaseException) -> bool:
+    """True for rfp_sandbox_runner.LeaseLost without importing the runner
+    (it must stay optional here): match the class by name and module, or an
+    explicit `llm_queue_lease_lost` attribute, and fall back to isinstance
+    only when the runner module imports cleanly."""
+    if getattr(exc, "llm_queue_lease_lost", False) is True:
+        return True
+    cls = type(exc)
+    if cls.__name__ == "LeaseLost" and cls.__module__.endswith("rfp_sandbox_runner"):
+        return True
+    try:
+        from app.services.rfp_sandbox_runner import LeaseLost
+    except Exception:  # noqa: BLE001 - the runner is optional to this module
+        return False
+    return isinstance(exc, LeaseLost)
+
+
 def _handle_failure(
     sb: Any, job: dict, spec: _JobSpec, exc: Exception, s: Settings
 ) -> None:
-    from app.services import llm
+    """Requeue or terminally fail a job whose run raised. Never raises: an
+    error inside the classification or the domain mark still reaches a
+    terminal CAS, so a job can never be left running with a live lease and
+    no worker (the sweep would eventually catch it, but with a misleading
+    'interrupted' verdict instead of the real failure)."""
+    if _is_lease_lost(exc):
+        # The sweep already requeued the job and another claim owns it; our
+        # fence would refuse every write anyway, and the domain row belongs
+        # to the new owner. Leave everything alone.
+        logger.warning(
+            "llm queue: job %s (%s) lost its lease mid-run; no writes",
+            job["id"],
+            job["job_type"],
+        )
+        return
+    try:
+        _handle_failure_inner(sb, job, spec, exc, s)
+    except Exception:  # noqa: BLE001 - the terminal CAS below is the last resort
+        logger.exception(
+            "llm queue: failure handling for %s (%s) errored; forcing terminal state",
+            job["id"],
+            job["job_type"],
+        )
+        try:
+            # Fenced on status=running: a job the inner handler already
+            # requeued or failed before erroring is left as it is, domain
+            # row included (its new owner, or the earlier mark, governs it).
+            forced = _cas_job(
+                sb,
+                job,
+                {
+                    "status": "failed",
+                    "finished_at": _now().isoformat(),
+                    "lease_expires_at": None,
+                    "claimed_by": None,
+                    "error_kind": llm_errors.KIND_UNKNOWN,
+                    "last_error": _HANDLER_FAILED_MESSAGE,
+                },
+            )
+            if forced:
+                _mark_domain(
+                    spec, job, {"status": "failed", "error": _HANDLER_FAILED_MESSAGE}
+                )
+        except Exception:  # noqa: BLE001 - nothing left to try; the sweep is the backstop
+            logger.exception("llm queue: terminal CAS for %s errored", job["id"])
 
+
+def _handle_failure_inner(
+    sb: Any, job: dict, spec: _JobSpec, exc: Exception, s: Settings
+) -> None:
     kind = llm_errors.classify(exc)
-    model = llm.active_model(spec.feature, s)
-    message = llm_errors.user_message(exc, model)[:_ERROR_MAX_CHARS]
+    model = spec.model_label(s)
+    message = spec.error_message(exc, model)[:_ERROR_MAX_CHARS]
     attempt = job.get("attempts") or 1
     delays = s.llm_retry_delay_list
 
@@ -488,11 +867,23 @@ def _sweep(s: Settings) -> None:
     global _last_prune
     if time.monotonic() - _last_prune >= _PRUNE_EVERY_SECONDS:
         _last_prune = time.monotonic()
-        cutoff = (_now() - timedelta(days=s.llm_call_log_retention_days)).isoformat()
-        sb.table("llm_call_log").delete().lt("created_at", cutoff).execute()
-        sb.table("llm_jobs").delete().lt("created_at", cutoff).in_(
-            "status", ["succeeded", "failed", "canceled"]
-        ).execute()
+        try:
+            cutoff = (_now() - timedelta(days=s.llm_call_log_retention_days)).isoformat()
+            sb.table("llm_call_log").delete().lt("created_at", cutoff).execute()
+            sb.table("llm_jobs").delete().lt("created_at", cutoff).in_(
+                "status", ["succeeded", "failed", "canceled"]
+            ).execute()
+        except Exception:  # noqa: BLE001 - one prune must not skip the other
+            logger.exception("llm queue: ledger prune failed")
+        if s.rfp_ingest_enabled:
+            # Sandbox retention: derived outputs + quarantine copies of runs
+            # past rfp_ingest_retention_days (rows and manifests are kept).
+            try:
+                from app.services import rfp_ingest
+
+                rfp_ingest.prune_expired()
+            except Exception:  # noqa: BLE001 - retention must never wedge the sweep
+                logger.exception("llm queue: rfp ingest retention prune failed")
 
 
 # ── Monitor actions ──────────────────────────────────────────────────────
@@ -568,6 +959,53 @@ def cancel(job_id: str) -> dict | None:
     return job
 
 
+_RESTORED_MESSAGE = "The project was deleted while this AI job was in flight. Run it again."
+
+
+def release_restored_project_jobs(project_id: str) -> int:
+    """After a project restore (docs/PROJECT_DELETE.md 4.3): the snapshot
+    brings back jobs that were queued or running at delete time, but their
+    worker and lease are long gone. Fail them (and their pending/running
+    domain rows) so nothing reruns on its own and users can start again.
+    Returns how many jobs were released."""
+    sb = get_supabase()
+    stranded = (
+        sb.table("llm_jobs")
+        .select("*")
+        .eq("project_id", project_id)
+        .in_("status", list(_ACTIVE_STATUSES))
+        .execute()
+    ).data or []
+    released = 0
+    for job in stranded:
+        resp = (
+            sb.table("llm_jobs")
+            .update(
+                {
+                    "status": "failed",
+                    "finished_at": _now().isoformat(),
+                    "claimed_by": None,
+                    "lease_expires_at": None,
+                    "error_kind": "interrupted",
+                    "last_error": _RESTORED_MESSAGE,
+                }
+            )
+            .eq("id", job["id"])
+            .in_("status", list(_ACTIVE_STATUSES))
+            .execute()
+        )
+        if resp.data:
+            released += 1
+            try:
+                spec = _spec(job["job_type"])
+            except KeyError:
+                logger.warning("llm queue: restored job %s has unknown type %s",
+                               job["id"], job["job_type"])
+                continue
+            _mark_domain(spec, job, {"status": "failed", "error": _RESTORED_MESSAGE})
+    return released
+
+
 _DISABLED_MESSAGE = "The AI queue was disabled. Run it again."
 
 
@@ -617,17 +1055,16 @@ async def worker_loop() -> None:
     Mirrors the polling_loop convention (sync work via asyncio.to_thread,
     a tick can never kill the loop)."""
     logger.info("llm queue worker started (token %s)", _WORKER_TOKEN[:8])
-    running: set[asyncio.Task] = set()
+    # task -> job_type, so each claim pass can count only its own kind.
+    running: dict[asyncio.Task, str] = {}
     while True:
         s = get_settings()
         try:
             await asyncio.to_thread(_sweep, s)
-            capacity = s.llm_queue_worker_concurrency - len(running)
-            if capacity > 0:
-                for job in await asyncio.to_thread(_claim, s, capacity):
-                    task = asyncio.create_task(asyncio.to_thread(_execute, job))
-                    running.add(task)
-                    task.add_done_callback(running.discard)
+            for job in await asyncio.to_thread(_claim_tick, s, list(running.values())):
+                task = asyncio.create_task(asyncio.to_thread(_execute, job))
+                running[task] = job["job_type"]
+                task.add_done_callback(lambda t: running.pop(t, None))
         except Exception:  # noqa: BLE001 - a bad tick must not kill the loop
             logger.exception("llm queue tick failed")
         await asyncio.sleep(max(0.5, float(s.llm_queue_poll_interval_seconds)))

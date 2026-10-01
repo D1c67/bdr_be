@@ -1,12 +1,13 @@
 """Saved New Bid drafts. The intake form parked before the project exists:
 saving a draft has NO side effects (no project row, no number reservation, no
-emails), and only name + number are required. Everything else the form holds
-rides in an opaque `data` blob the frontend re-loads verbatim.
+emails), and only the name is required. Everything else the form holds rides
+in an opaque `data` blob the frontend re-loads verbatim.
 
 Drafts are a shared team resource, same trust model as projects: any writer may
-list, read, update or delete any draft. A draft reserves nothing - the number
-is deliberately not unique here, POST /projects still 409s a duplicate at
-create time.
+list, read, update or delete any draft. A draft reserves nothing: the project
+number is assigned by the server when the draft becomes a project (0130,
+docs/RFP_CREATE.md section 2), so `number` is optional here and only old
+drafts still carry one (the list keeps returning it).
 
 The one field the backend looks inside the blob for is the confidential actual
 (to-GC) bid date, `data.fields.actual_bid_at`: responses strip it for roles
@@ -15,8 +16,8 @@ ACTUAL_BID_EDITOR_ROLES can neither set, change nor clear it - a PUT carries
 the stored value forward untouched.
 
 Files (0109): a draft also holds the files attached in the New Bid modal,
-limited to the intake package categories (drawing, electrical_drawing,
-specification, addendum). Objects are stored under `drafts/{draft_id}/` in the
+limited to the intake package categories (INITIAL_CATEGORIES: every drawing
+set, specification and rfp, plus addendum). Objects are stored under `drafts/{draft_id}/` in the
 same bucket as project files, with the same `{category}/{uuid}-{name}` key
 scheme. Addendum metadata (number, issue date, doc_type) is OPTIONAL at draft
 stage - a draft saves incomplete work - but validated whenever present, and a
@@ -57,7 +58,7 @@ from app.core.file_categories import (
 from app.core.ratelimit import upload_rate_limit
 from app.core.roles import ACTUAL_BID_EDITOR_ROLES, ACTUAL_BID_VIEWER_ROLES, Role
 from app.core.supabase_client import get_supabase
-from app.services import office_preview, storage
+from app.services import files_needed, office_preview, storage
 from app.services.notifications import audit
 
 router = APIRouter(prefix="/bid-drafts", tags=["bid-drafts"])
@@ -220,18 +221,26 @@ def _list_draft_files(draft_id: UUID) -> list[dict]:
 
 class BidDraftIn(BaseModel):
     name: str = Field(min_length=1, max_length=DRAFT_NAME_MAX)
-    number: str = Field(min_length=1, max_length=DRAFT_NUMBER_MAX)
+    # Optional since 0130 (numbers are assigned on save, never typed); a blank
+    # reads as absent.
+    number: str | None = Field(None, max_length=DRAFT_NUMBER_MAX)
     # The rest of the intake form, verbatim. Opaque to the backend except for
     # the actual_bid_at rules below; any JSON object is accepted.
     data: dict = Field(default_factory=dict)
 
-    @field_validator("name", "number")
+    @field_validator("name")
     @classmethod
     def _not_blank(cls, v: str) -> str:
         v = v.strip()
         if not v:
             raise ValueError("Cannot be empty")
         return v
+
+    @field_validator("number")
+    @classmethod
+    def _blank_number_is_none(cls, v: str | None) -> str | None:
+        v = (v or "").strip()
+        return v or None
 
 
 def _strip_actual_bid_at(data: dict) -> dict:
@@ -670,6 +679,9 @@ def transfer_draft(
             audit(user.id, "file.upload", "project_file", row["id"], audit_payload)
             if convertible:
                 background.add_task(office_preview.generate_preview, row["id"])
+            # The files flag (docs/RFP_BUILDINGCONNECTED.md 3.8): a landed
+            # drawing or specification satisfies it. Best effort in the service.
+            files_needed.clear_if_satisfied(get_supabase(), project_id, f["category"], user.id)
 
         # Retire the draft row the moment its file is safely on the project -
         # this is what makes a retry only process the remainder.

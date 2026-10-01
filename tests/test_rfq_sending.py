@@ -87,7 +87,9 @@ def test_reply_notice_token_is_a_substring_of_the_notice():
 
 def test_build_base_body_with_drawings_link():
     body = rs.build_base_body("Jane", "Friday, June 19th 2:00 PM", "https://1drv.ms/x")
-    assert "The drawings are available here: https://1drv.ms/x" in body
+    # The link sentence names both document sets since 0132 (specs ride every
+    # default set), so the vendor knows the folder is not drawings alone.
+    assert "The drawings and specifications are available here: https://1drv.ms/x" in body
 
 
 def test_is_trenching():
@@ -118,7 +120,7 @@ def test_build_custom_body_keeps_pes_own_reply_wording():
 
 def test_build_custom_body_appends_missing_drawings_link():
     out = rs.build_custom_body("Hi <Contact Name>", "Jane", "https://1drv.ms/x")
-    assert "The drawings are available here: https://1drv.ms/x" in out
+    assert f"{rs.DOCUMENTS_LINK_SENTENCE} https://1drv.ms/x" in out
 
 
 def test_build_custom_body_keeps_existing_drawings_link():
@@ -432,7 +434,7 @@ def test_send_one_ccs_same_company_contacts(monkeypatch):
         ),
     )
     monkeypatch.setattr(rs.graph_email, "add_attachment", lambda *a, **k: None)
-    monkeypatch.setattr(rs.graph_email, "send_draft", lambda _id: None)
+    monkeypatch.setattr(rs.graph_email, "send_draft", lambda _id, **k: None)
     monkeypatch.setattr(rs, "vary_email_body", lambda base, must_contain: base)
     monkeypatch.setattr(rs, "audit", lambda *a, **k: None)
     sb = _FakeSB()
@@ -474,7 +476,7 @@ def test_send_one_pins_reply_notice_through_the_rewrite(monkeypatch):
         ),
     )
     monkeypatch.setattr(rs.graph_email, "add_attachment", lambda *a, **k: None)
-    monkeypatch.setattr(rs.graph_email, "send_draft", lambda _id: None)
+    monkeypatch.setattr(rs.graph_email, "send_draft", lambda _id, **k: None)
     monkeypatch.setattr(
         rs,
         "vary_email_body",
@@ -511,7 +513,7 @@ def test_send_one_without_cc_keeps_single_recipient(monkeypatch):
         ),
     )
     monkeypatch.setattr(rs.graph_email, "add_attachment", lambda *a, **k: None)
-    monkeypatch.setattr(rs.graph_email, "send_draft", lambda _id: None)
+    monkeypatch.setattr(rs.graph_email, "send_draft", lambda _id, **k: None)
     monkeypatch.setattr(rs, "vary_email_body", lambda base, must_contain: base)
     monkeypatch.setattr(rs, "audit", lambda *a, **k: None)
     sb = _FakeSB()
@@ -547,7 +549,7 @@ def test_send_one_ccs_the_bids_desk_with_no_vendor_ccs(monkeypatch):
         ),
     )
     monkeypatch.setattr(rs.graph_email, "add_attachment", lambda *a, **k: None)
-    monkeypatch.setattr(rs.graph_email, "send_draft", lambda _id: None)
+    monkeypatch.setattr(rs.graph_email, "send_draft", lambda _id, **k: None)
     monkeypatch.setattr(rs, "vary_email_body", lambda base, must_contain: base)
     monkeypatch.setattr(rs, "audit", lambda *a, **k: None)
     sb = _FakeSB()
@@ -785,3 +787,195 @@ def test_bulk_send_trenching_default_swaps_split_for_markup(monkeypatch):
     # The Trenching split was never even fetched from storage.
     assert fetched_split_ids == ["f-light-split"]
     assert all(r["status"] == "sent" for r in result["results"])
+
+
+# ── Specifications on every RFQ (0132, docs/RFP_SPLIT.md section 5.1) ───────
+
+
+def test_prepare_drawings_adds_the_specifications(monkeypatch):
+    """Every default set carries the project's specs alongside the drawings,
+    through the same inline/link decision."""
+    by_cat = {
+        "electrical_drawing": [{"filename": "E-201.pdf", "content": b"e"}],
+        "drawing": [{"filename": "full-set.pdf", "content": b"g"}],
+        "specification": [
+            {"filename": "Div 26.pdf", "content": b"s"},
+            {"filename": "Div 27.pdf", "content": b"s"},
+        ],
+    }
+    monkeypatch.setattr(rs, "_load_files", lambda sb, pid, cat: list(by_cat.get(cat, [])))
+    atts, link = rs._prepare_drawings(None, _PROJECT)
+    assert [f["filename"] for f in atts] == ["E-201.pdf", "Div 26.pdf", "Div 27.pdf"]
+    assert link is None
+
+
+def test_prepare_drawings_specs_ride_the_same_folder_link(monkeypatch):
+    """Over the inline limit, drawings AND specs go into the one anonymous
+    folder: the email promises a single link, not one per document set."""
+    monkeypatch.setattr(
+        rs,
+        "get_settings",
+        lambda: Settings(_env_file=None, rfq_drawings_inline_limit_mb=1),
+    )
+    by_cat = {
+        "electrical_drawing": [{"filename": "E-201.pdf", "content": b"x" * (1024 * 1024)}],
+        "specification": [{"filename": "Div 26.pdf", "content": b"y" * (1024 * 1024)}],
+    }
+    monkeypatch.setattr(rs, "_load_files", lambda sb, pid, cat: list(by_cat.get(cat, [])))
+    uploaded: list[str] = []
+    monkeypatch.setattr(
+        rs.graph_email, "drive_upload", lambda path, content: uploaded.append(path)
+    )
+    monkeypatch.setattr(rs.graph_email, "drive_get_item_id", lambda folder: f"id:{folder}")
+    monkeypatch.setattr(rs.graph_email, "drive_create_link", lambda item: f"link:{item}")
+    atts, link = rs._prepare_drawings(None, _PROJECT)
+    assert atts == []
+    assert link == "link:id:BDR/26-104/drawings"
+    assert uploaded == [
+        "BDR/26-104/drawings/E-201.pdf",
+        "BDR/26-104/drawings/Div 26.pdf",
+    ]
+
+
+def test_prepare_drawings_specs_count_toward_the_total_cap(monkeypatch):
+    monkeypatch.setattr(
+        rs,
+        "get_settings",
+        lambda: Settings(
+            _env_file=None,
+            rfq_drawings_inline_limit_mb=1,
+            rfq_attachments_total_limit_mb=3,
+        ),
+    )
+    by_cat = {
+        "electrical_drawing": [{"filename": "E-201.pdf", "content": b"x" * (2 * 1024 * 1024)}],
+        "specification": [{"filename": "Div 26.pdf", "content": b"y" * (2 * 1024 * 1024)}],
+    }
+    monkeypatch.setattr(rs, "_load_files", lambda sb, pid, cat: list(by_cat.get(cat, [])))
+    with pytest.raises(ValueError, match="drawings and specifications"):
+        rs._prepare_drawings(None, _PROJECT)
+
+
+def test_bulk_send_trenching_also_carries_the_specs(monkeypatch):
+    """Trenching is explicitly included: markup + drawings + specs."""
+    project = {
+        "id": "p1", "number": "26-104", "name": "X",
+        "due_from_vendors_at": "2026-08-10T17:00:00Z", "actual_bid_at": None,
+    }
+    rfq = {
+        "id": "r-trench", "split_file_id": None,
+        "material_categories": {"name": "Trenching"},
+    }
+
+    def handler_for(table):
+        def handle(calls):
+            if table == "projects":
+                return project
+            if table == "rfqs":
+                return [] if any(n == "update" for n, _ in calls) else [rfq]
+            if table == "vendor_contacts":
+                return [{"id": "c1", "name": "Jane", "email": "j@x.com", "vendor_id": "v1"}]
+            raise AssertionError(f"unexpected table {table}")
+
+        return handle
+
+    class _SB:
+        def table(self, name):
+            return _RecordingQuery(handler_for(name))
+
+    import app.core.supabase_client as sbc
+
+    monkeypatch.setattr(sbc, "get_supabase", lambda: _SB())
+    by_cat = {
+        "electrical_drawing": [{"filename": "E-201.pdf", "content": b"e"}],
+        "specification": [{"filename": "Div 26.pdf", "content": b"s"}],
+        "markup": [{"filename": "Trench Markup.pdf", "content": b"m"}],
+    }
+    monkeypatch.setattr(rs, "_load_files", lambda sb, pid, cat: list(by_cat.get(cat, [])))
+    monkeypatch.setattr(rs, "_as_immutable_pdf", lambda f: f)
+    monkeypatch.setattr(rs.time, "sleep", lambda s: None)
+    sent = []
+
+    def fake_send_one(sb, **kw):
+        sent.append(kw)
+        return {"rfq_id": kw["rfq"]["id"], "vendor_contact_id": "c1", "status": "sent"}
+
+    monkeypatch.setattr(rs, "_send_one", fake_send_one)
+    rs.bulk_send(
+        "p1",
+        [{"rfq_id": "r-trench", "vendor_contact_ids": ["c1"], "attachment_file_ids": None}],
+        "u1",
+    )
+    assert [f["filename"] for f in sent[0]["attachments"]] == [
+        "E-201.pdf", "Div 26.pdf", "Trench Markup.pdf",
+    ]
+
+
+def test_files_query_drops_source_sets_and_unsent_drafts():
+    """Every default-attachment read filters `is_source_set` (0132) as well as
+    the unsent-estimator-draft guard."""
+    q = _RecordingQuery(lambda calls: [])
+    rs._files_query(_SBOne(q), "p1", "specification").execute()
+    assert ("eq", ("is_source_set", False)) in q._calls
+    assert any(n == "or_" for n, _ in q._calls)
+
+
+class _SBOne:
+    def __init__(self, q):
+        self._q = q
+
+    def table(self, name):
+        assert name == "project_files"
+        return self._q
+
+
+def test_default_attachments_payload_sections(monkeypatch):
+    """The Modify Files payload: one pre-checked section per block, specs
+    included on every category, `file_ids` = the sections concatenated."""
+    rows_by_cat = {
+        "electrical_drawing": [{"id": "e1", "filename": "E-201.pdf"}],
+        "drawing": [{"id": "g1", "filename": "full-set.pdf"}],
+        "specification": [{"id": "s1", "filename": "Div 26.pdf"}],
+        "markup": [{"id": "m1", "filename": "Trench Markup.pdf"}],
+    }
+    rfqs = [
+        {"id": "r-light", "split_file_id": "bom1", "material_categories": {"name": "Lighting"}},
+        {"id": "r-trench", "split_file_id": "bom2", "material_categories": {"name": "Trenching"}},
+    ]
+
+    class _SB:
+        def table(self, name):
+            if name == "rfqs":
+                return _RecordingQuery(lambda calls: rfqs)
+            return _RecordingQuery(
+                lambda calls: list(rows_by_cat.get(_eq_arg(calls, "category"), []))
+            )
+
+    monkeypatch.setattr(
+        rs, "_files_query", lambda sb, pid, cat: _RecordingQuery(
+            lambda calls: list(rows_by_cat.get(cat, []))
+        )
+    )
+    payload = rs.default_attachments(_SB(), "p1")
+    assert payload["drawings_category"] == "electrical_drawing"
+    light = payload["by_rfq"]["r-light"]
+    assert light["trenching"] is False
+    assert light["file_ids"] == ["bom1", "e1", "s1"]
+    assert [(s["key"], s["label"], s["file_ids"]) for s in light["sections"]] == [
+        ("counts", "BOM split", ["bom1"]),
+        ("drawings", "Electrical drawings", ["e1"]),
+        ("specifications", "Specifications", ["s1"]),
+    ]
+    trench = payload["by_rfq"]["r-trench"]
+    assert trench["trenching"] is True
+    # No BOM split for Trenching; the markup section takes its place, and the
+    # specs are there for both.
+    assert trench["file_ids"] == ["e1", "s1", "m1"]
+    assert [s["key"] for s in trench["sections"]] == ["drawings", "specifications", "markup"]
+
+
+def test_drawings_link_leads_the_body():
+    body = rs.build_base_body("Jane", "Friday, June 19th 2:00 PM", "https://1drv.ms/x")
+    assert body.index("https://1drv.ms/x") < body.index("Can you please")
+    custom = rs.build_custom_body("Hi <Contact Name>,\n\nPlease quote.", "Jane", "https://1drv.ms/x")
+    assert custom.startswith("Hi Jane,\n\nThe drawings and specifications are available here:")

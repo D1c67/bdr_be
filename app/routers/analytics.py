@@ -18,6 +18,7 @@ from app.core.roles import INTERNAL_ROLES
 from app.core.supabase_client import get_supabase
 from app.services import analytics_metrics as metrics
 from app.services import bid_invitations as bi
+from app.services import calling_in as calling_in_service
 from app.services import labor_engineer_report as ler
 from app.services.analytics_metrics import WindowData
 from app.services.bid_invitations_excel import build_bid_invitations_workbook
@@ -258,6 +259,34 @@ def activity(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
 
+# ── Calling In (docs/CALLING_IN.md section 6) ──────────────────────────────
+
+
+@router.get("/calling-in", dependencies=[Depends(report_rate_limit)])
+def calling_in(
+    range_: str = RangeParam,
+    start: str | None = None,
+    end: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Call-rate analytics over (project, GC, round) slots, each anchored on
+    when its call window opened (pre_bid: that GC's sent_at; post_bid: the
+    effective actual bid time); windows not open yet are left out, and a
+    missed slot counts only when its window closed at or after the go-live
+    marker (call_in_meta). The custom range takes `start`/`end` (the
+    contract) or `date_from`/`date_to` (what the other windowed routes take);
+    `start`/`end` win when both are sent. The payload carries no bid_at
+    field."""
+    _gate(user)
+    try:
+        df, dt = metrics.resolve_range(range_, start or date_from, end or date_to)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return calling_in_service.load_analytics(df, dt)
+
+
 # ── Bid Invitations report ─────────────────────────────────────────────────
 #
 # Calendar-anchored ranges (unlike the rolling windows above) with the *-to-date
@@ -314,7 +343,7 @@ def bid_invitations_export(
 # ── Estimating Engineer (Labor) dashboard ──────────────────────────────────
 
 
-@router.get("/labor-engineer")
+@router.get("/labor-engineer", dependencies=[Depends(report_rate_limit)])
 def labor_engineer(
     search: str | None = None,
     limit: int = Query(50, ge=1, le=200),
@@ -328,7 +357,7 @@ def labor_engineer(
     return ler.report(search, limit, offset, user.role)
 
 
-@router.get("/projects/{project_id}")
+@router.get("/projects/{project_id}", dependencies=[Depends(report_rate_limit)])
 def project_detail(
     project_id: str,
     range_: str = RangeParam,

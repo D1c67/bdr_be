@@ -11,6 +11,7 @@ import time
 import uuid
 
 import httpx
+from storage3.exceptions import StorageApiError
 
 from app.core.config import get_settings
 from app.core.supabase_client import get_supabase
@@ -67,10 +68,47 @@ def build_submittal_object_path(filename: str) -> str:
     return f"submittal-bank/{uuid.uuid4().hex}-{safe_key_component(filename)}"
 
 
+def _upload_options(content_type: str, upsert: bool) -> dict:
+    # A fresh dict per attempt: storage3 pops keys out of the one it is given.
+    return {"content-type": content_type, "upsert": "true" if upsert else "false"}
+
+
 def upload_file(path: str, content: bytes, content_type: str, *, upsert: bool = False) -> None:
-    get_supabase().storage.from_(BUCKET).upload(
-        path, content, {"content-type": content_type, "upsert": "true" if upsert else "false"}
-    )
+    """Upload `content` at `path`. A dropped connection (httpx.TransportError,
+    e.g. ReadError / WriteError "[SSL: SSLV3_ALERT_BAD_RECORD_MAC]") is
+    retried on a fresh one, up to `_TRANSFER_ATTEMPTS` with the same backoff
+    as `download_file`; the last error is raised. storage3 (2.30) does not
+    wrap transport errors (its `_request` converts only HTTPStatusError into
+    StorageApiError), so httpx.TransportError is what reaches us.
+
+    The first attempt keeps the caller's `upsert`; every retry upserts: the
+    failed attempt may have landed the object server side before the
+    connection died, and the path is ours (every caller mints it, most with
+    a fresh uuid), so overwriting it with the same bytes is the right answer
+    where a non-upsert retry would 409 "The resource already exists".
+
+    Only in-memory bytes are retried: a file object would resume from
+    wherever the failed attempt left its position."""
+    retryable = isinstance(content, (bytes, bytearray, memoryview))
+    attempts = _TRANSFER_ATTEMPTS if retryable else 1
+    for attempt in range(1, attempts + 1):
+        try:
+            get_supabase().storage.from_(BUCKET).upload(
+                path, content, _upload_options(content_type, upsert or attempt > 1)
+            )
+            return
+        except httpx.TransportError:
+            if attempt == attempts:
+                raise
+            logger.warning(
+                "storage upload of %s (%d bytes) dropped (attempt %d/%d); retrying",
+                path,
+                len(content),
+                attempt,
+                attempts,
+            )
+            time.sleep(_TRANSFER_BACKOFF_S * attempt)
+    raise AssertionError("unreachable")
 
 
 def signed_url(
@@ -138,6 +176,20 @@ def delete_file(path: str) -> None:
 _LIST_PAGE = 1000
 
 
+def _held_by_deleted_project(project_id: str) -> bool:
+    """Whether an open (not restored) deleted_projects archive names this
+    project. A failed read counts as held: keeping objects is the safe side."""
+    try:
+        rows = (
+            get_supabase().table("deleted_projects").select("id")
+            .eq("project_id", project_id).is_("restored_at", "null").limit(1).execute()
+        ).data or []
+    except Exception:  # noqa: BLE001
+        logger.exception("storage: deleted-project check failed for %s", project_id)
+        return True
+    return bool(rows)
+
+
 def delete_project_prefix(project_id: str) -> None:
     """Remove EVERY object under `{project_id}/` — uploads and preview
     derivatives alike.
@@ -151,7 +203,15 @@ def delete_project_prefix(project_id: str) -> None:
     all live exactly two levels deep: `{project_id}/{category}/{object}` and
     `{project_id}/previews/{file_id}.pdf`. PM-era paths are THREE levels
     (`{project_id}/pm/{category}/{object}`) and would be missed — don't reuse
-    this for projects past intake without making the walk recursive."""
+    this for projects past intake without making the walk recursive.
+
+    Never sweeps a project that sits in the Deleted Projects archive awaiting
+    a restore (docs/PROJECT_DELETE.md 8): a delete keeps every object under
+    `{project_id}/` so the restore gets its files back, and nothing may reclaim
+    them while that archive is open."""
+    if _held_by_deleted_project(project_id):
+        logger.warning("storage: not sweeping %s, a deleted-project archive holds it", project_id)
+        return
     store = get_supabase().storage.from_(BUCKET)
 
     def _list_all(prefix: str) -> list[dict]:
@@ -205,8 +265,43 @@ def copy_file(from_path: str, to_path: str) -> None:
     """Copy an object within the bucket (server-side; the bytes never travel
     through the app). Used by the bid-split training capture to preserve a
     source PDF under `bid-splits/training/{file_id}/` so the example outlives
-    the job's deletion sweep."""
-    get_supabase().storage.from_(BUCKET).copy(from_path, to_path)
+    the job's deletion sweep, and by the RFP split promotion to file each
+    segment on its project.
+
+    A dropped connection is retried like `upload_file`. A copy has no upsert,
+    so a retry that answers "already exists" (409 Duplicate) means the failed
+    attempt landed the copy before the connection died: that is success. A
+    409 on the FIRST attempt is still raised (the destination was taken
+    before we started)."""
+    for attempt in range(1, _TRANSFER_ATTEMPTS + 1):
+        try:
+            get_supabase().storage.from_(BUCKET).copy(from_path, to_path)
+            return
+        except httpx.TransportError:
+            if attempt == _TRANSFER_ATTEMPTS:
+                raise
+            logger.warning(
+                "storage copy of %s to %s dropped (attempt %d/%d); retrying",
+                from_path,
+                to_path,
+                attempt,
+                _TRANSFER_ATTEMPTS,
+            )
+            time.sleep(_TRANSFER_BACKOFF_S * attempt)
+        except StorageApiError as exc:
+            if attempt > 1 and _is_duplicate(exc):
+                logger.info("storage copy to %s had landed before the drop; done", to_path)
+                return
+            raise
+    raise AssertionError("unreachable")
+
+
+def _is_duplicate(exc: Exception) -> bool:
+    """storage-api's "The resource already exists" (409, code Duplicate)."""
+    status_code = str(getattr(exc, "status", "") or "")
+    code = str(getattr(exc, "code", "") or "")
+    message = str(getattr(exc, "message", "") or exc)
+    return status_code == "409" or code.lower() == "duplicate" or "already exists" in message.lower()
 
 
 def object_exists(path: str) -> bool:

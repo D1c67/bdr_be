@@ -241,8 +241,8 @@ def test_build_export_spooled_streams_valid_zip(monkeypatch):
     assert size == len(data)  # reported size matches the streamable bytes
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
         names = set(zf.namelist())
-    assert "drawing/E-1.pdf" in names
-    assert "estimate/Est.xlsx" in names
+    assert "Gen Dwgs/E-1.pdf" in names
+    assert "Estimate/Est.xlsx" in names
     assert "MANIFEST.txt" in names
     assert all(m["status"] == "ok" for m in manifest)
 

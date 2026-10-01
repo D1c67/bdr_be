@@ -122,8 +122,14 @@ def build_rows(sb, projects: list[dict], role: str) -> list[dict]:
     rfq_ids = [r["id"] for r in rfqs]
     if rfq_ids:
         for q in _in(
-            lambda: sb.table("quotes").select("rfq_id, received_at"), "rfq_id", rfq_ids
+            lambda: sb.table("quotes").select("rfq_id, received_at, received_after_submission"),
+            "rfq_id",
+            rfq_ids,
         ):
+            # A quote recorded after the bid was submitted (0138) is on record
+            # only and never counts as the category's first figure.
+            if q.get("received_after_submission"):
+                continue
             _keep_min(first_quote, q["rfq_id"], _parse(q.get("received_at")))
 
     gm_created: dict[str, datetime] = {}

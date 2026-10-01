@@ -76,7 +76,7 @@ def recipients_status(sb, rfq_id: str) -> list[dict]:
         .select(
             "id, vendor_contact_id, cc_recipients, graph_message_id, status, "
             "error, quote_received_at, sent_at, created_at, "
-            "vendor_contacts(id, name, email, vendor_id, vendors(name))"
+            "vendor_contacts(id, name, email, vendor_id, vendors(name, is_national_account))"
         )
         .eq("rfq_id", rfq_id)
         .execute()
@@ -160,6 +160,9 @@ def recipients_status(sb, rfq_id: str) -> list[dict]:
                 "contact_name": contact.get("name"),
                 "contact_email": contact.get("email"),
                 "vendor_name": (contact.get("vendors") or {}).get("name"),
+                "vendor_national_account": bool(
+                    (contact.get("vendors") or {}).get("is_national_account")
+                ),
                 "cc_recipients": latest.get("cc_recipients"),
                 "sent_at": latest.get("sent_at"),
                 "send_status": latest.get("status"),
@@ -407,7 +410,7 @@ def _nudge_one(
             "image/jpeg",
             content_id=email_branding.LOGO_CONTENT_ID,
         )
-        graph_email.send_draft(draft["id"])
+        graph_email.send_draft(draft["id"], project_id=project_id, rfq_id=rfq_id)
     except Exception as exc:  # noqa: BLE001 - record and continue with the batch
         logger.exception("RFQ nudge send failed for rfq_send %s", rfq_send_id)
         try:

@@ -34,9 +34,11 @@ from app.services import (
     graph_inbox,
     office_preview,
     storage,
+    workflow,
 )
 from app.services.notifications import audit, notify_role
 from app.services.openai_text import extract_quote_from_pdf
+from app.services.rfp_email_auth import address_domain, is_public_mailbox_domain
 
 logger = logging.getLogger(__name__)
 
@@ -250,6 +252,94 @@ def _is_duplicate_key(exc: Exception) -> bool:
     return "23505" in text or "duplicate key" in text
 
 
+# ── Who counts as the vendor on an RFQ thread ─────────────────────────────────
+#
+# The conversation id binds a message to its send; the sender decides whether
+# it is a vendor reply. The contact we mailed always is, and so is anyone else
+# at that vendor's company: an address in the directory under the same vendor,
+# or an address on a domain the vendor's contacts use (a quoting desk
+# answering for the rep the RFQ went to). Public mailbox providers never vouch
+# for a company. Our own people never count as the vendor: an estimator
+# answering from their own mailbox is on the thread too, as are bids@'s own
+# copies, which Graph reports under an Exchange directory path.
+
+SENDER_CONTACT = "contact"    # the address the RFQ was sent to
+SENDER_COMPANY = "company"    # someone else at the vendor's company
+SENDER_INTERNAL = "internal"  # one of us
+SENDER_OTHER = "other"        # anyone else (a forward from a personal address)
+
+# Consumer ISP mailboxes, on top of the shared public-provider list: a small
+# shop's rep on cox.net must vouch for himself only, never for every Cox
+# customer who lands on the thread.
+_ISP_MAILBOX_DOMAINS = frozenset({
+    "att.net", "bellsouth.net", "centurylink.net", "charter.net", "comcast.net",
+    "cox.net", "earthlink.net", "frontier.com", "gmx.com", "gmx.net", "juno.com",
+    "netzero.net", "optonline.net", "pm.me", "roadrunner.com", "rocketmail.com",
+    "rr.com", "sbcglobal.net", "verizon.net", "yandex.com", "zoho.com",
+})
+
+
+def _is_personal_domain(domain: str) -> bool:
+    return is_public_mailbox_domain(domain) or domain in _ISP_MAILBOX_DOMAINS
+
+
+def _is_own_mailbox(from_addr: str) -> bool:
+    """Mail the RFQ mailbox itself sent: bids@ by address, or a copy whose
+    sender Graph reports as an Exchange directory path (/O=EXCHANGELABS/...)
+    instead of an address, which it only does for senders inside our tenant."""
+    return from_addr.lower() == get_settings().ms_sender.lower() or "@" not in from_addr
+
+
+def _internal_domains() -> set[str]:
+    """Our own mail domains: the configured company domains plus whatever the
+    RFQ mailbox and its desk CC live on."""
+    settings = get_settings()
+    domains = set(settings.rfp_email_ingestion_internal_domain_set)
+    for addr in (settings.ms_sender, settings.rfq_cc):
+        if domain := address_domain(addr):
+            domains.add(domain)
+    return domains
+
+
+def _sender_relation(sb, contact: dict, from_addr: str) -> str:
+    """Classify a reply's sender against the contact the RFQ went to."""
+    addr = from_addr.strip().lower()
+    contact_email = (contact.get("email") or "").strip().lower()
+    if addr == contact_email:
+        return SENDER_CONTACT
+    company_emails = {contact_email} - {""}
+    if contact.get("vendor_id"):
+        rows = (
+            sb.table("vendor_contacts")
+            .select("email")
+            .eq("vendor_id", contact["vendor_id"])
+            .execute()
+        ).data or []
+        company_emails |= {(r.get("email") or "").strip().lower() for r in rows} - {""}
+    # A directory match wins even on our own domain: dev's test vendors are
+    # set up with company addresses.
+    if addr in company_emails:
+        return SENDER_COMPANY
+    internal = _internal_domains()
+    domain = address_domain(addr)
+    if not domain or domain in internal:
+        return SENDER_INTERNAL
+    company_domains = {
+        d for d in (address_domain(e) for e in company_emails)
+        if d and d not in internal and not _is_personal_domain(d)
+    }
+    return SENDER_COMPANY if domain in company_domains else SENDER_OTHER
+
+
+def _sender_name(contact: dict, from_addr: str | None) -> str:
+    """Who a reply came from, for notifications: the contact's name when they
+    sent it, otherwise the actual address with the vendor's name."""
+    if not from_addr or from_addr.lower() == (contact.get("email") or "").lower():
+        return contact["name"]
+    vendor = (contact.get("vendors") or {}).get("name")
+    return f"{from_addr} ({vendor})" if vendor else from_addr
+
+
 def _ingest_message(
     sb,
     msg: dict,
@@ -262,22 +352,22 @@ def _ingest_message(
     extracted quote. Shared by the background poller and the on-demand check.
 
     Returns the reply's final extraction status, or None when nothing was
-    ingested (our own outbound copy, a nudge we sent, no matching send, a
-    refused sender, or a message already stored).
+    ingested (our own outbound copy, one of our people on the thread, a nudge
+    we sent, no matching send, a refused sender, or a message already stored).
 
-    `allow_sender_mismatch` accepts a reply that came from a different address
-    than the contact we mailed. The conversation id is the match, so a forward
-    or a colleague answering for the vendor still belongs to this RFQ. The
-    poller leaves it off (it sweeps the whole mailbox, so the address is its
-    only other signal); the project-scoped check turns it on, and the actual
-    sender is recorded on the message row and audited either way.
+    The contact we mailed and anyone at the vendor's company are always
+    accepted (see _sender_relation). `allow_sender_mismatch` also accepts any
+    other outside address: the conversation id is the match, so a forward
+    from a personal address still belongs to this RFQ. The poller leaves it
+    off (it sweeps the whole mailbox); the project-scoped check turns it on.
+    Our own people are never accepted either way. Every sender other than
+    the contact is recorded on the message row and audited.
 
     `max_attachments` tightens the per-message attachment cap below the
     configured inbound limit.
     """
-    settings = get_settings()
     from_addr = ((msg.get("from") or {}).get("emailAddress") or {}).get("address", "")
-    if not from_addr or from_addr.lower() == settings.ms_sender.lower():
+    if not from_addr or _is_own_mailbox(from_addr):
         return None
     send = by_conversation.get(msg.get("conversationId"))
     if not send:
@@ -303,27 +393,10 @@ def _ingest_message(
         if nudges:
             return None
 
-    contact = send["vendor_contacts"]
-    if from_addr.lower() != (contact.get("email") or "").lower():
-        # A reply in the right conversation from an unexpected address. Always
-        # leave a trace so the PE can spot forwarded replies; whether it is also
-        # ingested is the caller's call (see allow_sender_mismatch above).
-        audit(
-            None,
-            "rfq.reply_sender_mismatch",
-            "rfq_send",
-            send["id"],
-            {
-                "from": from_addr,
-                "expected": contact.get("email"),
-                "ingested": allow_sender_mismatch,
-            },
-        )
-        if not allow_sender_mismatch:
-            return None
-
     # Idempotency: the poller may see the same message again after a delta reset,
-    # and the on-demand check re-reads whole conversations by design.
+    # and the on-demand check re-reads whole conversations by design. Checked
+    # before the sender is judged so a re-read neither re-queries the vendor's
+    # directory nor re-audits a reply it already stored.
     existing = (
         sb.table("rfq_messages")
         .select("id")
@@ -332,6 +405,34 @@ def _ingest_message(
     ).data
     if existing:
         return None
+
+    contact = send["vendor_contacts"]
+    relation = _sender_relation(sb, contact, from_addr)
+    if relation == SENDER_INTERNAL:
+        # One of our own people on the thread, never a vendor reply. Not
+        # audited: the check re-reads whole threads, and our side of a long
+        # back-and-forth would be logged again on every click.
+        return None
+    if relation != SENDER_CONTACT:
+        # A reply in the right conversation from someone other than the
+        # contact. A coworker at the vendor counts; any other outside address
+        # only when the caller allows it (see allow_sender_mismatch above).
+        # Always leave a trace so the PE can see who actually answered.
+        accepted = relation == SENDER_COMPANY or allow_sender_mismatch
+        audit(
+            None,
+            "rfq.reply_sender_mismatch",
+            "rfq_send",
+            send["id"],
+            {
+                "from": from_addr,
+                "expected": contact.get("email"),
+                "relation": relation,
+                "ingested": accepted,
+            },
+        )
+        if not accepted:
+            return None
 
     full = graph_inbox.get_message(msg["id"])
     try:
@@ -363,9 +464,12 @@ def _ingest_message(
         raise
 
     pdf_files: list[tuple[dict, bytes]] = []
+    attachment_skips: list[tuple[str, str]] = []
     ref_links: list[cloud_links.CloudLink] = []
     if msg.get("hasAttachments"):
-        pdf_files = _ingest_attachments(sb, send, row, max_attachments=max_attachments)
+        pdf_files, attachment_skips = _ingest_attachments(
+            sb, send, row, max_attachments=max_attachments
+        )
         ref_links = _reference_links(row["graph_message_id"])
     links = cloud_links.merge_links(
         ref_links,
@@ -379,15 +483,17 @@ def _ingest_message(
         sb, send, links, rfq_message_id=row["id"]
     )
     pdf_files.extend(link_pdfs)
-    status = _run_extraction(sb, send, row, pdf_files, link_failures)
+    status = _run_extraction(
+        sb, send, row, pdf_files, link_failures, attachment_skips=attachment_skips
+    )
 
     rfq = send["rfqs"]
     notify_role(
         Role.ESTIMATING_ENGINEER_MATERIALS,
         rfq["project_id"],
         "rfq.reply_received",
-        f"{contact['name']} replied on the {rfq['material_categories']['name']} RFQ "
-        f"for {rfq['projects']['name']}",
+        f"{_sender_name(contact, from_addr)} replied on the "
+        f"{rfq['material_categories']['name']} RFQ for {rfq['projects']['name']}",
         rfq_id=rfq["id"],
     )
     return status
@@ -437,7 +543,14 @@ def _store_quote_file(
                 ).eq("id", row["id"]).is_("rfq_message_id", "null").execute()
             return row
     path = storage.build_object_path(project["id"], "quote", filename)
-    storage.upload_file(path, content, content_type or "application/octet-stream")
+    # Never trust the vendor-declared content type for the stored object: a
+    # "quote.pdf" declared text/html would otherwise be stored renderable.
+    # Derive it from the extension (same allowlist as manual uploads) and fall
+    # back to octet-stream.
+    from app.routers.files import _safe_content_type
+
+    stored_mime = _safe_content_type(filename)
+    storage.upload_file(path, content, stored_mime)
     convertible = office_preview.is_convertible(filename, "quote")
     file_row = (
         sb.table("project_files")
@@ -449,7 +562,7 @@ def _store_quote_file(
                 "filename": filename,
                 "material_category_id": rfq["material_category_id"],
                 "rfq_message_id": rfq_message_id,
-                "mime_type": content_type,
+                "mime_type": stored_mime,
                 "size_bytes": len(content),
                 "preview_status": "pending" if convertible else "none",
             }
@@ -470,14 +583,46 @@ def _is_pdf(filename: str, content_type: str | None) -> bool:
     return (content_type or "").lower().startswith("application/pdf") or filename.lower().endswith(".pdf")
 
 
+def _attachment_ext(name: str) -> str:
+    return name.rsplit(".", 1)[-1].lower() if "." in name else ""
+
+
+_IMAGE_ATTACHMENT_EXTS = {"png", "jpg", "jpeg"}
+
+
+def _attachment_rank(att: dict) -> int:
+    """Fetch order under the per-reply cap: the PDFs extraction reads first,
+    then the other quote documents, then pictures (a photo or a large pasted
+    screenshot), then anything that would be refused after download anyway."""
+    name = att.get("name") or ""
+    if _is_pdf(name, att.get("contentType")):
+        return 0
+    ext = _attachment_ext(name)
+    if ext not in _QUOTE_ATTACHMENT_EXTS:
+        return 3
+    return 2 if ext in _IMAGE_ATTACHMENT_EXTS else 1
+
+
 def _ingest_attachments(
-    sb, send: dict, message_row: dict, *, max_attachments: int | None = None
-) -> list[tuple[dict, bytes]]:
-    """Store the reply's file attachments; returns (project_files row, bytes)
-    for the PDFs among them so the caller can run extraction.
+    sb, send: dict, message_row: dict, *, max_attachments: int | None = None,
+    reuse_existing: bool = False,
+) -> tuple[list[tuple[dict, bytes]], list[tuple[str, str]]]:
+    """Store the reply's file attachments. Returns (project_files row, bytes)
+    for the PDFs among them so the caller can run extraction, and (name,
+    reason) for every attached file that was NOT stored, so the reply can say
+    so instead of quietly showing no quote.
+
+    Signature art embedded in the body is dropped before the cap is counted:
+    Outlook re-attaches every earlier message's signature logos on each reply
+    and Graph lists them ahead of the real files, so on a thread with some
+    back and forth they used to fill the cap and push the quote PDF off the
+    end. A large body image (a pasted screenshot of a quote) is still kept,
+    ranked after the real files.
 
     `max_attachments` only ever tightens the configured cap (the on-demand check
-    passes a smaller one so a single click cannot pull dozens of files)."""
+    passes a smaller one so a single click cannot pull dozens of files).
+    `reuse_existing` (the PE-triggered retry) returns an already-stored copy of
+    the same file instead of storing it twice."""
     import base64
 
     settings = get_settings()
@@ -486,29 +631,45 @@ def _ingest_attachments(
     if max_attachments is not None:
         max_count = min(max_count, max_attachments)
     # Cap count + skip oversized attachments before their bytes are fetched.
-    attachments, _ = graph_inbox.list_attachments(
+    attachments, skipped = graph_inbox.list_attachments(
         message_row["graph_message_id"],
         max_count=max_count,
         max_bytes=settings.inbound_attachment_max_bytes,
+        skip_inline_images=True,
+        rank=_attachment_rank,
     )
+    not_stored: list[tuple[str, str]] = []
+    for att in skipped:
+        reason = att.get("reason")
+        if reason == "inline_image":
+            continue  # body art, not a file the vendor sent
+        if (
+            reason == "item_attachment"
+            and att.get("odata_type") == "#microsoft.graph.referenceAttachment"
+        ):
+            continue  # a cloud link: _reference_links resolves it separately
+        name = att.get("name") or "attachment"
+        not_stored.append((name, reason))
+        audit(None, "rfq.attachment_skipped", "rfq_send", send["id"],
+              {"name": name, "reason": reason, "size": att.get("size")})
     pdf_files: list[tuple[dict, bytes]] = []  # (project_files row, content)
     for att in attachments:
         name = att.get("name") or "attachment"
-        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
-        if ext not in _QUOTE_ATTACHMENT_EXTS:
-            # A reply may carry signatures/logos/etc.; only ingest quote-shaped
-            # files, and leave an audit trace for anything skipped.
+        if _attachment_ext(name) not in _QUOTE_ATTACHMENT_EXTS:
+            # Only ingest quote-shaped files, and leave an audit trace for
+            # anything skipped.
+            not_stored.append((name, "disallowed_type"))
             audit(None, "rfq.attachment_skipped", "rfq_send", send["id"],
                   {"name": name, "reason": "disallowed_type"})
             continue
         content = base64.b64decode(att["contentBytes"])
         file_row = _store_quote_file(
             sb, send, att["name"], content, att.get("contentType"),
-            rfq_message_id=message_row["id"],
+            rfq_message_id=message_row["id"], reuse_existing=reuse_existing,
         )
         if _is_pdf(att["name"], att.get("contentType")):
             pdf_files.append((file_row, content))
-    return pdf_files
+    return pdf_files, not_stored
 
 
 def _reference_links(graph_message_id: str) -> list[cloud_links.CloudLink]:
@@ -547,6 +708,28 @@ def _link_failure_note(failures: list[tuple[cloud_links.CloudLink, str]]) -> str
         parts.append(f'"{label}" — {_LINK_FAIL_TEXT.get(reason, reason)}')
     more = len(failures) - 3
     note = "Linked file(s) not fetched: " + "; ".join(parts)
+    return note + (f" (+{more} more)" if more > 0 else "")
+
+
+# What the PE reads when an attached file on a reply was not stored.
+_ATTACHMENT_SKIP_TEXT = {
+    "too_many": "past the per-reply file limit",
+    "too_large": "over the size limit",
+    "item_attachment": "an attached email, open it in Outlook",
+    "disallowed_type": "file type not accepted",
+    "unreadable": "the mailbox could not return them, try again later",
+}
+
+
+def _attachment_skip_note(skips: list[tuple[str, str]]) -> str | None:
+    if not skips:
+        return None
+    parts = [
+        f'"{name}" ({_ATTACHMENT_SKIP_TEXT.get(reason, reason)})'
+        for name, reason in skips[:3]
+    ]
+    more = len(skips) - 3
+    note = "Attachment(s) not saved: " + "; ".join(parts)
     return note + (f" (+{more} more)" if more > 0 else "")
 
 
@@ -599,12 +782,25 @@ def _ingest_cloud_links(
     return pdfs, failures
 
 
+def _post_submission(sb, project_id: str | None) -> bool:
+    """Best-effort window check: a failed lookup must never lose a quote."""
+    if not project_id:
+        return False
+    try:
+        return workflow.in_post_submission_window(project_id, sb)
+    except Exception:  # noqa: BLE001
+        logger.exception("Post-submission check failed for project %s", project_id)
+        return False
+
+
 def _run_extraction(
     sb,
     send: dict,
     message_row: dict,
     pdf_files: list[tuple[dict, bytes]],
     link_failures: list[tuple[cloud_links.CloudLink, str]] | None = None,
+    *,
+    attachment_skips: list[tuple[str, str]] | None = None,
 ) -> str:
     """Extract a quote amount from the reply's PDFs (attached or link-fetched)
     and record the outcome on the message. Returns the final status."""
@@ -612,11 +808,18 @@ def _run_extraction(
     rfq = send["rfqs"]
     project = rfq["projects"]
     contact = send["vendor_contacts"]
-    fail_note = _link_failure_note(link_failures or [])
+    notes = [
+        n for n in (
+            _attachment_skip_note(attachment_skips or []),
+            _link_failure_note(link_failures or []),
+        ) if n
+    ]
+    fail_note = ". ".join(notes) or None
 
     if not pdf_files:
-        # No extractable file. Links that failed to download are the one case
-        # the PE must act on (fetch manually / ask the vendor to attach).
+        # No extractable file. Files that were not stored (links that failed
+        # to download, attachments over a limit) are the case the PE must act
+        # on (open the email / fetch manually / ask the vendor to resend).
         if fail_note:
             sb.table("rfq_messages").update(
                 {"extraction_status": "failed", "extraction_error": fail_note}
@@ -685,19 +888,23 @@ def _run_extraction(
                 result.get("confidence"),
             )
             continue
-        sb.table("quotes").insert(
-            {
-                "rfq_id": rfq["id"],
-                "vendor_id": contact["vendor_id"],
-                "vendor_contact_id": contact["id"],
-                "amount": str(result["total_amount"]),
-                "quote_file_id": file_row["id"],
-                "source": "ai_extracted",
-                "rfq_send_id": send["id"],
-                "rfq_message_id": message_row["id"],
-                "ai_extraction": result,
-            }
-        ).execute()
+        quote_row = {
+            "rfq_id": rfq["id"],
+            "vendor_id": contact["vendor_id"],
+            "vendor_contact_id": contact["id"],
+            "amount": str(result["total_amount"]),
+            "quote_file_id": file_row["id"],
+            "source": "ai_extracted",
+            "rfq_send_id": send["id"],
+            "rfq_message_id": message_row["id"],
+            "ai_extraction": result,
+        }
+        # A quote arriving after the bid was submitted is on record only (0138):
+        # tagged so it never competes for "lowest" or feeds analytics. Nothing
+        # here selects it or bounces the bid, so the sent price is untouched.
+        if _post_submission(sb, rfq.get("project_id") or project.get("id")):
+            quote_row["received_after_submission"] = True
+        sb.table("quotes").insert(quote_row).execute()
         sb.table("rfqs").update({"status": "quotes_in"}).eq("id", rfq["id"]).execute()
         sb.table("rfq_sends").update(
             {"quote_received_at": _now().isoformat(), "polling_active": False}
@@ -707,8 +914,8 @@ def _run_extraction(
             Role.ESTIMATING_ENGINEER_MATERIALS,
             rfq["project_id"],
             "quote.received",
-            f"Quote received from {contact['name']} for "
-            f"{rfq['material_categories']['name']} on {project['name']}: "
+            f"Quote received from {_sender_name(contact, message_row.get('from_addr'))} "
+            f"for {rfq['material_categories']['name']} on {project['name']}: "
             f"${result['total_amount']}",
             rfq_id=rfq["id"],
         )
@@ -729,16 +936,32 @@ def _run_extraction(
     return extraction_status
 
 
-def refetch_link_files(project_id: str, message_id: str) -> dict:
-    """PE-triggered retry for a reply whose share links never became files —
-    re-parse the stored body (and any Outlook reference attachments), fetch +
-    store the files, and re-run extraction. Raises LookupError when the message
-    is not in the project, ValueError when there is nothing to do."""
+# Reply states a re-read may start from. 'pending' is excluded on purpose: it
+# is the claim a re-read (or the first extraction) holds while it runs.
+_REREAD_STATUSES = ["skipped", "no_amount", "failed", "needs_review"]
+
+
+def refetch_reply_files(project_id: str, message_id: str) -> dict:
+    """PE-triggered retry for a reply whose files never made it in: re-read
+    the email's attachments and its share links (the stored body plus any
+    Outlook reference attachments), store what is new, and re-run extraction.
+
+    Attachments are read under the current rules (signature art dropped, PDFs
+    first), so this is also how a reply stored before those rules, whose quote
+    PDF was crowded out by signature images, finally gets its quote. Files
+    already stored for the reply are reused, not duplicated.
+
+    The reply is claimed (status 'pending') for the duration, so two re-reads
+    of one reply (a PE's click racing the recovery script) cannot both create
+    a quote.
+
+    Raises LookupError when the message is not in the project, ValueError when
+    there is nothing to do."""
     sb = get_supabase()
     rows = (
         sb.table("rfq_messages")
         .select(
-            "id, body, graph_message_id, has_attachments, extraction_status, "
+            "id, from_addr, body, graph_message_id, has_attachments, extraction_status, "
             "rfq_sends(id, conversation_id, vendor_contact_id, rfq_id, "
             "vendor_contacts(id, name, email, vendor_id, vendors(name)), "
             "rfqs(id, project_id, material_category_id, material_categories(name), "
@@ -755,30 +978,89 @@ def refetch_link_files(project_id: str, message_id: str) -> dict:
         raise LookupError("message not found")
     if row.get("extraction_status") in ("done", "manual"):
         raise ValueError("A quote was already recorded for this reply.")
+    from_addr = row.get("from_addr") or ""
+    if from_addr and (
+        _is_own_mailbox(from_addr)
+        or _sender_relation(sb, send.get("vendor_contacts") or {}, from_addr)
+        == SENDER_INTERNAL
+    ):
+        # Stored as a "reply" by the old check rules: bids@'s own copy of the
+        # RFQ, or a teammate on the thread. Re-reading it would run the
+        # extractor over our own drawings and could invent a vendor quote.
+        raise ValueError(
+            "This email came from our side of the thread, not the vendor, "
+            "so there is no quote to read from it."
+        )
 
     links = cloud_links.find_cloud_links(row.get("body") or "")
-    if row.get("has_attachments"):
-        links = cloud_links.merge_links(_reference_links(row["graph_message_id"]), links)
-    if not links:
-        raise ValueError("No cloud-share links found in this reply.")
-    sb.table("rfq_messages").update({"cloud_link_count": len(links)}).eq(
-        "id", row["id"]
-    ).execute()
+    if not links and not row.get("has_attachments"):
+        raise ValueError("No attachments or cloud-share links found in this reply.")
 
-    pdfs, failures = _ingest_cloud_links(
-        sb, send, links, rfq_message_id=row["id"], reuse_existing=True
-    )
-    status = _run_extraction(sb, send, row, pdfs, failures)
+    claimed = (
+        sb.table("rfq_messages")
+        .update({"extraction_status": "pending"})
+        .eq("id", row["id"])
+        .in_("extraction_status", _REREAD_STATUSES)
+        .execute()
+    ).data
+    if not claimed:
+        raise ValueError("This reply is already being read. Give it a moment.")
+
+    try:
+        pdfs: list[tuple[dict, bytes]] = []
+        skips: list[tuple[str, str]] = []
+        if row.get("has_attachments"):
+            try:
+                pdfs, skips = _ingest_attachments(sb, send, row, reuse_existing=True)
+            except Exception:  # noqa: BLE001 - a gone or busy mailbox must not sink the links
+                logger.exception("Attachment re-read failed for rfq_message %s", row["id"])
+                skips = [("attachments", "unreadable")]
+            links = cloud_links.merge_links(_reference_links(row["graph_message_id"]), links)
+        if links:
+            sb.table("rfq_messages").update({"cloud_link_count": len(links)}).eq(
+                "id", row["id"]
+            ).execute()
+
+        link_pdfs, failures = _ingest_cloud_links(
+            sb, send, links, rfq_message_id=row["id"], reuse_existing=True
+        )
+        pdfs.extend(link_pdfs)
+        # `row` still carries the pre-claim status, which is what the
+        # extraction's no-file branch decides on.
+        status = _run_extraction(sb, send, row, pdfs, failures, attachment_skips=skips)
+    except BaseException:
+        _release_reread(sb, row["id"], row.get("extraction_status") or "skipped")
+        raise
+    # Every branch of _run_extraction returns the final status, but its
+    # nothing-changed branch does not write it: release the claim with it.
+    _release_reread(sb, row["id"], status)
     attempted = min(len(links), get_settings().inbound_link_max_count)
     return {
         "links_found": len(links),
+        # Files that came in through links (attachments are counted in pdfs_found).
         "files_ingested": attempted - len(failures),
+        "pdfs_found": len(pdfs),
         "failures": [
             {"label": link.label or link.url, "reason": _LINK_FAIL_TEXT.get(reason, reason)}
             for link, reason in failures
         ],
+        "attachments_not_saved": [
+            {"name": name, "reason": _ATTACHMENT_SKIP_TEXT.get(reason, reason)}
+            for name, reason in skips
+        ],
         "extraction_status": status,
     }
+
+
+def _release_reread(sb, message_id: str, status: str) -> None:
+    """Hand a claimed reply back at `status`, unless the run already wrote
+    its own final status over the claim."""
+    try:
+        sb.table("rfq_messages").update({"extraction_status": status}).eq(
+            "id", message_id
+        ).eq("extraction_status", "pending").execute()
+    except Exception:  # noqa: BLE001 - never mask the run's own outcome
+        logger.exception("Could not release the re-read claim on %s", message_id)
 
 
 # ── "Check for quotes now" (one project, one click) ───────────────────────────
@@ -1008,7 +1290,6 @@ def check_project_quotes(project_id: str) -> dict:
 
 
 def _run_project_check(sb, project_id: str, key: str, token: str) -> dict:
-    sender = get_settings().ms_sender.lower()
     notes: list[str] = []
     result: dict = {
         "sends_checked": 0,
@@ -1064,8 +1345,10 @@ def _run_project_check(sb, project_id: str, key: str, token: str) -> dict:
             from_addr = ((msg.get("from") or {}).get("emailAddress") or {}).get(
                 "address", ""
             )
-            if not from_addr or from_addr.lower() == sender:
-                continue  # our own copy of the RFQ we sent, not a reply
+            if not from_addr or _is_own_mailbox(from_addr):
+                # Our own copy of the RFQ we sent (by address, or under the
+                # directory path Graph gives the Sent Items copy), not a reply.
+                continue
             result["messages_seen"] += 1
             if ingested >= _CHECK_MAX_INGESTS:
                 _add_note(
@@ -1077,9 +1360,10 @@ def _run_project_check(sb, project_id: str, key: str, token: str) -> dict:
                 break
             try:
                 # allow_sender_mismatch: the conversation id already proves this
-                # message belongs to the send, so a reply from the vendor's
-                # colleague or a forwarded address counts. from_addr is stored on
-                # the message row and the mismatch is audited, so it stays visible.
+                # message belongs to the send, so on top of the vendor's own
+                # people a forward from an outside address counts too (our own
+                # people never do). from_addr is stored on the message row and
+                # the mismatch is audited, so it stays visible.
                 status = _ingest_message(
                     sb,
                     msg,

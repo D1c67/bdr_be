@@ -54,20 +54,144 @@ def test_missing_from_address_is_skipped():
     rfq_inbox._ingest_message(None, {"id": "m", "conversationId": "conv-1"}, {"conv-1": SEND})
 
 
-def test_sender_mismatch_is_audited_and_not_ingested(monkeypatch):
-    calls = []
-    monkeypatch.setattr(rfq_inbox, "audit", lambda *a, **k: calls.append((a, k)))
-    rfq_inbox._ingest_message(None, _msg("stranger@elsewhere.com"), {"conv-1": SEND})
-    assert len(calls) == 1
-    assert calls[0][0][1] == "rfq.reply_sender_mismatch"
-    assert calls[0][0][3] == "send-1"
+def test_own_copy_under_an_exchange_directory_path_is_skipped():
+    # bids@'s Sent Items copy of the RFQ reports its sender as the tenant's
+    # directory path, not bids@. It is our own mail, never a vendor reply.
+    dn = (
+        "/O=EXCHANGELABS/OU=EXCHANGE ADMINISTRATIVE GROUP (FYDIBOHF23SPDLT)"
+        "/CN=RECIPIENTS/CN=1CAD18FC663B4707B99C1274EF795330-1454091C-21"
+    )
+    assert rfq_inbox._ingest_message(None, _msg(dn), {"conv-1": SEND}) is None
 
 
-def test_sender_match_is_case_insensitive(monkeypatch):
-    # Reaching the idempotency check (first sb access) proves the guards passed.
-    monkeypatch.setattr(rfq_inbox, "audit", lambda *a, **k: pytest.fail("should not audit"))
-    with pytest.raises(AttributeError):  # sb=None -> .table() blows up at the DB step
-        rfq_inbox._ingest_message(None, _msg("Jane@Vendor.COM"), {"conv-1": SEND})
+# ── Who counts as the vendor ───────────────────────────────────────────────────
+# The contact we mailed and anyone at the vendor's company are accepted; our
+# own people never are; any other outside address only through the
+# project-scoped check (allow_sender_mismatch).
+
+SENDER = "bids@g3electrical.com"
+VENDOR_CONTACTS = [
+    {"id": "c1", "name": "Jane", "email": "jane@vendor.com", "vendor_id": "v1"},
+    {"id": "c2", "name": "Tim", "email": "Tim@Vendor.com", "vendor_id": "v1"},
+    # A dev-style test contact on our own domain, under the same vendor.
+    {"id": "c3", "name": "Tester", "email": "tester@g3electrical.com", "vendor_id": "v1"},
+    {"id": "c4", "name": "Bob", "email": "bob@othervendor.com", "vendor_id": "v2"},
+]
+
+
+@pytest.fixture
+def sender_env(monkeypatch):
+    """_ingest_message against a fake DB holding the vendor directory, with a
+    plain no-attachment reply body and every side effect past the DB recorded."""
+    db = FakeDB({"vendor_contacts": VENDOR_CONTACTS})
+    monkeypatch.setattr(
+        rfq_inbox, "get_settings", lambda: Settings(_env_file=None, ms_sender=SENDER)
+    )
+    monkeypatch.setattr(
+        graph_inbox, "get_message", lambda mid, **k: {"body": {"content": "<p>see below</p>"}}
+    )
+    audits, notes = [], []
+    monkeypatch.setattr(rfq_inbox, "audit", lambda *a, **k: audits.append(a))
+    monkeypatch.setattr(rfq_inbox, "notify_role", lambda *a, **k: notes.append(a))
+    return db, audits, notes
+
+
+def _ingest(db, from_addr, send=SEND, **kw):
+    return rfq_inbox._ingest_message(
+        db, _msg(from_addr, hasAttachments=False), {"conv-1": send}, **kw
+    )
+
+
+def test_the_contact_is_ingested_without_an_audit(sender_env):
+    db, audits, _ = sender_env
+    _ingest(db, "Jane@Vendor.COM")  # case-insensitive
+    assert len(db.tables["rfq_messages"]) == 1
+    assert audits == []
+
+
+def test_a_coworker_in_the_directory_is_ingested_by_the_poller(sender_env):
+    db, audits, notes = sender_env
+    _ingest(db, "tim@vendor.com")  # the poller: allow_sender_mismatch off
+    [message] = db.tables["rfq_messages"]
+    assert message["from_addr"] == "tim@vendor.com"
+    [audit_row] = audits
+    assert audit_row[1] == "rfq.reply_sender_mismatch"
+    assert audit_row[4]["relation"] == "company"
+    assert audit_row[4]["ingested"] is True
+    # The notice names who actually answered, not the contact.
+    assert "tim@vendor.com" in notes[0][3]
+
+
+def test_anyone_on_the_vendors_domain_is_ingested_by_the_poller(sender_env):
+    db, audits, _ = sender_env
+    _ingest(db, "Quotes@VENDOR.com")
+    assert len(db.tables["rfq_messages"]) == 1
+    assert audits[0][4]["relation"] == "company"
+
+
+def test_a_stranger_is_dropped_by_the_poller_but_audited(sender_env):
+    db, audits, _ = sender_env
+    assert _ingest(db, "someone@elsewhere.com") is None
+    assert db.tables.get("rfq_messages", []) == []
+    [audit_row] = audits
+    assert audit_row[3] == "send-1"
+    assert audit_row[4]["relation"] == "other"
+    assert audit_row[4]["ingested"] is False
+
+
+def test_a_stranger_is_ingested_by_the_project_check(sender_env):
+    db, audits, _ = sender_env
+    _ingest(db, "someone@elsewhere.com", allow_sender_mismatch=True)
+    assert len(db.tables["rfq_messages"]) == 1
+    assert audits[0][4]["ingested"] is True
+
+
+def test_another_vendors_contact_does_not_count_as_this_vendor(sender_env):
+    db, audits, _ = sender_env
+    assert _ingest(db, "bob@othervendor.com") is None
+    assert audits[0][4]["relation"] == "other"
+
+
+def test_our_own_people_are_never_the_vendor(sender_env):
+    # An estimator answering the vendor from their own mailbox is on the
+    # thread too. Not stored, not audited, even through the project check.
+    db, audits, _ = sender_env
+    assert _ingest(db, "estimator@g3electrical.com") is None
+    assert _ingest(db, "estimator@g3electrical.com", allow_sender_mismatch=True) is None
+    assert db.tables.get("rfq_messages", []) == []
+    assert audits == []
+
+
+def test_a_directory_match_wins_even_on_our_own_domain(sender_env):
+    db, _, _ = sender_env
+    _ingest(db, "tester@g3electrical.com")
+    assert len(db.tables["rfq_messages"]) == 1
+
+
+def test_a_public_mailbox_domain_never_vouches_for_a_company(sender_env):
+    # The contact quotes from gmail.com: that makes Tim a coworker only by his
+    # directory address, never every other Gmail user.
+    db, audits, _ = sender_env
+    gmail_contact = {**SEND["vendor_contacts"], "email": "jane.vendor@gmail.com"}
+    send = {**SEND, "vendor_contacts": gmail_contact}
+    assert _ingest(db, "random.person@gmail.com", send=send) is None
+    assert audits[0][4]["relation"] == "other"
+
+
+def test_a_consumer_isp_domain_never_vouches_for_a_company(sender_env):
+    db, audits, _ = sender_env
+    cox_contact = {**SEND["vendor_contacts"], "email": "smallshop@cox.net"}
+    send = {**SEND, "vendor_contacts": cox_contact}
+    assert _ingest(db, "neighbor@cox.net", send=send) is None
+    assert audits[0][4]["relation"] == "other"
+
+
+def test_a_stored_reply_is_not_re_audited_on_a_re_read(sender_env):
+    db, audits, _ = sender_env
+    _ingest(db, "tim@vendor.com")
+    _ingest(db, "tim@vendor.com")  # the check re-reads whole threads
+    assert len(db.tables["rfq_messages"]) == 1
+    assert len(audits) == 1
 
 
 def test_initial_delta_url_targets_inbox_with_window():
@@ -83,7 +207,6 @@ def test_initial_delta_url_targets_inbox_with_window():
 # lone worker stood itself down every other tick and the real cadence was double
 # the configured one.
 
-SENDER = "bids@g3electrical.com"
 LEASE_ROW = f"inbox:{SENDER}"
 
 
@@ -310,7 +433,7 @@ def test_refetch_ingests_and_extracts(db, refetch_env, monkeypatch):
             "CODALE QUOTE.pdf", PDF_BYTES, "application/pdf"
         ),
     )
-    result = rfq_inbox.refetch_link_files("p1", "m-1")
+    result = rfq_inbox.refetch_reply_files("p1", "m-1")
     assert result["links_found"] == 1
     assert result["files_ingested"] == 1
     assert result["extraction_status"] == "done"
@@ -333,7 +456,7 @@ def test_refetch_reuses_existing_file_row(db, refetch_env, monkeypatch):
             "CODALE QUOTE.pdf", PDF_BYTES, "application/pdf"
         ),
     )
-    rfq_inbox.refetch_link_files("p1", "m-1")
+    rfq_inbox.refetch_reply_files("p1", "m-1")
     assert len(db.tables["project_files"]) == 1  # no duplicate row
     [quote] = db.tables["quotes"]
     assert quote["quote_file_id"] == "f-1"
@@ -359,28 +482,315 @@ def test_refetch_does_not_reuse_a_different_vendors_same_named_file(
             "CODALE QUOTE.pdf", PDF_BYTES, "application/pdf"
         ),
     )
-    rfq_inbox.refetch_link_files("p1", "m-1")
+    rfq_inbox.refetch_reply_files("p1", "m-1")
     assert len(db.tables["project_files"]) == 2  # fresh row, not reuse
     [quote] = db.tables["quotes"]
     assert quote["quote_file_id"] != "other-vendor-file"
 
 
-def test_refetch_without_links_raises(db, refetch_env):
+def test_refetch_without_links_or_attachments_raises(db, refetch_env):
     db.tables["rfq_messages"] = [_stored_message(body="<p>no links here</p>")]
     with pytest.raises(ValueError):
-        rfq_inbox.refetch_link_files("p1", "m-1")
+        rfq_inbox.refetch_reply_files("p1", "m-1")
+
+
+def test_refetch_rereads_the_attachments_of_a_reply_stored_before_the_fix(
+    db, refetch_env, monkeypatch
+):
+    # A reply ingested under the old rules: its quote PDF sat behind 13
+    # signature images, the cap dropped it, and the reply was left 'skipped'.
+    db.tables["rfq_messages"] = [
+        _stored_message(body="<p>see attached</p>", has_attachments=True,
+                        extraction_status="skipped")
+    ]
+    _fake_attachments(monkeypatch, _deep_thread_listing())
+    monkeypatch.setattr(rfq_inbox, "_reference_links", lambda gid: [])
+    result = rfq_inbox.refetch_reply_files("p1", "m-1")
+
+    assert result["pdfs_found"] == 1
+    assert result["extraction_status"] == "done"
+    [quote] = db.tables["quotes"]
+    assert quote["rfq_message_id"] == "m-1"
+    [file_row] = db.tables["project_files"]  # no signature images stored
+    assert file_row["filename"] == "LVCC LIGHTING QUOTE.pdf"
+    assert file_row["rfq_message_id"] == "m-1"
+
+
+def test_refetch_reuses_an_attachment_already_stored(db, refetch_env, monkeypatch):
+    db.tables["rfq_messages"] = [
+        _stored_message(body="<p>see attached</p>", has_attachments=True,
+                        extraction_status="no_amount")
+    ]
+    db.tables["project_files"] = [
+        {"id": "f-1", "project_id": "p1", "category": "quote",
+         "material_category_id": "mc1", "filename": "LVCC LIGHTING QUOTE.pdf",
+         "size_bytes": len(PDF_BYTES), "rfq_message_id": "m-1"}
+    ]
+    _fake_attachments(monkeypatch, _deep_thread_listing())
+    monkeypatch.setattr(rfq_inbox, "_reference_links", lambda gid: [])
+    rfq_inbox.refetch_reply_files("p1", "m-1")
+
+    assert len(db.tables["project_files"]) == 1
+    assert db.tables["quotes"][0]["quote_file_id"] == "f-1"
+
+
+def _status(db, message_id="m-1"):
+    return next(r for r in db.tables["rfq_messages"] if r["id"] == message_id)[
+        "extraction_status"
+    ]
+
+
+@pytest.mark.parametrize("from_addr", [
+    "/O=EXCHANGELABS/OU=EXCHANGE ADMINISTRATIVE GROUP/CN=RECIPIENTS/CN=BIDS",
+    "estimator@g3electrical.com",
+])
+def test_refetch_refuses_our_own_mail_stored_as_a_reply(db, refetch_env, from_addr):
+    # The old check stored bids@'s Sent Items copy (and teammates) as replies.
+    # Re-reading one would run the extractor over our own drawings.
+    db.tables["rfq_messages"] = [
+        _stored_message(from_addr=from_addr, has_attachments=True, extraction_status="no_amount")
+    ]
+    with pytest.raises(ValueError, match="our side of the thread"):
+        rfq_inbox.refetch_reply_files("p1", "m-1")
+    assert _status(db) == "no_amount"
+
+
+def test_refetch_refuses_a_reply_another_reread_is_holding(db, refetch_env):
+    db.tables["rfq_messages"] = [_stored_message(extraction_status="pending")]
+    with pytest.raises(ValueError, match="already being read"):
+        rfq_inbox.refetch_reply_files("p1", "m-1")
+    assert db.tables.get("quotes", []) == []
+
+
+def test_refetch_releases_its_claim_when_nothing_new_turns_up(db, refetch_env, monkeypatch):
+    db.tables["rfq_messages"] = [
+        _stored_message(body="<p>thanks</p>", has_attachments=True, extraction_status="no_amount")
+    ]
+    _fake_attachments(monkeypatch, [_inline_image(i) for i in range(4)])
+    monkeypatch.setattr(rfq_inbox, "_reference_links", lambda gid: [])
+    assert rfq_inbox.refetch_reply_files("p1", "m-1")["extraction_status"] == "no_amount"
+    assert _status(db) == "no_amount"  # not left stuck at the 'pending' claim
+
+
+def test_refetch_hands_the_reply_back_if_it_crashes(db, refetch_env, monkeypatch):
+    db.tables["rfq_messages"] = [_stored_message(extraction_status="failed")]
+    monkeypatch.setattr(
+        cloud_links, "fetch",
+        lambda link, max_bytes: cloud_links.FetchedFile("Q.pdf", PDF_BYTES, "application/pdf"),
+    )
+
+    def _boom(*a, **k):
+        raise RuntimeError("extractor down")
+
+    monkeypatch.setattr(rfq_inbox, "_run_extraction", _boom)
+    with pytest.raises(RuntimeError):
+        rfq_inbox.refetch_reply_files("p1", "m-1")
+    assert _status(db) == "failed"
+
+
+def test_refetch_reports_a_mailbox_that_cannot_return_the_attachments(
+    db, refetch_env, monkeypatch
+):
+    # The email was deleted (Graph 404) or the mailbox is throttling: say so
+    # on the reply instead of failing the request.
+    db.tables["rfq_messages"] = [
+        _stored_message(body="<p>see attached</p>", has_attachments=True,
+                        extraction_status="skipped")
+    ]
+
+    def _gone(*a, **k):
+        raise RuntimeError("404 ErrorItemNotFound")
+
+    monkeypatch.setattr(graph_inbox, "graph_request", _gone)
+    monkeypatch.setattr(rfq_inbox, "_reference_links", lambda gid: [])
+    result = rfq_inbox.refetch_reply_files("p1", "m-1")
+    assert result["extraction_status"] == "failed"
+    [message] = db.tables["rfq_messages"]
+    assert "the mailbox could not return them" in message["extraction_error"]
+
+
+# ── Attachments on a deep reply thread ─────────────────────────────────────────
+# Outlook re-attaches every earlier message's signature images on each reply,
+# and Graph lists them ahead of the real files. Counted against the per-reply
+# cap, they pushed the quote PDF off the end once a thread had some back and
+# forth (seen live: 13 images ahead of a Codale lighting quote, 50 ahead of an
+# Alarmax one).
+
+
+def _inline_image(i: int) -> dict:
+    return {"@odata.type": "#microsoft.graph.fileAttachment", "id": f"img-{i}",
+            "name": f"image{i:03d}.png", "contentType": "image/png", "size": 9000,
+            "isInline": True}
+
+
+def _file(att_id: str, name: str, content_type: str) -> dict:
+    return {"@odata.type": "#microsoft.graph.fileAttachment", "id": att_id,
+            "name": name, "contentType": content_type, "size": len(PDF_BYTES),
+            "isInline": False}
+
+
+def _deep_thread_listing(images: int = 13) -> list[dict]:
+    return [_inline_image(i) for i in range(images)] + [
+        _file("pdf-1", "LVCC LIGHTING QUOTE.pdf", "application/pdf")
+    ]
+
+
+def _fake_attachments(monkeypatch, listing: list[dict]) -> list[str]:
+    """Serve `listing` from Graph's attachment endpoints; returns the ids whose
+    content was actually fetched."""
+    import base64
+
+    by_id = {a["id"]: a for a in listing}
+    fetched: list[str] = []
+
+    class _Resp:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    def _graph(method, path, params=None, **kw):
+        tail = path.rsplit("/attachments", 1)[1]
+        if not tail:
+            return _Resp({"value": listing})
+        att_id = tail.lstrip("/")
+        fetched.append(att_id)
+        return _Resp({**by_id[att_id],
+                      "contentBytes": base64.b64encode(PDF_BYTES).decode()})
+
+    monkeypatch.setattr(graph_inbox, "graph_request", _graph)
+    return fetched
+
+
+def test_inline_images_no_longer_fill_the_cap(monkeypatch):
+    fetched = _fake_attachments(monkeypatch, _deep_thread_listing())
+    got, skipped = graph_inbox.list_attachments(
+        "m", mailbox="x@y.com", max_count=10, skip_inline_images=True
+    )
+    assert [a["name"] for a in got] == ["LVCC LIGHTING QUOTE.pdf"]
+    assert fetched == ["pdf-1"]  # no image bytes were downloaded
+    assert {s["reason"] for s in skipped} == {"inline_image"}
+
+
+def test_other_callers_keep_the_old_listing_behaviour(monkeypatch):
+    # email_ingest stores every attachment, inline ones included; the flag is
+    # opt-in, so its behaviour is unchanged.
+    _fake_attachments(monkeypatch, _deep_thread_listing(images=3))
+    got, _ = graph_inbox.list_attachments("m", mailbox="x@y.com", max_count=10)
+    assert len(got) == 4
+
+
+def test_an_inline_pdf_is_still_a_file(monkeypatch):
+    # Apple Mail marks attached PDFs inline; only inline IMAGES are body art.
+    pdf = {**_file("pdf-1", "Quote.pdf", "application/pdf"), "isInline": True}
+    _fake_attachments(monkeypatch, [pdf])
+    got, _ = graph_inbox.list_attachments(
+        "m", mailbox="x@y.com", skip_inline_images=True
+    )
+    assert [a["name"] for a in got] == ["Quote.pdf"]
+
+
+def test_a_large_pasted_screenshot_is_kept(monkeypatch):
+    # Signature art tops out near 300 KB; a quote pasted into the body as a
+    # screenshot is bigger, and is the one body image worth keeping.
+    shot = {**_inline_image(99), "name": "image099.png", "size": 900 * 1024}
+    _fake_attachments(monkeypatch, [_inline_image(1), shot])
+    got, skipped = graph_inbox.list_attachments(
+        "m", mailbox="x@y.com", skip_inline_images=True
+    )
+    assert [a["name"] for a in got] == ["image099.png"]
+    assert [s["reason"] for s in skipped] == ["inline_image"]
+
+
+def test_rank_fetches_the_pdf_first_under_the_cap(monkeypatch):
+    listing = [
+        _file("x-1", "takeoff.xlsx", "application/vnd.ms-excel"),
+        _file("p-1", "photo.jpg", "image/jpeg"),
+        _file("pdf-1", "Quote.pdf", "application/pdf"),
+    ]
+    _fake_attachments(monkeypatch, listing)
+    got, skipped = graph_inbox.list_attachments(
+        "m", mailbox="x@y.com", max_count=1, rank=rfq_inbox._attachment_rank
+    )
+    assert [a["name"] for a in got] == ["Quote.pdf"]
+    assert [s["reason"] for s in skipped] == ["too_many", "too_many"]
+
+
+@pytest.fixture
+def attach_env(monkeypatch, db, link_env):
+    """link_env plus Graph reference links switched off, for attachment-only replies."""
+    monkeypatch.setattr(
+        graph_inbox, "get_message", lambda mid, **k: {"body": {"content": "<p>quote attached</p>"}}
+    )
+    monkeypatch.setattr(rfq_inbox, "_reference_links", lambda gid: [])
+    return link_env
+
+
+def test_a_quote_behind_a_deep_threads_signature_images_is_picked_up(
+    db, attach_env, monkeypatch
+):
+    _fake_attachments(monkeypatch, _deep_thread_listing(images=50))
+    rfq_inbox._ingest_message(db, _msg("jane@vendor.com"), {"conv-1": SEND})
+
+    [file_row] = db.tables["project_files"]  # the PDF only, no signature art
+    assert file_row["filename"] == "LVCC LIGHTING QUOTE.pdf"
+    [quote] = db.tables["quotes"]
+    assert quote["quote_file_id"] == file_row["id"]
+    assert db.tables["rfq_messages"][0]["extraction_status"] == "done"
+
+
+def test_a_quote_behind_signature_images_survives_the_checks_smaller_cap(
+    db, attach_env, monkeypatch
+):
+    _fake_attachments(monkeypatch, _deep_thread_listing(images=7))
+    rfq_inbox._ingest_message(
+        db, _msg("jane@vendor.com"), {"conv-1": SEND},
+        allow_sender_mismatch=True, max_attachments=rfq_inbox._CHECK_MAX_ATTACHMENTS,
+    )
+    assert len(db.tables["quotes"]) == 1
+
+
+def test_an_attachment_that_was_not_saved_is_reported_on_the_reply(
+    db, attach_env, monkeypatch
+):
+    monkeypatch.setattr(
+        rfq_inbox, "get_settings",
+        lambda: Settings(_env_file=None, inbound_attachment_max_count=1),
+    )
+    listing = [
+        _file("x-1", "pricing.xlsx", "application/vnd.ms-excel"),
+        _file("x-2", "pricing-alt.xlsx", "application/vnd.ms-excel"),
+        {"@odata.type": "#microsoft.graph.itemAttachment", "id": "i-1",
+         "name": "FW: our quote", "contentType": None, "size": 5000, "isInline": False},
+        {"@odata.type": "#microsoft.graph.referenceAttachment", "id": "r-1",
+         "name": "Quote on OneDrive", "contentType": None, "size": 100, "isInline": False},
+        *[_inline_image(i) for i in range(5)],
+    ]
+    _fake_attachments(monkeypatch, listing)
+    rfq_inbox._ingest_message(db, _msg("jane@vendor.com"), {"conv-1": SEND})
+
+    [message] = db.tables["rfq_messages"]
+    assert message["extraction_status"] == "failed"
+    error = message["extraction_error"]
+    assert '"pricing-alt.xlsx" (past the per-reply file limit)' in error
+    assert '"FW: our quote" (an attached email, open it in Outlook)' in error
+    assert "OneDrive" not in error   # a cloud link is resolved separately
+    assert "image" not in error      # signature art is not news
+    skipped = [a for a in attach_env if a[1] == "rfq.attachment_skipped"]
+    assert {a[4]["reason"] for a in skipped} == {"too_many", "item_attachment"}
 
 
 def test_refetch_wrong_project_404s(db, refetch_env):
     db.tables["rfq_messages"] = [_stored_message()]
     with pytest.raises(LookupError):
-        rfq_inbox.refetch_link_files("other-project", "m-1")
+        rfq_inbox.refetch_reply_files("other-project", "m-1")
 
 
 def test_refetch_already_extracted_refuses(db, refetch_env):
     db.tables["rfq_messages"] = [_stored_message(extraction_status="done")]
     with pytest.raises(ValueError):
-        rfq_inbox.refetch_link_files("p1", "m-1")
+        rfq_inbox.refetch_reply_files("p1", "m-1")
 
 
 # ── On-demand quote check (the Receive Quotes button) ──────────────────────────
@@ -569,6 +979,43 @@ def test_our_own_outbound_copy_is_not_counted_as_a_reply(check_db, check_env, mo
     result = rfq_inbox.check_project_quotes("p1")
     assert result["messages_seen"] == 0
     assert check_db.tables.get("rfq_messages", []) == []
+
+
+def test_the_sent_items_copy_under_a_directory_path_is_not_a_reply(
+    check_db, check_env, monkeypatch
+):
+    # Seen in dev: the check stored bids@'s own Sent Items copy of the RFQ as
+    # a vendor reply and ran the extractor over our BOM, because Graph
+    # reports that copy's sender as the tenant directory path.
+    dn = "/O=EXCHANGELABS/OU=EXCHANGE ADMINISTRATIVE GROUP/CN=RECIPIENTS/CN=BIDS"
+    monkeypatch.setattr(rfq_inbox, "_conversation_messages", lambda cid: [_msg(dn)])
+    result = rfq_inbox.check_project_quotes("p1")
+    assert result["messages_seen"] == 0
+    assert check_db.tables.get("rfq_messages", []) == []
+
+
+def test_a_teammate_on_the_thread_is_not_stored_by_the_check(
+    check_db, check_env, monkeypatch
+):
+    monkeypatch.setattr(
+        rfq_inbox, "_conversation_messages",
+        lambda cid: [_msg("estimator@g3electrical.com", hasAttachments=False)],
+    )
+    rfq_inbox.check_project_quotes("p1")
+    assert check_db.tables.get("rfq_messages", []) == []
+
+
+def test_the_check_picks_up_a_coworkers_quote_the_poller_used_to_drop(
+    check_db, check_env, monkeypatch
+):
+    check_db.tables["vendor_contacts"] = [dict(c) for c in VENDOR_CONTACTS]
+    monkeypatch.setattr(
+        rfq_inbox, "_conversation_messages",
+        lambda cid: [_msg("quotedesk@vendor.com", hasAttachments=False)],
+    )
+    rfq_inbox.check_project_quotes("p1")
+    [message] = check_db.tables["rfq_messages"]
+    assert message["from_addr"] == "quotedesk@vendor.com"
 
 
 # ── POST /projects/{id}/rfqs/check-quotes (the route in front of it) ───────────

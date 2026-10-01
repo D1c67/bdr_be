@@ -9,9 +9,19 @@ least-privilege hardening if the client secret ever leaks.
 
 Every send is recorded in `email_log`. For large attachments, prefer including
 short-TTL signed download links in the body over inlining bytes.
+
+Test mode (docs/RFP_TESTING.md 6): while an RFP test session is active
+EVERY send from this server, `send_mail` and `send_draft` alike, is
+rewritten by `rfp_test.redirect` to go to the session's redirect address as
+plain text under a header naming the intended recipients; with the address
+empty the send is refused (fail closed). Inert while RFP_TESTING_ENABLED is
+false: `rfp_test.active_session` answers None without a query.
 """
 
 import base64
+import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import httpx
 import msal
@@ -19,8 +29,13 @@ import msal
 from app.core.config import get_settings
 from app.core.supabase_client import get_supabase
 
+logger = logging.getLogger(__name__)
+
 _GRAPH_SCOPE = ["https://graph.microsoft.com/.default"]
 _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+# Streamed calls (attachment $value downloads): a fresh connection per call;
+# read/write cover a single socket operation, not the whole body.
+_STREAM_TIMEOUT = httpx.Timeout(connect=10, read=60, write=60, pool=30)
 
 _msal_app: msal.ConfidentialClientApplication | None = None
 
@@ -83,6 +98,46 @@ def graph_request(
     )
     resp.raise_for_status()
     return resp
+
+
+def _graph_client(timeout: httpx.Timeout) -> httpx.Client:
+    """Short-lived client for one streamed Graph call. Redirects are never
+    followed: a streamed `$value` download must land on Graph itself, and a
+    redirect would carry the tenant token somewhere we did not choose. Tests
+    replace this factory with a MockTransport-backed client."""
+    return httpx.Client(timeout=timeout, follow_redirects=False)
+
+
+@contextmanager
+def graph_stream(
+    method: str,
+    path: str,
+    *,
+    timeout: httpx.Timeout = _STREAM_TIMEOUT,
+    prefer: str | None = None,
+) -> Iterator[httpx.Response]:
+    """Streaming sibling of `graph_request`: same Authorization and
+    `Prefer: IdType="ImmutableId"` headers, yields the response from
+    `client.stream` so the caller can consume the body in chunks
+    (`resp.iter_bytes`) under its own byte cap instead of buffering it.
+
+    Unlike `graph_request` redirects are NEVER followed; a 3xx raises
+    `httpx.HTTPStatusError` like any other non-2xx (fail closed: the caller
+    inspects `exc.response.status_code` to map 404/410). The response and the
+    connection are closed on exit, whether the body was fully read or not.
+    """
+    prefer_header = 'IdType="ImmutableId"'
+    if prefer:
+        prefer_header += f", {prefer}"
+    headers = {
+        "Authorization": f"Bearer {_acquire_token()}",
+        "Prefer": prefer_header,
+    }
+    with _graph_client(timeout) as client:
+        with client.stream(method, f"{_GRAPH_BASE}{path}", headers=headers) as resp:
+            # Raises for 3xx too (redirects are refused, see above).
+            resp.raise_for_status()
+            yield resp
 
 
 # ── Draft flow (used for RFQs: lets us capture the conversationId) ──────────
@@ -190,9 +245,102 @@ def _upload_in_chunks(upload_url: str, content: bytes) -> None:
         resp.raise_for_status()
 
 
-def send_draft(message_id: str, *, sender: str | None = None) -> None:
+# What the redirect reads off a draft before it goes: the fields it rewrites
+# and the attachment listing (names and sizes) for the header.
+_DRAFT_SELECT = "id,subject,body,toRecipients,ccRecipients,bccRecipients"
+_DRAFT_EXPAND = "attachments($select=id,name,size,isInline,contentType)"
+
+
+def _active_test_session(sb=None):
+    """The active RFP test session, or None. Free while the bench is off (no
+    client, no query). Imported here: rfp_test imports this module for
+    `graph_request`."""
+    if not get_settings().rfp_testing_enabled:
+        return None
+    from app.services import rfp_test
+
+    return rfp_test.active_session(sb or get_supabase())
+
+
+def _redirect_draft(
+    message_id: str, *, sender: str, sb, session: dict, project_id: str | None,
+    rfq_id: str | None,
+):
+    """Section 6 for a draft: GET the draft, rewrite the fields through
+    `rfp_test.redirect`, PATCH them back, drop the inline attachments (the
+    body is text now). The draft's id and conversationId stay valid, so the
+    caller's threading (rfq_sends) is unchanged. Returns the Redirected
+    record for the event."""
+    from app.services import rfp_test
+
+    draft = graph_request(
+        "GET",
+        f"/users/{sender}/messages/{message_id}",
+        params={"$select": _DRAFT_SELECT, "$expand": _DRAFT_EXPAND},
+    ).json()
+    message = {
+        "subject": draft.get("subject"),
+        "body": draft.get("body") or {},
+        "toRecipients": draft.get("toRecipients") or [],
+        "ccRecipients": draft.get("ccRecipients") or [],
+        "bccRecipients": draft.get("bccRecipients") or [],
+        "attachments": draft.get("attachments") or [],
+    }
+    inline_ids = [a.get("id") for a in message["attachments"] if a.get("isInline") and a.get("id")]
+    redirected = rfp_test.redirect(
+        message, sb=sb, session=session, sender_mailbox=sender,
+        context={"project_id": project_id, "rfq_id": rfq_id},
+    )
+    graph_request(
+        "PATCH",
+        f"/users/{sender}/messages/{message_id}",
+        json={
+            "subject": message["subject"],
+            "body": message["body"],
+            "toRecipients": message["toRecipients"],
+            "ccRecipients": message["ccRecipients"],
+            "bccRecipients": message["bccRecipients"],
+        },
+    )
+    for att_id in inline_ids:
+        try:
+            graph_request("DELETE", f"/users/{sender}/messages/{message_id}/attachments/{att_id}")
+        except Exception:  # noqa: BLE001 - a leftover logo is harmless in a text body
+            logger.warning("test redirect: inline attachment %s not removed", att_id, exc_info=True)
+    return redirected
+
+
+def send_draft(
+    message_id: str, *, sender: str | None = None, project_id: str | None = None,
+    rfq_id: str | None = None,
+) -> None:
+    """Send a draft. `project_id` / `rfq_id` only label the test bench's
+    redirect event (docs/RFP_TESTING.md 6); callers that have them pass them."""
     sender = sender or get_settings().ms_sender
-    graph_request("POST", f"/users/{sender}/messages/{message_id}/send")
+    session = _active_test_session()
+    sb = get_supabase() if session is not None else None
+    redirected = None
+    if session is not None:
+        # Refuses (RedirectRefused) before anything is sent when the
+        # session's redirect address is empty: fail closed.
+        redirected = _redirect_draft(
+            message_id, sender=sender, sb=sb, session=session, project_id=project_id,
+            rfq_id=rfq_id,
+        )
+    try:
+        graph_request("POST", f"/users/{sender}/messages/{message_id}/send")
+    except Exception as exc:
+        if redirected is not None:
+            from app.services import rfp_test
+
+            rfp_test.record_redirected(
+                sb, session, redirected, email_log_id=None, status="failed", error=str(exc)
+            )
+        raise
+    if redirected is not None:
+        from app.services import rfp_test
+
+        rfp_test.record_redirected(sb, session, redirected, email_log_id=None, status="sent")
 
 
 def create_reply_all_draft(message_id: str, *, sender: str | None = None) -> dict:
@@ -327,26 +475,26 @@ def send_mail(
     """
     settings = get_settings()
     sb = get_supabase()
+    session = _active_test_session(sb)
 
     # to_addrs records the To line ONLY, never the CC. proposal_send proves a
     # crashed send actually delivered by comparing proposal_sends.gc_email to
     # this string for exact equality (see its join_recipients docstring), so
-    # folding CC addresses in here would break crash recovery.
-    log = (
-        sb.table("email_log")
-        .insert(
-            {
-                "to_addrs": ", ".join(to),
-                "subject": subject,
-                "body": body_html,
-                "status": "queued",
-                "project_id": project_id,
-                "rfq_id": rfq_id,
-                "sent_by": sent_by,
-            }
-        )
-        .execute()
-    ).data[0]
+    # folding CC addresses in here would break crash recovery. In test mode
+    # the row keeps the INTENDED To line and says where it really went.
+    log_row = {
+        "to_addrs": ", ".join(to),
+        "subject": subject,
+        "body": body_html,
+        "status": "queued",
+        "project_id": project_id,
+        "rfq_id": rfq_id,
+        "sent_by": sent_by,
+    }
+    if session is not None:
+        log_row["test_session_id"] = session.get("id")
+        log_row["redirected_to"] = (session.get("redirect_to") or "").strip() or None
+    log = sb.table("email_log").insert(log_row).execute().data[0]
 
     message: dict = {
         "subject": subject,
@@ -382,7 +530,18 @@ def send_mail(
     if msg_attachments:
         message["attachments"] = msg_attachments
 
+    redirected = None
     try:
+        if session is not None:
+            # Test mode: the assembled message goes to the redirect address
+            # as text (docs/RFP_TESTING.md 6); an empty address refuses the
+            # send (RedirectRefused) and the log row records the refusal.
+            from app.services import rfp_test
+
+            redirected = rfp_test.redirect(
+                message, sb=sb, session=session, sender_mailbox=settings.ms_sender,
+                context={"project_id": project_id, "rfq_id": rfq_id},
+            )
         token = _acquire_token()
         resp = httpx.post(
             f"{_GRAPH_BASE}/users/{settings.ms_sender}/sendMail",
@@ -399,6 +558,16 @@ def send_mail(
         sb.table("email_log").update({"status": "failed", "error": str(exc)}).eq(
             "id", log["id"]
         ).execute()
+        if redirected is not None:
+            from app.services import rfp_test
+
+            rfp_test.record_redirected(
+                sb, session, redirected, email_log_id=log["id"], status="failed", error=str(exc)
+            )
         raise
+    if redirected is not None:
+        from app.services import rfp_test
+
+        rfp_test.record_redirected(sb, session, redirected, email_log_id=log["id"], status="sent")
 
     return log

@@ -601,7 +601,23 @@ def commit_verify(
     key, else the live upstream figure) so downstream readers never fall back to
     figures that can move after the commit. Sections not on the project are
     stored NULL (never 0), the marker readers resolve to "not part of the
-    decomposition". The original→final delta is recorded in the audit log."""
+    decomposition". The original→final delta is recorded in the audit log.
+
+    Refused (409, nothing written) until the send_out head has reached Verify:
+    a commit while the bid is still at gc_pricing (or its lane is locked) would
+    freeze a snapshot of partial upstream figures. Past Verify (send_out /
+    submitted / bid_outcome) a commit is the silent re-stamp below."""
+    state = workflow.load_category_state(project_id)
+    send_state = state.get("send_out", {})
+    send_head = send_state.get("current_task")
+    if send_state.get("status") == "locked" or send_head not in (
+        "verify",
+        *workflow._PAST_VERIFY_HEADS,
+    ):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Pricing can only be committed once the bid reaches Verify",
+        )
     body = body or VerifyOverrideIn()
     originals = _verify_originals(project_id)
     sections = section_summary(_materials_rows(project_id))
@@ -643,8 +659,7 @@ def commit_verify(
         .single()
         .execute()
     ).data
-    state = workflow.load_category_state(project_id)
-    send_head = state.get("send_out", {}).get("current_task")
+    # send_head was read by the gate above.
     # Only advance + notify when the commit actually moved the send_out head off Verify;
     # a redundant re-commit (already advanced) just re-stamps the snapshot silently.
     if send_head == "verify":
