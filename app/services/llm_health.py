@@ -174,7 +174,7 @@ def _probe(
         provider,
         label,
         "ok",
-        "Connected — the provider answered and listed its models.",
+        "Connected. The provider answered and listed its models.",
         latency_ms=int((time.monotonic() - started) * 1000),
         model_count=len(ids),
     ), ids
@@ -188,14 +188,14 @@ def _failure(provider: str, label: str, exc: Exception, elapsed_ms: int) -> Prov
     if isinstance(exc, openai.APITimeoutError):
         return ProviderStatus(
             provider, label, "unreachable",
-            "No response within the health-check timeout — the server may be "
+            "No response within the health-check timeout. The server may be "
             "stopped, overloaded, or unreachable from the API.",
             latency_ms=elapsed_ms,
         )
     if isinstance(exc, openai.APIConnectionError):
         return ProviderStatus(
             provider, label, "unreachable",
-            "Could not connect — the server is not answering on its endpoint.",
+            "Could not connect. The model server is not answering on its endpoint.",
             latency_ms=elapsed_ms,
         )
     status_code = getattr(exc, "status_code", None)
@@ -229,7 +229,7 @@ def _failure(provider: str, label: str, exc: Exception, elapsed_ms: int) -> Prov
     logger.warning("LLM health probe failed for %s: %s", provider, name)
     return ProviderStatus(
         provider, label, "error",
-        "The health check failed for an unexpected reason — see the API logs.",
+        "The health check failed for an unexpected reason. See the API logs.",
         latency_ms=elapsed_ms,
     )
 
@@ -318,7 +318,7 @@ def _grade(
         # and the most likely one after someone restarts the box on a new model.
         return FeatureStatus(
             key, label, provider_label, route.model, "model_missing",
-            f"The server is running but is not serving “{route.model}” — "
+            f"The server is running but is not serving “{route.model}”, so "
             "every request for this feature will fail until the configured model "
             "and the loaded model match.",
             model_listed=False,
@@ -326,7 +326,7 @@ def _grade(
     detail = "Connected and serving this model."
     if route.provider != "self_hosted" and not listed:
         detail = (
-            "Connected. The provider's catalog doesn't list this exact model id — "
+            "Connected. The provider's catalog doesn't list this exact model id. This is "
             "usually harmless (it may be an alias), but worth checking if calls fail."
         )
     return FeatureStatus(

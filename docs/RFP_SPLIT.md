@@ -1253,7 +1253,12 @@ splitter". Refused 409 while the splitter or the queue is off, the project is
 marked split outside the app, its hand-off package has sent
 (`MSG_PACKAGE_SENT`, the corrections rule), a run is going, there is nothing
 to re-run (no flag, or only page-cap failures: "split them outside the app"),
-or the model is away (its sentence). Otherwise, claimed on the harvest's
+or the model is away (`model_away_sentence`: a plain sentence naming what is
+wrong, server not responding / wrong model loaded / no model set up, and what
+to do next; the health probe's own detail is no longer shown here). The flag
+carries `over_page_cap` (every failed file is over `page_cap`,
+BID_SPLIT_MAX_PAGES_PER_FILE) and the page hides "Run the splitter" then,
+saying the files must be split outside the app (2026-10-01). Otherwise, claimed on the harvest's
 split_status by a CAS from the status just read:
 
 - `requeue`: the harvest has a job with failed files. Those files (not the
@@ -1290,7 +1295,13 @@ app": 409 when there is no open flag or it is already marked; writes
 (migration `0143_rfp_split_resolution.sql`); audited
 `rfp_created.split_outside`. The banner folds into "Marked as split outside
 the app by <name> on <date>." with an Undo. The person uploads the split
-files through the normal upload flow.
+files through the normal upload flow. Marking also settles what an
+interrupted run left behind (`rfp_split.clear_interrupted`, 2026-10-01): a
+stale staging claim goes `failed` with the interrupted sentence (CAS on its
+stamp), the harvest's dead job is reaped (its stranded files go failed
+"interrupted" and the job settles), and other `processing` jobs of the
+harvest with nothing running are discarded. A live run is never touched.
+Best effort: the resolution is recorded either way.
 
 `DELETE /rfp-created/{project_id}/split/outside`, Undo: clears the three
 columns; audited `rfp_created.split_outside_undo`.

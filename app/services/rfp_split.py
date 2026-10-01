@@ -170,7 +170,6 @@ _OUTAGE_KINDS = frozenset({
     llm_errors.KIND_OUT_OF_TOKENS, llm_errors.KIND_UNAUTHORIZED,
 })
 _OUTAGE_RUNS_MAX = 3
-_MSG_MODEL_AWAY = "The bid file splitting model is not available."
 _MSG_SANDBOX_BUSY = "The sandbox is still checking the harvested documents."
 _MSG_NONE_STAGED = "No harvested document passed the sandbox checks; nothing was staged."
 _FILE_SELECT = (
@@ -1940,11 +1939,28 @@ _MSG_OVER_PAGE_CAP = (
     "split them outside the app."
 )
 _MSG_RUN_INTERRUPTED = "The splitter run was interrupted before its documents were staged."
+_MODEL_AWAY_WHY = {
+    "provider_down": "the AI model server is not responding",
+    "model_missing": "the AI model server is up but is not running the splitting model",
+    "unconfigured": "no AI model is set up for bid file splitting on this server",
+}
+MSG_MODEL_AWAY_RUN = (
+    "The Bid File Splitter cannot run right now because {why}. Nothing was changed. "
+    "Try again once the model status in the sidebar shows it is back, or split the files outside the app."
+)
 _ISSUE_FILES_MAX = 100
 _ISSUE_FILE_SELECT = "id, job_id, filename, status, error, page_count, created_at, updated_at"
 _HARVEST_ISSUE_SELECT = (
     "id, split_status, split_error, split_job_id, split_started_at, split_finished_at"
 )
+
+
+def model_away_sentence(state: str | None) -> str:
+    """The refusal a person reads when "Run the splitter" meets a model
+    outage: what is wrong in plain words and what to do next (the health
+    probe's own detail is written for the model status modal, not here)."""
+    why = _MODEL_AWAY_WHY.get(str(state or ""), "its AI model is offline")
+    return MSG_MODEL_AWAY_RUN.format(why=why)
 
 
 def failure_reason(files: list[dict]) -> str:
@@ -2103,6 +2119,7 @@ def split_issue(
         state = ISSUE_PARTIAL
     if state is None:
         return None
+    cap = int((settings or get_settings()).bid_split_max_pages_per_file)
     rec = record or {}
     resolution = None
     if rec.get("split_resolution") == RESOLUTION_OUTSIDE and state != ISSUE_RUNNING:
@@ -2126,7 +2143,18 @@ def split_issue(
         "started_at": harvest.get("split_started_at"),
         "finished_at": harvest.get("split_finished_at"),
         "resolution": resolution,
+        # Every failed file is over the page cap: a manual run would refuse
+        # (_MSG_OVER_PAGE_CAP), so the page hides "Run the splitter".
+        "over_page_cap": state != ISSUE_RUNNING and bool(failed) and all(_over_cap(f, cap) for f in failed),
+        "page_cap": cap,
     }
+
+
+def _over_cap(f: dict, cap: int) -> bool:
+    try:
+        return bool(f.get("page_count")) and int(f["page_count"]) > cap
+    except (TypeError, ValueError):
+        return False
 
 
 def issues_for_records(
@@ -2185,6 +2213,42 @@ def split_running(sb, record: dict) -> bool:
         return False
     issue = issues_for_records(sb, [record]).get(str(record.get("project_id") or ""))
     return bool(issue and issue.get("state") == ISSUE_RUNNING)
+
+
+def clear_interrupted(sb, record: dict, settings: Settings | None = None) -> None:
+    """Called when the project is marked split outside the app: settle what
+    an interrupted run left behind, so nothing reads "processing" forever.
+
+    - a staging claim gone stale (`pending`, no heartbeat: the server
+      restarted mid-staging) goes `failed` with the interrupted sentence
+      (CAS on its stamp, so a run that just took the claim is left alone);
+    - the harvest's job, when it is dead (`dead_job_ids`: processing with
+      nothing queued or running), is reaped: its stranded files go failed
+      "interrupted" and the job settles through the normal aggregate;
+    - other `processing` jobs of the harvest with nothing running (an
+      earlier staging's leftovers) are discarded, once no claim is live.
+
+    A live run is never touched. Best effort: never raises."""
+    s = settings or get_settings()
+    try:
+        harvest = _harvest_full(sb, record.get("harvest_id"))
+        if harvest is None:
+            return
+        if harvest.get("split_status") == SPLIT_PENDING and pending_is_stale(harvest, None, s):
+            if _claim_manual(sb, harvest, SPLIT_PENDING, {
+                "split_status": SPLIT_FAILED,
+                "split_error": harvest.get("split_error") or _MSG_RUN_INTERRUPTED,
+                "split_finished_at": _iso(_now()),
+            }):
+                sync_record(sb, str(record.get("project_id")), SPLIT_FAILED, harvest.get("split_job_id"))
+            harvest = _harvest_full(sb, harvest["id"]) or harvest
+        if harvest.get("split_status") != SPLIT_PENDING:
+            _discard_orphans(sb, harvest, s)   # no staging owns the harvest, so none can be feeding them
+        job = _job(sb, harvest.get("split_job_id"))
+        if job is not None and job.get("status") == "processing":
+            _reap_if_dead(sb, harvest, job, s)
+    except Exception:  # noqa: BLE001 - the resolution is recorded either way
+        logger.exception("rfp split: could not clear an interrupted run on %s", record.get("project_id"))
 
 
 def creation_note(sb, harvest: dict | None) -> str | None:
@@ -2294,7 +2358,7 @@ def start_manual_run(sb, record: dict, *, actor_id: str | None, settings: Settin
         raise RunRefused(MSG_NOTHING_TO_RUN)
     away = model_away(s)
     if away:
-        raise RunRefused(away[1])
+        raise RunRefused(model_away_sentence(away[0]))
     job = _job(sb, harvest.get("split_job_id"))
     if job is not None and job.get("status") == "processing":
         # The flag is not `running`, so this job should be dead (a restart
@@ -2313,7 +2377,7 @@ def start_manual_run(sb, record: dict, *, actor_id: str | None, settings: Settin
     if job is not None and files:
         cap = int(s.bid_split_max_pages_per_file)
         failed = [f for f in files if f.get("status") == "failed"]
-        runnable = [f for f in failed if not (f.get("page_count") and int(f["page_count"]) > cap)]
+        runnable = [f for f in failed if not _over_cap(f, cap)]
         if not failed:
             raise RunRefused(MSG_NOTHING_TO_RUN)
         if not runnable:

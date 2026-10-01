@@ -746,6 +746,9 @@ def mark_rfp_created_split_outside(project_id: str, user: CurrentUser = Depends(
     ).data or []
     if not rows:
         raise HTTPException(status.HTTP_409_CONFLICT, "This project is already marked as split outside the app.")
+    # An interrupted run can leave a job reading "processing" forever; the
+    # person is done with the splitter here, so settle it now.
+    _split().clear_interrupted(sb, rows[0])
     audit(user.id, "rfp_created.split_outside", AUDIT_ENTITY, project_id,
           {"state": issue.get("state"), "job_id": issue.get("job_id")})
     return {"split": issue_for_project(sb, rows[0])}

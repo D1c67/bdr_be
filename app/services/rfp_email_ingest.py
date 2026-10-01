@@ -1326,7 +1326,7 @@ def model_unavailable(snapshot, feature: str = FEATURE) -> tuple[str, str] | Non
             continue
         if feat.state in ("provider_down", "model_missing", "unconfigured"):
             name = _FEATURE_NAMES.get(feature, feature)
-            return feat.state, (feat.detail or f"The {name} model is not available.")
+            return feat.state, (feat.detail or f"The {name} model is offline right now.")
         return None
     return None
 

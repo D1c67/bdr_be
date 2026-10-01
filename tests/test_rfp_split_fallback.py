@@ -554,6 +554,9 @@ def test_run_with_failed_files_requeues_them_on_the_linked_job(env):
     with pytest.raises(HTTPException) as exc:
         rr.run_rfp_created_split(P1, BackgroundTasks(), user=_user())
     assert exc.value.status_code == 409 and "page limit (600 pages per file)" in exc.value.detail
+    # ...and the flag says so, so the page hides "Run the splitter".
+    issue = rr.issue_for_project(env.db, env.db.tables["rfp_created_projects"][0])
+    assert issue["over_page_cap"] is True and issue["page_cap"] == 600
 
 
 def test_run_refusals(env, monkeypatch):
@@ -565,8 +568,10 @@ def test_run_refusals(env, monkeypatch):
     monkeypatch.setattr(files_router, "handoff_locked", lambda pid: True)
     refused(rfp_split.MSG_PACKAGE_SENT)
     monkeypatch.setattr(files_router, "handoff_locked", lambda pid: False)
-    monkeypatch.setattr(rfp_split, "model_away", lambda *a, **k: ("provider_down", "The model server is off."))
-    refused("The model server is off.")
+    monkeypatch.setattr(rfp_split, "model_away", lambda *a, **k: ("provider_down", "Could not connect — raw probe."))
+    refused(rfp_split.model_away_sentence("provider_down"))
+    assert "not responding" in rfp_split.model_away_sentence("provider_down")
+    assert "\u2014" not in rfp_split.model_away_sentence("provider_down")
     monkeypatch.setattr(rfp_split, "model_away", lambda *a, **k: None)
     monkeypatch.setattr(rfp_split, "get_settings", lambda: _settings(rfp_split_enabled=False))
     refused(rfp_split.MSG_SPLIT_OFF)
@@ -603,6 +608,61 @@ def test_outside_the_app_and_undo(env):
     with pytest.raises(HTTPException) as exc:
         rr.mark_rfp_created_split_outside(P1, user=_user())
     assert exc.value.status_code == 409
+
+
+def test_over_page_cap_only_when_every_failed_file_is_over_the_cap():
+    hv = _harvest(split_status="complete", split_job_id=JOB)
+    job = {"id": JOB, "status": "done_with_errors"}
+    assert rfp_split.split_issue(hv, job, _files("done", "failed"))["over_page_cap"] is True
+    mixed = _files("done", "failed", "failed")
+    mixed[2]["page_count"] = 40
+    assert rfp_split.split_issue(hv, job, mixed)["over_page_cap"] is False
+    # Staging gave up (no files): the run can stage again.
+    assert rfp_split.split_issue(_harvest(split_status="failed", split_error="x"), None, [])["over_page_cap"] is False
+
+
+def test_outside_reaps_a_dead_job_so_nothing_reads_processing(env):
+    old = rfp_split._iso(rfp_split._now() - timedelta(hours=2))
+    env.db.tables["bid_split_jobs"] = [{"id": JOB, "status": "processing", "project_id": P1, "source": "rfp",
+                                        "rfp_harvest_id": HV, "created_by": None, "created_at": old, "updated_at": old}]
+    env.db.tables["bid_split_files"] = [
+        {"id": "f0", "job_id": JOB, "filename": "A.pdf", "status": "done", "error": None, "page_count": 10,
+         "created_at": old, "updated_at": old},
+        {"id": "f1", "job_id": JOB, "filename": "B.pdf", "status": "running", "error": None, "page_count": 10,
+         "created_at": old, "updated_at": old},
+    ]
+    _hv(env).update(split_status="running", split_error=None, split_job_id=JOB)
+    issue = rr.issue_for_project(env.db, env.db.tables["rfp_created_projects"][0])
+    assert issue["state"] == "failed"                      # dead: nothing queued or running
+    out = rr.mark_rfp_created_split_outside(P1, user=_user())
+    assert env.db.tables["bid_split_jobs"][0]["status"] != "processing"
+    files = {f["id"]: f for f in env.db.tables["bid_split_files"]}
+    assert files["f1"]["status"] == "failed" and files["f1"]["error"] == rfp_split._MSG_JOB_INTERRUPTED
+    assert _hv(env)["split_status"] in ("complete", "failed")
+    assert out["split"]["resolution"]["kind"] == "outside" and out["split"]["state"] != "running"
+
+
+def test_outside_settles_a_stale_staging_claim_and_its_orphans(env, monkeypatch):
+    old = rfp_split._iso(rfp_split._now() - timedelta(hours=2))
+    _hv(env).update(split_status="pending", split_error=None, split_job_id=None, split_started_at=old)
+    env.db.tables["bid_split_jobs"] = [{"id": "orphan", "status": "processing", "project_id": P1, "source": "rfp",
+                                        "rfp_harvest_id": HV, "created_at": old, "updated_at": old}]
+    assert rr.issue_for_project(env.db, env.db.tables["rfp_created_projects"][0])["state"] == "failed"
+    swept = []
+    monkeypatch.setattr(rfp_split.storage, "delete_bid_split_prefix", lambda jid: swept.append(jid))
+    rr.mark_rfp_created_split_outside(P1, user=_user())
+    assert _hv(env)["split_status"] == "failed" and _hv(env)["split_error"] == rfp_split._MSG_RUN_INTERRUPTED
+    assert env.db.tables["bid_split_jobs"] == [] and swept == ["orphan"]
+    assert env.db.tables["rfp_created_projects"][0]["split_status"] == "failed"
+
+
+def test_outside_leaves_a_live_run_alone(env):
+    fresh = rfp_split._iso(rfp_split._now())
+    env.db.tables["bid_split_jobs"] = [{"id": JOB, "status": "processing", "project_id": P1, "source": "rfp",
+                                        "rfp_harvest_id": HV, "created_at": fresh, "updated_at": fresh}]
+    _hv(env).update(split_status="failed", split_job_id=JOB)
+    rfp_split.clear_interrupted(env.db, env.db.tables["rfp_created_projects"][0])
+    assert env.db.tables["bid_split_jobs"][0]["status"] == "processing"
 
 
 def test_the_created_page_flags_a_staging_failure_and_a_partial_split(env, monkeypatch):

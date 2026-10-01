@@ -765,7 +765,7 @@ def test_model_unavailable_reads_the_feature_grade():
     assert m(snap, "rfp_match") is None
     # A feature the snapshot does not list, or a blank detail, still names the model.
     assert m(_Snapshot("unconfigured", None), "rfp_match")[1] == (
-        "The RFP project matching model is not available."
+        "The RFP project matching model is offline right now."
     )
 
 
