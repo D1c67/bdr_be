@@ -802,6 +802,13 @@ def test_bid_due_at_combines_in_pacific_and_degrades():
         ("Bidders Preference Affidavit.pdf", "other"),
         ("Ownership Disclosure Form.docx", "other"),
         ("21081-_1.PDF", "other"),
+        # Underscores separate words (SmartBid plan rooms name files this way).
+        ("NSU_Grey_Shell_SPECS_-_Project_Manual.pdf", "specification"),
+        ("Addendum_1_FPR_NSU_Gateway_3.pdf", "specification"),
+        ("2026-09-24_-_Whole_Foods_-_Bid_Drawings.pdf", "drawing"),
+        # A spreadsheet or Word file is never a drawing.
+        ("Bid_Sheet_CSI_Divisions_-_Template__with_alts_.xlsx", "other"),
+        ("Plans and Sheets.docx", "other"),
         ("", "other"),
         (None, "other"),
     ],

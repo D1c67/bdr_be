@@ -48,10 +48,11 @@ express that combination.
 | Review queue roles | Estimating Admin primarily. IT Admin, Executive and both Estimating Engineer focuses may also act. Accountant and Estimator never see it. |
 | Authorized-sender management | Executive, Estimating Admin and IT Admin. Locked rules are IT Admin only. |
 | Lookback on first start | 3 days, deployment-forward, on dev and on the eventual production first start. See section 6. |
-| Platform addresses | The given platform addresses are seeded as locked rules (after 2026-09-16: Procore, plus the two PipelineSuite GC domains seeded by 0129). More can be added later as locked rules by the IT Admin. |
+| Platform addresses | The given platform addresses are seeded as locked rules (after 2026-09-16: Procore, plus the two PipelineSuite GC domains seeded by 0129; after 2026-10-01: plus `smartbidnet.com`, seeded by 0148). More can be added later as locked rules by the IT Admin. |
 | Blocked platforms (2026-09-15, 2026-09-16) | BuildingConnected, NGEM and PlanHub are not invitation methods. Mail from buildingconnected.com, ionwave.net, planhub.com and planhubprojects.com (and subdomains) is sanitized out at listing time via `RFP_EMAIL_INGESTION_BLOCKED_DOMAINS`, like internal and vendor senders: no row, no LLM call. Migration 0124 removed the BuildingConnected and NGEM seed rules and rows and narrowed both method check constraints; migration 0128 did the same for PlanHub. |
 | GC portals (2026-09-16) | `gc_portal` is the method for a GC that invites through its own bidding portal. Every such portal is different, so the harvest step picks the scraper by the sender's domain (`RFP_HARVEST.md` 2.3). The method is granted by a locked rule the IT Admin adds on that GC's sending domain; locked rules outrank the GC-domain source, which is how the portal rule beats the same GC's organic match. Migration 0127 widened both check constraints; no rows changed. Scrapers are built per GC and none exist yet: until one is registered a gc_portal row drains to done unharvested, like organic. |
 | PipelineSuite portals (2026-09-16) | `pipelinesuite` is the method for a GC whose plan room is a PipelineSuite (PreconSuite) portal at `<gc>.pipelinesuite.com`. Unlike `gc_portal`, one method-keyed harvester serves every such GC: the invitation email comes from the GC's own domain and carries the portal host, a Project ID and a Security Key, and that is all the harvester needs (section 3.9, `RFP_PIPELINESUITE.md`). Granted by a locked domain rule on the GC's own domain; migration 0129 widened both check constraints and seeded `cgandbinc.com` and `shfcontracting.com`. |
+| SmartBid (2026-10-01) | `smartbid` is the method for invitations sent through ConstructConnect's SmartBid. Every one comes from the platform's own address (`notifications@com2.smartbidnet.com`), so, like Procore and unlike PipelineSuite, it is granted by ONE locked domain rule on the platform domain (`smartbidnet.com`, covering `com2.smartbidnet.com` on the label boundary), and one method-keyed harvester serves every GC that sends through it (section 3.9.1, `RFP_SMARTBID.md`). Migration 0148 widened both check constraints and seeded the rule. |
 
 ---
 
@@ -77,7 +78,7 @@ rfp_emails row: status = received
   |               else              -> review_llm  (human: yes -> authorize, no -> rejected_by_review)
   v  authorize  address / domain / GC-domain rules .... unauthorized -> flagged_unauthorized
   |                                                       (human: continue -> method as nonorganic)
-  v  method     organic | procore | pipelinesuite | gc_portal | general | nonorganic
+  v  method     organic | procore | pipelinesuite | smartbid | gc_portal | general | nonorganic
   v  done       (parked here for the future match step and harvest step)
 ```
 
@@ -425,19 +426,21 @@ Rules live in `rfp_authorized_senders`:
 |---|---|
 | kind | `address` or `domain` |
 | value | lowercased address or bare domain |
-| method | invitation method granted by this rule (`procore`, `pipelinesuite`, `gc_portal`, `general`; `buildingconnected` and `ngem` were removed by 0124, `gc_portal` was added by 0127, `planhub` was removed by 0128, `pipelinesuite` was added by 0129) |
-| locked | true for platform rules, pipelinesuite rules and gc_portal rules; only the IT Admin can add, edit or remove locked rules |
+| method | invitation method granted by this rule (`procore`, `pipelinesuite`, `smartbid`, `gc_portal`, `general`; `buildingconnected` and `ngem` were removed by 0124, `gc_portal` was added by 0127, `planhub` was removed by 0128, `pipelinesuite` was added by 0129, `smartbid` was added by 0148) |
+| locked | true for platform rules, pipelinesuite rules, smartbid rules and gc_portal rules; only the IT Admin can add, edit or remove locked rules |
 | created_by | user id, null for the seed |
 
 Seed (locked; 0120 seeded four rows, 0124 removed the BuildingConnected and
 NGEM rows and 0128 the PlanHub row because that mail is now dropped at
-listing time; 0129 added the first two PipelineSuite portals):
+listing time; 0129 added the first two PipelineSuite portals; 0148 added
+SmartBid):
 
 | kind | value | method |
 |---|---|---|
 | domain | procoretech.com | procore |
 | domain | cgandbinc.com | pipelinesuite |
 | domain | shfcontracting.com | pipelinesuite |
+| domain | smartbidnet.com | smartbid |
 
 Evaluation, on the RFC 5322 From address only (never display name, never
 Reply-To), and only after the auth step passed:
@@ -484,8 +487,8 @@ Decided from what authorized the sender, in this precedence:
 
 1. A locked rule (address rule before domain rule) gives its method: a
    platform (`procore`), `pipelinesuite` for a GC whose plan room is a
-   PipelineSuite portal, or `gc_portal` for a GC that invites through its
-   own bespoke bidding portal.
+   PipelineSuite portal, `smartbid` for ConstructConnect's SmartBid, or
+   `gc_portal` for a GC that invites through its own bespoke bidding portal.
 2. A GC-domain match gives `organic`.
 3. A user-added rule gives `general` (its `method` column is always `general`
    for non-locked rules).
@@ -532,6 +535,26 @@ rule, not code.
   tracking pings, the harvest data shape, the settings and the tests) is in
   `RFP_PIPELINESUITE.md`; the harvest wiring in `RFP_HARVEST.md` 2.4.
 
+### 3.9.1 SmartBid (2026-10-01)
+
+`smartbid` is the method for invitations sent through ConstructConnect's
+SmartBid (sometimes "SmartInsight"). It works like `procore` at the
+authorization layer (the platform is the sender) and like `pipelinesuite` at
+the harvest layer (no credentials in the env).
+
+- Granted by ONE locked domain rule on the platform domain,
+  `smartbidnet.com`, which covers `com2.smartbidnet.com` on a label
+  boundary. Migration 0148 seeds it and widens both check constraints. The
+  GC is not the sender, so the GC comes from the extract step (the email
+  signature), exactly as for Procore.
+- The harvester needs nothing from the env: the "Click Here to View the
+  Project" link in the email body carries the bid project id and a
+  per-recipient passport key. A SmartBid row with no such link (a marketing
+  blast, for example) drains to `done` unharvested, like any organic row.
+- Everything past the method (the client, the login, the tracking pings, the
+  harvest data shape, the settings and the tests) is in `RFP_SMARTBID.md`;
+  the harvest wiring in `RFP_HARVEST.md` 2.6.
+
 ### 3.10 Done
 
 `method` no longer hands the row to `done`: it hands it to `extract`, then
@@ -577,7 +600,7 @@ migrations. Applied manually to the dev database only, per the standing rule.
 | review_decision, review_by, review_at | text, uuid, timestamptz |
 | authorization_kind, authorization_rule_id | text, uuid |
 | continued_by, continued_at | uuid, timestamptz (the unauthorized override) |
-| invitation_method | text; check `rfp_emails_invitation_method_check` (0124, widened by 0127, narrowed by 0128, widened by 0129 to organic, procore, pipelinesuite, gc_portal, general, nonorganic) |
+| invitation_method | text; check `rfp_emails_invitation_method_check` (0124, widened by 0127, narrowed by 0128, widened by 0129 to organic, procore, pipelinesuite, gc_portal, general, nonorganic, widened by 0148 to add smartbid) |
 | status | text, indexed with next_attempt_at |
 | flag_reason | text |
 | decided_at_step | text |
@@ -610,7 +633,7 @@ mailbox that received the message.
 `rfp_authorized_senders`: as in 3.7, plus `created_at`, unique (`kind`,
 `value`); check `rfp_authorized_senders_method_check` (0124, widened by 0127,
 narrowed by 0128, widened by 0129 to procore, pipelinesuite, gc_portal,
-general).
+general, widened by 0148 to add smartbid).
 
 `rfp_classify_training`: `rfp_email_id`, `subject`, `body_excerpt`,
 `llm_answer`, `llm_confidence`, `human_answer`, `decided_by`, `created_at`.
@@ -720,7 +743,7 @@ count only what the viewer can see.
 | PATCH /rfp-emails/{id} {invitation_method} | correct the method |
 | GET /rfp-emails/counts | badge counts for the sidebar and dashboard |
 | GET /rfp-emails/authorized-senders | `{items}`; locked first; each with `created_by_name` |
-| POST /rfp-emails/authorized-senders {kind, value, locked?, method?} | 201 `{item, rescanned}`; `locked` and `method` (`procore`, `pipelinesuite`, `gc_portal`, `general`) accepted from the IT Admin only, every other rule is `general`; runs the 14 day learn-back |
+| POST /rfp-emails/authorized-senders {kind, value, locked?, method?} | 201 `{item, rescanned}`; `locked` and `method` (`procore`, `pipelinesuite`, `smartbid`, `gc_portal`, `general`) accepted from the IT Admin only, every other rule is `general`; runs the 14 day learn-back |
 | DELETE /rfp-emails/authorized-senders/{id} | remove; locked rows IT Admin only |
 | GET /rfp-emails/blocked-senders | `{items, env_domains}`; locked (platform) first; each with `created_by_name`. `env_domains` is what the server environment still pins, listed read-only |
 | POST /rfp-emails/blocked-senders {kind, value, reason?} | 201 `{item, parked}`; blocks and parks everything from that sender still in flight |
@@ -764,7 +787,7 @@ at a public mailbox provider.
   form with a kind selector (address or domain) and value; remove button
   disabled on locked rows unless the viewer is the IT Admin; a "locked"
   checkbox on the add form for the IT Admin only, and once it is ticked a
-  method picker (GC portal, PipelineSuite, Procore, General; default
+  method picker (GC portal, PipelineSuite, Procore, SmartBid, General; default
   General) so the locked rule names the source it stands for.
 - Settings, "Blocked senders" section on the same tab (2026-09-22), visible
   to those three roles plus any dev account: the blocked table with scope
@@ -939,6 +962,22 @@ authorized-senders route does). Tests:
 `test_the_it_admin_may_add_a_locked_pipelinesuite_rule_on_a_gc_domain`,
 `test_locked_pipelinesuite_rule_outranks_the_same_gcs_organic_match`.
 
+Addendum 2026-10-01: `smartbid` added as an invitation method (section 3.9.1,
+`RFP_SMARTBID.md`). Migration 0148 widens both named checks by that one value
+and seeds one locked domain rule, `smartbidnet.com`, with an `on conflict
+(kind, value) do update` so a hand-added rule on that domain is upgraded in
+place. `INVITATION_METHODS` and `RULE_METHODS` gained `smartbid` in the
+service, the router (`MethodPatchIn`, `AuthorizedSenderIn`) and the FE. The
+migration touches no email rows: after applying it, rows from
+`smartbidnet.com` parked at `flagged_unauthorized` are re-authorized by
+running `rescan_after_rule_added` once for the seeded rule, which is a
+release step that needs the owner's go (on dev it touches about 55 rows
+across about 12 real projects, and every new project the match step does not
+find gets logged into and downloaded). Tests:
+`test_migration_0148_adds_smartbid_and_seeds_one_locked_rule`,
+`test_the_it_admin_may_add_a_locked_smartbid_rule_on_the_platform_domain`,
+`test_locked_smartbid_rule_outranks_the_platform_senders_other_matches`.
+
 ## 12. First live run (2026-09-10, dev database, real mailboxes)
 
 Three-day window across the four mailboxes, model box up. 738 rows: 279
@@ -953,8 +992,9 @@ What it showed, and what was done or is still open:
 - Procore sends from `us02.procoretech.com`, not the bare domain. Fixed by
   the subdomain rule; the 14 affected rows were rescanned to `done/procore`.
 - SmartBid (`com2.smartbidnet.com`, 12 rows) is a real invitation platform
-  with no seed rule. Open: the IT Admin can add it as a locked rule from the
-  settings page; a fifth invitation method may be wanted later.
+  with no seed rule. RESOLVED 2026-10-01: migration 0148 adds `smartbid` as
+  an invitation method and seeds `smartbidnet.com` as a locked rule (section
+  3.9.1, `RFP_SMARTBID.md`).
 - `eoc-gc.com` (16 rows) and other GC domains are unauthorized on dev only
   because the dev database has almost no GC contacts; production will
   authorize them organically.

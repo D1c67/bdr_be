@@ -172,9 +172,10 @@ def _classified(sb, user: CurrentUser, now: datetime, *, email_select: str):
 
 @router.get("/summary", dependencies=[Depends(rfp_processing_rate_limit)])
 def rfp_processing_summary(user: CurrentUser = Depends(require_view_queue)) -> dict:
-    """`{lanes, steps, stuck_kinds, portal_served, generated_at}` (section
-    2.1): lane counts (plus `review_total` and `total`), the processing rows
-    per automated step, the stuck rows per reason. Counted inside the
+    """`{lanes, steps, stuck_kinds, waiting_on_review, portal_served,
+    generated_at}` (section 2.1): lane counts (plus `review_total` and
+    `total`), the processing rows per automated step, the stuck rows per
+    reason, the processing rows parked behind a copy in a review lane. Counted inside the
     viewer's mailbox scope; an empty scope reads no email row at all.
     `portal_served` is true when portal invitations are part of the counts
     for this viewer."""
@@ -215,13 +216,17 @@ def list_rfp_processing(
     if missing:
         harvests = {**harvests, **svc.harvest_statuses(sb, missing, _harvest_status_by_id)}
 
+    waits = svc.review_waits(classified)
     items = []
     for source, row, row_lane, stuck in page:
         if source == svc.SOURCE_PORTAL:
             items.append(svc.portal_item(row, row_lane, stuck, projects=projects, harvests=harvests))
         else:
             items.append(
-                svc.email_item(row, row_lane, stuck, projects=projects, gcs=gcs, harvests=harvests)
+                svc.email_item(
+                    row, row_lane, stuck, projects=projects, gcs=gcs, harvests=harvests,
+                    waiting_on=waits.get(str(row.get("id"))),
+                )
             )
     return {"items": items, "total": len(hits), "offset": offset, "limit": limit, "lane": lane}
 

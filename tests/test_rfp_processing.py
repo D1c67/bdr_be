@@ -634,6 +634,8 @@ ITEM_KEYS = {
     "created_project_id", "primary_mailbox", "portal",
     # additive (build record): the model's verdict for the Detail column
     "llm_answer", "llm_confidence", "llm_reasoning",
+    # additive: the copy in a review lane a sibling-wait row is parked behind
+    "waiting_on",
 }
 
 
@@ -671,6 +673,7 @@ def test_the_item_shape_for_both_sources(db):
         "match_project": {"id": P1, "name": "Sunrise Elementary", "number": "26.9.7301"},
         "created_project_id": None, "primary_mailbox": None, "portal": "ngem",
         "llm_answer": None, "llm_confidence": None, "llm_reasoning": None,
+        "waiting_on": None,
     }
     # A portal row at harvest with no record yet reads `pending`, like the NGEM tab.
     assert by_id[I_HARVEST]["harvest_status"] == "pending"
@@ -681,6 +684,89 @@ def test_the_gc_name_falls_back_to_the_extracted_one(db):
                                       extracted_gc_name="Typed GC")]
     out = rp.list_rfp_processing(lane="all", limit=50, offset=0, user=_user())
     assert out["items"][0]["gc_name"] == "Typed GC"
+
+
+# ── Copies waiting on a review (rule 4, `review_waits`) ──────────────────
+
+E_COPY_A = "3f1c0b00-0000-4000-8000-00000000000d"
+E_COPY_B = "3f1c0b00-0000-4000-8000-00000000000e"
+E_COPY_RUN = "3f1c0b00-0000-4000-8000-00000000000f"
+E_COPY_FOREIGN = "3f1c0b00-0000-4000-8000-000000000010"
+
+
+def _copy_of(eid, leader_id, *, received_min, wording="another"):
+    return _email(
+        eid, "extract", received_min=received_min, next_attempt_at=_ahead(5),
+        last_error=f"Waiting for {wording} copy of this message ({leader_id}) to finish.",
+    )
+
+
+def _seed_copies(db):
+    """The leader E_MATCH in review_match with two copies behind it (one in
+    the old wording, one naming the id in upper case), a copy behind a leader
+    that is still processing, and a copy behind a leader in a mailbox only
+    TIESHA's scope reaches."""
+    _seed(db)
+    db.tables["rfp_emails"] += [
+        _copy_of(E_COPY_A, E_MATCH, received_min=50),
+        _copy_of(E_COPY_B, E_MATCH.upper(), received_min=40, wording="an earlier"),
+        _copy_of(E_COPY_RUN, E_RUN, received_min=8),
+        _copy_of(E_COPY_FOREIGN, E_FOREIGN, received_min=30),
+    ]
+    db.tables["rfp_email_sightings"] = [
+        {"id": f"s-{r['id']}", "rfp_email_id": r["id"], "mailbox": r["mailboxes"][0]}
+        for r in db.tables["rfp_emails"]
+    ]
+
+
+def test_the_sibling_wait_sentence_yields_its_leader_id():
+    assert svc.sibling_wait_leader_id(
+        f"Waiting for another copy of this message ({E_MATCH}) to finish.") == E_MATCH
+    assert svc.sibling_wait_leader_id(
+        f"Waiting for an earlier copy of this message ({E_MATCH.upper()}) to finish.") == E_MATCH
+    # Not the wait sentence, or the sentence with no id: nothing to follow.
+    assert svc.sibling_wait_leader_id(f"The model is away ({E_MATCH}).") is None
+    assert svc.sibling_wait_leader_id("Waiting for another copy of this message to finish.") is None
+    assert svc.sibling_wait_leader_id(None) is None
+
+
+def test_copies_behind_a_review_row_are_counted_and_point_at_it(db):
+    _seed_copies(db)
+    summary = rp.rfp_processing_summary(user=_user())
+    # They stay in the processing lane (nothing is stuck); the new count is
+    # the part of that lane a person's review is holding.
+    assert summary["lanes"]["processing"] == 3 + 4
+    assert summary["waiting_on_review"] == 2
+
+    out = rp.list_rfp_processing(lane="processing", limit=50, offset=0, user=_user())
+    by_id = {i["id"]: i for i in out["items"]}
+    assert by_id[E_COPY_A]["waiting_on"] == {"id": E_MATCH, "lane": "review_match"}
+    assert by_id[E_COPY_B]["waiting_on"] == {"id": E_MATCH, "lane": "review_match"}
+    assert by_id[E_COPY_A]["lane"] == "processing" and by_id[E_COPY_A]["stuck"] is None
+    # A leader still being processed is not a review wait.
+    assert by_id[E_COPY_RUN]["waiting_on"] is None
+    # A leader outside this viewer's mailboxes is never described.
+    assert by_id[E_COPY_FOREIGN]["waiting_on"] is None
+    assert by_id[E_RUN]["waiting_on"] is None
+
+
+def test_a_viewer_who_sees_the_leader_gets_the_pointer(db):
+    _seed_copies(db)
+    dev = _user(Role.IT_ADMIN, is_dev=True)
+    assert rp.rfp_processing_summary(user=dev)["waiting_on_review"] == 3
+    out = rp.list_rfp_processing(lane="processing", limit=50, offset=0, user=dev)
+    by_id = {i["id"]: i for i in out["items"]}
+    assert by_id[E_COPY_FOREIGN]["waiting_on"] == {"id": E_FOREIGN, "lane": "review_llm"}
+
+
+def test_a_copy_whose_leader_has_decided_is_not_a_review_wait(db):
+    _seed_copies(db)
+    for row in db.tables["rfp_emails"]:
+        if row["id"] == E_MATCH:
+            row["status"] = "merged"      # decided: no longer loaded as in flight
+    assert rp.rfp_processing_summary(user=_user())["waiting_on_review"] == 0
+    out = rp.list_rfp_processing(lane="processing", limit=50, offset=0, user=_user())
+    assert all(i["waiting_on"] is None for i in out["items"])
 
 
 def test_the_list_never_selects_star_and_reads_references_once(db):

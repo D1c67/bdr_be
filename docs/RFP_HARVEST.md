@@ -7,7 +7,8 @@ later creation slice (and a person, today) can look at them. This sprint
 built the Procore harvester; the harvester interface is method-keyed, and
 the second harvester behind it, PipelineSuite (section 2.4,
 `RFP_PIPELINESUITE.md`, 2026-09-16), slotted in without touching the
-pipeline, as SmartBid and organic (attachment) harvests can later.
+pipeline, as did the organic (attachment) harvest (section 2.5) and SmartBid
+(section 2.6, `RFP_SMARTBID.md`, 2026-10-01).
 (BuildingConnected and NGEM since 2026-09-15, and PlanHub since
 2026-09-16, are not invitation methods: their mail is dropped at listing
 time, see `RFP_EMAIL_INGESTION.md` section 3.1.)
@@ -353,6 +354,38 @@ already https and on a recognised host; the card renders them as
 `unsupported` links (the download-by-hand cases). No URL ever lands on a
 `files[]` entry.
 
+### 2.6 SmartBid (`smartbid`, 2026-10-01)
+
+The fourth harvester behind `harvester_for`, in full in `RFP_SMARTBID.md`.
+A `smartbid` invitation (RFP_EMAIL_INGESTION.md 3.9.1) comes from
+ConstructConnect's SmartBid platform itself
+(`notifications@com2.smartbidnet.com`), so, like Procore, the method is
+granted by ONE locked domain rule on the platform domain (0148 seeds
+`smartbidnet.com`) and one harvester serves every GC that sends through it.
+Like PipelineSuite it needs no credentials: the "Click Here to View the
+Project" link in the email body carries the bid project id and a
+per-recipient passport key.
+
+- `harvester_for` answers `"smartbid"` for the method under
+  `RFP_INGESTION_ENABLED`, `RFP_HARVEST_ENABLED` and `SMARTBID_ENABLED`
+  alone. The reference is parsed from the email body
+  (`smartbid_client.parse_reference`); `can_harvest` says so when the body
+  carries no project link.
+- One session row, `provider = smartbid`, login bookkeeping only (nothing
+  secret is stored; the bearer token lives in the job's memory for one
+  harvest). `availability`, the lock, the login thresholds and the bell work
+  as for the other platforms, and `POST /{id}/harvest` checks the row's own
+  platform through `availability_for(row)`. `session_status()` has a
+  `smartbid` block.
+- Files go through the same provider-neutral `_harvest_files`, facts first,
+  then caps, then files. The harvest row is keyed `smartbid:<bid project
+  id>`, so the Bids@, office@ and tmoore@ copies of one invitation share one
+  harvest.
+- Never answered: the email's "Yes, I'll Bid" / "No, I Won't Bid" links and
+  their API calls, and any confidentiality agreement, are outside the
+  client's allowlist. The email's own read receipt, open pixel and "View the
+  Project" click are fired once per harvest.
+
 ---
 
 ## 3. Procore client (`app/services/procore_client.py`)
@@ -578,8 +611,8 @@ Existing router `/rfp-emails` (review-queue roles, feature switch):
 | method and path | purpose |
 |---|---|
 | GET /rfp-emails/{id} | gains `harvest` (the harvest row without `raw`, `claim_token`) and `harvest_job` (queue poll info) |
-| POST /rfp-emails/{id}/harvest | manual run: 202 `{job}`; 409 `rfp_harvest_active` when a job is already active; 409 `rfp_harvest_not_available` when the method has no harvester or the email has no platform link; 503 `rfp_harvest_locked` with the unlock time while the logins for the row's own platform are locked (`availability_for(row)`: Procore's one session, or the PipelineSuite portal named in the body). Accepts `{"force": true}` to refresh a complete harvest. Audited `rfp_harvest.run`. Rate limit: the default bucket. |
-| GET /rfp-emails/harvest-status | `{enabled, configured, account, logged_in_at, last_used_at, last_login_attempt_at, login_failures, locked_until, last_error, active_jobs}` for the settings tab (manage roles), plus a `pipelinesuite` block (`{enabled, portals: [...]}`, one entry per portal host, section 2.4); never the cookies, never the password, never a Security Key |
+| POST /rfp-emails/{id}/harvest | manual run: 202 `{job}`; 409 `rfp_harvest_active` when a job is already active; 409 `rfp_harvest_not_available` when the method has no harvester or the email has no platform link; 503 `rfp_harvest_locked` with the unlock time while the logins for the row's own platform are locked (`availability_for(row)`: Procore's one session, the PipelineSuite portal named in the body, or SmartBid's one session). Accepts `{"force": true}` to refresh a complete harvest. Audited `rfp_harvest.run`. Rate limit: the default bucket. |
+| GET /rfp-emails/harvest-status | `{enabled, configured, account, logged_in_at, last_used_at, last_login_attempt_at, login_failures, locked_until, last_error, active_jobs}` for the settings tab (manage roles), plus a `pipelinesuite` block (`{enabled, portals: [...]}`, one entry per portal host, section 2.4) and a `smartbid` block (section 2.6, `RFP_SMARTBID.md` section 4); never the cookies, never the password, never a Security Key, never a SmartBid passport key or token |
 
 The list rows (`GET /rfp-emails?tab=processed`) gain `harvest_status`
 (null, pending, running, complete, failed) through the join.
@@ -658,9 +691,10 @@ intervals at least 60 s); `RFP_HARVEST_MAX_FILES` is clamped at use time to
 `rfp_ingest_max_files_per_run` (`Settings.rfp_harvest_file_cap`);
 `procore_configured` is the derived property (both credentials non-empty).
 The `PIPELINESUITE_*` block (on by default, no credentials) is in
-`RFP_PIPELINESUITE.md` section 6; `Settings.rfp_harvest_active` is
+`RFP_PIPELINESUITE.md` section 6, the `SMARTBID_*` block (on by default, no
+credentials) in `RFP_SMARTBID.md` section 6; `Settings.rfp_harvest_active` is
 `rfp_ingest_enabled and rfp_harvest_enabled and (procore_configured or
-pipelinesuite_enabled or rfp_harvest_email_enabled)`.
+pipelinesuite_enabled or smartbid_enabled or rfp_harvest_email_enabled)`.
 
 ---
 
@@ -721,9 +755,12 @@ pipelinesuite_enabled or rfp_harvest_email_enabled)`.
 
 ## 10. Out of scope
 
-- SmartBid and organic (attachment) harvesters: the
-  `harvester_for` registry is the seam (PipelineSuite, section 2.4, is the
-  second harvester behind it since 2026-09-16). The per-GC portal scrapers
+- SmartBid and organic (attachment) harvesters are no longer out of scope:
+  the organic one is section 2.5 (2026-09-16) and SmartBid is section 2.6,
+  `RFP_SMARTBID.md` (2026-10-01). The `harvester_for` registry is the seam
+  (PipelineSuite, section 2.4, was the second harvester behind it). The
+  SmartBid project-list sweep and addendum refresh are `RFP_SMARTBID.md`
+  section 9. The per-GC portal scrapers
   behind `gc_portal` (section 2.3): the method, the domain-keyed registry
   and the drain-to-done behavior exist; every scraper is its own build.
 - Harvesting `merged` / `duplicate` rows (documents for an existing

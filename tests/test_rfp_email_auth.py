@@ -504,15 +504,19 @@ def test_method_for_rule_and_constants():
     # and neither is a method any more. 0127: gc_portal joined both lists.
     # 0128: PlanHub went the same way as 0124's two (blocked at listing time,
     # no longer a method). 0129: pipelinesuite joined both lists, after
-    # procore (docs/RFP_PIPELINESUITE.md section 4).
+    # procore (docs/RFP_PIPELINESUITE.md section 4). 0148: smartbid joined
+    # both lists, right after pipelinesuite (docs/RFP_SMARTBID.md section 4).
     assert set(auth.INVITATION_METHODS) == {
-        "organic", "procore", "pipelinesuite", "gc_portal", "general", "nonorganic"
+        "organic", "procore", "pipelinesuite", "smartbid", "gc_portal", "general", "nonorganic"
     }
-    assert set(auth.RULE_METHODS) == {"procore", "pipelinesuite", "gc_portal", "general"}
+    assert set(auth.RULE_METHODS) == {"procore", "pipelinesuite", "smartbid", "gc_portal", "general"}
     assert auth.METHOD_GC_PORTAL == "gc_portal"
     assert auth.METHOD_PIPELINESUITE == "pipelinesuite"
+    assert auth.METHOD_SMARTBID == "smartbid"
     assert auth.INVITATION_METHODS.index("pipelinesuite") == auth.INVITATION_METHODS.index("procore") + 1
     assert auth.RULE_METHODS.index("pipelinesuite") == auth.RULE_METHODS.index("procore") + 1
+    assert auth.INVITATION_METHODS.index("smartbid") == auth.INVITATION_METHODS.index("pipelinesuite") + 1
+    assert auth.RULE_METHODS.index("smartbid") == auth.RULE_METHODS.index("pipelinesuite") + 1
     for gone in ("buildingconnected", "ngem", "planhub"):
         assert gone not in auth.INVITATION_METHODS and gone not in auth.RULE_METHODS
         assert not hasattr(auth, f"METHOD_{gone.upper()}")
@@ -573,6 +577,45 @@ def test_a_non_locked_pipelinesuite_rule_is_still_general():
     assert r.method == "general"
     assert auth.method_for_rule(_rule("x", "domain", "d", "pipelinesuite", True), "domain") == "pipelinesuite"
     assert auth.method_for_rule(_rule("x", "domain", "d", "pipelinesuite", False), "domain") == "general"
+
+
+# ── smartbid: invitations sent through ConstructConnect's SmartBid (2026-10-01,
+# docs/RFP_SMARTBID.md section 1; 0148 seeds smartbidnet.com as a locked domain
+# rule). The sender is the platform itself, notifications@com2.smartbidnet.com,
+# so like procore one platform-domain rule grants the method for every GC. ──
+
+
+def test_locked_smartbid_rule_grants_the_method_on_the_platform_domain_and_its_subdomains():
+    """The seeded rule is on smartbidnet.com; the real sender is the
+    com2.smartbidnet.com subdomain, covered on a label boundary like
+    us02.procoretech.com. Without the rule the same sender is unauthorized
+    (it was parked at flagged_unauthorized until 0148)."""
+    rules = SEED + [_rule("r-sb", "domain", "smartbidnet.com", "smartbid", True)]
+    r = auth.evaluate_authorization("notifications@com2.smartbidnet.com", rules, set(), INTERNAL)
+    assert r == auth.AuthorizationResult(True, "domain", "r-sb", "smartbid")
+    assert auth.evaluate_authorization("x@smartbidnet.com", rules, set(), INTERNAL).method == "smartbid"
+    # Only on a label boundary, and never the other way round.
+    assert not auth.evaluate_authorization("x@fakesmartbidnet.com", rules, set(), INTERNAL).authorized
+    assert not auth.evaluate_authorization("x@smartbidnet.com.evil.example", rules, set(), INTERNAL).authorized
+    assert not auth.evaluate_authorization("notifications@com2.smartbidnet.com", SEED, set(), INTERNAL).authorized
+
+
+def test_locked_smartbid_rule_outranks_the_platform_senders_other_matches():
+    """A GC contact on the platform domain (unlikely, but precedence is the
+    contract) still gets the platform method: locked rules come first."""
+    rules = SEED + [_rule("r-sb", "domain", "smartbidnet.com", "smartbid", True)]
+    r = auth.evaluate_authorization(
+        "notifications@com2.smartbidnet.com", rules, {"smartbidnet.com"}, INTERNAL
+    )
+    assert r.kind == "domain" and r.method == "smartbid" and r.rule_id == "r-sb"
+
+
+def test_a_non_locked_smartbid_rule_is_still_general():
+    rules = SEED + [_rule("r-user", "domain", "smartbidnet.com", "smartbid", False)]
+    r = auth.evaluate_authorization("notifications@com2.smartbidnet.com", rules, set(), INTERNAL)
+    assert r.method == "general"
+    assert auth.method_for_rule(_rule("x", "domain", "d", "smartbid", True), "domain") == "smartbid"
+    assert auth.method_for_rule(_rule("x", "domain", "d", "smartbid", False), "domain") == "general"
 
 
 # ── Domain rules cover subdomains (live finding 2026-09-10: Procore sends from

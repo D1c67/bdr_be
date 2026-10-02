@@ -23,7 +23,16 @@ Pinned, in the doc's order:
   accepted, and every failure mapping including the losing claim;
 - `mark_from_queue` fencing, `current_status`, `error_message`;
 - `step` (drain, park while locked, enqueue once, never twice while a job
-  is active) and the session store, the lock bell and the settings adapters.
+  is active) and the session store, the lock bell and the settings adapters;
+- PipelineSuite (docs/RFP_PIPELINESUITE.md 8) and SmartBid
+  (docs/RFP_SMARTBID.md 8) in their own sections at the end: the registry,
+  `execute` against a stub session and a stub Graph (pings once, recorded,
+  never fatal; facts before files; KB to bytes; caps; per-file outcomes;
+  every failure mapping; the lock parks without an attempt), and for
+  SmartBid the gate's refusal, restricted files skipped, the re-login on
+  expiry, and one end-to-end run over the fake platform proving no
+  passport key, bearer token, security token or SAS signature is
+  persisted or logged.
 """
 
 from __future__ import annotations
@@ -35,6 +44,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from app.core.config import Settings
@@ -45,9 +55,11 @@ from app.services import (
     procore_client as pc,
     rfp_harvest as h,
     rfp_ingest,
+    smartbid_client as sbc,
 )
 from tests import fixtures_pipelinesuite as psfx
 from tests import fixtures_procore as fx
+from tests import fixtures_smartbid as sbfx
 from tests.test_rfp_email_ingest import FakeDB
 
 NOW = datetime(2026, 9, 14, 12, 0, 0, tzinfo=timezone.utc)
@@ -1659,6 +1671,10 @@ def test_availability_and_session_status_read_the_store_without_touching_procore
         "last_error": "password: Procore rejected the password.",
         "active_jobs": 2,
         "pipelinesuite": {"enabled": True, "portals": []},
+        "smartbid": {
+            "enabled": True, "logged_in_at": None, "last_used_at": None, "last_login_attempt_at": None,
+            "login_failures": 0, "locked_until": None, "last_error": None,
+        },
     }
     assert "secret-cookie" not in json.dumps(status) and "pw" not in status.values()
     assert h.session_status(_settings(tmp_path, procore_login_email=""))["account"] is None
@@ -1942,7 +1958,8 @@ def test_availability_for_reads_the_rows_own_portal_lock(db, settings, tmp_path)
     assert h.availability_for(other, settings) == (True, None, None)
     assert h.availability_for(_email(), settings) == (True, None, None)
     assert h.availability(settings) == (True, None, None)
-    assert h.availability(settings, "smartbid") == (False, h._MSG_NO_HARVESTER, None)
+    assert h.availability(settings, "smartbid") == (True, None, None)
+    assert h.availability(settings, "no-such-platform") == (False, h._MSG_NO_HARVESTER, None)
     # And the other way round: a Procore lock leaves the portal alone.
     db.tables["rfp_harvest_sessions"] = [{"provider": "procore", "locked_until": until.isoformat()}]
     assert h.availability_for(_ps_email(), settings) == (True, None, None)
@@ -2510,3 +2527,999 @@ def test_pipelinesuite_pure_builders_edge_cases():
     assert data["point_of_contact"] is None and data["tracking"] is None
     assert data["documents"] == {"count": 0, "bytes": 0, "kinds": {}, "folders": []}
     assert psfx.CGB_KEY not in json.dumps(data) and "http" not in json.dumps(h.build_pipelinesuite_raw(page))
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# SmartBid (docs/RFP_SMARTBID.md sections 4 and 8)
+# ═════════════════════════════════════════════════════════════════════════
+
+SB_BODY = sbfx.load(sbfx.EMAIL_874974_TEXT)
+SB_REF = sbc.parse_reference(SB_BODY)
+SB_KEY = "smartbid:874974"
+SB_URL = "https://gocc.smartbid.co/#/projectlist"
+SB_MAILBOX = "bids@g3.example"
+SB_PROJECT = sbc.parse_project(sbfx.load_json(sbfx.BP_874974))
+SB_FILE_IDS = [f["file_id"] for f in SB_PROJECT.files]
+SB_LOCKED = "SmartBid logins are locked after repeated failures."
+SB_AGREEMENT = (
+    "This SmartBid project needs a confidentiality agreement accepted in SmartBid first; "
+    "open it there, then press Harvest again."
+)
+SB_NOW = datetime(2026, 10, 1, 21, 0, 0, tzinfo=timezone.utc)   # the fake platform's stamp
+# What must never be persisted or logged: the passport key (and the link
+# that carries it), the bearer token, the per-file security token, the SAS
+# signature.
+SB_SECRETS = (
+    sbfx.KEY, sbfx.KEY.lower(), "sPassportKey", sbfx.BEARER, sbfx.SECURITY_TOKEN,
+    sbfx.SAS_SIGNATURE, "sig=",
+)
+
+
+class FakeSmartBidSession:
+    """The subset of smartbid_client.SmartBidSession the job touches.
+    `errors` maps "login", "gate", "project", a file id or a ping URL to an
+    exception (or a list consumed one per call); `bytes_for` overrides the
+    bytes a download (by file id) writes; `ping_status` the status a ping
+    answers."""
+
+    provider = "smartbid"
+
+    def __init__(self, payload=None):
+        self.calls: list[tuple] = []
+        self.available: tuple = (True, None, None)
+        self.payload = payload if payload is not None else sbfx.load_json(sbfx.BP_874974)
+        self.errors: dict = {}
+        self.bytes_for: dict[str, bytes] = {}
+        self.ping_status: dict[str, object] = {}
+        self.locators: list = []
+        self.on_download = None
+        self.closed = False
+        self.downloads = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.closed = True
+
+    def _raise(self, key):
+        err = self.errors.get(key)
+        if isinstance(err, list):
+            if err:
+                raise err.pop(0)
+        elif err is not None:
+            raise err
+
+    def availability(self):
+        self.calls.append(("availability",))
+        return self.available
+
+    def login(self):
+        self.calls.append(("login",))
+        self._raise("login")
+
+    def gate(self):
+        self.calls.append(("gate",))
+        self._raise("gate")
+        return sbfx.load_json(sbfx.CA_OPEN[0])
+
+    def get_project(self):
+        self.calls.append(("project",))
+        self._raise("project")
+        return copy.deepcopy(self.payload)
+
+    def download(self, entry, dest, *, max_bytes):
+        file_id = entry["file_id"]
+        self.calls.append(("download", file_id, max_bytes))
+        self.locators.append(entry)
+        if self.downloads == 0 and self.on_download is not None:
+            self.on_download()
+        self.downloads += 1
+        self._raise(file_id)
+        data = self.bytes_for.get(file_id, PDF)
+        if len(data) > max_bytes:
+            raise sbc.SmartBidForbidden("The project file is larger than the harvest accepts.")
+        dest.write_bytes(data)
+        return len(data)
+
+    def ping(self, url):
+        self.calls.append(("ping", url))
+        self._raise(url)
+        if url in self.ping_status:
+            return self.ping_status[url]
+        return 302 if "/Main/Login.aspx" in url else 200
+
+    @property
+    def pings(self):
+        return [c[1] for c in self.calls if c[0] == "ping"]
+
+    @property
+    def names(self):
+        return [c[0] for c in self.calls]
+
+
+@pytest.fixture
+def sb_session(monkeypatch):
+    fake = FakeSmartBidSession()
+    opened = []
+
+    def open_session(settings, ref):
+        opened.append((settings, ref))
+        return fake
+
+    monkeypatch.setattr(h, "open_smartbid_session", open_session)
+    fake.opened = opened
+    return fake
+
+
+@pytest.fixture
+def sb_graph(graph):
+    graph.html = sbfx.load(sbfx.EMAIL_874974_HTML)
+    return graph
+
+
+def _sb_email(**over):
+    row = _email(
+        invitation_method="smartbid",
+        body_text=SB_BODY,
+        from_address="notifications@com2.smartbidnet.com",
+        primary_mailbox=SB_MAILBOX,
+    )
+    row.update(over)
+    return row
+
+
+def _sb_seed(db, row=None, *, sightings=True):
+    row = _seed(db, row or _sb_email())
+    if sightings:
+        db.tables["rfp_email_sightings"].extend([
+            {"id": "s-1", "rfp_email_id": row["id"], "mailbox": "office@g3.example",
+             "graph_message_id": "msg-office", "created_at": "2026-10-01T01:00:00+00:00"},
+            {"id": "s-2", "rfp_email_id": row["id"], "mailbox": SB_MAILBOX,
+             "graph_message_id": "msg-bids", "created_at": "2026-10-01T02:00:00+00:00"},
+        ])
+    return row
+
+
+def _sb_harvest_row(**over):
+    row = _harvest_row(method="smartbid", external_key=SB_KEY, external_url=SB_URL, data={"platform": "smartbid"})
+    row.update(over)
+    return row
+
+
+def _sb_no_secret_anywhere(db, caplog=None):
+    """No SmartBid secret in any harvest row, email row update (the email's
+    own body_text, which carries the key by nature, is left out), queue
+    job, session row, bell or log record."""
+    tables = {
+        name: [
+            {k: v for k, v in row.items() if not (name == "rfp_emails" and k == "body_text")}
+            for row in rows
+        ]
+        for name, rows in db.tables.items()
+    }
+    dumped = json.dumps(tables, default=str)
+    for marker in SB_SECRETS:
+        assert marker not in dumped, marker
+    assert "Login.aspx" not in dumped
+    if caplog is not None:
+        for marker in SB_SECRETS:
+            assert marker not in caplog.text, marker
+            assert not any(marker in str(r.args) or marker in str(r.msg) for r in caplog.records), marker
+
+
+# ── Registry ─────────────────────────────────────────────────────────────
+
+
+def test_smartbid_registry_needs_the_flags_and_the_reference(tmp_path):
+    on = _settings(tmp_path)
+    row = _sb_email()
+    assert h.harvester_for(row, on) == "smartbid"
+    assert h.can_harvest(row, on) == (True, None)
+    ref = h.platform_reference("smartbid", SB_BODY)
+    assert ref == SB_REF and ref.external_key == SB_KEY and ref.external_url == SB_URL
+    assert h.reference_for(row) == SB_REF
+    assert h.platform_reference("procore", SB_BODY) is None
+    assert h.platform_reference("pipelinesuite", SB_BODY) is None
+    assert h.platform_reference("smartbid", PS_BODY) is None
+    assert h.session_provider_for(row, on) == "smartbid"
+    assert h.session_provider_for(_sb_email(body_text="no link here"), on) is None
+    # Procore credentials play no part; the SmartBid flag does.
+    assert h.harvester_for(row, _settings(tmp_path, procore_login_password="")) == "smartbid"
+    for off in (
+        _settings(tmp_path, smartbid_enabled=False),
+        _settings(tmp_path, rfp_harvest_enabled=False),
+        _settings(tmp_path, rfp_ingest_enabled=False),
+    ):
+        assert h.harvester_for(row, off) is None
+        assert h.can_harvest(row, off) == (False, h._MSG_NO_HARVESTER)
+    # Only the Yes / No links: no reference (an iR link is never fallen back to).
+    answers_only = f"Yes <{sbfx.YES_URL}> | No <{sbfx.NO_URL}>"
+    for body in (answers_only, None, "Please bid."):
+        no_ref = _sb_email(body_text=body)
+        assert h.harvester_for(no_ref, on) == "smartbid"
+        assert h.can_harvest(no_ref, on) == (False, "The email carries no SmartBid project link.")
+    # The other platforms keep their own sentences.
+    assert h.can_harvest(_email(body_text=None), on) == (False, h._MSG_NO_LINK)
+    assert h.can_harvest(_ps_email(body_text=None), on)[1] == h._MSG_NO_PS_REFERENCE
+    assert h.harvester_for(row) == "smartbid"
+
+
+def test_smartbid_availability_for_reads_the_one_smartbid_lock(db, settings, tmp_path):
+    until = NOW + timedelta(hours=1)
+    assert h.availability_for(_sb_email(), settings) == (True, None, None)
+    assert h.availability_for(_sb_email(body_text="nothing"), settings) == (False, h._MSG_NO_SB_REFERENCE, None)
+    assert h.availability_for(_sb_email(), _settings(tmp_path, smartbid_enabled=False)) == (
+        False, h._MSG_NO_HARVESTER, None
+    )
+    db.tables["rfp_harvest_sessions"].append({"provider": "smartbid", "locked_until": until.isoformat()})
+    assert h.availability_for(_sb_email(), settings) == (False, SB_LOCKED, until)
+    assert h.availability(settings, "smartbid") == (False, SB_LOCKED, until)
+    # Every SmartBid email shares the one lock; Procore and the portals do not.
+    other = _sb_email(body_text=sbfx.load(sbfx.EMAIL_876398_TEXT))
+    assert h.availability_for(other, settings)[0] is False
+    assert h.availability_for(_email(), settings) == (True, None, None)
+    assert h.availability_for(_ps_email(), settings) == (True, None, None)
+    db.tables["rfp_harvest_sessions"] = [{"provider": "procore", "locked_until": until.isoformat()}]
+    assert h.availability_for(_sb_email(), settings) == (True, None, None)
+
+
+# ── execute: the happy path ──────────────────────────────────────────────
+
+
+def _sb_expected_files(statuses=None):
+    out = []
+    for index, f in enumerate(SB_PROJECT.files):
+        out.append({
+            "file_path": f"{f['folder']}/{f['name']}" if f["folder"] else f["name"],
+            "size": f["size_kb"] * 1024,
+            "kind": h._sb_kind(f["name"], f["folder"]),
+            "discipline": None,
+            "file_id": f["file_id"],
+            "uploaded_on": f["uploaded_on"],
+            "sandbox_file_id": f"f-{index + 2}",
+            "status": "accepted",
+            "error": None,
+        })
+    return out
+
+
+def test_smartbid_execute_pipeline_mode_harvests_facts_files_and_pings(
+    db, sb_session, sandbox, sb_graph, settings, caplog
+):
+    caplog.set_level(logging.DEBUG)
+    _sb_seed(db)
+    assert h.execute(E1) is None
+    harvest = _the_harvest(db)
+    assert harvest["status"] == "complete" and harvest["claim_token"] is None
+    assert harvest["method"] == "smartbid" and harvest["external_key"] == SB_KEY
+    assert harvest["external_url"] == SB_URL and harvest["rfp_email_id"] == E1
+    assert harvest["facts_at"] == NOW.isoformat() and harvest["finished_at"] == NOW.isoformat()
+    files = _sb_expected_files()
+    folders = sorted({p["file_path"].rsplit("/", 1)[0] for p in files})
+    assert harvest["data"] == {
+        "platform": "smartbid",
+        "bid_project_id": 874974,
+        "system_id": 3766,
+        "project_name": "Nevada State University @ NLV Gateway",
+        "project_address": "800 E Lake Mead Blvd, North Las Vegas, NV 89030",
+        "bid_due_at": "2026-10-01T17:00:00-05:00",
+        "bid_due_text": "10-01-2026 5:00 PM",
+        "bid_due_tz": "CT",
+        "bid_due_tz_assumed": False,
+        "gc": {"name": "DC Building Group, LLC.", "address": None, "phone": "(702) 434-9991 x214",
+               "fax": "(702) 243-5556", "website": None},
+        "point_of_contact": {"name": "Nicole Burguin", "email": None, "phone": "(702) 434-9991 x214"},
+        "owner": None,
+        "architect": "SCA Design",
+        "project_status": "Open to Bid",
+        "past_due": False,
+        "allow_late_proposal": False,
+        "pre_bid": None,
+        "invitations": [{"code": "26 00 00", "name": "Electrical", "status": "Accepted"}],
+        "response_recorded": True,
+        "tracking": {"pinged_at": NOW.isoformat(), "opened": True, "clicked": True, "error": None},
+        "documents": {
+            "count": 45,
+            "bytes": 763_174 * 1024,
+            "kinds": {"drawing": 19, "other": 23, "specification": 3},  # name, else folder
+            "folders": folders,
+            "restricted": 0,
+        },
+    }
+    assert len(folders) == 10 and "Shell Bid Set/REVISED CIVILS 9.24.26" in folders
+    assert harvest["description_text"].startswith("Project Description:")
+    assert "<" not in harvest["description_text"]
+    assert harvest["instructions_text"] is None
+    assert set(harvest["raw"]) == {"bid_project", "invitations", "files_head"}
+    assert "PassportKey" not in harvest["raw"]["bid_project"]
+    assert "ProjectDescription" not in harvest["raw"]["bid_project"]
+    assert harvest["raw"]["bid_project"]["Title"] == "Nevada State University @ NLV Gateway"
+    assert len(harvest["raw"]["files_head"]) == 45 and "href" not in harvest["raw"]["files_head"][0]
+    assert harvest["file_count"] == 45 and harvest["files_accepted"] == 45
+    assert harvest["bytes_downloaded"] == 45 * len(PDF) and harvest["sandbox_run_id"] == "run-1"
+    assert harvest["files"] == files
+    assert "http" not in json.dumps(harvest["files"])
+    email = _email_row(db)
+    assert email["status"] == "split" and email["harvest_id"] == harvest["id"]
+    assert email["harvested_at"] == NOW.isoformat() and email["last_error"] is None
+    # The documented order: pings (receipt, open, click), availability, the
+    # login, the gate, the project, the downloads in plan-room order.
+    assert sb_session.opened == [(settings, SB_REF)] and sb_session.closed
+    assert sb_session.calls[:7] == [
+        ("ping", sbfx.READ_RECEIPT_URL),
+        ("ping", sbfx.OPEN_PIXEL_URL),
+        ("ping", sbfx.VIEW_URL),
+        ("availability",),
+        ("login",),
+        ("gate",),
+        ("project",),
+    ]
+    assert sb_session.calls[7:] == [("download", fid, settings.rfp_ingest_max_file_bytes) for fid in SB_FILE_IDS]
+    assert not any("iR=" in url for url in sb_session.pings)
+    # The locator is the parsed plan-room entry (its Href in memory only).
+    assert sb_session.locators[0] == SB_PROJECT.files[0] and sb_session.locators[0]["href"].startswith("https://")
+    assert sb_graph.calls == [("msg-bids", SB_MAILBOX, "id,body", "html")]
+    assert sandbox.calls[0] == ("create", E1, harvest["id"])
+    adds = [c for c in sandbox.calls if c[0] == "add"]
+    assert [c[2] for c in adds] == [f["name"] for f in SB_PROJECT.files]
+    assert adds[0][5] == {"kind": "smartbid", "file_path": files[0]["file_path"], "harvest_id": harvest["id"]}
+    assert sandbox.calls[-2:] == [("start", "run-1"), ("dispatch", "run-1", None, None)]
+    _sb_no_secret_anywhere(db, caplog)
+
+
+def test_smartbid_manual_mode_links_a_done_row(db, sb_session, sandbox, sb_graph):
+    _sb_seed(db, _sb_email(status="done", flag_reason="no_project_name"))
+    h.execute(E1)
+    harvest = _the_harvest(db)
+    assert harvest["status"] == "complete" and harvest["data"]["platform"] == "smartbid"
+    email = _email_row(db)
+    assert email["status"] == "done" and email["flag_reason"] == "no_project_name"
+    assert email["harvest_id"] == harvest["id"] and email["harvested_at"] == NOW.isoformat()
+
+
+def test_smartbid_writes_the_facts_before_the_first_download(db, sb_session, sandbox, sb_graph):
+    _sb_seed(db)
+    seen = {}
+    sb_session.on_download = lambda: seen.update(copy.deepcopy(_the_harvest(db)))
+    h.execute(E1)
+    assert seen["status"] == "running" and seen["claim_token"]
+    assert seen["facts_at"] == NOW.isoformat() and seen["external_url"] == SB_URL
+    assert seen["data"]["project_name"] == "Nevada State University @ NLV Gateway"
+    assert seen["data"]["tracking"]["pinged_at"] == NOW.isoformat()
+    assert seen["file_count"] == 45 and all(f["status"] is None for f in seen["files"])
+
+
+def test_smartbid_reuses_a_young_complete_harvest_without_pinging_or_logging_in(db, sb_session, sandbox, sb_graph):
+    _sb_seed(db)
+    db.tables["rfp_harvests"].append(_sb_harvest_row(finished_at=(NOW - timedelta(days=2)).isoformat()))
+    h.execute(E1)
+    assert sb_session.opened == [] and sb_graph.calls == [] and sandbox.calls == []
+    assert _email_row(db)["status"] == "split" and _email_row(db)["harvest_id"] == "hv-1"
+
+
+def test_smartbid_copies_of_one_invitation_share_one_harvest(db, sb_session, sandbox, sb_graph):
+    """Bids@, office@ and tmoore@ each get their own key for the project;
+    the harvest row is per bid project, so the second copy reuses it."""
+    _sb_seed(db)
+    h.execute(E1)
+    other_key = sbfx.KEY.replace("DEADBEEF", "FEEDFACE", 1)
+    second = _sb_email(id="e-2", body_text=SB_BODY.replace(sbfx.KEY, other_key))
+    _seed(db, second)
+    sb_session.calls.clear()
+    h.execute("e-2")
+    assert len(_harvests(db)) == 1 and sb_session.calls == []
+    assert _email_row(db, "e-2")["harvest_id"] == _the_harvest(db)["id"]
+
+
+# ── execute: the tracking pings ──────────────────────────────────────────
+
+
+def test_smartbid_pings_fire_once_and_are_skipped_on_a_later_run(db, sb_session, sandbox, sb_graph):
+    _sb_seed(db, _sb_email(status="done"))
+    h.execute(E1)
+    first = _the_harvest(db)["data"]["tracking"]
+    assert first == {"pinged_at": NOW.isoformat(), "opened": True, "clicked": True, "error": None}
+    assert sb_session.pings == [sbfx.READ_RECEIPT_URL, sbfx.OPEN_PIXEL_URL, sbfx.VIEW_URL]
+    sb_session.calls.clear()
+    sb_graph.calls.clear()
+    h.execute(E1, force=True)
+    harvest = _the_harvest(db)
+    assert harvest["attempts"] == 2 and harvest["status"] == "complete"
+    assert harvest["data"]["tracking"] == first
+    assert sb_session.pings == [] and sb_graph.calls == []
+    assert sb_session.calls[0] == ("availability",)
+
+
+def test_smartbid_the_lock_parks_without_an_attempt_and_the_pings_are_kept(db, sb_session, sandbox, sb_graph):
+    _sb_seed(db, _sb_email(attempts=1))
+    until = NOW + timedelta(hours=2)
+    sb_session.available = (False, SB_LOCKED, until)
+    assert h.execute(E1) is None
+    harvest = _the_harvest(db)
+    assert harvest["status"] == "pending" and harvest["data"]["tracking"]["pinged_at"] == NOW.isoformat()
+    assert sb_session.names == ["ping", "ping", "ping", "availability"]       # no login spent
+    email = _email_row(db)
+    assert email["status"] == "harvest" and email["next_attempt_at"] == until.isoformat()
+    assert email["attempts"] == 1 and email["last_error"] == SB_LOCKED
+    # The lock lifts: the second run pings nothing and completes.
+    sb_session.available = (True, None, None)
+    sb_session.calls.clear()
+    h.execute(E1)
+    assert sb_session.pings == [] and _the_harvest(db)["status"] == "complete"
+
+
+def test_smartbid_pings_never_fail_the_harvest(db, sb_session, sandbox, sb_graph):
+    _sb_seed(db)
+    sb_session.errors[sbfx.READ_RECEIPT_URL] = RuntimeError("tracker exploded")
+    sb_session.ping_status[sbfx.OPEN_PIXEL_URL] = None
+    sb_session.ping_status[sbfx.VIEW_URL] = 500
+    h.execute(E1)
+    harvest = _the_harvest(db)
+    assert harvest["status"] == "complete"
+    assert harvest["data"]["tracking"] == {
+        "pinged_at": NOW.isoformat(), "opened": False, "clicked": False,
+        "error": "read receipt: RuntimeError; open: no answer; click: HTTP 500",
+    }
+    # Either pixel's 200 is an open; a 302 is a click.
+    db.tables["rfp_harvests"] = []
+    db.tables["rfp_emails"] = [_sb_email()]
+    sb_session.errors.clear()
+    sb_session.ping_status = {sbfx.READ_RECEIPT_URL: 404}
+    h.execute(E1)
+    assert _the_harvest(db)["data"]["tracking"] == {
+        "pinged_at": NOW.isoformat(), "opened": True, "clicked": True, "error": "read receipt: HTTP 404",
+    }
+
+
+def test_smartbid_pings_fall_back_to_the_references_link_without_pixels(db, sb_session, sandbox, sb_graph):
+    # Graph down: no pixel fires, the email's own View the Project link is clicked.
+    _sb_seed(db)
+    sb_graph.mode = "boom"
+    h.execute(E1)
+    tracking = _the_harvest(db)["data"]["tracking"]
+    assert tracking == {"pinged_at": NOW.isoformat(), "opened": None, "clicked": True, "error": None}
+    assert sb_session.pings == [sbfx.VIEW_URL] and len(sb_graph.calls) == 2
+    # HTML without the View anchor: the pixels fire, the click is the reference's.
+    db.tables["rfp_harvests"] = []
+    db.tables["rfp_emails"] = [_sb_email()]
+    sb_graph.mode = "ok"
+    sb_graph.html = sbfx.load(sbfx.EMAIL_874974_HTML).replace("Click Here to View the Project", "Details")
+    sb_graph.calls.clear()
+    sb_session.calls.clear()
+    h.execute(E1)
+    assert sb_session.pings == [sbfx.READ_RECEIPT_URL, sbfx.OPEN_PIXEL_URL, SB_REF.click_url]
+    # No sighting at all: the click only.
+    db.tables["rfp_harvests"] = []
+    db.tables["rfp_email_sightings"] = []
+    db.tables["rfp_emails"] = [_sb_email()]
+    sb_graph.calls.clear()
+    sb_session.calls.clear()
+    h.execute(E1)
+    assert sb_session.pings == [sbfx.VIEW_URL] and sb_graph.calls == []
+    assert _the_harvest(db)["data"]["tracking"]["opened"] is None
+
+
+def test_smartbid_pings_can_be_switched_off(db, sb_session, sandbox, sb_graph, monkeypatch, tmp_path):
+    monkeypatch.setattr(h, "get_settings", lambda: _settings(tmp_path, smartbid_tracking_pings_enabled=False))
+    _sb_seed(db)
+    h.execute(E1)
+    assert sb_session.pings == [] and sb_graph.calls == []
+    assert _the_harvest(db)["data"]["tracking"] is None
+    assert _the_harvest(db)["status"] == "complete"
+
+
+# ── execute: the gate, restricted files, caps, per-file outcomes ─────────
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [SB_AGREEMENT, "SmartBid does not allow this project: Your company is not on the bidders list for this project."],
+)
+def test_smartbid_the_gates_refusal_is_permanent_and_writes_no_facts(db, sb_session, sandbox, sb_graph, sentence):
+    _sb_seed(db)
+    sb_session.errors["gate"] = sbc.SmartBidForbidden(sentence)
+    assert h.execute(E1) is None
+    harvest = _the_harvest(db)
+    assert harvest["status"] == "failed" and harvest["last_error"] == sentence
+    assert harvest.get("facts_at") is None and set(harvest["data"]) == {"tracking"}
+    assert sb_session.names[-2:] == ["login", "gate"] and sandbox.calls == []
+    email = _email_row(db)
+    assert email["status"] == "split" and email["harvest_id"] == harvest["id"]
+    assert email["last_error"] == sentence
+    db.tables["rfp_emails"] = [_sb_email(status="done")]
+    db.tables["rfp_harvests"] = []
+    with pytest.raises(h.RfpHarvestPermanent) as exc:
+        h.execute(E1)
+    assert str(exc.value) == sentence
+
+
+def _restricted_payload(*, everything=False):
+    payload = sbfx.load_json(sbfx.BP_874974)
+    root = payload["PlanRoom"][0]
+    if everything:
+        root["SCARequired"] = True
+        return payload
+    contract = next(n for n in root["Folders"] if n["Name"] == "DCBG Contract Terms & Conditions")
+    contract["SCARequired"] = True                       # 7 files under it
+    itb = next(n for n in root["Folders"] if n["Name"] == "DCBG ITB")
+    itb["Folders"][0]["PQRequired"] = True                # 1 file
+    return payload
+
+
+def test_smartbid_restricted_files_are_skipped_and_never_downloaded(db, sb_session, sandbox, sb_graph):
+    sb_session.payload = _restricted_payload()
+    _sb_seed(db)
+    h.execute(E1)
+    harvest = _the_harvest(db)
+    assert harvest["status"] == "complete"
+    skipped = [f for f in harvest["files"] if f["status"] == "skipped"]
+    assert len(skipped) == 8
+    assert all(f["error"] == "SmartBid requires an agreement for this file" for f in skipped)
+    assert all(f["sandbox_file_id"] is None for f in skipped)
+    assert {f["file_path"].split("/")[0] for f in skipped} == {"DCBG Contract Terms & Conditions", "DCBG ITB"}
+    downloaded = {c[1] for c in sb_session.calls if c[0] == "download"}
+    assert len(downloaded) == 37 and not downloaded & {f["file_id"] for f in skipped}
+    assert harvest["files_accepted"] == 37
+    assert harvest["data"]["documents"]["restricted"] == 8 and harvest["data"]["documents"]["count"] == 45
+
+
+def test_smartbid_every_file_restricted_creates_no_run(db, sb_session, sandbox, sb_graph):
+    sb_session.payload = _restricted_payload(everything=True)
+    _sb_seed(db)
+    h.execute(E1)
+    harvest = _the_harvest(db)
+    assert harvest["status"] == "complete" and harvest["sandbox_run_id"] is None
+    assert harvest["files_accepted"] == 0 and harvest["data"]["documents"]["restricted"] == 45
+    assert sandbox.calls == [] and "download" not in sb_session.names
+
+
+def test_smartbid_file_and_byte_caps_are_permanent_keep_the_facts_and_skip_restricted_files(
+    db, sb_session, sandbox, sb_graph, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(h, "get_settings", lambda: _settings(tmp_path, rfp_harvest_max_files=2))
+    _sb_seed(db)
+    h.execute(E1)
+    harvest = _the_harvest(db)
+    assert harvest["status"] == "failed"
+    assert harvest["last_error"] == "The project holds more files than the harvest accepts (45 of 2)."
+    assert harvest["data"]["project_name"] == "Nevada State University @ NLV Gateway" and harvest["facts_at"]
+    assert sandbox.calls == [] and "download" not in sb_session.names
+    assert _email_row(db)["status"] == "split" and _email_row(db)["harvest_id"] == harvest["id"]
+    monkeypatch.setattr(h, "get_settings", lambda: _settings(tmp_path, rfp_harvest_max_total_bytes=3 * 1024 * 1024))
+    db.tables["rfp_harvests"] = []
+    db.tables["rfp_emails"] = [_sb_email()]
+    h.execute(E1)
+    assert _the_harvest(db)["last_error"] == "The project files are larger than the harvest accepts (745 MB of 3 MB)."
+    # Restricted files are not counted: 37 downloadable fit a cap of 37.
+    sb_session.payload = _restricted_payload()
+    for cap, status in ((36, "failed"), (37, "complete")):
+        monkeypatch.setattr(h, "get_settings", lambda cap=cap: _settings(tmp_path, rfp_harvest_max_files=cap))
+        db.tables["rfp_harvests"] = []
+        db.tables["rfp_emails"] = [_sb_email()]
+        h.execute(E1)
+        assert _the_harvest(db)["status"] == status, cap
+    db.tables["rfp_harvests"] = []
+    db.tables["rfp_emails"] = [_sb_email()]
+    monkeypatch.setattr(h, "get_settings", lambda: _settings(tmp_path, rfp_harvest_max_files=36))
+    h.execute(E1)
+    assert _the_harvest(db)["last_error"] == "The project holds more files than the harvest accepts (37 of 36)."
+
+
+def test_smartbid_per_file_outcomes_with_docx_and_xlsx(db, sb_session, sandbox, sb_graph):
+    _sb_seed(db)
+    office = [f["file_id"] for f in SB_PROJECT.files if f["ext"] in ("docx", "xlsx")]
+    for file_id in office:
+        sb_session.bytes_for[file_id] = DOCX                    # the sandbox's sniff decides
+    first, second, third = SB_FILE_IDS[0], SB_FILE_IDS[1], SB_FILE_IDS[2]
+    sb_session.errors[first] = [sbc.SmartBidTransient("The SmartBid file store answered 503.")] * 3
+    sb_session.errors[second] = sbc.SmartBidForbidden("The SmartBid file store refused the file (404).")
+    sb_session.errors[third] = sbc.SmartBidForbidden("The project file is larger than the harvest accepts.")
+    h.execute(E1)
+    harvest = _the_harvest(db)
+    by_id = {f["file_id"]: f for f in harvest["files"]}
+    assert by_id[first]["status"] == "download_failed" and by_id[first]["error"] == "The SmartBid file store answered 503."
+    assert by_id[second]["status"] == "download_failed" and "(404)" in by_id[second]["error"]
+    assert by_id[third]["status"] == "too_large"
+    assert len(office) == 5
+    assert all(by_id[i]["status"] == "rejected" and by_id[i]["error"] == "The file is not a PDF." for i in office)
+    assert by_id[sbfx.EXHIBIT_F_ID]["size"] == 15 * 1024 and by_id[sbfx.EXHIBIT_F_ID]["kind"] == "other"
+    assert harvest["files_accepted"] == 45 - 5 - 3 and harvest["status"] == "complete"
+    assert sum(1 for c in sb_session.calls if c[:2] == ("download", first)) == 3
+
+
+# ── execute: session expiry and failure mapping ──────────────────────────
+
+
+def test_smartbid_a_401_on_a_project_read_logs_in_once_more_and_retries_once(db, sb_session, sandbox, sb_graph):
+    _sb_seed(db)
+    sb_session.errors["project"] = [sbc.SmartBidSessionExpired()]
+    h.execute(E1)
+    assert _the_harvest(db)["status"] == "complete"
+    assert sb_session.names[3:8] == ["availability", "login", "gate", "project", "login"]
+    assert sb_session.names[8] == "project"
+    # Expired twice: transient for the queue.
+    db.tables["rfp_harvests"] = []
+    db.tables["rfp_emails"] = [_sb_email()]
+    sb_session.calls.clear()
+    sb_session.errors["gate"] = [sbc.SmartBidSessionExpired(), sbc.SmartBidSessionExpired()]
+    with pytest.raises(h.RfpHarvestTransient):
+        h.execute(E1)
+    assert _the_harvest(db)["status"] == "pending" and _email_row(db)["status"] == "harvest"
+
+
+def test_smartbid_a_401_during_a_download_logs_in_once_for_that_file(db, sb_session, sandbox, sb_graph):
+    _sb_seed(db)
+    target = SB_FILE_IDS[4]
+    sb_session.errors[target] = [sbc.SmartBidSessionExpired()]
+    h.execute(E1)
+    harvest = _the_harvest(db)
+    assert harvest["status"] == "complete" and harvest["files_accepted"] == 45
+    downloads = [c for c in sb_session.calls if c[0] in ("download", "login")]
+    index = downloads.index(("download", target, h.get_settings().rfp_ingest_max_file_bytes))
+    assert downloads[index + 1] == ("login",) and downloads[index + 2][:2] == ("download", target)
+    assert sb_session.names.count("login") == 2
+    # Expired again right after the re-login: transient for the job.
+    db.tables["rfp_harvests"] = []
+    db.tables["rfp_emails"] = [_sb_email()]
+    sb_session.calls.clear()
+    sb_session.errors[target] = [sbc.SmartBidSessionExpired(), sbc.SmartBidSessionExpired()]
+    with pytest.raises(h.RfpHarvestTransient):
+        h.execute(E1)
+    assert _the_harvest(db)["status"] == "pending"
+
+
+@pytest.mark.parametrize(
+    "key, exc",
+    [
+        ("login", sbc.SmartBidTransient("SmartBid refused the project link or is down (HTTP 500).")),
+        ("login", sbc.SmartBidLoginFailed("token", "SmartBid answered the login without an access token.")),
+        ("project", sbc.SmartBidTransient("SmartBid answered 503; the harvest will be retried.")),
+        ("project", h.RfpHarvestTransient("interrupted")),
+    ],
+)
+def test_smartbid_transient_releases_and_raises_for_the_queue(db, sb_session, sandbox, sb_graph, key, exc, caplog):
+    caplog.set_level(logging.DEBUG)
+    _sb_seed(db)
+    sb_session.errors[key] = exc
+    with pytest.raises(h.RfpHarvestTransient) as raised:
+        h.execute(E1)
+    assert str(raised.value) == str(exc)
+    harvest = _the_harvest(db)
+    assert harvest["status"] == "pending" and harvest["claim_token"] is None
+    assert harvest["last_error"] == str(exc) and harvest["finished_at"] is None
+    assert harvest["data"]["tracking"]["pinged_at"] == NOW.isoformat()
+    assert _email_row(db)["status"] == "harvest" and _email_row(db)["harvest_id"] is None
+    _sb_no_secret_anywhere(db, caplog)
+
+
+def test_smartbid_unavailable_parks_without_an_attempt_and_fails_by_hand(db, sb_session, sandbox, sb_graph, settings):
+    _sb_seed(db, _sb_email(attempts=2))
+    recent = NOW + timedelta(seconds=20)
+    sb_session.errors["login"] = sbc.SmartBidUnavailable(
+        "A SmartBid login was attempted recently; waiting before trying again.", locked_until=recent
+    )
+    assert h.execute(E1) is None
+    harvest = _the_harvest(db)
+    assert harvest["status"] == "pending" and harvest["claim_token"] is None
+    email = _email_row(db)
+    assert email["status"] == "harvest" and email["attempts"] == 2 and email["harvest_id"] is None
+    assert email["next_attempt_at"] == (NOW + timedelta(seconds=settings.rfp_harvest_poll_seconds)).isoformat()
+    assert "attempted recently" in email["last_error"]
+    # A login lock parks until the lock lifts.
+    until = NOW + timedelta(hours=3)
+    sb_session.errors["login"] = sbc.SmartBidLoginLocked(SB_LOCKED, locked_until=until)
+    h.execute(E1)
+    assert _email_row(db)["next_attempt_at"] == until.isoformat()
+    # By hand: failed and linked.
+    db.tables["rfp_emails"] = [_sb_email(status="done")]
+    with pytest.raises(h.RfpHarvestPermanent) as exc:
+        h.execute(E1)
+    assert str(exc.value) == SB_LOCKED
+    assert _the_harvest(db)["status"] == "failed" and _email_row(db)["harvest_id"] == _the_harvest(db)["id"]
+
+
+def test_smartbid_a_rejected_link_fails_the_harvest_and_moves_the_email_on(db, sb_session, sandbox, sb_graph):
+    _sb_seed(db)
+    rejected = (
+        "SmartBid rejected this email's project link (the invitation may have been "
+        "withdrawn or the link expired)."
+    )
+    sb_session.errors["login"] = sbc.SmartBidForbidden(rejected)
+    assert h.execute(E1) is None
+    harvest = _the_harvest(db)
+    assert harvest["status"] == "failed" and harvest["last_error"] == rejected
+    email = _email_row(db)
+    assert email["status"] == "split" and email["harvest_id"] == harvest["id"] and email["last_error"] == rejected
+
+
+def test_smartbid_no_reference_is_permanent_without_a_row(db, sb_session, sandbox, sb_graph):
+    _sb_seed(db, _sb_email(body_text=f"Yes <{sbfx.YES_URL}>"), sightings=False)
+    assert h.execute(E1) is None
+    assert _harvests(db) == [] and sb_session.opened == []
+    email = _email_row(db)
+    assert email["status"] == "split" and email["last_error"] == "The email carries no SmartBid project link."
+    db.tables["rfp_emails"] = [_sb_email(status="done", body_text=None)]
+    with pytest.raises(h.RfpHarvestPermanent) as exc:
+        h.execute(E1)
+    assert str(exc.value) == "The email carries no SmartBid project link."
+
+
+def test_smartbid_off_drains_a_pipeline_row_and_refuses_by_hand(db, sb_session, sandbox, sb_graph, monkeypatch, tmp_path):
+    monkeypatch.setattr(h, "get_settings", lambda: _settings(tmp_path, smartbid_enabled=False))
+    _sb_seed(db)
+    h.execute(E1)
+    assert _email_row(db)["status"] == "split" and _harvests(db) == [] and sb_session.opened == []
+    db.tables["rfp_emails"] = [_sb_email(status="done")]
+    with pytest.raises(h.RfpHarvestPermanent) as exc:
+        h.execute(E1)
+    assert str(exc.value) == h._MSG_NO_HARVESTER
+
+
+def test_smartbid_losing_claim_and_lost_lease(db, sb_session, sandbox, sb_graph, monkeypatch):
+    _sb_seed(db)
+    db.tables["rfp_harvests"].append(_sb_harvest_row(status="running", claim_token="theirs", started_at=NOW.isoformat()))
+    assert h.execute(E1) is None
+    assert sb_session.opened == [] and _email_row(db)["last_error"] == h._MSG_CLAIMED
+    db.tables["rfp_harvests"] = []
+    monkeypatch.setattr(llm_queue, "renew_lease", lambda job=None: False)
+    with pytest.raises(h.RfpHarvestTransient):
+        h.execute(E1)
+    assert _the_harvest(db)["status"] == "pending"
+    assert sb_session.names == ["ping", "ping", "ping", "availability"]
+
+
+# ── End to end over the fake platform: no secret persisted or logged ─────
+
+
+@pytest.fixture
+def sb_platform(monkeypatch):
+    """The real SmartBid client over the fake platform from
+    tests/test_smartbid_client (MockTransport only, no network), with the
+    real store adapter on the fake table and the real bell."""
+    from tests.test_smartbid_client import FakeSmartBid
+
+    fake = FakeSmartBid()
+    fake.blob_bytes = PDF
+    opened = []
+
+    def open_session(settings, ref):
+        session = sbc.SmartBidSession(
+            sbc.SmartBidConfig(min_request_interval=0.0, login_min_interval=30, timeout=5.0),
+            h._SessionStore(settings, ref.session_provider), ref,
+            transport=httpx.MockTransport(fake), sleep=lambda s: None, now=lambda: SB_NOW,
+            on_lock=h._notify_smartbid_lock,
+        )
+        session._download_client_factory = lambda: httpx.Client(
+            transport=httpx.MockTransport(fake), follow_redirects=False
+        )
+        opened.append(session)
+        return session
+
+    monkeypatch.setattr(h, "open_smartbid_session", open_session)
+    monkeypatch.setattr(sbc, "_last_request_at", 0.0)
+    fake.opened = opened
+    return fake
+
+
+def test_smartbid_end_to_end_persists_and_logs_no_key_token_or_signature(
+    db, sb_platform, sandbox, sb_graph, caplog
+):
+    caplog.set_level(logging.DEBUG)
+    _sb_seed(db)
+    h.enqueue(E1, created_by=None)                        # a queue row to inspect too
+    assert h.execute(E1) is None
+    harvest = _the_harvest(db)
+    assert harvest["status"] == "complete" and harvest["files_accepted"] == 45
+    assert harvest["data"]["tracking"] == {"pinged_at": NOW.isoformat(), "opened": True, "clicked": True, "error": None}
+    assert harvest["data"]["bid_due_at"] == "2026-10-01T17:00:00-05:00"
+    # What went over the wire: the three tracking hits, one token POST, the
+    # two reads, three requests per file. Never an answer, never an agreement.
+    paths = sb_platform.paths
+    assert paths[:6] == [
+        ("GET", "securecc.smartbidnet.com", "/External/RequestReadReceipt.aspx"),
+        ("GET", "em.smartinsight.co", "/wf/open"),
+        ("GET", "securecc.smartbidnet.com", "/Main/Login.aspx"),
+        ("POST", "apicc.smartinsight.co", "/token"),
+        ("GET", "apicc.smartinsight.co", "/api/projects/getconfidentialagreement"),
+        ("GET", "apicc.smartinsight.co", "/api/projects/getbidproject"),
+    ]
+    assert len(paths) == 6 + 3 * 45
+    assert [p for m, _, p in paths if m == "POST"] == ["/token"] + ["/api/admin/getSecurityToken"] * 45
+    assert {m for m, _, _ in paths} == {"GET", "POST"}
+    assert not any("iR=" in str(r.url) or "iR%3D" in str(r.url) for r in sb_platform.requests)
+    assert not any(word in p for _, _, p in paths for word in ("setallcodesanswer", "linkwontbidthisjob", "Unsubscribe"))
+    # The session row is bookkeeping only.
+    rows = db.tables["rfp_harvest_sessions"]
+    assert [r["provider"] for r in rows] == ["smartbid"]
+    assert rows[0]["account"] == "passport" and rows[0]["cookies"] == [] and rows[0]["login_failures"] == 0
+    assert sb_platform.opened[0]._token is None                # dropped on close
+    # The passport key, the bearer token, the security token and the SAS
+    # signature: in no harvest row, email update, queue row, session row,
+    # bell or log record. httpx did log every request, redacted.
+    assert "HTTP Request" in caplog.text and "?<redacted>" in caplog.text
+    _sb_no_secret_anywhere(db, caplog)
+
+
+def test_smartbid_end_to_end_a_dead_link_is_transient_and_never_locks(db, sb_platform, sandbox, sb_graph, caplog):
+    """A dead or foreign link answers /token with 500 (captured): transient,
+    no failure counted, no bell; the queue's attempt cap ends it."""
+    caplog.set_level(logging.DEBUG)
+    sb_platform.key = "0" * 40
+    _sb_seed(db)
+    with pytest.raises(h.RfpHarvestTransient) as exc:
+        h.execute(E1)
+    assert str(exc.value) == "SmartBid refused the project link or is down (HTTP 500)."
+    assert db.tables["rfp_harvest_sessions"] == [] and db.tables["notifications"] == []
+    assert _the_harvest(db)["last_error"] == "SmartBid refused the project link or is down (HTTP 500)."
+    _sb_no_secret_anywhere(db, caplog)
+
+
+# ── Sessions, the bell, the status block, the step ───────────────────────
+
+
+def test_smartbid_session_store_uses_the_smartbid_thresholds(db, tmp_path):
+    settings = _settings(tmp_path, smartbid_login_max_failures=2, smartbid_login_lock_seconds=120)
+    store = h._SessionStore(settings, "smartbid")
+    assert store.max_failures == 2 and store.lock_seconds == 120
+    assert store.record_login(ok=False, error="token: no")["login_failures"] == 1
+    state = store.record_login(ok=False, error="token: no")
+    assert state["login_failures"] == 2 and state["locked_until"] == (NOW + timedelta(seconds=120)).isoformat()
+    store.save_cookies("passport", [])
+    rows = db.tables["rfp_harvest_sessions"]
+    assert [r["provider"] for r in rows] == ["smartbid"]
+    assert rows[0]["account"] == "passport" and rows[0]["cookies"] == [] and rows[0]["login_failures"] == 0
+    procore = h._SessionStore(settings)
+    assert procore.load() is None and procore.max_failures == settings.procore_login_max_failures
+
+
+def test_open_smartbid_session_wires_the_config_the_store_and_the_bell(settings):
+    session = h.open_smartbid_session(settings, SB_REF)
+    try:
+        assert isinstance(session, sbc.SmartBidSession)
+        assert session.config == sbc.SmartBidConfig(
+            min_request_interval=settings.smartbid_min_request_interval_seconds,
+            login_min_interval=settings.smartbid_login_min_interval_seconds,
+            timeout=settings.smartbid_request_timeout_seconds,
+        )
+        assert isinstance(session.store, h._SessionStore) and session.store.provider == "smartbid"
+        assert session._on_lock is h._notify_smartbid_lock and session.ref is SB_REF
+        assert sbfx.KEY not in repr(session) and sbfx.KEY not in repr(session.config)
+    finally:
+        session.close()
+
+
+def test_notify_lock_in_smartbids_words(db):
+    until = NOW + timedelta(hours=6)
+    h._notify_smartbid_lock(until, "SmartBid answered the login without an access token.", None)
+    bells = db.tables["notifications"]
+    assert len(bells) == 1 and bells[0]["type"] == "rfp_harvest.login_failed" and bells[0]["role"] == Role.IT_ADMIN
+    assert bells[0]["message"] == (
+        "SmartBid logins failed repeatedly; SmartBid RFP harvests are paused until 2026-09-14 18:00 UTC. "
+        "Each login uses the project link in the invitation email."
+    )
+    assert bells[0]["metadata"] == {
+        "locked_until": until.isoformat(), "error": "SmartBid answered the login without an access token.",
+        "platform": "smartbid",
+    }
+    h._notify_smartbid_lock(until, "again")
+    assert len(bells) == 1
+
+
+def test_session_status_has_the_smartbid_block_without_cookies_or_keys(db, settings, tmp_path):
+    until = NOW + timedelta(hours=1)
+    db.tables["rfp_harvest_sessions"].extend([
+        {"provider": "smartbid", "account": "passport", "cookies": [{"name": "x", "value": "secret-cookie"}],
+         "logged_in_at": "2026-10-01T10:00:00+00:00", "last_used_at": "2026-10-01T10:05:00+00:00",
+         "last_login_attempt_at": "2026-10-01T11:00:00+00:00", "login_failures": 3,
+         "locked_until": until.isoformat(), "last_error": "token: SmartBid answered the login with HTTP 401."},
+        {"provider": "procore", "account": "harvest-bot@example.com", "cookies": [], "login_failures": 1},
+    ])
+    status = h.session_status(settings)
+    assert status["smartbid"] == {
+        "enabled": True,
+        "logged_in_at": "2026-10-01T10:00:00+00:00",
+        "last_used_at": "2026-10-01T10:05:00+00:00",
+        "last_login_attempt_at": "2026-10-01T11:00:00+00:00",
+        "login_failures": 3,
+        "locked_until": until.isoformat(),
+        "last_error": "token: SmartBid answered the login with HTTP 401.",
+    }
+    assert status["login_failures"] == 1 and status["pipelinesuite"]["portals"] == []
+    assert "secret" not in json.dumps(status)
+    assert h.session_status(_settings(tmp_path, smartbid_enabled=False))["smartbid"]["enabled"] is False
+    # An expired lock reads as none.
+    db.tables["rfp_harvest_sessions"][0]["locked_until"] = (NOW - timedelta(seconds=1)).isoformat()
+    assert h.session_status(settings)["smartbid"]["locked_until"] is None
+
+
+def test_step_parks_a_smartbid_row_on_the_smartbid_lock(db, settings):
+    until = NOW + timedelta(hours=2)
+    db.tables["rfp_harvest_sessions"].append({"provider": "smartbid", "locked_until": until.isoformat()})
+    rec = _StepRecorder()
+    h.step(db, _sb_email(), park=rec.park, finish=rec.finish)
+    assert rec.finished == 0 and db.tables["llm_jobs"] == []
+    assert rec.parks == [(7200.0, SB_LOCKED)]
+    # A row without a link drains; the lock gone, the row is enqueued once.
+    h.step(db, _sb_email(body_text=f"Yes <{sbfx.YES_URL}>"), park=rec.park, finish=rec.finish)
+    assert rec.finished == 1
+    db.tables["rfp_harvest_sessions"] = []
+    h.step(db, _sb_email(), park=rec.park, finish=rec.finish)
+    assert [j["target_id"] for j in db.tables["llm_jobs"]] == [E1]
+    assert rec.parks[-1] == (settings.rfp_harvest_poll_seconds, None)
+
+
+def test_smartbid_rows_reach_the_router_helpers_and_the_queue_marks(db):
+    db.tables["rfp_harvests"].append(_sb_harvest_row(claim_token="tok"))
+    assert h.harvest_for_email(db, _sb_email())["id"] == "hv-1"
+    assert h.harvest_for_email(db, _sb_email(body_text="nothing")) is None
+    _seed(db, _sb_email())
+    db.tables["rfp_harvests"][0].update(status="pending", finished_at=None)
+    h.mark_from_queue(E1, "failed", "SmartBid refused the project link or is down (HTTP 500).")
+    assert _the_harvest(db)["status"] == "failed"
+    assert _email_row(db)["status"] == "split" and _email_row(db)["harvest_id"] == "hv-1"
+    assert h.error_message(sbc.SmartBidForbidden("Refused."), "procore") == "Refused."
+    assert h.error_message(sbc.SmartBidLoginLocked(SB_LOCKED), "procore") == SB_LOCKED
+    assert sbc.SmartBidTransient in h._TRANSIENT_ERRORS and sbc.SmartBidForbidden in h._FORBIDDEN_ERRORS
+    assert h.FILE_SKIPPED in h._SETTLED_BEFORE_DOWNLOAD
+
+
+def test_smartbid_pure_builders_edge_cases():
+    project = sbc.parse_project({"BidProject": {"BidProjectId": 874974, "TimeZoneShort": "(XYZ)",
+                                                "BidDueDate": "2026-10-01T17:00:00"}})
+    entries, locators = h.smartbid_files(project)
+    assert entries == [] and locators == []
+    data = h.normalize_smartbid_facts(SB_REF, project, [], None)
+    assert data["platform"] == "smartbid" and data["project_name"] is None
+    assert data["bid_due_at"] == "2026-10-01T17:00:00-07:00" and data["bid_due_tz"] == "XYZ"
+    assert data["bid_due_tz_assumed"] is True
+    assert data["point_of_contact"] is None and data["tracking"] is None and data["pre_bid"] is None
+    assert data["documents"] == {"count": 0, "bytes": 0, "kinds": {}, "folders": [], "restricted": 0}
+    no_due = sbc.parse_project({"BidProject": {"BidProjectId": 1}})
+    assert h.normalize_smartbid_facts(SB_REF, no_due, [], None)["bid_due_tz_assumed"] is False
+    with_pre_bid = sbc.parse_project({"BidProject": {
+        "BidProjectId": 1, "PreBidMeetingDate": "10/05/2026 09:00 AM", "PreBidMeetingTimeZone": "(PT)",
+        "IsPreBidMeetingMandatory": True, "Address1": "1 Main ", "City": "Reno", "State": "NV", "Zip": "89501",
+        "Manager": "Pat", "Phone": None,
+    }})
+    data = h.normalize_smartbid_facts(SB_REF, with_pre_bid, [], None)
+    assert data["pre_bid"] == {"date": "10/05/2026 09:00 AM", "time_zone": "PT", "mandatory": True}
+    assert data["project_address"] == "1 Main, Reno, NV 89501"
+    assert data["point_of_contact"] == {"name": "Pat", "email": None, "phone": None}
+    raw = h.build_smartbid_raw(
+        {"BidProject": {"Title": "T", "PassportKey": sbfx.KEY, "passportkey2": "x", "SessionToken": "t",
+                        "ProjectDescription": "<p>d</p>", "logo": "https://h/x?sig=abc"}},
+        with_pre_bid,
+    )
+    assert raw["bid_project"] == {"Title": "T", "logo": None}
+    assert h.build_smartbid_raw(None, no_due) == {"bid_project": {}, "invitations": [], "files_head": []}
+    assert sbfx.KEY not in json.dumps(data)
+
+
+def test_smartbid_file_kind_falls_back_to_the_folder():
+    """A sheet-code file name says nothing; its folder does. A spreadsheet
+    under a plans folder stays other, and the name wins over the folder."""
+    project = sbc.parse_project({"BidProject": {"BidProjectId": 874974, "SystemId": 3766}, "PlanRoom": [{
+        "Name": "root", "isFile": False, "Folders": [
+            {"Name": "Shell Bid Set ", "isFile": False, "Folders": [
+                {"isFile": True, "FileId": 1, "Name": "E-2026-09-01_NSU_Shell_REV_1.pdf", "Size": 10,
+                 "Href": "https://apicc.smartbidnet.com/project/fileMgmt/download?Value=MS44NzQ5NzQuMzc2Ng=="},
+                {"isFile": True, "FileId": 2, "Name": "NSU_Grey_Shell_SPECS_-_Project_Manual.pdf", "Size": 10,
+                 "Href": "https://apicc.smartbidnet.com/project/fileMgmt/download?Value=Mi44NzQ5NzQuMzc2Ng=="},
+            ]},
+            {"Name": "Plans", "isFile": False, "Folders": [
+                {"isFile": True, "FileId": 3, "Name": "Quantities.xlsx", "Size": 10,
+                 "Href": "https://apicc.smartbidnet.com/project/fileMgmt/download?Value=My44NzQ5NzQuMzc2Ng=="},
+            ]},
+            {"Name": "Contract", "isFile": False, "Folders": [
+                {"isFile": True, "FileId": 4, "Name": "2025_Subcontract.docx", "Size": 10,
+                 "Href": "https://apicc.smartbidnet.com/project/fileMgmt/download?Value=NC44NzQ5NzQuMzc2Ng=="},
+            ]},
+        ]}]})
+    entries, _ = h.smartbid_files(project)
+    assert [(e["file_path"], e["kind"]) for e in entries] == [
+        ("Shell Bid Set/E-2026-09-01_NSU_Shell_REV_1.pdf", "drawing"),
+        ("Shell Bid Set/NSU_Grey_Shell_SPECS_-_Project_Manual.pdf", "specification"),
+        ("Plans/Quantities.xlsx", "other"),
+        ("Contract/2025_Subcontract.docx", "other"),
+    ]

@@ -764,6 +764,18 @@ class Settings(BaseSettings):
     pipelinesuite_login_max_failures: int = 3            # per portal
     pipelinesuite_login_lock_seconds: int = 21600        # per portal (6 h)
     pipelinesuite_request_timeout_seconds: float = 30.0
+    # SmartBid (ConstructConnect): many GCs invite through it from the
+    # platform's own address. No credentials here: each invitation email
+    # carries a per-recipient, per-project passport key in its "View the
+    # Project" link, and the harvester logs in with that for one harvest
+    # (nothing secret is stored). Design record: docs/RFP_SMARTBID.md, section 6.
+    smartbid_enabled: bool = True
+    smartbid_tracking_pings_enabled: bool = True   # fire the read receipt, open pixel + View the Project click once per harvest
+    smartbid_min_request_interval_seconds: float = 2.0
+    smartbid_login_min_interval_seconds: int = 30  # between token requests
+    smartbid_login_max_failures: int = 3           # unexpected login answers before the lock
+    smartbid_login_lock_seconds: int = 21600       # 6 h
+    smartbid_request_timeout_seconds: float = 60.0
     # Email harvester (docs/RFP_HARVEST.md 2.5): organic, general and
     # nonorganic invitations carry their files as attachments and as
     # cloud-share links (SharePoint/OneDrive/Dropbox/Box/Google Drive), so
@@ -979,14 +991,15 @@ class Settings(BaseSettings):
     @property
     def rfp_harvest_active(self) -> bool:
         """The harvest slice runs: master switch, its own switch, and at least
-        one harvester (Procore with credentials, PipelineSuite, or the email
-        harvester; the last two need no credentials)."""
+        one harvester (Procore with credentials, PipelineSuite, SmartBid, or
+        the email harvester; the last three need no credentials)."""
         return (
             self.rfp_ingest_enabled
             and self.rfp_harvest_enabled
             and (
                 self.procore_configured
                 or self.pipelinesuite_enabled
+                or self.smartbid_enabled
                 or self.rfp_harvest_email_enabled
             )
         )
@@ -1356,6 +1369,22 @@ class Settings(BaseSettings):
                 "PIPELINESUITE_LOGIN_MIN_INTERVAL_SECONDS and PIPELINESUITE_LOGIN_LOCK_SECONDS "
                 "must be at least 60, PIPELINESUITE_LOGIN_MAX_FAILURES at least 1, and "
                 "PIPELINESUITE_REQUEST_TIMEOUT_SECONDS positive."
+            )
+        if self.smartbid_min_request_interval_seconds < 0.5:
+            raise ValueError(
+                "SMARTBID_MIN_REQUEST_INTERVAL_SECONDS must be at least 0.5 (the harvest "
+                "must keep a human pace against the platform)."
+            )
+        if (
+            self.smartbid_login_min_interval_seconds < 10
+            or self.smartbid_login_max_failures < 1
+            or self.smartbid_login_lock_seconds < 60
+            or self.smartbid_request_timeout_seconds <= 0
+        ):
+            raise ValueError(
+                "SMARTBID_LOGIN_MIN_INTERVAL_SECONDS must be at least 10, "
+                "SMARTBID_LOGIN_LOCK_SECONDS at least 60, SMARTBID_LOGIN_MAX_FAILURES at "
+                "least 1, and SMARTBID_REQUEST_TIMEOUT_SECONDS positive."
             )
         if (
             self.rfp_harvest_link_max_count < 1

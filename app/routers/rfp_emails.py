@@ -239,16 +239,18 @@ TAB_STATUSES: dict[str, tuple[str, ...]] = {
     "processed": ("done", "merged", "duplicate", "harvest", "split", "create", "created"),
 }
 
-# The six values the invitation_method check constraint allows (0120,
+# The seven values the invitation_method check constraint allows (0120,
 # narrowed by 0124 and 0128: buildingconnected, ngem and planhub mail is
 # sanitized out at listing time and none is a method any more; widened by
-# 0127: gc_portal for a GC that invites through its own bidding portal, and
-# by 0129: pipelinesuite for a GC whose plan room is a PipelineSuite portal,
-# docs/RFP_PIPELINESUITE.md).
+# 0127: gc_portal for a GC that invites through its own bidding portal, by
+# 0129: pipelinesuite for a GC whose plan room is a PipelineSuite portal,
+# docs/RFP_PIPELINESUITE.md, and by 0148: smartbid for invitations sent
+# through ConstructConnect's SmartBid, docs/RFP_SMARTBID.md).
 INVITATION_METHODS = (
     "organic",
     "procore",
     "pipelinesuite",
+    "smartbid",
     "gc_portal",
     "general",
     "nonorganic",
@@ -881,13 +883,15 @@ class AuthorizedSenderIn(BaseModel):
     Admin only. `method` is accepted only alongside `locked` (a platform
     rule names the source it represents: `procore`, or `pipelinesuite` for
     a GC whose plan room is a PipelineSuite portal, granted on that GC's
-    own domain; `gc_portal` names a GC's own bespoke bidding portal, keyed
-    by the rule's domain); every other rule is `general`."""
+    own domain, or `smartbid` for ConstructConnect's SmartBid, granted on
+    the platform's own domain (smartbidnet.com); `gc_portal` names a GC's
+    own bespoke bidding portal, keyed by the rule's domain); every other
+    rule is `general`."""
 
     kind: Literal["address", "domain"]
     value: str = Field(min_length=1, max_length=320)
     locked: bool = False
-    method: Literal["procore", "pipelinesuite", "gc_portal", "general"] | None = None
+    method: Literal["procore", "pipelinesuite", "smartbid", "gc_portal", "general"] | None = None
 
 
 @router.get("/authorized-senders", dependencies=[Depends(rfp_emails_rate_limit)])
@@ -1239,9 +1243,11 @@ def rfp_harvest_status(_: CurrentUser = Depends(require_sender_admin)) -> dict:
     """The settings tab's harvester blocks: Procore (configured, the account
     but never the password, last login, lock state, last error, active jobs)
     plus a `pipelinesuite` block listing every portal session (host, key
-    fingerprint, last login, failures, lock, last error; never the key).
-    Never the cookies (docs/RFP_HARVEST.md section 5, RFP_PIPELINESUITE.md
-    section 4)."""
+    fingerprint, last login, failures, lock, last error; never the key) and
+    a `smartbid` block for the one SmartBid login (enabled, last login,
+    last use, failures, lock, last error; no key, no token). Never the
+    cookies (docs/RFP_HARVEST.md section 5, RFP_PIPELINESUITE.md section 4,
+    RFP_SMARTBID.md section 4)."""
     return _harvest().session_status()
 
 
@@ -1283,8 +1289,9 @@ def harvest_rfp_email(
     no harvester, the body has no platform link, or the status is not one a
     harvest may run from; 503 `rfp_harvest_locked` while the logins for the
     row's own platform are locked (or not configured): Procore's one
-    session, or the PipelineSuite portal named in the email's body
-    (docs/RFP_PIPELINESUITE.md section 7). Audited `rfp_harvest.run`."""
+    session, the PipelineSuite portal named in the email's body
+    (docs/RFP_PIPELINESUITE.md section 7), or SmartBid's one session
+    (docs/RFP_SMARTBID.md section 7). Audited `rfp_harvest.run`."""
     _uuid_or_404(email_id, _EMAIL_NOT_FOUND)
     sb = get_supabase()
     harvest = _harvest()
@@ -1304,7 +1311,8 @@ def harvest_rfp_email(
             headers={"X-Error-Code": ErrorCode.RFP_HARVEST_NOT_AVAILABLE.value},
         )
     # The lock is per platform session: Procore has one, PipelineSuite one
-    # per portal host, so the service reads the row to know which to check.
+    # per portal host, SmartBid one, so the service reads the row to know
+    # which to check.
     usable, why, until = harvest.availability_for(row)
     if not usable:
         detail = why or "The platform is not available."
@@ -1537,6 +1545,7 @@ class MethodPatchIn(BaseModel):
         "organic",
         "procore",
         "pipelinesuite",
+        "smartbid",
         "gc_portal",
         "general",
         "nonorganic",

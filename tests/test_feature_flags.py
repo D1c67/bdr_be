@@ -578,9 +578,10 @@ def test_procore_configured_needs_both_credentials_non_blank():
     # rfp_harvest_active is the whole gate: master switch, slice switch, a
     # harvester. Since 2026-09-16 the PipelineSuite harvester and the email
     # harvester count as harvesters and need no credentials (both default
-    # on), so the gate is open without Procore credentials unless both are
-    # switched off too (docs/RFP_PIPELINESUITE.md section 6, RFP_HARVEST.md
-    # 2.5).
+    # on), and since 2026-10-01 so does SmartBid, so the gate is open without
+    # Procore credentials unless all three are switched off too
+    # (docs/RFP_PIPELINESUITE.md section 6, RFP_HARVEST.md 2.5,
+    # RFP_SMARTBID.md section 6).
     creds = dict(procore_login_email="bot@example.com", procore_login_password="pw")
     assert _harvest_settings(rfp_ingest_enabled=True, rfp_harvest_enabled=True, **creds).rfp_harvest_active
     assert not _harvest_settings(rfp_ingest_enabled=True, rfp_harvest_enabled=False, **creds).rfp_harvest_active
@@ -589,17 +590,37 @@ def test_procore_configured_needs_both_credentials_non_blank():
     assert _harvest_settings(
         rfp_ingest_enabled=True, rfp_harvest_enabled=True, pipelinesuite_enabled=False
     ).rfp_harvest_active
-    assert not _harvest_settings(
+    assert _harvest_settings(
         rfp_ingest_enabled=True, rfp_harvest_enabled=True, pipelinesuite_enabled=False,
         rfp_harvest_email_enabled=False,
     ).rfp_harvest_active
+    assert not _harvest_settings(
+        rfp_ingest_enabled=True, rfp_harvest_enabled=True, pipelinesuite_enabled=False,
+        rfp_harvest_email_enabled=False, smartbid_enabled=False,
+    ).rfp_harvest_active
     assert _harvest_settings(
         rfp_ingest_enabled=True, rfp_harvest_enabled=True, pipelinesuite_enabled=False,
-        rfp_harvest_email_enabled=False, **creds
+        rfp_harvest_email_enabled=False, smartbid_enabled=False, **creds
     ).rfp_harvest_active
     # The two upstream switches still gate PipelineSuite alone.
     assert not _harvest_settings(rfp_ingest_enabled=True, rfp_harvest_enabled=False).rfp_harvest_active
     assert not _harvest_settings(rfp_ingest_enabled=False, rfp_harvest_enabled=True).rfp_harvest_active
+    # Since 2026-10-01 SmartBid is a harvester too (no credentials, default
+    # on): with Procore unconfigured and the other two off, it alone opens the
+    # gate, and the upstream switches still close it (docs/RFP_SMARTBID.md
+    # section 6).
+    only_smartbid = dict(
+        rfp_ingest_enabled=True, rfp_harvest_enabled=True,
+        pipelinesuite_enabled=False, rfp_harvest_email_enabled=False,
+    )
+    assert _harvest_settings(smartbid_enabled=True, **only_smartbid).rfp_harvest_active
+    assert not _harvest_settings(smartbid_enabled=False, **only_smartbid).rfp_harvest_active
+    assert not _harvest_settings(
+        smartbid_enabled=True, **{**only_smartbid, "rfp_harvest_enabled": False}
+    ).rfp_harvest_active
+    assert not _harvest_settings(
+        smartbid_enabled=True, **{**only_smartbid, "rfp_ingest_enabled": False}
+    ).rfp_harvest_active
 
 
 def test_pipelinesuite_settings_defaults_match_the_design_record():
@@ -632,6 +653,55 @@ def test_pipelinesuite_settings_guard_refuses_each_bad_value(overrides, names_va
         _harvest_settings(pipelinesuite_enabled=False, **overrides)
     with pytest.raises(ValueError, match=names_var):
         _harvest_settings(pipelinesuite_enabled=True, **overrides)
+
+
+def test_smartbid_settings_defaults_match_the_design_record():
+    s = _harvest_settings()
+    assert s.smartbid_enabled is True
+    assert s.smartbid_tracking_pings_enabled is True
+    assert s.smartbid_min_request_interval_seconds == 2.0
+    assert s.smartbid_login_min_interval_seconds == 30
+    assert s.smartbid_login_max_failures == 3
+    assert s.smartbid_login_lock_seconds == 21600
+    assert s.smartbid_request_timeout_seconds == 60
+    # No credential fields: the project id and passport key come from the email.
+    assert not any(name.startswith("smartbid_") and name.endswith(("email", "password", "key", "token"))
+                   for name in Settings.model_fields)
+
+
+@pytest.mark.parametrize(
+    "overrides,names_var",
+    [
+        ({"smartbid_min_request_interval_seconds": 0.4}, "SMARTBID_MIN_REQUEST_INTERVAL_SECONDS"),
+        ({"smartbid_login_lock_seconds": 59}, "SMARTBID_LOGIN_LOCK_SECONDS"),
+        ({"smartbid_login_min_interval_seconds": 9}, "SMARTBID_LOGIN_MIN_INTERVAL_SECONDS"),
+        ({"smartbid_login_max_failures": 0}, "SMARTBID_LOGIN_MAX_FAILURES"),
+        ({"smartbid_request_timeout_seconds": 0}, "SMARTBID_REQUEST_TIMEOUT_SECONDS"),
+    ],
+)
+def test_smartbid_settings_guard_refuses_each_bad_value(overrides, names_var):
+    """Validation mirrors procore_* and pipelinesuite_*, whether or not the
+    harvester is on (the login floor is 10 s, not 60: SmartBid's key is per
+    email, so a stale link never locks the platform)."""
+    with pytest.raises(ValueError, match=names_var):
+        _harvest_settings(smartbid_enabled=False, **overrides)
+    with pytest.raises(ValueError, match=names_var):
+        _harvest_settings(smartbid_enabled=True, **overrides)
+    # The boundary values themselves are accepted.
+    ok = _harvest_settings(
+        smartbid_min_request_interval_seconds=0.5, smartbid_login_min_interval_seconds=10,
+        smartbid_login_lock_seconds=60, smartbid_login_max_failures=1,
+    )
+    assert ok.smartbid_login_min_interval_seconds == 10
+
+
+def test_smartbid_env_names_carry_the_documented_prefix(monkeypatch):
+    monkeypatch.setenv("SMARTBID_ENABLED", "false")
+    monkeypatch.setenv("SMARTBID_TRACKING_PINGS_ENABLED", "false")
+    monkeypatch.setenv("SMARTBID_LOGIN_LOCK_SECONDS", "3600")
+    s = Settings(_env_file=None)
+    assert s.smartbid_enabled is False and s.smartbid_tracking_pings_enabled is False
+    assert s.smartbid_login_lock_seconds == 3600
 
 
 def test_pipelinesuite_env_names_carry_the_documented_prefix(monkeypatch):

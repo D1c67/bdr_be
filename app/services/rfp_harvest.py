@@ -8,15 +8,20 @@ Ingestion Sandbox run (`source_kind = rfp_email`). One `rfp_harvests` row per
 platform object (`method` + `external_key`), reused by every later email
 about the same object.
 
-Three harvesters live behind `harvester_for`: Procore (RFP_HARVEST.md),
+Four harvesters live behind `harvester_for`: Procore (RFP_HARVEST.md),
 PipelineSuite (RFP_PIPELINESUITE.md, 2026-09-16: the GC's own plan room at
 `<gc>.pipelinesuite.com`, logged into with the Project ID and Security Key
-the invitation email carries, one stored session per portal host) and the
-email harvester (RFP_HARVEST.md 2.5, 2026-09-16: the `organic`, `general`
-and `nonorganic` methods, whose "platform" is the email itself: its
-attachments and its cloud-share links, body in `rfp_email_harvest.py`, the
-pure policy and trigger in `rfp_email_files.py`). The seam is where the
-next platforms (SmartBid) plug in.
+the invitation email carries, one stored session per portal host), SmartBid
+(RFP_SMARTBID.md, 2026-10-01: ConstructConnect's platform, many GCs, every
+invitation from the platform's own address; the email's View the Project
+link carries a per-recipient, per-project passport key that buys a bearer
+token for one harvest, nothing secret stored, the agreement gate read and
+never accepted, the bid question never answered) and the email harvester
+(RFP_HARVEST.md 2.5, 2026-09-16: the `organic`, `general` and `nonorganic`
+methods, whose "platform" is the email itself: its attachments and its
+cloud-share links, body in `rfp_email_harvest.py`, the pure policy and
+trigger in `rfp_email_files.py`). The seam is where the next platforms
+plug in.
 BuildingConnected and NGEM (2026-09-15) and PlanHub (2026-09-16) are not
 invitation methods: their mail is sanitized out at listing time. `gc_portal`
 (2026-09-16) is the method for a GC that invites through a genuinely bespoke
@@ -24,8 +29,8 @@ portal; every such portal is different, so the scraper is chosen by the
 sender's domain through `GC_PORTAL_SCRAPERS` (doc 2.3). The registry is empty
 until the first scraper lands, and until then a gc_portal row drains to done
 unharvested exactly like organic. The pure parts (`normalize_facts`,
-`classify_manifest`, `html_to_text`, the `pipelinesuite_*` builders) have no
-I/O so the captured payloads can be tested exhaustively.
+`classify_manifest`, `html_to_text`, the `pipelinesuite_*` and `smartbid_*`
+builders) have no I/O so the captured payloads can be tested exhaustively.
 
 Failure policy (doc 2.2): a harvest never blocks the pipeline forever.
 Unavailable (no credentials, logins locked, an interstitial) parks the row
@@ -65,12 +70,14 @@ from app.services import (
     rfp_email_files as ef,
     rfp_ingest,
     rfp_test,
+    smartbid_client as sbc,
 )
 from app.services.notifications import notify_role
 from app.services.rfp_email_auth import (
     METHOD_GC_PORTAL,
     METHOD_PIPELINESUITE,
     METHOD_PROCORE,
+    METHOD_SMARTBID,
     address_domain,
     domain_covered_by,
 )
@@ -103,7 +110,10 @@ FILE_SKIPPED_CAP = "skipped_cap"
 # loop runs, so it skips them.
 FILE_REUSED = ef.FILE_REUSED
 FILE_EXPANDED = ef.FILE_EXPANDED
-_SETTLED_BEFORE_DOWNLOAD = (FILE_REUSED, FILE_EXPANDED)
+# And one from SmartBid (RFP_SMARTBID.md 4): a plan-room file behind an
+# agreement or a prequalification, never downloaded.
+FILE_SKIPPED = "skipped"
+_SETTLED_BEFORE_DOWNLOAD = (FILE_REUSED, FILE_EXPANDED, FILE_SKIPPED)
 HARVESTER_EMAIL = ef.HARVESTER_EMAIL
 
 KIND_DRAWING = "drawing"
@@ -147,15 +157,33 @@ _MSG_PS_LOCKED = psc.LOCKED_MESSAGE
 _MSG_PROCORE_LOCKED = "Procore logins are locked after repeated failures."
 _PS_RAW_FILES_HEAD = 50
 
-# The three client exception families _harvest_files and the job map the same
+# SmartBid (docs/RFP_SMARTBID.md section 4). The caps and the empty-project
+# sentences are PipelineSuite's (both speak of "the project").
+_MSG_NO_SB_REFERENCE = "The email carries no SmartBid project link."
+_MSG_SB_LOCKED = sbc.LOCKED_MESSAGE
+_MSG_SB_RESTRICTED = "SmartBid requires an agreement for this file"
+_SB_RAW_FILES_HEAD = 50
+# BidProject keys `raw` never keeps: the passport key again, and the
+# description (it is `description_text`).
+_SB_RAW_DROP_KEYS = frozenset({"PassportKey", "ProjectDescription"})
+_SB_SECRET_KEY_RE = re.compile(r"passport|token|secret|password", re.IGNORECASE)
+
+# The four client exception families _harvest_files and the job map the same
 # way (the email harvester's session raises the cloud_folders pair).
-_TRANSIENT_ERRORS = (pc.ProcoreTransient, psc.PipelineSuiteTransient, cloud_folders.CloudTransient)
-_FORBIDDEN_ERRORS = (pc.ProcoreForbidden, psc.PipelineSuiteForbidden, cloud_folders.CloudForbidden)
+_TRANSIENT_ERRORS = (
+    pc.ProcoreTransient, psc.PipelineSuiteTransient, sbc.SmartBidTransient,
+    cloud_folders.CloudTransient,
+)
+_FORBIDDEN_ERRORS = (
+    pc.ProcoreForbidden, psc.PipelineSuiteForbidden, sbc.SmartBidForbidden,
+    cloud_folders.CloudForbidden,
+)
 # (unavailable, forbidden, base) per platform, for the job's failure mapping.
 _PROCORE_ERRORS = (pc.ProcoreUnavailable, pc.ProcoreForbidden, pc.ProcoreError)
 _PIPELINESUITE_ERRORS = (
     psc.PipelineSuiteUnavailable, psc.PipelineSuiteForbidden, psc.PipelineSuiteError
 )
+_SMARTBID_ERRORS = (sbc.SmartBidUnavailable, sbc.SmartBidForbidden, sbc.SmartBidError)
 _EMAIL_ERRORS = (cloud_folders.CloudUnavailable, cloud_folders.CloudForbidden, cloud_folders.CloudError)
 
 
@@ -709,6 +737,156 @@ def build_pipelinesuite_raw(page: psc.ProjectPage) -> dict:
     return raw
 
 
+# ── Pure: SmartBid facts (RFP_SMARTBID.md section 4) ─────────────────────────
+
+
+def _sb_kind(name: str, folder: str) -> str:
+    """The file name's kind, else its folder path's: SmartBid GCs often keep
+    the meaning in the folder ("Shell Bid Set/E-2026-09-01_..._REV_1.pdf",
+    "Plans/Bid Drawings/...") and give the file a sheet code for a name."""
+    kind = sbc.classify_name(name)
+    if kind == psc.KIND_OTHER and folder:
+        # The folder text carries the file's extension, so a spreadsheet
+        # under "Plans/" stays other.
+        return sbc.classify_name(folder + os.path.splitext(name)[1])
+    return kind
+
+
+def smartbid_files(project: sbc.SmartBidProject) -> tuple[list[dict], list[dict | None]]:
+    """The harvest file entries (no URLs; sizes KB x 1024, kind from the
+    name or else its folder, discipline always None; a restricted entry
+    already `skipped`) and
+    the aligned in-memory locator list: the parsed plan-room entry the
+    client's `download` takes (its Href never leaves memory), None for a
+    restricted entry. Plan-room order (folders walked depth-first)."""
+    entries: list[dict] = []
+    locators: list[dict | None] = []
+    for row in project.files:
+        name = _cap(row.get("name"), _NAME_MAX_CHARS) or "document"
+        folder = _cap(row.get("folder"), _PATH_MAX_CHARS - len(name) - 1) or ""
+        file_path = f"{folder}/{name}" if folder else name
+        restricted = bool(row.get("restricted"))
+        entries.append(
+            {
+                "file_path": file_path[:_PATH_MAX_CHARS],
+                "size": max(0, int(row.get("size_kb") or 0)) * 1024,
+                "kind": _sb_kind(name, folder),
+                "discipline": None,
+                "file_id": _cap(row.get("file_id"), 40),
+                "uploaded_on": _cap(row.get("uploaded_on"), 40),
+                "sandbox_file_id": None,
+                "status": FILE_SKIPPED if restricted else None,
+                "error": _MSG_SB_RESTRICTED if restricted else None,
+            }
+        )
+        locators.append(None if restricted else dict(row))
+    return entries, locators
+
+
+def _sb_address(project: sbc.SmartBidProject) -> str | None:
+    """address1, address2, city, "state zip" joined by ", "."""
+    state_zip = " ".join(p for p in (_cap(project.state, 40), _cap(project.zip, 20)) if p)
+    parts = (
+        _cap(project.address1, _SHORT_MAX_CHARS), _cap(project.address2, _SHORT_MAX_CHARS),
+        _cap(project.city, 80), state_zip,
+    )
+    return ", ".join(p for p in parts if p)[:_SHORT_MAX_CHARS] or None
+
+
+def normalize_smartbid_facts(
+    ref: sbc.SmartBidRef, project: sbc.SmartBidProject, entries: list[dict], tracking: dict | None
+) -> dict:
+    """The section 4 `data` document for a SmartBid harvest. Never the
+    passport key, never a token, no URLs."""
+    folders = sorted({e["file_path"].rsplit("/", 1)[0] for e in entries if "/" in e["file_path"]})
+    summary = documents_summary(entries)
+    summary.pop("disciplines", None)
+    summary["folders"] = folders
+    summary["restricted"] = sum(1 for e in entries if e.get("status") == FILE_SKIPPED)
+    due_at = sbc.bid_due_at(project)
+    _, zone_assumed = sbc.bid_due_zone(project.time_zone_short)
+    manager = _cap(project.manager, _NAME_MAX_CHARS)
+    phone = _cap(project.phone, 60)
+    pre_bid = project.pre_bid if isinstance(project.pre_bid, dict) else None
+    return {
+        "platform": sbc.PROVIDER,
+        "bid_project_id": project.bid_project_id or int(ref.bid_project_id),
+        "system_id": project.system_id,
+        "project_name": _cap(project.title, _NAME_MAX_CHARS),
+        "project_address": _sb_address(project),
+        "bid_due_at": due_at,
+        "bid_due_text": _cap(project.bid_due_text, 80),
+        "bid_due_tz": _cap(project.time_zone_short, 10),
+        "bid_due_tz_assumed": bool(due_at and zone_assumed),
+        "gc": {
+            "name": _cap(project.gc_name, _NAME_MAX_CHARS),
+            "address": None,
+            "phone": phone,
+            "fax": _cap(project.fax, 60),
+            "website": None,
+        },
+        "point_of_contact": (
+            {"name": manager, "email": None, "phone": phone} if (manager or phone) else None
+        ),
+        "owner": _cap(project.owner, _NAME_MAX_CHARS),
+        "architect": _cap(project.architect, _NAME_MAX_CHARS),
+        "project_status": _cap(project.project_status, 80),
+        "past_due": bool(project.past_due),
+        "allow_late_proposal": bool(project.allow_late_proposal),
+        "pre_bid": (
+            {
+                "date": _cap(pre_bid.get("date"), 80),
+                "time_zone": _cap(pre_bid.get("time_zone"), 10),
+                "mandatory": bool(pre_bid.get("mandatory")),
+            }
+            if pre_bid else None
+        ),
+        "invitations": [
+            {
+                "code": _cap(i.get("code"), 40),
+                "name": _cap(i.get("name"), _NAME_MAX_CHARS),
+                "status": _cap(i.get("status"), 40),
+            }
+            for i in project.invitations[:_MAX_MEMBERS]
+        ],
+        "response_recorded": bool(project.response_recorded),
+        "tracking": tracking,
+        "documents": summary,
+    }
+
+
+def build_smartbid_raw(payload: Any, project: sbc.SmartBidProject) -> dict:
+    """`{bid_project, invitations, files_head}`: the BidProject without the
+    passport key (or any key-, token- or password-named field) and without
+    the description, the parsed invitations, the first plan-room entries
+    without their links. No key, no token, no URL a file could be fetched by."""
+    bp = payload.get("BidProject") if isinstance(payload, dict) else None
+    bid_project = {
+        k: v for k, v in (bp if isinstance(bp, dict) else {}).items()
+        if isinstance(k, str) and k not in _SB_RAW_DROP_KEYS and not _SB_SECRET_KEY_RE.search(k)
+    }
+    head = [
+        {
+            "file_id": f.get("file_id"),
+            "name": f.get("name"),
+            "folder": f.get("folder"),
+            "size_kb": f.get("size_kb"),
+            "uploaded_on": f.get("uploaded_on"),
+            "version": f.get("version"),
+            "restricted": bool(f.get("restricted")),
+        }
+        for f in project.files[:_SB_RAW_FILES_HEAD]
+    ]
+    raw = {
+        "bid_project": _trim_raw(bid_project),
+        "invitations": [dict(i) for i in project.invitations[:_MAX_MEMBERS]],
+        "files_head": head,
+    }
+    if len(json.dumps(raw, default=str)) > _RAW_MAX_CHARS:
+        raw.pop("files_head", None)
+    return raw
+
+
 # ── GC portal scrapers (doc 2.3) ─────────────────────────────────────────────
 # A `gc_portal` invitation comes from a GC that runs its own bidding portal.
 # Every portal is different, so the scraper is chosen by the sender's domain:
@@ -733,7 +911,7 @@ def gc_portal_scraper_for(row: dict) -> str | None:
 # ── Harvester registry ───────────────────────────────────────────────────────
 
 
-PlatformRef = pc.ProcoreRef | psc.PipelineSuiteRef
+PlatformRef = pc.ProcoreRef | psc.PipelineSuiteRef | sbc.SmartBidRef
 # Every reference the row helpers read `external_key` / `external_url` off.
 AnyRef = PlatformRef | ef.EmailRef
 
@@ -741,8 +919,8 @@ AnyRef = PlatformRef | ef.EmailRef
 def harvester_for(row: dict, settings: Settings | None = None) -> str | None:
     """The harvester key for this email, or None: the method has none, the
     slice is off, the harvester's credentials are empty (Procore) or its
-    flag is off (PipelineSuite, the email harvester), or (gc_portal) no
-    scraper is registered for the sender's domain."""
+    flag is off (PipelineSuite, SmartBid, the email harvester), or
+    (gc_portal) no scraper is registered for the sender's domain."""
     s = settings or get_settings()
     if not (s.rfp_ingest_enabled and s.rfp_harvest_enabled):
         return None
@@ -751,6 +929,8 @@ def harvester_for(row: dict, settings: Settings | None = None) -> str | None:
         return METHOD_PROCORE
     if method == METHOD_PIPELINESUITE and s.pipelinesuite_enabled:
         return METHOD_PIPELINESUITE
+    if method == METHOD_SMARTBID and s.smartbid_enabled:
+        return METHOD_SMARTBID
     if method == METHOD_GC_PORTAL and gc_portal_scraper_for(row) is not None:
         return METHOD_GC_PORTAL
     if method in ef.EMAIL_METHODS and s.rfp_harvest_email_enabled:
@@ -760,18 +940,20 @@ def harvester_for(row: dict, settings: Settings | None = None) -> str | None:
 
 def platform_reference(method: str | None, body_text: str | None) -> PlatformRef | None:
     """The platform object the email names, parsed from its text body: a
-    ProcoreRef or a PipelineSuiteRef (both answer to `external_key` and
-    `external_url`). None for every other method."""
+    ProcoreRef, a PipelineSuiteRef or a SmartBidRef (all answer to
+    `external_key` and `external_url`). None for every other method."""
     if method == METHOD_PROCORE:
         return pc.parse_reference(body_text)
     if method == METHOD_PIPELINESUITE:
         return psc.parse_reference(body_text)
+    if method == METHOD_SMARTBID:
+        return sbc.parse_reference(body_text)
     return None
 
 
 def reference_for(row: dict) -> AnyRef | None:
     """What this email names for its harvester, from the row: the platform
-    object parsed off the text body (Procore, PipelineSuite), or (the email
+    object parsed off the text body (Procore, PipelineSuite, SmartBid), or (the email
     harvester) the email itself when its stored attachment listing or its
     body carries anything to harvest (`rfp_email_files.email_reference`).
     None for every other method, and the reason the match exit, the step
@@ -784,21 +966,26 @@ def reference_for(row: dict) -> AnyRef | None:
 
 def session_provider_for(row: dict, settings: Settings | None = None) -> str | None:
     """The rfp_harvest_sessions provider this email's harvest logs in
-    through: `procore`, or `pipelinesuite:<host>` from the parsed reference.
-    None when the method has no login session or the reference is missing."""
+    through: `procore`, `pipelinesuite:<host>` from the parsed reference, or
+    `smartbid` when the email carries a SmartBid project link. None when the
+    method has no login session or the reference is missing."""
     method = row.get("invitation_method")
     if method == METHOD_PROCORE:
         return pc.PROVIDER
     if method == METHOD_PIPELINESUITE:
         ref = psc.parse_reference(row.get("body_text"))
         return ref.session_provider if ref is not None else None
+    if method == METHOD_SMARTBID:
+        sb_ref = sbc.parse_reference(row.get("body_text"))
+        return sb_ref.session_provider if sb_ref is not None else None
     return None
 
 
 def can_harvest(row: dict, settings: Settings | None = None) -> tuple[bool, str | None]:
     """(possible, reason) for the router and the step: a harvester exists and
     the email carries a platform link (or, PipelineSuite, the portal host,
-    Project ID and Security Key)."""
+    Project ID and Security Key; SmartBid, the View the Project link with
+    its passport key)."""
     s = settings or get_settings()
     method = row.get("invitation_method")
     if method == METHOD_GC_PORTAL:
@@ -813,6 +1000,12 @@ def can_harvest(row: dict, settings: Settings | None = None) -> tuple[bool, str 
             return False, _MSG_NO_HARVESTER
         if reference_for(row) is None:
             return False, _MSG_NO_PS_REFERENCE
+        return True, None
+    if method == METHOD_SMARTBID:
+        if not (s.rfp_ingest_enabled and s.rfp_harvest_enabled and s.smartbid_enabled):
+            return False, _MSG_NO_HARVESTER
+        if reference_for(row) is None:
+            return False, _MSG_NO_SB_REFERENCE
         return True, None
     if method in ef.EMAIL_METHODS:
         if not (s.rfp_ingest_enabled and s.rfp_harvest_enabled and s.rfp_harvest_email_enabled):
@@ -838,9 +1031,11 @@ def _is_pipelinesuite_provider(provider: str) -> bool:
 
 class _SessionStore:
     """One rfp_harvest_sessions row: the shared Procore session (provider
-    `procore`, RFP_HARVEST.md 3.2) or one PipelineSuite portal's session
-    (provider `pipelinesuite:<host>`, RFP_PIPELINESUITE.md 3.2). The failure
-    cap and the lock length come from the matching settings block."""
+    `procore`, RFP_HARVEST.md 3.2), one PipelineSuite portal's session
+    (provider `pipelinesuite:<host>`, RFP_PIPELINESUITE.md 3.2) or the
+    SmartBid login bookkeeping (provider `smartbid`, RFP_SMARTBID.md 3.2:
+    no cookies, nothing secret). The failure cap and the lock length come
+    from the matching settings block."""
 
     def __init__(self, settings: Settings, provider: str = pc.PROVIDER) -> None:
         self.s = settings
@@ -851,12 +1046,16 @@ class _SessionStore:
     def max_failures(self) -> int:
         if _is_pipelinesuite_provider(self.provider):
             return self.s.pipelinesuite_login_max_failures
+        if self.provider == sbc.SESSION_PROVIDER:
+            return self.s.smartbid_login_max_failures
         return self.s.procore_login_max_failures
 
     @property
     def lock_seconds(self) -> int:
         if _is_pipelinesuite_provider(self.provider):
             return self.s.pipelinesuite_login_lock_seconds
+        if self.provider == sbc.SESSION_PROVIDER:
+            return self.s.smartbid_login_lock_seconds
         return self.s.procore_login_lock_seconds
 
     def load(self) -> dict | None:
@@ -915,10 +1114,13 @@ class _SessionStore:
             logger.debug("rfp harvest: session touch failed", exc_info=True)
 
 
-def _notify_lock(until: datetime, error: str, portal: str | None = None) -> None:
+def _notify_lock(
+    until: datetime, error: str, portal: str | None = None, *, platform: str | None = None
+) -> None:
     """One bell to every IT Admin when logins lock; deduped while an unread
     one exists. `portal` is the PipelineSuite host (the Procore session
-    passes none): the text names it."""
+    passes none): the text names it. `platform="smartbid"` is the SmartBid
+    sentence (its session passes no portal; `_notify_smartbid_lock`)."""
     sb = get_supabase()
     pending = (
         sb.table("notifications")
@@ -932,7 +1134,12 @@ def _notify_lock(until: datetime, error: str, portal: str | None = None) -> None
     if pending:
         return
     when = until.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    if portal:
+    if platform == sbc.PROVIDER:
+        message = (
+            f"SmartBid logins failed repeatedly; SmartBid RFP harvests are paused until {when}. "
+            "Each login uses the project link in the invitation email."
+        )
+    elif portal:
         message = (
             f"PipelineSuite login ({portal}) failed repeatedly; RFP harvests for that portal "
             f"are paused until {when}. The Project ID and Security Key come from the "
@@ -944,7 +1151,9 @@ def _notify_lock(until: datetime, error: str, portal: str | None = None) -> None
             "Check PROCORE_LOGIN_EMAIL and PROCORE_LOGIN_PASSWORD."
         )
     metadata: dict = {"locked_until": _iso(until), "error": error[:_ERROR_MAX_CHARS]}
-    if portal:
+    if platform == sbc.PROVIDER:
+        metadata["platform"] = sbc.PROVIDER
+    elif portal:
         metadata["portal"] = portal
     notify_role(
         Role.IT_ADMIN,
@@ -994,9 +1203,35 @@ def open_pipelinesuite_session(
     )
 
 
+def _notify_smartbid_lock(until: datetime, error: str, _portal: str | None = None) -> None:
+    """The SmartBid session's `on_lock`: the shared bell, SmartBid's text."""
+    _notify_lock(until, error, platform=sbc.PROVIDER)
+
+
+def smartbid_config(settings: Settings) -> sbc.SmartBidConfig:
+    return sbc.SmartBidConfig(
+        min_request_interval=settings.smartbid_min_request_interval_seconds,
+        login_min_interval=settings.smartbid_login_min_interval_seconds,
+        timeout=settings.smartbid_request_timeout_seconds,
+    )
+
+
+def open_smartbid_session(settings: Settings | None, ref: sbc.SmartBidRef) -> sbc.SmartBidSession:
+    """One harvest's SmartBid session (store row `smartbid`: bookkeeping
+    only), the lock bell in SmartBid's words. The session takes the passport
+    key from `ref` at login time and keeps the token in memory."""
+    s = settings or get_settings()
+    return sbc.SmartBidSession(
+        smartbid_config(s), _SessionStore(s, ref.session_provider), ref,
+        on_lock=_notify_smartbid_lock,
+    )
+
+
 def _locked_reason(provider: str) -> str:
     if _is_pipelinesuite_provider(provider):
         return _MSG_PS_LOCKED.format(host=provider[len(psc.SESSION_PROVIDER_PREFIX):])
+    if provider == sbc.SESSION_PROVIDER:
+        return _MSG_SB_LOCKED
     return _MSG_PROCORE_LOCKED
 
 
@@ -1005,13 +1240,16 @@ def availability(
 ) -> tuple[bool, str | None, datetime | None]:
     """(usable, reason, locked_until) for one session provider without
     touching the platform: `procore` (the default, so older callers keep
-    working) or `pipelinesuite:<host>`."""
+    working), `pipelinesuite:<host>` or `smartbid`."""
     s = settings or get_settings()
     if provider == pc.PROVIDER:
         if not s.procore_configured:
             return False, _MSG_NOT_CONFIGURED, None
     elif _is_pipelinesuite_provider(provider):
         if not s.pipelinesuite_enabled:
+            return False, _MSG_NO_HARVESTER, None
+    elif provider == sbc.SESSION_PROVIDER:
+        if not s.smartbid_enabled:
             return False, _MSG_NO_HARVESTER, None
     else:
         return False, _MSG_NO_HARVESTER, None
@@ -1028,15 +1266,16 @@ def availability_for(
     """`availability` for this email's own session provider: the router's
     lock check (503 rfp_harvest_locked) and the step's park use it. A method
     with no login session (gc_portal) is always usable here; a PipelineSuite
-    row without a reference is not (the sentence names what is missing)."""
+    or SmartBid row without a reference is not (the sentence names what is
+    missing)."""
     s = settings or get_settings()
     method = row.get("invitation_method")
     if method == METHOD_PROCORE:
         return availability(s, pc.PROVIDER)
-    if method == METHOD_PIPELINESUITE:
+    if method in (METHOD_PIPELINESUITE, METHOD_SMARTBID):
         provider = session_provider_for(row, s)
         if provider is None:
-            return False, _MSG_NO_PS_REFERENCE, None
+            return False, _no_reference_message(method), None
         return availability(s, provider)
     return True, None, None
 
@@ -1065,13 +1304,32 @@ def _portal_status(row: dict, now: datetime) -> dict:
     }
 
 
+def _smartbid_status(row: dict, settings: Settings, now: datetime) -> dict:
+    """The SmartBid block for the settings tab: login bookkeeping only (no
+    account, no cookies; there is no key or token stored to show)."""
+    until = pc.lock_state(row, now)
+    return {
+        "enabled": bool(
+            settings.rfp_ingest_enabled and settings.rfp_harvest_enabled and settings.smartbid_enabled
+        ),
+        "logged_in_at": row.get("logged_in_at"),
+        "last_used_at": row.get("last_used_at"),
+        "last_login_attempt_at": row.get("last_login_attempt_at"),
+        "login_failures": int(row.get("login_failures") or 0),
+        "locked_until": _iso(until) if until else None,
+        "last_error": row.get("last_error"),
+    }
+
+
 def session_status(settings: Settings | None = None) -> dict:
     """For the settings tab: never the cookies, never the password, never a
-    Security Key (the PipelineSuite `account` is its fingerprint)."""
+    Security Key (the PipelineSuite `account` is its fingerprint), never a
+    SmartBid passport key or token (none is stored)."""
     s = settings or get_settings()
     rows = _session_rows()
     now = _now()
     state = next((r for r in rows if r.get("provider") == pc.PROVIDER), None) or {}
+    smartbid_row = next((r for r in rows if r.get("provider") == sbc.SESSION_PROVIDER), None) or {}
     portals = sorted(
         (
             _portal_status(r, now)
@@ -1111,6 +1369,7 @@ def session_status(settings: Settings | None = None) -> dict:
             ),
             "portals": portals,
         },
+        "smartbid": _smartbid_status(smartbid_row, s, now),
     }
 
 
@@ -1197,7 +1456,7 @@ def error_message(exc: Exception, _label: str) -> str:
         exc,
         (
             RfpHarvestTransient, RfpHarvestPermanent, pc.ProcoreError, psc.PipelineSuiteError,
-            cloud_folders.CloudError,
+            sbc.SmartBidError, cloud_folders.CloudError,
         ),
     ):
         return str(exc) or _MSG_INTERRUPTED
@@ -1418,11 +1677,12 @@ def _unlink_quietly(path: Path) -> None:
         pass
 
 
-def _download_one(session: Any, url: str, dest: Path, *, max_bytes: int) -> bytes:
+def _download_one(session: Any, url: Any, dest: Path, *, max_bytes: int) -> bytes:
     """Up to _DOWNLOAD_ATTEMPTS paced tries on transient trouble; the bytes
     are read back once and the scratch file removed. `session` is any
-    platform session exposing `download(url, dest, max_bytes)` and raising
-    one of the two client families."""
+    platform session exposing `download(locator, dest, max_bytes)` and
+    raising one of the client families; `url` is that session's locator (a
+    URL, or for SmartBid the parsed plan-room entry)."""
     last: Exception | None = None
     for attempt in range(_DOWNLOAD_ATTEMPTS):
         _unlink_quietly(dest)
@@ -1456,7 +1716,7 @@ def _harvest_files(
     token: str,
     email_id: str,
     entries: list[dict],
-    urls: list[str | None],
+    urls: list[Any],
     *,
     prior_files: Any = None,
 ) -> tuple[str | None, int, int]:
@@ -1464,14 +1724,16 @@ def _harvest_files(
     accepted, bytes). Raises _ClaimLost and RfpHarvestTransient; per-file
     trouble is recorded on the entry. Provider-neutral: `session` is any
     platform session exposing `provider` (the sandbox source kind) and
-    `download(url, dest, max_bytes)` raising the Procore, PipelineSuite or
-    cloud_folders Transient / Forbidden pair. The filename handed to the
-    sandbox is the entry's basename, extension kept. `prior_files` is the
-    harvest row's file list from before this attempt (the facts write
-    replaces it), read only when the run it went into is reused. Entries
-    settled before the loop (`reused`: an earlier harvest's file, its
-    sandbox_file_id already set; `expanded`: an opened zip whose members
-    follow it) are skipped and never counted as accepted."""
+    `download(locator, dest, max_bytes)` raising the Procore, PipelineSuite,
+    SmartBid or cloud_folders Transient / Forbidden pair; `urls` holds the
+    aligned locators (URLs, or SmartBid's parsed plan-room entries), in
+    memory only. The filename handed to the sandbox is the entry's basename,
+    extension kept. `prior_files` is the harvest row's file list from before
+    this attempt (the facts write replaces it), read only when the run it
+    went into is reused. Entries settled before the loop (`reused`: an
+    earlier harvest's file, its sandbox_file_id already set; `expanded`: an
+    opened zip whose members follow it; `skipped`: a SmartBid file behind an
+    agreement) are skipped and never counted as accepted."""
     if not entries:
         return None, 0, 0
     run = _existing_run(sb, harvest.get("sandbox_run_id"))
@@ -1769,15 +2031,18 @@ def _email_html(sb, email: dict) -> str | None:
     return None
 
 
-def _ping_once(session: Any, url: str, label: str, problems: list[str]) -> bool:
-    """One tracker GET; True when it answered 200 or 302. Never raises."""
+def _ping_once(
+    session: Any, url: str, label: str, problems: list[str], ok: tuple[int, ...] = (200, 302)
+) -> bool:
+    """One tracker GET; True when it answered one of `ok` (200 or 302 by
+    default). Never raises."""
     try:
         status = session.ping(url)
     except Exception as exc:  # noqa: BLE001 - a ping never fails the harvest
         logger.warning("rfp harvest: %s ping failed (%s)", label, type(exc).__name__)
         problems.append(f"{label}: {type(exc).__name__}")
         return False
-    if status in (200, 302):
+    if status in ok:
         return True
     problems.append(f"{label}: no answer" if status is None else f"{label}: HTTP {status}")
     return False
@@ -1883,6 +2148,154 @@ def _harvest_pipelinesuite(
         )
 
 
+# ── SmartBid: pings, downloads, the body (RFP_SMARTBID.md 4) ─────────────────
+
+
+def _ping_smartbid_tracking(
+    sb, email: dict, harvest: dict, settings: Settings, session: Any, ref: sbc.SmartBidRef
+) -> dict | None:
+    """Fire the email's own tracking once, the way a person reading it
+    would: the SmartBid read receipt, the SendGrid open pixel and the "Click
+    Here to View the Project" link (never an `iR` link), each a single GET
+    with no redirect followed. When the email HTML cannot be had (or carries
+    no View link) the click is the reference's own link and no pixel fires.
+    Returns the `data.tracking` record (`opened`: either pixel answered 200;
+    `clicked`: the link answered 200 or 302), or None when nothing was
+    pinged (the setting is off, or the harvest row already carries
+    `tracking.pinged_at`). Nothing here raises; no URL is recorded."""
+    try:
+        if not settings.smartbid_tracking_pings_enabled:
+            return None
+        data = harvest.get("data") if isinstance(harvest.get("data"), dict) else {}
+        existing = data.get("tracking") if isinstance(data.get("tracking"), dict) else None
+        if existing and existing.get("pinged_at"):
+            return None
+        problems: list[str] = []
+        tracking = sbc.Tracking(None, None, None)
+        try:
+            page_html = _email_html(sb, email)
+        except Exception as exc:  # noqa: BLE001 - Graph trouble: the reference's link
+            logger.warning("rfp harvest: email html lookup failed (%s)", type(exc).__name__)
+            problems.append(f"email: {type(exc).__name__}")
+            page_html = None
+        if page_html:
+            tracking = sbc.parse_tracking(page_html)
+        pixels = [
+            (url, label)
+            for url, label in ((tracking.read_receipt_url, "read receipt"), (tracking.open_url, "open"))
+            if url
+        ]
+        click_url = tracking.click_url or ref.click_url
+        opened: bool | None = None
+        if pixels:
+            results = [_ping_once(session, url, label, problems, ok=(200,)) for url, label in pixels]
+            opened = any(results)
+        clicked = _ping_once(session, click_url, "click", problems) if click_url else None
+        return {
+            "pinged_at": _iso(_now()),
+            "opened": opened,
+            "clicked": clicked,
+            "error": ("; ".join(problems))[:_ERROR_MAX_CHARS] or None,
+        }
+    except Exception as exc:  # noqa: BLE001 - belt and braces: never out of the job
+        logger.warning("rfp harvest: smartbid tracking pings failed (%s)", type(exc).__name__)
+        return {
+            "pinged_at": _iso(_now()),
+            "opened": None,
+            "clicked": None,
+            "error": f"tracking: {type(exc).__name__}"[:_ERROR_MAX_CHARS],
+        }
+
+
+class _SmartBidDownloads:
+    """What `_harvest_files` needs from a platform session (`provider` and
+    `download(locator, dest, max_bytes)`) over one SmartBid session: the
+    locator is the parsed plan-room entry (memory only), and a 401 on the
+    security token or the direct-URL lookup logs in once more and retries
+    that file once, at most."""
+
+    provider = sbc.PROVIDER
+
+    def __init__(self, session: Any) -> None:
+        self.session = session
+
+    def download(self, locator: Any, dest: Path, *, max_bytes: int) -> int:
+        try:
+            return self.session.download(locator, dest, max_bytes=max_bytes)
+        except sbc.SmartBidSessionExpired:
+            _unlink_quietly(dest)
+            self.session.login()
+            return self.session.download(locator, dest, max_bytes=max_bytes)
+
+
+def _sb_with_relogin(session: Any, call: Callable[[], Any]) -> Any:
+    """One project read; a 401 logs in once more and retries once (a second
+    401 stays SmartBidSessionExpired: transient for the job)."""
+    try:
+        return call()
+    except sbc.SmartBidSessionExpired:
+        session.login()
+        return call()
+
+
+def _harvest_smartbid(
+    sb, settings: Settings, email: dict, ref: sbc.SmartBidRef, harvest: dict, token: str
+) -> None:
+    """The SmartBid body of the job (RFP_SMARTBID.md section 4, steps 3 to
+    5): pings, availability, the login, the agreement gate, the project
+    (one re-login and retry on expiry), facts first, caps, files (restricted
+    ones skipped), complete. The bearer token lives in the session only."""
+    with open_smartbid_session(settings, ref) as session:
+        prior_data = harvest.get("data") if isinstance(harvest.get("data"), dict) else {}
+        tracking = _ping_smartbid_tracking(sb, email, harvest, settings, session, ref)
+        if tracking is not None:
+            # Recorded before the API is touched, so a parked or failed run
+            # never pings again.
+            merged = {**prior_data, "tracking": tracking}
+            _update_claimed(sb, harvest["id"], token, {"data": merged})
+            harvest["data"] = merged
+        else:
+            tracking = prior_data.get("tracking") if isinstance(prior_data.get("tracking"), dict) else None
+        usable, reason, until = session.availability()
+        if not usable:
+            raise sbc.SmartBidUnavailable(reason or _MSG_SB_LOCKED, locked_until=until)
+        _renew()
+        session.login()
+        _sb_with_relogin(session, session.gate)
+        payload = _sb_with_relogin(session, session.get_project)
+        project = sbc.parse_project(payload)
+        entries, locators = smartbid_files(project)
+        data = normalize_smartbid_facts(ref, project, entries, tracking)
+        facts = {
+            "external_url": ref.external_url,
+            "data": data,
+            "raw": build_smartbid_raw(payload, project),
+            "description_text": html_to_text(project.description_html),
+            "instructions_text": None,
+            "files": entries,
+            "file_count": len(entries),
+            "facts_at": _iso(_now()),
+        }
+        prior_files = list(harvest.get("files") or [])
+        _update_claimed(sb, harvest["id"], token, facts)
+        harvest.update(facts)
+        # The caps count what would be downloaded: restricted files never are.
+        downloadable = [e for e in entries if e.get("status") != FILE_SKIPPED]
+        _check_caps(
+            settings, downloadable,
+            files_message=_MSG_PS_TOO_MANY_FILES, bytes_message=_MSG_PS_TOO_MANY_BYTES,
+        )
+        run_id, accepted, total = None, 0, 0
+        if downloadable:
+            run_id, accepted, total = _harvest_files(
+                sb, _SmartBidDownloads(session), settings, harvest, token, email["id"],
+                entries, locators, prior_files=prior_files,
+            )
+        _complete_harvest(
+            sb, harvest, token, entries, run_id, accepted, total, no_files_message=_MSG_PS_NO_FILES
+        )
+
+
 def _run_claimed(
     sb, settings: Settings, email: dict, harvest: dict, token: str, pipeline: bool,
     body: Callable[[], None], errors: tuple[type, type, type],
@@ -1963,7 +2376,8 @@ def _run_claimed(
 
 
 def execute(email_id: str, *, force: bool = False) -> None:
-    """The rfp_harvest job (RFP_HARVEST.md 2.2; RFP_PIPELINESUITE.md 4).
+    """The rfp_harvest job (RFP_HARVEST.md 2.2; RFP_PIPELINESUITE.md 4;
+    RFP_SMARTBID.md 4).
     Pipeline mode moves the email harvest -> done; manual mode (`force`, or a
     terminal row) only links it."""
     settings = get_settings()
@@ -2019,7 +2433,8 @@ def execute(email_id: str, *, force: bool = False) -> None:
                 "reusable": bool(_reusable(harvest, settings)),
                 "credentials_present": bool(
                     settings.procore_configured if harvester == MODEL_LABEL else
-                    getattr(ref, "security_key", None) if method == METHOD_PIPELINESUITE else False
+                    getattr(ref, "security_key", None) if method == METHOD_PIPELINESUITE else
+                    getattr(ref, "passport_key", None) if method == METHOD_SMARTBID else False
                 ),
             },
         )
@@ -2055,6 +2470,13 @@ def execute(email_id: str, *, force: bool = False) -> None:
             _PIPELINESUITE_ERRORS,
         )
         return
+    if method == METHOD_SMARTBID:
+        _run_claimed(
+            sb, settings, email, harvest, token, pipeline,
+            lambda: _harvest_smartbid(sb, settings, email, ref, harvest, token),
+            _SMARTBID_ERRORS,
+        )
+        return
     if harvester_for(email, settings) == HARVESTER_EMAIL:
         # Imported here: the email body imports this module for the shared
         # machinery, so a top-level import would be a cycle.
@@ -2076,6 +2498,8 @@ def execute(email_id: str, *, force: bool = False) -> None:
 def _no_reference_message(method: str | None) -> str:
     if method == METHOD_PIPELINESUITE:
         return _MSG_NO_PS_REFERENCE
+    if method == METHOD_SMARTBID:
+        return _MSG_NO_SB_REFERENCE
     if method in ef.EMAIL_METHODS:
         return _MSG_NO_EMAIL_FILES
     return _MSG_NO_LINK

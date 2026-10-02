@@ -1291,7 +1291,7 @@ def test_the_patch_literal_matches_the_migrations_method_list():
     """The body Literal, the rule-form Literal, INVITATION_METHODS and the
     service vocabulary must not drift apart, or the router would let through
     a value the check constraint (0120, narrowed by 0124 and 0128, widened by
-    0127 and 0129) refuses."""
+    0127, 0129 and 0148) refuses."""
     from typing import get_args
 
     field = rr.MethodPatchIn.model_fields["invitation_method"]
@@ -1300,21 +1300,28 @@ def test_the_patch_literal_matches_the_migrations_method_list():
         "organic",
         "procore",
         "pipelinesuite",
+        "smartbid",
         "gc_portal",
         "general",
         "nonorganic",
     }
     assert set(rr.INVITATION_METHODS) == set(auth_svc.INVITATION_METHODS)
+    assert tuple(rr.INVITATION_METHODS) == tuple(auth_svc.INVITATION_METHODS)
     rule_field = rr.AuthorizedSenderIn.model_fields["method"]
     rule_literals = {a for a in get_args(get_args(rule_field.annotation)[0])}
     assert rule_literals == set(auth_svc.RULE_METHODS) == {
-        "procore", "pipelinesuite", "gc_portal", "general"
+        "procore", "pipelinesuite", "smartbid", "gc_portal", "general"
     }
     assert rr.MethodPatchIn(invitation_method="gc_portal").invitation_method == "gc_portal"
     assert rr.MethodPatchIn(invitation_method="pipelinesuite").invitation_method == "pipelinesuite"
+    assert rr.MethodPatchIn(invitation_method="smartbid").invitation_method == "smartbid"
     assert (
         rr.AuthorizedSenderIn(kind="domain", value="cgandbinc.com", locked=True, method="pipelinesuite").method
         == "pipelinesuite"
+    )
+    assert (
+        rr.AuthorizedSenderIn(kind="domain", value="smartbidnet.com", locked=True, method="smartbid").method
+        == "smartbid"
     )
     for gone in ("buildingconnected", "ngem", "planhub"):
         with pytest.raises(Exception):
@@ -1463,7 +1470,7 @@ def test_migration_0128_drops_planhub_and_narrows_both_constraints():
 
 def test_migration_0129_adds_pipelinesuite_and_seeds_two_locked_rules():
     """0129 widens the two named checks by exactly pipelinesuite (to the
-    router's LIVE vocabulary), seeds the first two PipelineSuite portals as
+    vocabulary as it stood after 0129; 0148 added smartbid afterwards), seeds the first two PipelineSuite portals as
     locked domain rules with an upsert on (kind, value), deletes nothing,
     and reuses the lookup-by-column pattern so it is idempotent
     (docs/RFP_PIPELINESUITE.md section 5)."""
@@ -1478,7 +1485,7 @@ def test_migration_0129_adds_pipelinesuite_and_seeds_two_locked_rules():
     # No row purge and no email-row rewrite: the only write is the seed.
     assert "delete from" not in sql
     assert not re.search(r"update rfp_emails", sql)
-    # Named constraints carrying the router's LIVE vocabulary exactly.
+    # Named constraints carrying the vocabulary as it stood after 0129.
     email_check = re.search(
         r"add constraint rfp_emails_invitation_method_check\s+"
         r"check \(invitation_method in \(([^)]+)\)\)",
@@ -1486,16 +1493,18 @@ def test_migration_0129_adds_pipelinesuite_and_seeds_two_locked_rules():
     )
     assert email_check
     email_values = {v.strip().strip("'") for v in email_check.group(1).split(",")}
-    assert email_values == set(rr.INVITATION_METHODS)
+    # Frozen history: the sets 0129 wrote at the time, not the live vocabulary
+    # (0148 added smartbid afterwards).
     assert email_values == {"organic", "procore", "pipelinesuite", "gc_portal", "general", "nonorganic"}
+    assert email_values | {"smartbid"} == set(rr.INVITATION_METHODS)
     rule_check = re.search(
         r"add constraint rfp_authorized_senders_method_check\s+check \(method in \(([^)]+)\)\)",
         sql,
     )
     assert rule_check
     rule_values = {v.strip().strip("'") for v in rule_check.group(1).split(",")}
-    assert rule_values == set(auth_svc.RULE_METHODS)
     assert rule_values == {"procore", "pipelinesuite", "gc_portal", "general"}
+    assert rule_values | {"smartbid"} == set(auth_svc.RULE_METHODS)
     # The two seeded portals: locked domain rules carrying the method, upserted
     # on the 0120 unique index so a hand-added rule is upgraded, not duplicated.
     seed = re.search(
@@ -1531,6 +1540,82 @@ def test_migration_0129_adds_pipelinesuite_and_seeds_two_locked_rules():
     assert callable(rfp_email_ingest.rescan_after_rule_added)
     # Only one 0129 file: prefixes must stay unique.
     assert len(list(migrations.glob("0129_*.sql"))) == 1
+
+
+def test_migration_0148_adds_smartbid_and_seeds_one_locked_rule():
+    """0148 widens the two named checks by exactly smartbid (to the router's
+    LIVE vocabulary), seeds the SmartBid platform domain as ONE locked domain
+    rule with an upsert on (kind, value), deletes nothing, and reuses the
+    lookup-by-column pattern so it is idempotent (docs/RFP_SMARTBID.md
+    section 5)."""
+    import re
+    from pathlib import Path
+
+    migrations = Path(__file__).resolve().parents[1] / "supabase/migrations"
+    sql = (migrations / "0148_rfp_smartbid_method.sql").read_text(encoding="utf-8")
+    assert sql.startswith("-- 0148 - ")
+    assert sql.rstrip().endswith("notify pgrst, 'reload schema';")
+    assert "\u2014" not in sql and "\u2013" not in sql
+    # No row purge and no email-row rewrite: the only write is the seed.
+    assert "delete from" not in sql
+    assert not re.search(r"update rfp_emails", sql)
+    # Named constraints carrying the router's LIVE vocabulary exactly.
+    email_check = re.search(
+        r"add constraint rfp_emails_invitation_method_check\s+"
+        r"check \(invitation_method in \(([^)]+)\)\)",
+        sql,
+    )
+    assert email_check
+    email_values = {v.strip().strip("'") for v in email_check.group(1).split(",")}
+    assert email_values == set(rr.INVITATION_METHODS)
+    assert email_values == {
+        "organic", "procore", "pipelinesuite", "smartbid", "gc_portal", "general", "nonorganic"
+    }
+    rule_check = re.search(
+        r"add constraint rfp_authorized_senders_method_check\s+check \(method in \(([^)]+)\)\)",
+        sql,
+    )
+    assert rule_check
+    rule_values = {v.strip().strip("'") for v in rule_check.group(1).split(",")}
+    assert rule_values == set(auth_svc.RULE_METHODS)
+    assert rule_values == {"procore", "pipelinesuite", "smartbid", "gc_portal", "general"}
+    # The seed: one locked domain rule on the platform domain, upserted on the
+    # 0120 unique index so a hand-added rule is upgraded, not duplicated.
+    seed = re.search(
+        r"insert into rfp_authorized_senders \(kind, value, method, locked\) values\s+"
+        r"(\(.+?\)(?:,\s*\(.+?\))*)\s+on conflict \(kind, value\) do update set "
+        r"method = 'smartbid', locked = true;",
+        sql,
+        re.S,
+    )
+    assert seed, "seed insert with the on conflict clause"
+    rows = {
+        tuple(v.strip().strip("'") for v in row.split(","))
+        for row in re.findall(r"\(([^()]+)\)", seed.group(1))
+    }
+    assert rows == {("domain", "smartbidnet.com", "smartbid", "true")}
+    assert sql.count("on conflict (kind, value) do update") == 1
+    # The seeded value is a bare domain the service accepts as is.
+    from app.services import rfp_email_auth
+
+    assert rfp_email_auth.validate_rule("domain", "smartbidnet.com") == ("domain", "smartbidnet.com")
+    # Both DO blocks look the old constraint up by column, so a re-run drops
+    # the named one and re-adds it.
+    assert sql.count("from pg_constraint c") == 2
+    assert "a.attname = 'invitation_method'" in sql and "a.attname = 'method'" in sql
+    assert sql.count("do $$") == 2 and sql.count("end\n$$;") == 2
+    # No DDL on the two harvest columns that have no check constraint (0123).
+    assert "alter table rfp_harvests" not in sql
+    assert "alter table rfp_harvest_sessions" not in sql
+    # The header names the release step (rescan the parked rows the seeded
+    # domain now covers, only with the owner's go) and that function exists.
+    assert "rescan_after_rule_added" in sql
+    assert "go" in sql.lower() and "55 rows" in sql
+    from app.services import rfp_email_ingest
+
+    assert callable(rfp_email_ingest.rescan_after_rule_added)
+    # Only one 0148 file: prefixes must stay unique.
+    assert len(list(migrations.glob("0148_*.sql"))) == 1
 
 
 # ── Match actions (docs/RFP_MATCHING.md 3.8) ─────────────────────────────
@@ -1928,6 +2013,37 @@ def test_the_it_admin_may_add_a_locked_pipelinesuite_rule_on_a_gc_domain(db, ing
     assert exc.value.headers["X-Error-Code"] == ErrorCode.RFP_RULE_LOCKED_IT_ADMIN_ONLY
 
 
+def test_the_it_admin_may_add_a_locked_smartbid_rule_on_the_platform_domain(db, ingest):
+    """SmartBid invitations come from the platform's own domain, so the
+    locked rule sits on smartbidnet.com (0148 seeds it) and carries smartbid,
+    the method the harvest step keys the SmartBid harvester on
+    (docs/RFP_SMARTBID.md section 1). The learn-back runs like for any
+    rule."""
+    _seed(db)
+    res = rr.create_authorized_sender(
+        rr.AuthorizedSenderIn(kind="domain", value="SmartBidNet.COM", locked=True, method="smartbid"),
+        user=_user(Role.IT_ADMIN),
+    )
+    assert res["item"]["locked"] is True
+    assert res["item"]["method"] == "smartbid"
+    assert res["item"]["value"] == "smartbidnet.com"
+    assert ("rescan", "domain", "smartbidnet.com") in ingest.calls
+    # Not locked: the method is forced back to general like any user rule.
+    res = rr.create_authorized_sender(
+        rr.AuthorizedSenderIn(kind="domain", value="smartbid.example", locked=False, method="smartbid"),
+        user=_user(Role.IT_ADMIN),
+    )
+    assert res["item"]["locked"] is False and res["item"]["method"] == "general"
+    # Locked rules are IT Admin only, smartbid included.
+    with pytest.raises(HTTPException) as exc:
+        rr.create_authorized_sender(
+            rr.AuthorizedSenderIn(kind="domain", value="another.example", locked=True, method="smartbid"),
+            user=_user(Role.ESTIMATING_ADMIN),
+        )
+    assert exc.value.status_code == 403
+    assert exc.value.headers["X-Error-Code"] == ErrorCode.RFP_RULE_LOCKED_IT_ADMIN_ONLY
+
+
 @pytest.mark.parametrize("role", [Role.EXECUTIVE, Role.ESTIMATING_ADMIN])
 def test_only_the_it_admin_may_delete_a_locked_rule(db, role):
     _seed(db)
@@ -2021,6 +2137,7 @@ def test_the_services_are_reached_lazily():
 
 E7 = "3f1c0b00-0000-4000-8000-000000000007"  # done, procore, with a bid link
 E8 = "3f1c0b00-0000-4000-8000-000000000008"  # done, pipelinesuite (added per test)
+E9 = "3f1c0b00-0000-4000-8000-00000000000b"  # done, smartbid (added per test)
 H1 = "8d000000-0000-4000-8000-000000000001"
 SIGNED_URL = "https://storage.procore.com/api/v5/files/x.pdf?companyId=5662&sig=deadbeef"
 PROCORE_BODY = (
@@ -2212,6 +2329,42 @@ def test_harvest_route_503s_while_logins_are_locked_with_the_unlock_time(db, har
     assert not any(c[0] == "enqueue" for c in harvest_mod.calls)
 
 
+def test_harvest_route_503s_a_locked_smartbid_session_with_its_own_sentence(db, harvest_mod):
+    """SmartBid has one session (not one per portal): the route asks the
+    service about the row's own platform through `availability_for(row)` and
+    passes its sentence through with the unlock time, like Procore's and
+    PipelineSuite's (docs/RFP_SMARTBID.md section 7)."""
+    from datetime import datetime, timezone
+
+    _seed_harvest(db)
+    db.tables["rfp_emails"].append(_email(
+        E9, status="done", received_at="2026-10-01T05:00:00+00:00", invitation_method="smartbid",
+        body_text="Click Here to View the Project (dummy link)\n",
+    ))
+    until = datetime(2026, 10, 1, 22, 0, tzinfo=timezone.utc)
+    harvest_mod.avail = (
+        False,
+        "SmartBid logins failed repeatedly; SmartBid RFP harvests are paused.",
+        until,
+    )
+    with pytest.raises(HTTPException) as exc:
+        rr.harvest_rfp_email(E9, None, user=_user())
+    assert exc.value.status_code == 503
+    assert exc.value.headers["X-Error-Code"] == ErrorCode.RFP_HARVEST_LOCKED
+    assert exc.value.detail == (
+        "SmartBid logins failed repeatedly; SmartBid RFP harvests are paused. "
+        "Locked until 2026-10-01T22:00:00+00:00."
+    )
+    assert ("availability_for", E9, "smartbid") in harvest_mod.calls
+    assert ("availability",) not in harvest_mod.calls
+    assert not any(c[0] == "enqueue" for c in harvest_mod.calls)
+    # Usable again: the same route enqueues, with the row passed through.
+    harvest_mod.avail = (True, None, None)
+    out = rr.harvest_rfp_email(E9, None, user=_user(uid="u3"))
+    assert out == {"job": {"id": "job-1", "status": "queued"}}
+    assert ("enqueue", E9, "u3", False) in harvest_mod.calls
+
+
 def test_harvest_route_404s_a_missing_or_malformed_id_before_the_service(db, harvest_mod):
     _seed_harvest(db)
     for bad in (MISSING, NOT_A_UUID):
@@ -2352,16 +2505,33 @@ def test_harvest_status_through_the_real_service_never_returns_cookies_or_a_pass
             "last_login_attempt_at": "2026-09-16T10:00:00+00:00", "login_failures": 0,
             "locked_until": None, "last_error": None,
         },
+        # The SmartBid session (0148, docs/RFP_SMARTBID.md section 3.2): login
+        # bookkeeping only, but a stray cookie or token must never come back.
+        {
+            "provider": "smartbid", "account": "0123456789abcdef",
+            "cookies": [{"name": "passport", "value": "very-secret-smartbid-cookie"}],
+            "logged_in_at": "2026-10-01T10:00:00+00:00", "last_used_at": "2026-10-01T10:05:00+00:00",
+            "last_login_attempt_at": "2026-10-01T10:00:00+00:00", "login_failures": 1,
+            "locked_until": None, "last_error": "SmartBid refused the project link or is down (HTTP 500).",
+        },
     ]
     out = rr.rfp_harvest_status(_user(Role.EXECUTIVE))
     assert set(out) == {
         "enabled", "configured", "account", "logged_in_at", "last_used_at",
         "last_login_attempt_at", "login_failures", "locked_until", "last_error", "active_jobs",
-        "pipelinesuite",
+        "pipelinesuite", "smartbid",
     }
     dumped = repr(out)
     assert "very-secret-cookie" not in dumped and "cookies" not in out
     assert "very-secret-portal-cookie" not in dumped
+    assert "very-secret-smartbid-cookie" not in dumped
+    sb_block = out["smartbid"]
+    assert "cookies" not in sb_block and "account" not in sb_block
+    assert sb_block["logged_in_at"] == "2026-10-01T10:00:00+00:00"
+    assert sb_block["login_failures"] == 1 and sb_block["locked_until"] is None
+    assert sb_block["last_error"] == "SmartBid refused the project link or is down (HTTP 500)."
+    # The pinned test env has RFP_HARVEST_ENABLED=false, so the block says off.
+    assert sb_block["enabled"] is False
     assert out["logged_in_at"] == "2026-09-14T10:00:00+00:00"
     portals = out["pipelinesuite"]["portals"]
     assert [p["host"] for p in portals] == ["gc.pipelinesuite.com"]

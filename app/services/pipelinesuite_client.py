@@ -875,16 +875,20 @@ _DRAWING_RE = re.compile(r"\b(dwg|drawings?|plans?|sheets?|bid set|compiled set)
 _SPEC_RE = re.compile(
     r"\b(spec|specs|specifications?|manual|addend\w*|amend\w*|itb|ifb|rfp|scope)\b", re.IGNORECASE
 )
+# A spreadsheet or a Word file is never a drawing ("Bid_Sheet_CSI_Divisions.xlsx").
+_NEVER_DRAWING_EXTS = frozenset({".xls", ".xlsx", ".xlsm", ".csv", ".doc", ".docx", ".txt"})
 
 
 def classify_name(name: str | None) -> str:
     """drawing / specification / other from the file name alone (the page
-    carries no discipline)."""
-    text = (name or "").strip()
+    carries no discipline). Underscores count as spaces: plan rooms often
+    name files `NSU_Grey_Shell_SPECS_-_Project_Manual.pdf`, and `\\b` does not
+    break on `_`."""
+    text = (name or "").replace("_", " ").strip()
     if not text:
         return KIND_OTHER
     ext = os.path.splitext(text)[1].lower()
-    if ext == ".dwg" or _DRAWING_RE.search(text):
+    if ext == ".dwg" or (ext not in _NEVER_DRAWING_EXTS and _DRAWING_RE.search(text)):
         return KIND_DRAWING
     if _SPEC_RE.search(text):
         return KIND_SPECIFICATION

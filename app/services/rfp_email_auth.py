@@ -31,7 +31,8 @@ from dataclasses import dataclass
 # and PlanHub until 2026-09-16; their mail is now sanitized out at listing
 # time (RFP_EMAIL_INGESTION_BLOCKED_DOMAINS) like internal and vendor
 # senders, and migrations 0124 and 0128 narrowed both check constraints.
-# Migration 0127 added gc_portal and 0129 added pipelinesuite (2026-09-16).
+# Migration 0127 added gc_portal and 0129 added pipelinesuite (2026-09-16);
+# 0148 added smartbid (2026-10-01).
 
 METHOD_ORGANIC = "organic"                 # the sender is a known GC domain
 METHOD_PROCORE = "procore"
@@ -41,6 +42,12 @@ METHOD_PROCORE = "procore"
 # shfcontracting.com); the harvester needs nothing but the email body
 # (portal host, Project ID, Security Key). docs/RFP_PIPELINESUITE.md.
 METHOD_PIPELINESUITE = "pipelinesuite"
+# SmartBid (ConstructConnect): many GCs send through it, always from the
+# platform's own address (notifications@com2.smartbidnet.com), so like
+# Procore the method is granted by one locked domain rule on the platform
+# domain (0148 seeds smartbidnet.com); the harvester needs nothing but the
+# email body (the project link's passport key). docs/RFP_SMARTBID.md.
+METHOD_SMARTBID = "smartbid"
 # A GC that invites through its own bidding portal. Every such portal is
 # different, so the harvest step picks the scraper by the sender's domain
 # (rfp_harvest.GC_PORTAL_SCRAPERS); the method itself is granted by a locked
@@ -53,6 +60,7 @@ INVITATION_METHODS = (
     METHOD_ORGANIC,
     METHOD_PROCORE,
     METHOD_PIPELINESUITE,
+    METHOD_SMARTBID,
     METHOD_GC_PORTAL,
     METHOD_GENERAL,
     METHOD_NONORGANIC,
@@ -62,6 +70,7 @@ INVITATION_METHODS = (
 RULE_METHODS = (
     METHOD_PROCORE,
     METHOD_PIPELINESUITE,
+    METHOD_SMARTBID,
     METHOD_GC_PORTAL,
     METHOD_GENERAL,
 )

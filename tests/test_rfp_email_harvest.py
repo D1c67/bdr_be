@@ -266,6 +266,9 @@ def test_registry_answers_email_for_the_three_methods_under_the_switch(tmp_path,
     assert h.reference_for({"invitation_method": "procore", "body_text": "x"}) is None
     assert h.reference_for({"invitation_method": "gc_portal", "body_text": BODY}) is None
     assert h.harvester_for(_organic(invitation_method="gc_portal"), on) is None
+    # SmartBid (0148) has its own harvester; the email harvester never claims it.
+    assert h.reference_for({"invitation_method": "smartbid", "body_text": BODY}) is None
+    assert h.harvester_for(_organic(invitation_method="smartbid"), on) == "smartbid"
 
 
 def test_the_selects_carry_what_the_trigger_reads():

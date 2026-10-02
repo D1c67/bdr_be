@@ -73,10 +73,15 @@ routes use `require_view_queue` (VIEW roles), the retry uses
             "authorize": n, "method": n, "extract": n, "match": n,
             "harvest": n, "split": n, "create": n},
   "stuck_kinds": {"failed": n, "retrying": n, "model_wait": n, "stalled": n},
+  "waiting_on_review": n,
   "portal_served": bool,
   "generated_at": iso
 }
 ```
+
+`waiting_on_review` (added 2026-10-02) is the part of `lanes.processing`
+held by a person: copies parked behind another copy that sits in a review
+lane (section 3, rule 4).
 
 `steps` counts processing rows only (email + portal, by status).
 `review_total` = the three review lanes summed. `total` = every in-flight
@@ -125,9 +130,16 @@ Item shape (one shape for both sources; absent facts are null):
   "match_project": {"id", "name", "number"} | null,
   "created_project_id": uuid | null,
   "primary_mailbox": str | null,
-  "portal": "ngem" | null
+  "portal": "ngem" | null,
+  "waiting_on": {"id": uuid, "lane": "review_llm" | "flagged_unauthorized" | "review_match"} | null
 }
 ```
+
+`waiting_on` (added 2026-10-02): on a processing email row parked behind
+another copy of the same message (rule 4's sibling wait), the copy it waits
+on when that copy is in a review lane, else null. Worked out from the rows
+already loaded for the viewer (`rfp_processing.review_waits`): no extra
+query, and a copy outside the viewer's mailbox scope is never described.
 
 `last_error` is the row's own text, already capped at 500 chars by the
 pipeline; it never contains mail bodies. `match_score` is NOT in the item
@@ -172,7 +184,11 @@ stall_minutes, slow_stall_minutes, harvest_status)` in
    older rows "Waiting for an earlier copy ..."), the row is a later copy
    parked at `extract` behind an older copy and follows that copy's
    decision; it is `processing`, not stuck, and the page shows the sentence
-   in its Detail cell.
+   in its Detail cell. When the copy it waits on sits in a review lane
+   (2026-10-02 prod finding: 21 copies behind 11 unreviewed Match review
+   rows read as "Processing" for a day), the row carries `waiting_on`, is
+   counted in the summary's `waiting_on_review`, and the page shows it as
+   "Waiting on review" with an "Open original" action.
 5. pending status and `updated_at` older than the stall threshold with
    `next_attempt_at` null or past: stuck `stalled`. Threshold =
    `RFP_PROCESSING_STALL_MINUTES` (default 30) for the quick steps;

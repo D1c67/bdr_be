@@ -26,6 +26,7 @@ Nothing here writes, and nothing here returns a mail body, a link, a
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 from app.services import rfp_email_visibility as visibility
@@ -67,6 +68,22 @@ def is_sibling_wait(last_error) -> bool:
     """True when `last_error` is the pipeline's own sibling wait sentence."""
     text = str(last_error or "").lstrip()
     return any(text.startswith(p) for p in SIBLING_WAIT_PREFIXES)
+
+
+# The leader id the sibling wait sentence carries in parentheses
+# (rfp_email_ingest._sibling_short_circuit writes "... message (<id>) to ...").
+_SIBLING_LEADER_RE = re.compile(
+    r"\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)", re.IGNORECASE
+)
+
+
+def sibling_wait_leader_id(last_error) -> str | None:
+    """The id of the copy a sibling-wait row is parked behind, lowercased, or
+    None when `last_error` is not the wait sentence or names no id."""
+    if not is_sibling_wait(last_error):
+        return None
+    m = _SIBLING_LEADER_RE.search(str(last_error))
+    return m.group(1).lower() if m else None
 
 EMAIL_FAILED = "failed"
 # The portal's statuses (rfp_portal_ingest.STATUS_PENDING / STATUS_HUMAN),
@@ -335,12 +352,44 @@ def classify_all(
     return out
 
 
+# ── Copies waiting on a review (section 3, rule 4) ───────────────────────
+
+
+def review_waits(classified: list[tuple[str, dict, str, dict | None]]) -> dict[str, dict]:
+    """`{row_id: {"id": leader_id, "lane": leader_lane}}` for every email row
+    in the processing lane that is parked behind another copy of the same
+    message (the sibling wait sentence) whose copy sits in a review lane: the
+    row moves only once a person decides that copy.
+
+    Read off the rows already loaded for this viewer, so no extra query runs
+    and a leader outside the viewer's mailbox scope is never described (the
+    row then stays a plain processing row)."""
+    lanes = {
+        str(row.get("id") or "").lower(): lane
+        for source, row, lane, _ in classified
+        if source == SOURCE_EMAIL
+    }
+    out: dict[str, dict] = {}
+    for source, row, lane, _ in classified:
+        if source != SOURCE_EMAIL or lane != LANE_PROCESSING:
+            continue
+        leader_id = sibling_wait_leader_id(row.get("last_error"))
+        if not leader_id:
+            continue
+        leader_lane = lanes.get(leader_id)
+        if leader_lane in REVIEW_LANES:
+            out[str(row.get("id"))] = {"id": leader_id, "lane": leader_lane}
+    return out
+
+
 # ── Summary (section 2.1) ────────────────────────────────────────────────
 
 
 def summarize(classified: list[tuple[str, dict, str, dict | None]], *, portal_served: bool,
               now: datetime) -> dict:
-    """The summary over `[(source, row, lane, stuck)]`."""
+    """The summary over `[(source, row, lane, stuck)]`. `waiting_on_review`
+    is the part of the processing lane that waits on a person reviewing
+    another copy of the same message (`review_waits`)."""
     lanes = {lane: 0 for lane in LANES}
     steps = {step: 0 for step in STEPS}
     kinds = {kind: 0 for kind in STUCK_KINDS}
@@ -356,6 +405,7 @@ def summarize(classified: list[tuple[str, dict, str, dict | None]], *, portal_se
         "lanes": lanes,
         "steps": steps,
         "stuck_kinds": kinds,
+        "waiting_on_review": len(review_waits(classified)),
         "portal_served": bool(portal_served),
         "generated_at": now.isoformat(),
     }
@@ -408,8 +458,9 @@ def select_lane(classified: list[tuple[str, dict, str, dict | None]], lane_filte
 
 
 def email_item(row: dict, lane: str, stuck: dict | None, *, projects: dict, gcs: dict,
-               harvests: dict) -> dict:
-    """One email row in the section 2.2 shape."""
+               harvests: dict, waiting_on: dict | None = None) -> dict:
+    """One email row in the section 2.2 shape. `waiting_on` is the row's
+    `review_waits` entry: the copy in a review lane it is parked behind."""
     gc = gcs.get(row.get("resolved_gc_id")) if row.get("resolved_gc_id") else None
     return {
         "source": SOURCE_EMAIL,
@@ -441,6 +492,9 @@ def email_item(row: dict, lane: str, stuck: dict | None, *, projects: dict, gcs:
         "llm_answer": row.get("llm_answer"),
         "llm_confidence": row.get("llm_confidence"),
         "llm_reasoning": row.get("llm_reasoning"),
+        # Additive: the copy this row waits behind while a person reviews it,
+        # `{id, lane}`, else null. Only ever a row this viewer can see.
+        "waiting_on": waiting_on,
     }
 
 
@@ -473,6 +527,7 @@ def portal_item(row: dict, lane: str, stuck: dict | None, *, projects: dict,
         "llm_answer": None,
         "llm_confidence": None,
         "llm_reasoning": None,
+        "waiting_on": None,
     }
 
 

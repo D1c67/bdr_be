@@ -244,7 +244,7 @@ the tombstone check (5.3).
   marked row, so the button does not show.
 
 Why nothing else can recreate it: a new email or sighting sharing the harvest
-(Procore and PipelineSuite reuse one harvest per `(method, external_key)`, the
+(Procore, PipelineSuite and SmartBid reuse one harvest per `(method, external_key)`, the
 email harvester and NGEM likewise per their key) meets the harvest's mark; a
 copy of the email meets the copy's mark; the link-only path finds
 `rfp_harvests.project_id` null and falls through to the block; a person's

@@ -1910,6 +1910,17 @@ def test_sweep_picks_up_a_due_harvest_row(db, harvest_on):
     assert _row(db, "e2")["next_attempt_at"] > ingest._iso(ingest._now())
 
 
+def test_set_method_accepts_smartbid_and_still_refuses_an_unknown_value(db):
+    """0148 added smartbid to the vocabulary the service validates against;
+    buildingconnected and friends stay gone (docs/RFP_SMARTBID.md section 4)."""
+    _seed(db, _procore_email(status="harvest", invitation_method="procore"))
+    assert ingest.set_method(db, "e1", "smartbid", "u1")["invitation_method"] == "smartbid"
+    assert _row(db)["invitation_method"] == "smartbid"
+    with pytest.raises(ValueError):
+        ingest.set_method(db, "e1", "buildingconnected", "u1")
+    assert _row(db)["invitation_method"] == "smartbid"
+
+
 def test_set_method_accepts_a_harvest_row_and_dismiss_refuses_it(db):
     _seed(db, _procore_email(status="harvest", invitation_method="procore"))
     assert ingest.set_method(db, "e1", "gc_portal", "u1")["invitation_method"] == "gc_portal"
