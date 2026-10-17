@@ -32,8 +32,9 @@ SELF_HOSTED_LLM_EC2B_MODEL=qwen-3.8-27b
 
 Model resolution per feature (`app/services/llm.py`):
 
-1. `SELF_HOSTED_<FEATURE>_MODEL` if set. The literal `off` disables the
-   feature in self-hosted mode.
+1. `SELF_HOSTED_<FEATURE>_MODEL` if set, but only on the env default box
+   (`SELF_HOSTED_LLM_TARGET`). The literal `off` disables the feature in
+   self-hosted mode on every box.
 2. Otherwise the live target's `SELF_HOSTED_LLM_<TARGET>_MODEL`.
 3. Empty in both places = the feature is off (the pre-toggle behaviour).
 
@@ -55,9 +56,11 @@ IT Admins and dev accounts see an "AI model server" card on /settings listing
 every target, its model, and whether the API has it configured. "Use this box"
 calls `PUT /model-status/target`, which:
 
-1. Refuses a target with no base URL / model in the env ("Not set up"), or one
-   where a feature is pinned (`SELF_HOSTED_<FEATURE>_MODEL`) to a model that
-   box does not serve.
+1. Refuses a target with no base URL / model in the env ("Not set up").
+   Per-feature pins (`SELF_HOSTED_<FEATURE>_MODEL`) never block a switch: on
+   any box other than the env default they are dropped and every feature uses
+   that box's own `SELF_HOSTED_LLM_<BOX>_MODEL` (`off` still applies).
+   Switching back to the default box restores the pins.
 2. Probes the box (`/models`, one retry). If it does not answer or does not
    serve the configured model, nothing changes and the UI offers
    "Switch anyway".

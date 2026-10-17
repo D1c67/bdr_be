@@ -156,11 +156,63 @@ def test_switch_to_unconfigured_box_raises(monkeypatch):
         llm_target.switch("nope", user_id="u1")
 
 
-def test_switch_refuses_when_features_are_pinned_to_another_model(monkeypatch):
-    s = _sh(self_hosted_boq_model="qwen-3.5-4b")
+# Prod pins nine features to box A's model in Railway; a switch must not need
+# those env vars cleared.
+_PROD_PINS = dict(
+    self_hosted_boq_model="qwen-3.5-4b",
+    self_hosted_estimate_model="qwen-3.5-4b",
+    self_hosted_translate_model="qwen-3.5-4b",
+    self_hosted_proposal_model="qwen-3.5-4b",
+    self_hosted_quote_pdf_model="qwen-3.5-4b",
+    self_hosted_email_vary_model="qwen-3.5-4b",
+    self_hosted_aliases_model="qwen-3.5-4b",
+    self_hosted_email_match_model="qwen-3.5-4b",
+    self_hosted_bid_split_model="qwen-3.5-4b",
+)
+
+
+def test_pins_apply_on_the_default_box():
+    s = _sh(**_PROD_PINS, self_hosted_llm_ec2_model="qwen-a-served")
+    assert llm.resolve("boq", s).model == "qwen-3.5-4b"
+    assert llm.resolve("rfp_classify", s).model == "qwen-a-served"
+
+
+def test_override_box_ignores_pins_but_keeps_off():
+    s = _sh(**{**_PROD_PINS, "self_hosted_translate_model": "off"})
+    llm_target._set_memory("ec2b")
+    for feature in llm._FEATURES:
+        route = llm.resolve(feature, s)
+        assert route.base_url == "https://llm2.example.com/v1"
+        expected = "" if feature == "translate" else "qwen-3.8-27b"
+        assert route.model == expected, feature
+
+
+def test_rfp_steps_follow_an_off_classify_on_the_override_box():
+    """A dropped extract/match pin falls back to classify, as an empty one
+    always has, so an "off" classify keeps the whole RFP chain off."""
+    s = _sh(self_hosted_rfp_classify_model="off", self_hosted_rfp_match_model="qwen-3.5-4b")
+    llm_target._set_memory("ec2b")
+    assert llm.resolve("rfp_extract", s).model == ""
+    assert llm.resolve("rfp_match", s).model == ""
+
+
+def test_switch_works_with_pins_and_back_restores_them(monkeypatch):
+    db = _FakeDb()
+    s = _sh(**_PROD_PINS)
+    monkeypatch.setattr(llm_target, "_db", lambda: db)
     monkeypatch.setattr(llm_target, "get_settings", lambda: s)
-    with pytest.raises(llm_target.TargetUnavailable, match="boq"):
-        llm_target.switch("ec2b", user_id="u1")
+    monkeypatch.setattr(llm_target, "_recent_changes", lambda: [])
+    monkeypatch.setattr(
+        llm_target, "probe", lambda t, _s=None: {"state": "ok", "detail": "", "latency_ms": 1}
+    )
+    out = llm_target.switch("ec2b", user_id="u1")
+    assert out["ok"] is True
+    assert all(v == [] for v in out["state"]["pinned_features"].values())
+    assert llm.resolve("boq", s).model == "qwen-3.8-27b"
+    assert llm.active_model("bid_split", s) == "self-hosted:qwen-3.8-27b"
+
+    llm_target.switch(None, user_id="u1")
+    assert llm.resolve("boq", s).model == "qwen-3.5-4b"
 
 
 def test_refresh_reads_db_and_keeps_last_value_on_error(monkeypatch):

@@ -18,6 +18,11 @@ How the override reaches the routing layer:
 - `switch()` writes the row, logs it to `llm_target_changes`, and updates this
   worker's memory at once.
 
+Per-feature pins (SELF_HOSTED_<FEATURE>_MODEL) belong to the env default box.
+When the override moves to another box, every feature uses that box's own
+model, so a switch is one click with no env edits. The literal "off" still
+disables a feature on every box.
+
 Fail safe: a DB error keeps the last known value; an override naming a target
 that is no longer usable (its env vars were removed) is ignored, so the env
 default serves rather than nothing.
@@ -79,9 +84,25 @@ def target_problem(target: str, s: Settings) -> str | None:
     return None
 
 
+def _unpinned(s: Settings) -> dict[str, str]:
+    """Blank every per-feature model pin except "off", so each feature falls
+    through to the live box's own model (services/llm._self_hosted_model)."""
+    from app.services import llm
+
+    return {
+        name: ""
+        for name in type(s).model_fields
+        if name.startswith("self_hosted_")
+        and name.endswith("_model")
+        and not name.startswith("self_hosted_llm_")
+        and (getattr(s, name) or "").strip().lower() != llm.SELF_HOSTED_MODEL_OFF
+    }
+
+
 def apply(s: Settings) -> Settings:
     """`s` with the live override as its target (or `s` itself when there is
-    none, it matches already, or the override target is not usable)."""
+    none, it matches already, or the override target is not usable). On the
+    override box the per-feature pins are dropped (see the module docstring)."""
     target = _override
     if not target or target == s.self_hosted_llm_target:
         return s
@@ -91,7 +112,7 @@ def apply(s: Settings) -> Settings:
         return cached
     if target_problem(target, s):
         return s
-    switched = s.model_copy(update={"self_hosted_llm_target": target})
+    switched = s.model_copy(update={"self_hosted_llm_target": target, **_unpinned(s)})
     with _lock:
         # Settings objects are long-lived (get_settings is lru_cached); tests
         # build many, so keep the memo from growing without bound.
@@ -170,20 +191,6 @@ class TargetOption:
     is_live: bool
 
 
-def _pinned_features(target: str, s: Settings) -> list[str]:
-    """Features whose SELF_HOSTED_<FEATURE>_MODEL pins a model that `target`
-    does not serve (they would 404 on that box). "off" is not a pin."""
-    from app.services import llm
-
-    target_model = (getattr(s, f"self_hosted_llm_{target}_model", "") or "").strip()
-    pinned = []
-    for key, spec in llm._FEATURES.items():
-        explicit = (spec.sh_model(s) or "").strip()
-        if explicit and explicit.lower() != llm.SELF_HOSTED_MODEL_OFF and explicit != target_model:
-            pinned.append(key)
-    return pinned
-
-
 def state(s: Settings | None = None) -> dict:
     s = s or get_settings()
     live = live_target(s)
@@ -215,7 +222,9 @@ def state(s: Settings | None = None) -> dict:
         "default_target": s.self_hosted_llm_target,
         "override": _override,
         "options": options,
-        "pinned_features": {o["key"]: _pinned_features(o["key"], s) for o in options},
+        # Kept for the Settings card, which disables a box with pins listed.
+        # Pins no longer block a switch (apply drops them off the default box).
+        "pinned_features": {o["key"]: [] for o in options},
         "recent_changes": _recent_changes(),
     }
 
@@ -283,13 +292,6 @@ def switch(target: str | None, *, user_id: str, force: bool = False) -> dict:
     problem = target_problem(resolved, s)
     if problem:
         raise TargetUnavailable(problem)
-    pinned = _pinned_features(resolved, s)
-    if pinned:
-        raise TargetUnavailable(
-            "These features are pinned to a model this box does not serve: "
-            f"{', '.join(pinned)}. Clear their SELF_HOSTED_<FEATURE>_MODEL env "
-            "vars first."
-        )
 
     result = probe(resolved, s)
     if result["state"] != "ok" and not force:
