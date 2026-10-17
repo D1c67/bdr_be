@@ -628,6 +628,12 @@ class RfpCreatedSummary(BaseModel):
     # package_sent}`; null when the split succeeded, was skipped, or the
     # route does not compute it.
     split_issue: dict[str, Any] | None = None
+    # The missing files (docs/RFP_MISSING_FILES.md 7), detail route only:
+    # `{state: open | dismissed | resolved, total_failure, counts, items,
+    # dismissed, drop, splitter_available, splitter_unavailable_reason,
+    # package_sent, page_cap}`; null when the project has no items or the
+    # route does not compute it.
+    files_issue: dict[str, Any] | None = None
 
 
 class ProjectOut(BaseModel):
@@ -842,6 +848,25 @@ class ProjectDeleteIn(BaseModel):
     reason: str | None = Field(default=None, max_length=64)
     note: str | None = Field(default=None, max_length=4000)
     confirm_name: str | None = Field(default=None, max_length=1000)
+
+
+class ProjectMergePreviewIn(BaseModel):
+    """POST /projects/{id}/merge-preview (docs/PROJECT_MERGE.md 5): the
+    project picked to merge into. An id that is not a project is answered
+    by the service (409 target_not_found), so this is a plain string."""
+
+    target_project_id: str = Field(min_length=1, max_length=64)
+
+
+class ProjectMergeIn(BaseModel):
+    """POST /projects/{id}/merge (docs/PROJECT_MERGE.md 5). Both typed names
+    are checked by the service and again by the database function under the
+    row locks, each mismatch a 422 with a sentence (plain strings here,
+    capped only to bound the request, like ProjectDeleteIn)."""
+
+    target_project_id: str = Field(min_length=1, max_length=64)
+    confirm_source_name: str | None = Field(default=None, max_length=1000)
+    confirm_target_name: str | None = Field(default=None, max_length=1000)
 
 
 # ── RFP matching (docs/RFP_MATCHING.md sections 3.7 to 3.9) ──────────────

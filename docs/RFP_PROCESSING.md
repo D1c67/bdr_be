@@ -131,9 +131,16 @@ Item shape (one shape for both sources; absent facts are null):
   "created_project_id": uuid | null,
   "primary_mailbox": str | null,
   "portal": "ngem" | null,
-  "waiting_on": {"id": uuid, "lane": "review_llm" | "flagged_unauthorized" | "review_match"} | null
+  "waiting_on": {"id": uuid, "lane": "review_llm" | "flagged_unauthorized" | "review_match"} | null,
+  "flag_reason": str | null
 }
 ```
+
+`flag_reason` (added 2026-10-05): the row's own `flag_reason`, on both
+sources (the queue list already serves it to the same roles). The page
+reads it for a review_match row with no `match_project`: `new_gc_unresolved`
+(RFP_MATCHING.md 3.5 rule 8b, nothing matched and the GC is unknown) shows
+"New invitation, GC unknown" instead of "No candidate".
 
 `waiting_on` (added 2026-10-02): on a processing email row parked behind
 another copy of the same message (rule 4's sibling wait), the copy it waits
@@ -252,7 +259,8 @@ for retrying and model wait. Both settings are new `Settings` fields in
     (classify / authorize / match), red when stuck at the stuck step, with a
     "Step n of N: name" caption), Waiting since (age +
     timestamp), Detail (the model verdict for review_llm, the best candidate
-    for review_match, the stuck reason with next attempt for stuck rows),
+    for review_match, or "New invitation, GC unknown" for one held by rule
+    8b with no candidate, the stuck reason with next attempt for stuck rows),
     Action ("Review" primary illuminated for review rows; "Retry" for
     retryable email rows; nothing otherwise). Rows: amber tint + flag badge
     for review, red tint + "Stuck" badge for stuck, plain otherwise. Clicking

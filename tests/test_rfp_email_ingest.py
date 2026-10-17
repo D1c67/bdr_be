@@ -874,7 +874,9 @@ def test_full_walk_to_done_organic(db, llm_answer):
 
 
 def test_platform_rule_gives_its_method(db, llm_answer):
-    llm_answer({"answer": "yes", "confidence": 0.99, "reasoning": ""})
+    # The GC resolves by name, so rule 8b (no project, no GC) does not hold it.
+    llm_answer({"answer": "yes", "confidence": 0.99, "reasoning": ""},
+               extract={**EXTRACT_OK, "gc_name": "GC Example Builders"})
     _seed(db, _email(from_address="noreply@us02.procoretech.com"))
     ingest._process_email(db, dict(_row(db)))
     row = _row(db)
@@ -928,6 +930,62 @@ def test_confident_no_is_flagged_llm_no(db, llm_answer):
     ingest._process_email(db, dict(_row(db)))
     row = _row(db)
     assert row["status"] == "flagged_llm_no" and row["decided_at_step"] == "classify"
+
+
+def _fetch_body(monkeypatch, body):
+    monkeypatch.setattr(
+        ingest.graph_inbox, "get_message",
+        lambda *a, **k: {"body": {"content": body},
+                         "internetMessageHeaders": [{"name": "Authentication-Results", "value": EXO_PASS}]},
+    )
+
+
+def test_procore_change_order_rfq_ends_at_keywords_with_no_model_call(db, llm_answer, monkeypatch):
+    """Doc 3.4.1: the overdue Request for Quote digest (a change order on a
+    contract we hold, never a bid) is decided for free at the keyword step:
+    flagged_llm_no with its own reason, no classify, extract or match call,
+    so it can never reach the match and create steps again."""
+    from tests import fixtures_procore as fx
+
+    calls = llm_answer({"answer": "yes", "confidence": 0.99, "reasoning": "a quote request"})
+    _fetch_body(monkeypatch, fx.CO_RFQ_BODY)
+    _seed(db, _email(from_address=fx.CO_RFQ_FROM, subject=fx.CO_RFQ_SUBJECT))
+    assert ingest._process_email(db, dict(_row(db))) is None
+    row = _row(db)
+    assert row["status"] == "flagged_llm_no" and row["flag_reason"] == "procore_change_order_rfq"
+    assert row["decided_at_step"] == "keywords" and row["keyword_hits"]
+    assert row.get("llm_answer") is None and row.get("classified_at") is None
+    assert calls == []
+
+
+def test_a_change_order_rfq_waiting_at_classify_ends_without_the_model(db, llm_answer):
+    """A row that reached classify before the rule (or waits there for the
+    model) is ended by the same rule ahead of the model gate, even while the
+    model is down this tick, and nothing is stamped as a model wait."""
+    from tests import fixtures_procore as fx
+
+    calls = llm_answer({"answer": "yes", "confidence": 0.99, "reasoning": ""})
+    _seed(db, _email(status="classify", from_address=fx.CO_RFQ_FROM, subject=fx.CO_RFQ_SUBJECT,
+                     body_text=fx.CO_RFQ_BODY, keyword_hits=["request", "quote"],
+                     last_error="Waiting for the model", next_attempt_at="2026-09-09T10:05:00+00:00"))
+    ingest._process_email(db, dict(_row(db)), llm_down={ingest.FEATURE}, stamp_skipped=True)
+    row = _row(db)
+    assert row["status"] == "flagged_llm_no" and row["flag_reason"] == "procore_change_order_rfq"
+    assert row["decided_at_step"] == "classify" and row["next_attempt_at"] is None
+    assert calls == []
+
+
+def test_a_procore_bid_invitation_still_goes_to_the_model(db, llm_answer, monkeypatch):
+    from tests import fixtures_procore as fx
+
+    calls = llm_answer({"answer": "yes", "confidence": 0.99, "reasoning": "invitation"})
+    _fetch_body(monkeypatch, fx.EMAIL_BODY)
+    # Even under the digest's subject: the bid link decides it.
+    _seed(db, _email(from_address="noreply@procoretech.com", subject=fx.CO_RFQ_SUBJECT))
+    ingest._process_email(db, dict(_row(db)))
+    row = _row(db)
+    assert row["llm_answer"] == "yes" and row["flag_reason"] != "procore_change_order_rfq"
+    assert _calls_for(calls, "rfp_classify")
 
 
 def test_uncertain_goes_to_review_and_counts(db, llm_answer):
@@ -1541,23 +1599,52 @@ def test_fake_candidate_query_handles_not_in_and_nested_and_group(db):
         {"id": "p-old", "name": "Old", "current_stage": "rfq", "abandoned_at": None,
          "internal_bid_at": old, "actual_bid_at": None},
         {"id": "p-nodate", "name": "No date", "current_stage": "rfq", "abandoned_at": None,
-         "internal_bid_at": None, "actual_bid_at": None},
+         "internal_bid_at": None, "actual_bid_at": None,
+         "created_at": ingest._iso(now - timedelta(days=60))},
         {"id": "p-excluded", "name": "Excluded", "current_stage": "rfq", "abandoned_at": None,
          "internal_bid_at": recent, "actual_bid_at": None},
+        # 2026-10-12: created inside the window, with no bid date or with
+        # one older than the rebid lookback. The created_at term loads both.
+        {"id": "p-nodate-recent", "name": "No date, new", "current_stage": "go_no_go",
+         "abandoned_at": None, "internal_bid_at": None, "actual_bid_at": None,
+         "created_at": ingest._iso(now - timedelta(days=1))},
+        {"id": "p-ancient-recent", "name": "Ancient date, new", "current_stage": "go_no_go",
+         "abandoned_at": None, "internal_bid_at": None, "actual_bid_at": old,
+         "created_at": ingest._iso(now - timedelta(days=1))},
+        # Created inside the window but closed: the stage filter still wins.
+        {"id": "p-declined-recent", "name": "Declined, new", "current_stage": "declined",
+         "abandoned_at": None, "internal_bid_at": None, "actual_bid_at": None,
+         "created_at": ingest._iso(now - timedelta(days=1))},
     ]
     lo = ingest.rfp_match.pg_ts(now - timedelta(days=30))
     rows = ingest.rfp_match.candidate_query(db, lo).execute().data
-    assert {r["id"] for r in rows} == {"p-open", "p-actual", "p-excluded"}
+    assert {r["id"] for r in rows} == {
+        "p-open", "p-actual", "p-excluded", "p-nodate-recent", "p-ancient-recent"}
+    # The sweep bundle's shape: date terms over the lookback, created_at over
+    # the window. p-old (internal 400 days ago, no created_at) and p-nodate
+    # (created 60 days ago) stay out.
+    lookback = ingest.rfp_match.pg_ts(now - timedelta(days=365))
+    rows = ingest.rfp_match.candidate_query(db, lookback, created_lo_iso=lo).execute().data
+    assert {r["id"] for r in rows} == {
+        "p-open", "p-actual", "p-excluded", "p-nodate-recent", "p-ancient-recent"}
+    rows = ingest.rfp_match.candidate_query(
+        db, lo, created_lo_iso=ingest.rfp_match.pg_ts(now - timedelta(days=90))
+    ).execute().data
+    assert "p-nodate" in {r["id"] for r in rows}
+    rows = ingest.rfp_match.candidate_query(db, lo).execute().data
     # The excluded ids are a Python filter over the same result.
     ranked = ingest.rfp_match.rank_candidates(
         {"project_name": "x"}, rows, _settings(), excluded_ids=["p-excluded"]
     )
-    assert {c["project_id"] for c in ranked} == {"p-open", "p-actual"}
+    assert {c["project_id"] for c in ranked} == {
+        "p-open", "p-actual", "p-nodate-recent", "p-ancient-recent"}
     # `not_` is consumed by every filter, not only is_.
     assert {r["id"] for r in db.table("projects").select("id").not_.eq("id", "p-open")
             .execute().data} == {r["id"] for r in db.tables["projects"]} - {"p-open"}
     assert [r["id"] for r in db.table("projects").select("id").not_.gte("internal_bid_at", recent)
-            .neq("id", "p-nodate").execute().data] == ["p-actual", "p-old"]
+            .neq("id", "p-nodate")
+            .not_.in_("id", ["p-nodate-recent", "p-ancient-recent", "p-declined-recent"])
+            .execute().data] == ["p-actual", "p-old"]
     with pytest.raises(ValueError):
         db.table("projects").select("id").or_("garbage")
     with pytest.raises(ValueError):
@@ -1805,7 +1892,9 @@ def test_process_email_runs_the_harvest_step_in_the_same_pass(db, harvest_on, ll
         lambda *a, **k: {"body": {"content": fx.EMAIL_BODY}, "bodyPreview": "Monument",
                          "internetMessageHeaders": [{"name": "Authentication-Results", "value": EXO_PASS}]},
     )
-    llm_answer({"answer": "yes", "confidence": 0.95, "reasoning": "invitation"})
+    # The GC resolves by name, so rule 8b (no project, no GC) does not hold it.
+    llm_answer({"answer": "yes", "confidence": 0.95, "reasoning": "invitation"},
+               extract={**EXTRACT_OK, "gc_name": "GC Example Builders"})
     before = ingest._now()
     _seed(db, _procore_email())
     assert ingest._process_email(db, dict(_row(db))) is None

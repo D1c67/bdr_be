@@ -60,7 +60,15 @@ from app.core.config import Settings, get_settings
 from app.core.roles import Role
 from app.core.supabase_client import get_supabase
 from app.sandbox import protocol
-from app.services import files_needed, llm_queue, office_preview, rfp_split, rfp_zip, storage
+from app.services import (
+    files_needed,
+    llm_queue,
+    office_preview,
+    rfp_file_issues,
+    rfp_split,
+    rfp_zip,
+    storage,
+)
 from app.services import rfp_ingest_storage as rs
 from app.services.notifications import audit, notify_role, notify_user
 
@@ -935,6 +943,9 @@ def mark_from_queue(project_id: str, status: str, error: str | None) -> None:
             "files_claimed_at": None,
         }
     ).eq("project_id", project_id).in_("files_status", [STATUS_PENDING, STATUS_RUNNING]).execute()
+    # The missing files (docs/RFP_MISSING_FILES.md 4): the promotion gave up,
+    # so whatever the harvest could not bring in is listed now. Best effort.
+    rfp_file_issues.sync_project(sb, project_id)
 
 
 def error_message(exc: Exception, _label: str) -> str:
@@ -1183,6 +1194,13 @@ def _promote_one(
     # The files flag (docs/RFP_BUILDINGCONNECTED.md 3.8): a promoted drawing
     # or specification satisfies it. Best effort inside the service.
     files_needed.clear_if_satisfied(sb, project_id, category, None)
+    # The missing files (docs/RFP_MISSING_FILES.md 4): a promoted file of the
+    # same name resolves its item. Not a person's insert, so never the
+    # first-file rule. Best effort inside the service.
+    rfp_file_issues.after_file_insert(
+        sb, project_id, category=category, filenames=[decision.filename, entry_name(entry, file_row)],
+        actor_id=None, by_person=False,
+    )
     if convertible:
         try:
             office_preview.generate_preview(inserted["id"])
@@ -1252,6 +1270,7 @@ def execute(project_id: str, harvest_id: str | None = None) -> None:
     skipped: list[dict] = []
     scratch: Path | None = None
     split_rows: dict = {}
+    harvest: dict | None = None
     try:
         harvest = _load_harvest(sb, source_harvest_id)
         entries = [e for e in ((harvest or {}).get("files") or []) if isinstance(e, dict)]
@@ -1356,6 +1375,12 @@ def execute(project_id: str, harvest_id: str | None = None) -> None:
     except _ClaimLost:
         logger.warning("rfp create files: claim on %s lost at the end; result not recorded", project_id)
         return
+    # The missing files (docs/RFP_MISSING_FILES.md 4): what the harvest and
+    # this promotion could not bring in becomes the project's items (a
+    # retried promotion adds only new ones). Best effort inside the service.
+    rfp_file_issues.sync_project(
+        sb, project_id, harvest=harvest, record={**record, "files_skipped": skipped[:_SKIPPED_CAP]},
+    )
     try:
         _notify_drawings(sb, project_id, drawings)
     except Exception:  # noqa: BLE001 - the bell is a courtesy

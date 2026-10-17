@@ -1465,17 +1465,21 @@ def continue_rfp_email(
 def dismiss_rfp_email(
     email_id: str, user: CurrentUser = Depends(require_review_queue)
 ) -> dict:
-    """Dismiss a message waiting at review_llm or flagged_unauthorized:
-    terminal at rejected_by_review. 409 once the row has left those states,
-    including a row at review_match, whose only rejection exit is
-    match/reject."""
+    """Dismiss a message waiting at review_llm or flagged_unauthorized, or
+    "Not an RFP" on one waiting at review_match (the same review-queue roles
+    as the match actions): terminal at rejected_by_review. 409 once the row
+    has left those states; on review_match also 409
+    `rfp_match_not_actionable` while an open merge holds a link on a
+    project (merge again to finish, or unmerge it first)."""
     _uuid_or_404(email_id, _EMAIL_NOT_FOUND)
     sb = get_supabase()
     _email_exists_or_404(sb, email_id, user)
     try:
         _ingest().dismiss(sb, email_id, user.id)
     except LookupError as exc:
-        raise _conflict(exc) from exc
+        # A refusal from the match guard carries its own code; a plain miss
+        # is the ordinary "no longer waiting" 409.
+        raise (_match_error(exc) if getattr(exc, "code", None) else _conflict(exc)) from exc
     return _detail(sb, email_id, user.role)
 
 
@@ -1635,8 +1639,9 @@ def duplicate_rfp_email_match(
 def reject_rfp_email_match(
     email_id: str, user: CurrentUser = Depends(require_review_queue)
 ) -> dict:
-    """"Not a match": the row ends at `done` with the candidates kept for
-    training. The only rejection exit from review_match."""
+    """"Not a match": the row goes on as a new invitation (harvest, then
+    create) with the candidates kept for training. The other exit from
+    review_match is "Not an RFP" (POST /dismiss), which ends it."""
     _uuid_or_404(email_id, _EMAIL_NOT_FOUND)
     sb = get_supabase()
     _email_exists_or_404(sb, email_id, user)

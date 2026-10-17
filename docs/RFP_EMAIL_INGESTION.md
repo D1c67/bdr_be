@@ -53,6 +53,7 @@ express that combination.
 | GC portals (2026-09-16) | `gc_portal` is the method for a GC that invites through its own bidding portal. Every such portal is different, so the harvest step picks the scraper by the sender's domain (`RFP_HARVEST.md` 2.3). The method is granted by a locked rule the IT Admin adds on that GC's sending domain; locked rules outrank the GC-domain source, which is how the portal rule beats the same GC's organic match. Migration 0127 widened both check constraints; no rows changed. Scrapers are built per GC and none exist yet: until one is registered a gc_portal row drains to done unharvested, like organic. |
 | PipelineSuite portals (2026-09-16) | `pipelinesuite` is the method for a GC whose plan room is a PipelineSuite (PreconSuite) portal at `<gc>.pipelinesuite.com`. Unlike `gc_portal`, one method-keyed harvester serves every such GC: the invitation email comes from the GC's own domain and carries the portal host, a Project ID and a Security Key, and that is all the harvester needs (section 3.9, `RFP_PIPELINESUITE.md`). Granted by a locked domain rule on the GC's own domain; migration 0129 widened both check constraints and seeded `cgandbinc.com` and `shfcontracting.com`. |
 | SmartBid (2026-10-01) | `smartbid` is the method for invitations sent through ConstructConnect's SmartBid. Every one comes from the platform's own address (`notifications@com2.smartbidnet.com`), so, like Procore and unlike PipelineSuite, it is granted by ONE locked domain rule on the platform domain (`smartbidnet.com`, covering `com2.smartbidnet.com` on the label boundary), and one method-keyed harvester serves every GC that sends through it (section 3.9.1, `RFP_SMARTBID.md`). Migration 0148 widened both check constraints and seeded the rule. |
+| Procore change-order RFQs (2026-10-05) | Procore's Request for Quote tool mail ("<GC>: You have N overdue Request(s) for Quote", and any change-order RFQ: a quote on a contract G3 already holds, never a bid) ends at `flagged_llm_no` with `flag_reason = procore_change_order_rfq` before the classify call, by a free deterministic rule at the keyword step (3.4.1). Before it the model said yes on most of them and the matcher and creation made 12 junk projects in production in 5 days. |
 
 ---
 
@@ -72,6 +73,8 @@ rfp_emails row: status = received
   v  fetch      GET message: text body + internetMessageHeaders + attachment listing
   v  auth       parse Authentication-Results ........ fail -> flagged_auth
   v  keywords   word-boundary scan .................... none -> flagged_no_keywords
+  |             Procore change-order RFQ (3.4.1) ....... flagged_llm_no (procore_change_order_rfq),
+  |                                                       no model call
   v  classify   LLM yes/no/undetermined + confidence
   |               yes  >= threshold -> authorize
   |               no   >= threshold -> flagged_llm_no
@@ -252,6 +255,62 @@ message advanced. No hits stops the row at `flagged_no_keywords`.
 Expectation: most external business mail hits `project` or `request`, so this
 gate mostly trims newsletters and receipts. Its job is to be a cheap floor, not
 the main filter.
+
+### 3.4.1 Procore change-order RFQs (2026-10-05)
+
+Procore's Request for Quote tool prices a change event against a contract G3
+already holds. Its notifications come from the same platform domain the
+locked Procore rule trusts (`<gc>_notifications@procoretech.com`), the daily
+digest reads "Benchmark Contracting dba Cobblestone Construction: You have 1
+overdue Request for Quote", and the body names a project, a requester and a
+"Quote Due Date" (often a year or more past). To the classifier and the
+extractor that looks like an invitation: in production (2026-10-01 to 10-05)
+most were classified yes, the stale due date kept the matcher's candidate
+window empty every day, no GC resolved, and creation made 12 junk projects,
+three of one job 7 minutes apart. None of it is a bid.
+
+Rule (`rfp_email_auth.is_procore_change_order_rfq(from_address, subject,
+body_text)`, pure), all three must hold:
+
+1. The sender's domain is `procoretech.com` or a subdomain of it
+   (`domain_covered_by`, on a label boundary: `us02.procoretech.com` yes,
+   `notprocoretech.com` no). The auth step has already passed the message,
+   so the From is Exchange-verified.
+2. The body carries NO Procore bid link: `procore_client.parse_reference`,
+   the harvester's own reader, finds no bid sheet route, bid page, documents
+   zip or bid intent link. Every real invitation, reminder and addendum
+   carries one, so this rule can never end a real one, whatever its subject.
+3. The subject matches `you have <N> overdue request(s) for quote(s)`
+   (case-insensitive), OR the body links a commitment or change-event RFQ:
+   `procore_client.has_change_order_rfq_link`, the same link reading as the
+   harvester (every Outlook safelink unwrapped and percent-decoded, the
+   `app.procore.com` host only), path
+   `/<id>/project/(commitments|change_events)/.../request_for_quotes(/...)`,
+   e.g. `/2870898/project/commitments/work_order_contracts/12493925/request_for_quotes/2383864`
+   and its `.../quotes/set_cost_impact` answer links. Either signal alone is
+   enough, so a new (not yet overdue) change-order RFQ is caught too.
+
+Where: in `_step_keywords`, after the gate found hits (so the gate keeps its
+meaning) and before the row moves to `classify`: `_terminal(keywords ->
+flagged_llm_no)` with `flag_reason = procore_change_order_rfq`,
+`decided_at_step = keywords`, `keyword_hits` stored. No model is called, the
+classify budget is not touched (`classified_at` stays null), and the row
+never reaches extract, match, harvest or create. A row that was already
+waiting at `classify` (it arrived before the rule, or waits there for the
+model) is ended by the same rule in `_process_email` ahead of the model gate,
+with `decided_at_step = classify`, even while the model is down. A test-bench
+row records the decision on its `keywords` event (`rule`). The status is the
+existing `flagged_llm_no` ("Not an RFP", Flagged tab), so no migration: the
+`rfp_emails` check constraints cover `status` and the other enums, never
+`flag_reason` or `decided_at_step`. The FE renders the reason as "Procore
+change-order quote request, not a bid".
+
+Checked against every stored row on the dev database (4,453 rows, 508 from
+Procore, read-only, 2026-10-05): the rule matches exactly the 81 overdue
+digests (Cobblestone and Monument, every one of them, including the 9 the
+model had already said no to) and none of the 302 Procore rows that carry a
+bid link (invitations, "Reminder to submit your Bid", addenda, Q&A notices);
+no stored row carries both kinds of link.
 
 ### 3.5 Classify (LLM)
 
@@ -739,7 +798,7 @@ count only what the viewer can see.
 | GET /rfp-emails/{id} | the full row plus `mailboxes` (sightings) and `rule` (the matched authorized-sender rule or null) |
 | POST /rfp-emails/{id}/review {decision: yes\|no} | LLM review action |
 | POST /rfp-emails/{id}/continue | unauthorized override |
-| POST /rfp-emails/{id}/dismiss | unauthorized dismiss |
+| POST /rfp-emails/{id}/dismiss | dismiss a review_llm or flagged_unauthorized row; also "Not an RFP" on a review_match row (RFP_MATCHING.md 3.8, 2026-10-05) |
 | PATCH /rfp-emails/{id} {invitation_method} | correct the method |
 | GET /rfp-emails/counts | badge counts for the sidebar and dashboard |
 | GET /rfp-emails/authorized-senders | `{items}`; locked first; each with `created_by_name` |

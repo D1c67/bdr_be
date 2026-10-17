@@ -579,6 +579,28 @@ def test_route_rule_8_no_candidate_and_all_different():
     assert r.status == "review_match" and r.best["project_id"] == "p1"
 
 
+def test_route_rule_8b_holds_a_new_invitation_with_no_gc():
+    """Rule 8b (2026-10-05): with `hold_new_without_gc` (the email step), the
+    two "no existing project" exits wait for a person when the GC did not
+    resolve, with no proposed project. A resolved GC, or the flag off (the
+    portal steps), goes on exactly as rule 8 says."""
+    held = m.Route("review_match", "new_gc_unresolved", None)
+    different = [_cand("p1", 0.9, verdict="different", confidence=0.9)]
+    for cands in ([], [_cand("p1", 0.5)], different):
+        assert _route(cands, gc_resolved=False, hold_new_without_gc=True) == held
+        assert _route(cands, gc_resolved=True, hold_new_without_gc=True).status == "done"
+        assert _route(cands, gc_resolved=False).status == "done"
+    assert _route(different, gc_resolved=True, hold_new_without_gc=True).flag_reason == "all_different"
+    # Only the no-project exits: a candidate worth reviewing keeps its own
+    # reason, and a nameless email still drains as no_project_name.
+    assert _route([_cand("p1", 0.7)], gc_resolved=False, hold_new_without_gc=True).flag_reason == (
+        "match_uncertain")
+    assert _route([], has_name=False, gc_resolved=False, hold_new_without_gc=True).flag_reason == (
+        "no_project_name")
+    # The auto-merge switch plays no part in it.
+    assert _route([], gc_resolved=False, auto_merge=False, hold_new_without_gc=True) == held
+
+
 def test_route_rule_1_ambiguity_guard_beats_everything():
     r = _route([_cand("p1", 0.95, **CONFIDENT), _cand("p2", 0.9, **CONFIDENT)])
     assert (r.status, r.flag_reason, r.best["project_id"]) == ("review_match", "match_ambiguous", "p1")
@@ -726,6 +748,62 @@ def test_split_bands_and_window():
     assert [p["id"] for p in cands] == ["recent", "edge"]
     assert [p["id"] for p in rebid] == ["old"]
     assert m.in_candidate_window(dateless, now, S) is False
+
+
+def test_split_bands_admits_a_project_created_inside_the_window():
+    """2026-10-12: a project created inside the candidate window is a
+    candidate whatever its bid date (none, stale, or older than the rebid
+    lookback), so a repeat of the same invitation finds it. A project with
+    no bid date and an old (or missing) created_at is in neither band."""
+    now = datetime(2026, 9, 11, 12, 0, tzinfo=timezone.utc)
+    yesterday = "2026-09-10T12:00:00Z"
+    fresh_nodate = _project(id="fresh-nodate", actual_bid_at=None, internal_bid_at=None,
+                            created_at=yesterday)
+    fresh_stale = _project(id="fresh-stale", actual_bid_at="2026-05-06T00:00:00Z",
+                           internal_bid_at=None, created_at=yesterday)
+    fresh_ancient = _project(id="fresh-ancient", actual_bid_at="2025-09-01T00:00:00Z",
+                             internal_bid_at=None, created_at=yesterday)
+    old_nodate = _project(id="old-nodate", actual_bid_at=None, internal_bid_at=None,
+                          created_at="2026-08-11T12:00:00Z")   # 31 days ago
+    edge_nodate = _project(id="edge-nodate", actual_bid_at=None, internal_bid_at=None,
+                           created_at="2026-08-12T12:00:00Z")  # exactly 30 days ago
+    stale_old = _project(id="stale-old", actual_bid_at="2026-05-06T00:00:00Z",
+                         internal_bid_at=None, created_at="2026-05-01T00:00:00Z")
+    no_key = _project(id="no-key", actual_bid_at="2026-05-06T00:00:00Z", internal_bid_at=None)
+    fresh_excluded = _project(id="fresh-ex", actual_bid_at=None, internal_bid_at=None,
+                              created_at=yesterday)
+    cands, rebid = m.split_bands(
+        [fresh_nodate, fresh_stale, fresh_ancient, old_nodate, edge_nodate, stale_old, no_key,
+         fresh_excluded],
+        now, S, excluded_ids={"fresh-ex"},
+    )
+    assert [p["id"] for p in cands] == ["fresh-nodate", "fresh-stale", "fresh-ancient",
+                                        "edge-nodate"]
+    # A stale-dated project created inside the window is a candidate, never
+    # also a rebid; one created long ago (or with no created_at key, the old
+    # fixtures) keeps the rebid band.
+    assert [p["id"] for p in rebid] == ["stale-old", "no-key"]
+    assert m.in_candidate_window(fresh_nodate, now, S) is True
+    assert m.in_candidate_window(fresh_stale, now, S) is True
+    assert m.in_candidate_window(old_nodate, now, S) is False
+    assert m.in_candidate_window(no_key, now, S) is False
+    assert m.in_candidate_window({**old_nodate, "created_at": None}, now, S) is False
+    # A bid date inside the window still wins whatever created_at says.
+    assert m.in_candidate_window(_project(actual_bid_at="2026-09-01T00:00:00Z",
+                                          created_at="2020-01-01T00:00:00Z"), now, S) is True
+
+
+def test_rank_candidates_scores_a_dateless_project_on_the_name_alone():
+    dateless = _project(id="nodate", actual_bid_at=None, internal_bid_at=None,
+                        created_at="2026-09-10T12:00:00Z")
+    ranked = m.rank_candidates(_facts(), [dateless], S)
+    assert len(ranked) == 1
+    b = ranked[0]["breakdown"]
+    assert b["date"] is None and b["dates_used"] == [] and b["closest_kind"] is None
+    assert b["total"] == b["name"] == 1.0
+    undated = m.rank_candidates(_facts(bid_due_at=None, has_time=False), [dateless], S)
+    assert undated[0]["breakdown"]["date"] is None
+    assert undated[0]["breakdown"]["total"] == undated[0]["breakdown"]["name"]
 
 
 # ── Match prompt and verdicts ────────────────────────────────────────────────
@@ -944,7 +1022,7 @@ GOLDEN = [
 @pytest.mark.parametrize("facts, project, expected", GOLDEN, ids=[g[1]["id"] for g in GOLDEN])
 def test_golden_scores(facts, project, expected):
     assert m.score_candidate(facts, project, S) == expected
-    assert m.settings_snapshot(S)["scorer_version"] == "rfp_match_scorer_v1"
+    assert m.settings_snapshot(S)["scorer_version"] == "rfp_match_scorer_v2"
 
 
 # ── Sibling key and leader ───────────────────────────────────────────────────
@@ -1223,10 +1301,53 @@ def test_candidate_query_or_group_reads_the_actual_date_first():
     assert "project_gcs(id, gc_id, needs_by, general_contractors(name))" in sb.calls[1][1][0]
     assert sb.calls[2][1] == ("abandoned_at", "null")
     assert sb.calls[4][1] == ("current_stage", ["declined", "pm_only", "cp_only"])
+    # The created_at bound defaults to lo_iso (the portal "same as" check
+    # passes the candidate window as lo_iso and gets the whole window rule).
     assert sb.calls[5][1] == (
         "actual_bid_at.gte.2026-08-12T00:00:00Z,"
-        "and(actual_bid_at.is.null,internal_bid_at.gte.2026-08-12T00:00:00Z)",
+        "and(actual_bid_at.is.null,internal_bid_at.gte.2026-08-12T00:00:00Z),"
+        "created_at.gte.2026-08-12T00:00:00Z",
     )
+
+
+def test_candidate_query_takes_its_own_created_at_bound():
+    sb = _Q()
+    m.candidate_query(sb, "2025-09-11T00:00:00Z", created_lo_iso="2026-08-12T00:00:00Z",
+                      select="id")
+    assert sb.calls[1][1] == ("id",)
+    assert sb.calls[5][1] == (
+        "actual_bid_at.gte.2025-09-11T00:00:00Z,"
+        "and(actual_bid_at.is.null,internal_bid_at.gte.2025-09-11T00:00:00Z),"
+        "created_at.gte.2026-08-12T00:00:00Z",
+    )
+
+
+def test_candidate_selects_name_created_at():
+    """The test fakes return whole rows for an embedded select, so a select
+    that forgot created_at would pass every fake-based test and silently turn
+    the created_at leg of the candidate window off in prod (PostgREST drops
+    unnamed columns). Pin the column by name."""
+    from app.services import rfp_email_ingest
+
+    def top_level(select: str) -> set[str]:
+        cols, depth, cur = [], 0, ""
+        for ch in select:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            if ch == "," and depth == 0:
+                cols.append(cur.strip())
+                cur = ""
+            else:
+                cur += ch
+        cols.append(cur.strip())
+        return set(cols)
+
+    assert "created_at" in top_level(m.CANDIDATE_SELECT)
+    assert "created_at" in top_level(rfp_email_ingest._PROJECT_SELECT)
+    assert {"actual_bid_at", "internal_bid_at", "abandoned_at", "current_stage"} <= top_level(
+        rfp_email_ingest._PROJECT_SELECT)
 
 
 def test_precreate_query_windows_on_internal_only():

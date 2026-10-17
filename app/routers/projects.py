@@ -4,7 +4,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from postgrest.exceptions import APIError
 
 from app.core.config import get_settings
@@ -34,6 +34,8 @@ from app.models.schemas import (
     ProjectCreate,
     ProjectDeleteIn,
     ProjectGcConfirmIn,
+    ProjectMergeIn,
+    ProjectMergePreviewIn,
     ProjectGcConfirmOut,
     ProjectGCIn,
     ProjectGCUpdate,
@@ -51,6 +53,7 @@ from app.services import (
     gono,
     pm,
     project_delete,
+    project_merge,
     project_numbers,
     proposal_send,
     storage,
@@ -421,6 +424,8 @@ def _rfp_created_summary(row: dict) -> dict:
         "likely_gc_name": row.get("likely_gc_name"),
         # Detail route only (`_split_issue_for`); the list leaves it null.
         "split_issue": row.get("split_issue"),
+        # Detail route only (`_files_issue_for`, docs/RFP_MISSING_FILES.md 7).
+        "files_issue": row.get("files_issue"),
     }
 
 
@@ -436,6 +441,21 @@ def _split_issue_for(row: dict | None) -> dict | None:
         return issue_for_project(get_supabase(), row)
     except Exception:  # noqa: BLE001 - a banner, never a gate on the project page
         logger.exception("projects: split flag failed for %s", row.get("project_id"))
+        return None
+
+
+def _files_issue_for(row: dict | None) -> dict | None:
+    """The missing-files issue for the project page (docs/RFP_MISSING_FILES.md
+    7): every file or link the harvest could not bring in. Never fails the
+    project read: trouble answers None (no callout)."""
+    if not row or not row.get("project_id"):
+        return None
+    try:
+        from app.services import rfp_file_issues
+
+        return rfp_file_issues.issue_for_project(get_supabase(), str(row["project_id"]))
+    except Exception:  # noqa: BLE001 - a callout, never a gate on the project page
+        logger.exception("projects: missing-files issue failed for %s", row.get("project_id"))
         return None
 
 
@@ -1000,6 +1020,91 @@ def archive_delete_project(
         raise _delete_error(exc) from exc
 
 
+# ── Merge into a project we are already bidding (docs/PROJECT_MERGE.md 5) ───
+# The Project Details box's "Merge Projects" on an RFP-created project: its
+# GCs, RFP links, email filing and new documents move to the picked project
+# and it is deleted through the archive above (reason `merged`). The delete
+# roles and the delete rate limit; Bidding only.
+
+
+def _merge_error(exc: project_merge.ProjectMergeError) -> HTTPException:
+    headers = {"X-Error-Code": f"project_merge_{exc.code}"} if exc.code else None
+    return HTTPException(exc.status_code, str(exc), headers=headers)
+
+
+@router.get(
+    "/{project_id}/merge-targets",
+    dependencies=_BIDDING_ONLY + [Depends(project_delete_rate_limit)],
+)
+def project_merge_targets(
+    project_id: str,
+    q: str | None = Query(default=None, max_length=400),
+    limit: int = Query(default=project_merge.DEFAULT_LIMIT, ge=1, le=project_merge.MAX_LIMIT),
+    user: CurrentUser = Depends(require_project_delete),
+) -> dict:
+    """The Pick step: `{items: [{id, number, name, stage, bid_at, gc_names,
+    rfp_created}], blocked}`. Without `q`, up to 10 likely targets by name;
+    with it (trimmed, 100 characters at most), up to `limit` projects whose
+    number, name or a GC's name contains it, nearest bid date first. Only
+    projects still being bid in the same test-bench scope. `blocked` is why
+    this project cannot be merged at all (then no items). `bid_at` is the
+    actual bid date only for the roles that may see it."""
+    _uuid_or_404(project_id)
+    try:
+        return project_merge.merge_targets(
+            get_supabase(), project_id, q=q, limit=limit, role=user.role
+        )
+    except project_merge.ProjectMergeError as exc:
+        raise _merge_error(exc) from exc
+
+
+@router.post(
+    "/{project_id}/merge-preview",
+    dependencies=_BIDDING_ONLY + [Depends(project_delete_rate_limit)],
+)
+def project_merge_preview(
+    project_id: str,
+    body: ProjectMergePreviewIn,
+    _: CurrentUser = Depends(require_project_delete),
+) -> dict:
+    """The "Are you sure?" step: what moves and what stays, both texts to
+    type, and the document comparison's progress. POST because it stores
+    document hashes; each call works about 20 seconds and the modal calls
+    again until `ready`. A `blocked` answer is final."""
+    _uuid_or_404(project_id)
+    try:
+        return project_merge.preview(get_supabase(), project_id, body.target_project_id)
+    except project_merge.ProjectMergeError as exc:
+        raise _merge_error(exc) from exc
+
+
+@router.post(
+    "/{project_id}/merge",
+    dependencies=_BIDDING_ONLY + [Depends(project_delete_rate_limit)],
+)
+def merge_project(
+    project_id: str,
+    body: ProjectMergeIn,
+    user: CurrentUser = Depends(require_project_delete),
+) -> dict:
+    """Merge this RFP-created project into the target and delete it,
+    recoverably (one transaction in the database, both names checked again
+    under the row locks). 200 `{archive_id, source, target, gcs_moved,
+    gcs_already, files_moved, files_skipped, rfp_links_moved}`; 422 on a
+    name mismatch; 409 on any refusal, `files_not_ready` while documents are
+    still being compared, `files_changed` when they changed twice under the
+    call; 404 unknown project. Audited `project.merge` on the target and
+    `project.delete` (reason merged) on this project."""
+    _uuid_or_404(project_id)
+    try:
+        return project_merge.merge(
+            get_supabase(), project_id, target_id=body.target_project_id, actor_id=user.id,
+            confirm_source=body.confirm_source_name, confirm_target=body.confirm_target_name,
+        )
+    except project_merge.ProjectMergeError as exc:
+        raise _merge_error(exc) from exc
+
+
 @router.get("/{project_id}", response_model=ProjectOut)
 def get_project(project_id: str, user: CurrentUser = Depends(get_current_user)):
     if user.role not in INTERNAL_ROLES:
@@ -1011,7 +1116,7 @@ def get_project(project_id: str, user: CurrentUser = Depends(get_current_user)):
     created = _rfp_created_rows([project_id])
     row = created.get(project_id)
     if row is not None:
-        row = {**row, "split_issue": _split_issue_for(row)}
+        row = {**row, "split_issue": _split_issue_for(row), "files_issue": _files_issue_for(row)}
     return _present(
         project,
         user.role,

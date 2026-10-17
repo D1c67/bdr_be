@@ -23,7 +23,7 @@ from fastapi.routing import APIRoute
 
 import app.main as app_main
 from app.core import deps
-from app.routers import rfp_emails, rfp_testing
+from app.routers import llm_status, rfp_emails, rfp_testing
 
 WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -46,6 +46,8 @@ ROLE_GATES = {
     deps.require_cp_write,
     rfp_emails.require_block_admin,
     rfp_testing.require_dev_it_admin,
+    # IT Admin role OR a dev account (live AI box switch).
+    llm_status.require_model_admin,
 }
 
 # Reviewed write routes without a role-class dependency. Each one checks the

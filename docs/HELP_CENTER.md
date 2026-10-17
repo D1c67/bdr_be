@@ -113,6 +113,38 @@ move:
   cases (PM or Certified Payroll enrollment) or the restore rules change,
   update that section.
 
+- Merge Projects (added 2026-10-07, dev only, PROJECT_MERGE.md): the
+  section "Merging a project into one you're already bidding"
+  (`new-projects-merge` in `newProjects.ts`), linked from the lede of
+  `new-projects-wrong`. It explains when to use it (an RFP-created project
+  that is the same job as an active bid: not abandoned, declined or
+  decided; no work started on the RFP project; documents finished copying;
+  splitter not running; not in PM or Certified Payroll), who can (Estimating
+  Admin, Executive, IT Admin), the click path ([[Details]], [[Merge
+  Projects]] at the bottom of the Project details box, pick with likely
+  matches or search, [[Are you sure?]] with "Comparing documents: N of M"),
+  the two typed names (old and new, exact, the number when a project has no
+  name), the what-moves table (GCs with contacts and due date, GCs already
+  on the kept project keep their link and gain contacts, documents by
+  identical contents only with skipped and unreadable cases, RFP links,
+  filed project emails; notes, intake, estimator notes, Go/No-Go answers
+  and history stay), that the old project goes to Deleted Projects as
+  "Merged into NUMBER NAME", the one notification to the kept project's
+  step owners, and that an IT Admin's restore brings it back WITHOUT what
+  moved. If the eligibility rules (sections 2.1 and 2.2), what moves
+  (section 3) or the restore rule (section 6) change, update that section.
+
+- No-GC hold, Not an RFP and Procore change-order RFQs (2026-10-05, dev
+  only): `matching.ts` (the "New invitation, GC unknown" reason row and the
+  paragraph on when a no-match email carries on by itself), `review.ts`
+  (the [[Not an RFP]] and [[Continue as a new project]] rows of the match
+  review table), `emailsPage.ts` (the Procore change-order reason and the
+  match buttons), `journey.ts` (the classify and match steps and the final
+  statuses), `glossary.ts` (Match review) and `newProjects.ts` ("Nothing
+  identifies the GC"). If rule 8b's exemptions (nonorganic, a platform
+  object that already has a project) or the Procore rule
+  (RFP_EMAIL_INGESTION.md 3.4.1) change, update those lines.
+
 - Calling In (added 2026-09-30, `lib/help/calling-in/*.ts`): mirrors
   `CALLING_IN.md`. If the list timing (10 days, Pacific calendar days, end of
   day for an unknown bid time), the "only Spoke with them marks a GC done"

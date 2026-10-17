@@ -98,6 +98,11 @@ _TYPE_META: dict[str, tuple[str, str]] = {
     # merged anything. Created with mirror_email=False and no project, so this
     # entry only gives the type a title if the mirror is ever enabled.
     "rfp_match.merged": ("New RFP matches merged", "Open RFP emails"),
+    # Merge Projects (docs/PROJECT_MERGE.md 7.3): a bell row on the project
+    # merged into, to its current stage's owners. Created with
+    # mirror_email=False like the matcher's notice; this entry titles it in
+    # the notification log and in the mirror if that is ever enabled.
+    "project_merged": ("A project was merged into this one", "Open project"),
     # NGEM portal invitations (docs/RFP_NGEM_PORTAL.md section 5): bell rows
     # only (mirror_email=False); these entries give the types a title in the
     # notification log and a heading if the mirror is ever enabled.

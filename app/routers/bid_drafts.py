@@ -58,7 +58,7 @@ from app.core.file_categories import (
 from app.core.ratelimit import upload_rate_limit
 from app.core.roles import ACTUAL_BID_EDITOR_ROLES, ACTUAL_BID_VIEWER_ROLES, Role
 from app.core.supabase_client import get_supabase
-from app.services import files_needed, office_preview, storage
+from app.services import files_needed, office_preview, rfp_file_issues, storage
 from app.services.notifications import audit
 
 router = APIRouter(prefix="/bid-drafts", tags=["bid-drafts"])
@@ -628,6 +628,9 @@ def transfer_draft(
             row = existing[0]
         else:
             convertible = office_preview.is_convertible(f["filename"], f["category"])
+            # The missing-files first-file rule asks BEFORE the insert
+            # (docs/RFP_MISSING_FILES.md 4); best effort.
+            first_file = rfp_file_issues.is_first_file(get_supabase(), project_id, f["category"])
             insert = (
                 get_supabase()
                 .table("project_files")
@@ -682,6 +685,12 @@ def transfer_draft(
             # The files flag (docs/RFP_BUILDINGCONNECTED.md 3.8): a landed
             # drawing or specification satisfies it. Best effort in the service.
             files_needed.clear_if_satisfied(get_supabase(), project_id, f["category"], user.id)
+            # The missing files of an RFP-created project: a landed file of
+            # the same name resolves its item. Best effort in the service.
+            rfp_file_issues.after_file_insert(
+                get_supabase(), project_id, category=f["category"], filenames=[f.get("filename")],
+                actor_id=user.id, first_file=first_file, by_person=True,
+            )
 
         # Retire the draft row the moment its file is safely on the project -
         # this is what makes a retry only process the remainder.

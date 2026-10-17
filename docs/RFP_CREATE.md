@@ -37,7 +37,7 @@ FE namespace `rfpCreated`.
 | Assignment | Fully automatic. The New Project form shows a preview ("next: 26.9.7204") and the server assigns the real number on save, atomically, so two people saving at once get consecutive numbers. Nobody types a number, in the form, in Edit Details, or in a saved draft. |
 | `B` | A BUDGETARY marker (not a rebid marker), added so estimating engineers notice a budgetary bid at a glance. A "Budgetary" toggle on New Project appends it at assignment; the same toggle on Edit Details adds or removes it later (a rename of the same number). |
 | Existing numbers | Never rewritten, not on dev, not on production. The format rule applies only to numbers the app assigns and to the Budgetary toggle. A legacy number the toggle cannot parse is left alone with a clear refusal. |
-| Duplicates | The RFP matcher is the duplicate guard (user decision). This slice adds only harvest-key idempotency: one project per `rfp_harvests` row, so a Procore reminder, addendum notice or second-recipient copy that shares the harvest attaches to the project already created from it. Copies that do NOT share a harvest are caught by the create-time guard in 4.6 (a sibling copy that already created, or a project made minutes ago with the same name for the same GC): it links, it never decides that two DIFFERENT invitations are one project. |
+| Duplicates | The RFP matcher is the duplicate guard (user decision). This slice adds only harvest-key idempotency: one project per `rfp_harvests` row, so a Procore reminder, addendum notice or second-recipient copy that shares the harvest attaches to the project already created from it. Copies that do NOT share a harvest are caught by the create-time guard in 4.6 (a sibling copy that already created, or a project made minutes ago with the same name for the same GC, or, with no GC resolved, from the same sender): it links, it never decides that two DIFFERENT invitations are one project. |
 | What is filled | Name, actual bid date, address, bidding link (or "no link"), bid notes, invitation date, GC(s) and bid contact, `is_ngem` for NGEM, and the harvested documents. `created_by` is null (System) on the automatic path, the clicking user on the manual path. |
 | What stays empty | Internal bid date, due-from-estimator, due-from-vendors and the nine Go/No-Go rubric answers. The DB allows null; only the manual form's schema required them. Filling them is the Estimating Admin's task (a dashboard task plus one email per project). |
 | Go/No-Go | The project is created at `intake` and advanced into `go_no_go` with the `review` entry action, never `score` (an empty rubric scores 0, which would be an automatic No-Go). It waits in the Executive's review exactly like a hand-sent project. |
@@ -46,7 +46,7 @@ FE namespace `rfpCreated`.
 | Rollout | Button first: "Create project" on the RFP email detail (every tab) and on the NGEM invitation modal from day one. Automatic creation behind `RFP_CREATE_AUTO_ENABLED` (default false), applying to rows that reach the end of the pipeline after the flag is on. |
 | Which rows | Every invitation method (`organic`, `procore`, `pipelinesuite`, `smartbid`, `gc_portal`, `general`, `nonorganic`) and NGEM portal invitations. Rows with nothing harvested still create, flagged "missing files". Sibling followers (`flag_reason = sibling`) never create; they are linked to the leader's project. `merged` and `duplicate` rows never create (the project exists). |
 | Files | The ORIGINAL bytes are promoted from quarantine when the sandbox verdict is `verified`, every hazard counter except `uri_links` is zero and the promoted bytes carry no byte marker but `/URI` as a name token (estimators take off from vector PDFs; RFQs and the splitter need them too). Anything else is listed on the card with the reason and not ingested; no rasterized fallback. Legacy `.doc` / `.xls` promote the sandbox's converted PDF instead of the original (legacy binaries can carry macros, the converted PDF cannot); a `.docx` / `.xlsx` original is scanned as an OOXML container first and falls back to the converted PDF when the scan refuses it (section 5). |
-| GC | A resolved GC attaches with its resolved contact. Unresolved: the card shows "Sender: Name <address>, likely <GC>" when the app can infer one (a GC contact on the sender's domain, or the match step's GC candidates); a `nonorganic` row (an unauthorized sender a user allowed) with no inference creates a new GC and contact from the sender; every other unresolved case creates the project with no GC and the flag. NGEM projects have no GC by design (the agency is the owner). |
+| GC | A resolved GC attaches with its resolved contact. Unresolved: the card shows "Sender: Name <address>, likely <GC>" when the app can infer one (a GC contact on the sender's domain, or the match step's GC candidates); a `nonorganic` row (an unauthorized sender a user allowed) with no inference creates a new GC and contact from the sender; every other unresolved case creates the project with no GC and the flag. Since 2026-10-05 an email row (other than `nonorganic`) that matched no project and has no resolved GC first waits at `review_match` (`new_gc_unresolved`, RFP_MATCHING.md 3.5 rule 8b), so it reaches creation without a GC only when a person continues it that way. NGEM projects have no GC by design (the agency is the owner). |
 | Unauthorized marker | A project created from a row that was `flagged_unauthorized` and continued by a person carries "sender was unauthorized, allowed by <user>" on the page and on the project header. |
 | Name-less rows | "Set project name" on the email detail (with an Are-you-sure modal) writes the name and sends the row back through `match`, so it harvests and creates like any other. |
 | Out of scope | PM-only and Certified Payroll project creation still take a typed number (other sub-apps; the counter skips any number they take). Automatic re-harvest for addenda. Making the sandbox's reading tier lazy now that originals reach the project (follow-up, storage win only). |
@@ -143,7 +143,12 @@ Where rows enter `create` (all in existing seams, replacing `done`):
 1. `rfp_email_ingest._park_done`: the match step's "no project" exits
    (`no_project_name` included: the row lands at `create`, the step sees no
    name and drains to `done` with `flag_reason` untouched, so "Set project
-   name" can send it back through `match`).
+   name" can send it back through `match`). Since 2026-10-05 a
+   `no_candidate` or `all_different` row whose GC did not resolve does NOT
+   take this exit: it waits at `review_match` (`new_gc_unresolved`,
+   RFP_MATCHING.md 3.5 rule 8b) and enters through exit 5 once a person
+   continues it. `nonorganic` rows and rows whose platform object already
+   has a project still take it.
 2. `rfp_harvest._finish_email` in pipeline mode (the job's own exit, success
    and permanent failure alike: a failed harvest still creates, flagged
    "missing files").
@@ -227,8 +232,8 @@ def gc_plan_for(sb, row: dict, harvest: dict | None) -> GcPlan          # resolv
 def link_harvest_mates(sb, harvest_id: str, project_id: str) -> int    # other rows sharing the harvest -> created
 def normalized_name(value) -> str                                       # pure: whitespace collapsed, casefolded
 def duplicate_project_for(sb, row: dict, settings) -> _Duplicate | None
-    # 4.6: _Duplicate(project_id, why, sibling_email_id, project) or None
-def recent_project_sentence(project: dict | None) -> str                # the manual path's refusal
+    # 4.6: _Duplicate(project_id, why, sibling_email_id, project, matched_on) or None
+def recent_project_sentence(project: dict | None, matched_on="gc") -> str   # the manual path's refusal
 ```
 
 ### 4.1 Preconditions (`CreateRefused` with a sentence)
@@ -375,10 +380,40 @@ subject and no copies, so it is skipped.
 2. **A project made moments ago.** A `projects` row created within
    `RFP_CREATE_DUPLICATE_WINDOW_MINUTES` (60; 0 disables this half), not
    abandoned, whose name equals this row's `extracted_project_name` with
-   whitespace collapsed and casefolded, AND already linked in `project_gcs`
-   to this row's `resolved_gc_id`. The oldest such project wins. A row with
-   no `resolved_gc_id` skips this half entirely: a name on its own is the
-   matcher's evidence, not a blind guard's.
+   whitespace collapsed and casefolded, AND tied to this row by more than
+   the name. The oldest such project wins. The tie:
+   - with a `resolved_gc_id`: the project is already linked in
+     `project_gcs` to that GC (`matched_on = gc`);
+   - with none (2026-10-05; before, this half was skipped): an email from
+     this row's own sender address (`from_address`, case-insensitive) made
+     or joined the project (`matched_on = sender`). "Made" is the email the
+     project's `rfp_created_projects` record names (written right behind
+     the project, 4.5 step 2, so a creation still in flight counts);
+     "joined" is any `rfp_emails` row whose `created_project_id` is the
+     project. The same mailbox sending the same notice again is the case
+     this catches: three copies of one Procore notice with no GC made three
+     projects 7 minutes apart in production on 2026-10-02. A project nobody
+     made from an email (New Bid) never matches this way. A row whose
+     method sends every GC's mail from one shared platform address
+     (`SHARED_SENDER_METHODS`: `smartbid`, all from
+     `notifications@com2.smartbidnet.com`) gets no sender tie at all, so GC
+     B's invitation never lands on GC A's same-name project with GC B never
+     attached; with no GC it gets the sibling half only. Checked on dev
+     2026-10-05 for the other methods: Procore senders are per GC
+     (`<gc>_notifications@procoretech.com`), PipelineSuite, organic and
+     nonorganic senders are the GC's own people (no `general` rows yet). A
+     per-address "more than one extracted GC name" test was rejected: the
+     extracted names are model spellings of one GC ("EOC" / "EOC
+     Estimates", "SHF" / "SEBF International", four Cobblestone variants),
+     so it would refuse real single-GC senders and is not deterministic.
+   A name on its own never links: that is the matcher's evidence, not a
+   blind guard's. The 60-minute window covers copies that arrive in the same
+   tick or minutes apart, before the matcher's per-sweep bundle can see the
+   first copy's project. Repeats a day or more apart (the daily Procore
+   reminders of 2026-10-06..09) are the matcher's job: a project created in
+   the last `RFP_MATCH_CANDIDATE_WINDOW_DAYS` days is a match candidate
+   whatever its bid date (docs/RFP_MATCHING.md section 1, 2026-10-12), so
+   this window is not widened.
 
 Neither half ever links to a project in the row's `excluded_project_ids`
 (an unmerge put it there precisely so this row never lands on it again), to
@@ -392,8 +427,9 @@ created` with that `created_project_id` and `decided_at_step = create` (a
 sibling hit also stamps `sibling_of_email_id` and `flag_reason = sibling`,
 the same marks 3.1 and `link_harvest_mates` leave), a `rfp_create.link`
 audit row records what was duplicated in `duplicate_of` (the copy's email id
-for a sibling hit, the project id for a recent-project hit) and the rule that
-found it in `why` (`sibling` or `recent_project`), and the call returns
+for a sibling hit, the project id for a recent-project hit), the rule that
+found it in `why` (`sibling` or `recent_project`) and, for a recent-project
+hit, the tie in `matched_on` (`gc` or `sender`; null for a sibling), and the call returns
 `Created(linked=True, why=..., duplicate_of=<email id or null>)`. A test row records a `create` / `linked` event; other rows log at
 info. The one thing that can raise is the CAS: a miss is the lost race and
 raises `CreateRefused(_MSG_LOST_RACE)`, exactly as `_link_existing` does.
@@ -435,9 +471,10 @@ The two halves differ on the harvest and the documents:
 On the MANUAL path (the "Create project" button, `automatic=False`) the
 recent-project half does NOT link. A person's click is never attached to a
 project the app only inferred: it raises `CreateRefused` with a sentence
-naming the project and its age ("A project with this name for this GC was
+naming the project, its age and the tie ("A project with this name for this GC was
 created 7 minutes ago: 26.9.7124 NAME. Merge this email into it, or rename
-the project, before creating another."), which the router returns as the 409
+the project, before creating another."; "from this sender" in place of "for
+this GC" when the tie was the sender), which the router returns as the 409
 `rfp_create_refused` it already returns for refusals. The sibling half links
 on both paths: a copy of the same message is not an inference, it IS this
 email. The automatic path links on both halves.
@@ -875,8 +912,12 @@ the block. Release needs 0130 on staging then production plus
   notifications, missing list, and the 4.6 duplicate guard (sibling already
   created in either direction, a recent project with the same name and GC,
   another GC, another name, outside the window, abandoned, window 0, a row
-  with no resolved GC, the button path releasing its claim, the test-bench
-  `linked` event).
+  with no resolved GC (never on the name alone; 2026-10-05: joins a recent
+  project its own sender made, found by the `rfp_created_projects` record or
+  by `created_project_id`, case-insensitive, never another sender's, and a
+  resolved GC keeps the GC tie; the manual refusal says "from this
+  sender"), the button path releasing its claim, the test-bench `linked`
+  event).
 - `tests/test_rfp_create_files.py`: promotion decision table (every skip
   reason), category mapping, idempotent retry, sha mismatch, doc/xls
   converted path, drawing bell once.

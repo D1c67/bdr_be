@@ -1075,9 +1075,11 @@ def test_the_window_at_zero_turns_the_project_half_of_the_guard_off(db, rec, mon
                                 automatic=True).project_id == "p-sib"
 
 
-def test_a_row_with_no_resolved_gc_gets_only_the_sibling_half(db, rec):
+def test_a_row_with_no_resolved_gc_never_links_on_the_name_alone(db, rec):
     """A name alone never links: naming two different jobs the same thing is
-    common, and deciding they are one project is the matcher's job."""
+    common, and deciding they are one project is the matcher's job. With no
+    GC, the project half needs the same sender (next tests); a project no
+    email of this sender made is not it."""
     _existing(db, "p-recent")
     db.tables["rfp_emails"].append(_email(resolved_gc_id=None, resolved_gc_contact_id=None,
                                           gc_candidates=[]))
@@ -1092,6 +1094,125 @@ def test_a_row_with_no_resolved_gc_gets_only_the_sibling_half(db, rec):
     db.tables["rfp_emails"].append(_email(id="e-2", **other))
     made = rc.create_from_email(db, _email_row(db, "e-2"), actor_id=None, automatic=True)
     assert made.linked is True and made.project_id == "p-recent"
+
+
+NO_GC = {"resolved_gc_id": None, "resolved_gc_contact_id": None, "gc_candidates": []}
+PROCORE_SENDER = "cobblestone_construction_notifications@procoretech.com"
+
+
+def _made_by(db, project_id, email_id, sender, *, record=True, **over):
+    """The email that made `project_id`, the way a creation leaves it: the
+    `rfp_created_projects` record naming it (4.5 step 2) and, once its CAS
+    landed, its own `created_project_id`. A day before this row, so it is
+    never a sibling copy: only the project half of the guard can find it."""
+    db.tables["rfp_emails"].append(_email(
+        id=email_id, from_address=sender, status="created", created_project_id=project_id,
+        received_at="2026-09-14T13:00:00+00:00", **{**NO_GC, **over}))
+    if record:
+        db.tables["rfp_created_projects"].append(
+            {"project_id": project_id, "source_kind": "rfp_email", "rfp_email_id": email_id})
+
+
+def test_a_no_gc_row_joins_a_recent_project_its_own_sender_made(db, rec, no_insert):
+    """2026-10-02: three copies of one Procore notice, no GC resolved, made
+    three projects 7 minutes apart. With no GC the project half ties the
+    project to this row by the sender of the email that made it
+    (case-insensitive) instead of skipping."""
+    _existing(db, "p-first", gc_id=None, minutes_ago=7)
+    _made_by(db, "p-first", "e-maker", PROCORE_SENDER.upper())
+    db.tables["rfp_emails"].append(_email(from_address=PROCORE_SENDER, invitation_method="procore",
+                                          **NO_GC))
+    made = rc.create_from_email(db, _email_row(db), actor_id=None, automatic=True)
+    assert made.linked is True and made.project_id == "p-first" and made.why == "recent_project"
+    assert [p["id"] for p in _projects(db)] == ["p-first"]
+    row = _email_row(db)
+    assert row["status"] == "created" and row["created_project_id"] == "p-first"
+    assert row["sibling_of_email_id"] is None
+    (a,) = [x for x in rec["audits"] if x["action"] == "rfp_create.link"]
+    assert a["payload"]["why"] == "recent_project" and a["payload"]["matched_on"] == "sender"
+    assert a["payload"]["duplicate_of"] == "p-first"
+
+
+def test_a_no_gc_row_finds_the_maker_by_either_record(db, rec, no_insert):
+    """The record alone (a creation whose own CAS has not landed yet) and
+    the email's `created_project_id` alone (no record) each tie it."""
+    _existing(db, "p-inflight", gc_id=None)
+    _made_by(db, "p-inflight", "e-maker", PROCORE_SENDER)
+    db.tables["rfp_emails"][-1]["created_project_id"] = None     # its CAS still to come
+    db.tables["rfp_emails"].append(_email(from_address=PROCORE_SENDER, **NO_GC))
+    assert rc.create_from_email(db, _email_row(db), actor_id=None, automatic=True).project_id == (
+        "p-inflight")
+
+    _existing(db, "p-linked", name="Clinic Fit-Out", gc_id=None, number="26.9.7160")
+    _made_by(db, "p-linked", "e-maker-2", PROCORE_SENDER, record=False)
+    other = {"subject": "Invitation to Bid: Clinic Fit-Out", "extracted_project_name": "Clinic Fit-Out"}
+    db.tables["rfp_emails"].append(_email(id="e-2", from_address=PROCORE_SENDER, **other, **NO_GC))
+    assert rc.create_from_email(db, _email_row(db, "e-2"), actor_id=None, automatic=True).project_id == (
+        "p-linked")
+
+
+def test_a_no_gc_row_from_another_sender_makes_its_own_project(db, rec):
+    _existing(db, "p-first", gc_id=None)
+    _made_by(db, "p-first", "e-maker", "monument_construction_notifications@procoretech.com")
+    db.tables["rfp_emails"].append(_email(from_address=PROCORE_SENDER, **NO_GC))
+    made = rc.create_from_email(db, _email_row(db), actor_id=None, automatic=True)
+    assert made.linked is False and made.project_id != "p-first"
+    # A sender match outside the window, or on another name, is no match either.
+    _existing(db, "p-old", name="Clinic Fit-Out", gc_id=None, minutes_ago=61, number="26.9.7161")
+    _made_by(db, "p-old", "e-old", PROCORE_SENDER)
+    db.tables["rfp_emails"].append(_email(id="e-3", from_address=PROCORE_SENDER,
+                                          subject="Invitation to Bid: Clinic Fit-Out",
+                                          extracted_project_name="Clinic Fit-Out", **NO_GC))
+    assert rc.create_from_email(db, _email_row(db, "e-3"), actor_id=None, automatic=True).linked is False
+
+
+def test_a_shared_platform_sender_never_ties_a_no_gc_row(db, rec):
+    """SmartBid sends every GC's invitation from one address: GC B's no-GC
+    invitation must not land on GC A's same-name project (GC B would never
+    be attached). The sibling half still applies; a resolved GC still ties."""
+    smartbid = "notifications@com2.smartbidnet.com"
+    _existing(db, "p-gc-a", gc_id=None)
+    _made_by(db, "p-gc-a", "e-gc-a", smartbid, invitation_method="smartbid")
+    db.tables["rfp_emails"].append(_email(from_address=smartbid, invitation_method="smartbid", **NO_GC))
+    made = rc.create_from_email(db, _email_row(db), actor_id=None, automatic=True)
+    assert made.linked is False and made.project_id != "p-gc-a"
+    # The same shape from a per-GC sender (any other method) still ties.
+    _existing(db, "p-procore", name="Clinic Fit-Out", gc_id=None, number="26.9.7160")
+    _made_by(db, "p-procore", "e-procore", PROCORE_SENDER, invitation_method="procore")
+    db.tables["rfp_emails"].append(_email(
+        id="e-2", from_address=PROCORE_SENDER, invitation_method="procore",
+        subject="Invitation to Bid: Clinic Fit-Out", extracted_project_name="Clinic Fit-Out", **NO_GC))
+    assert rc.create_from_email(db, _email_row(db, "e-2"), actor_id=None, automatic=True).project_id == (
+        "p-procore")
+    # A SmartBid row WITH a resolved GC keeps the GC tie.
+    _existing(db, "p-gc-1", name="Depot Remodel", gc_id="gc-1", number="26.9.7161")
+    db.tables["rfp_emails"].append(_email(
+        id="e-3", from_address=smartbid, invitation_method="smartbid",
+        subject="Invitation to Bid: Depot Remodel", extracted_project_name="Depot Remodel"))
+    made = rc.create_from_email(db, _email_row(db, "e-3"), actor_id=None, automatic=True)
+    assert made.linked is True and made.project_id == "p-gc-1"
+
+
+def test_a_resolved_gc_keeps_the_gc_rule_not_the_sender(db, rec):
+    """With a GC resolved, the GC on the project is the tie, as before: the
+    same sender is not enough when the project carries another GC."""
+    _existing(db, "p-first", gc_id="gc-2")
+    _made_by(db, "p-first", "e-maker", "pm@gc.example")
+    db.tables["rfp_emails"].append(_email())                  # gc-1, same sender
+    assert rc.create_from_email(db, _email_row(db), actor_id=None, automatic=True).linked is False
+
+
+def test_the_manual_refusal_names_the_sender_when_no_gc_resolved(db, rec, no_insert):
+    _existing(db, "p-first", gc_id=None, minutes_ago=7, number="26.9.7124")
+    _made_by(db, "p-first", "e-maker", PROCORE_SENDER)
+    db.tables["rfp_emails"].append(_email(status="done", from_address=PROCORE_SENDER, **NO_GC))
+    with pytest.raises(rc.CreateRefused) as exc:
+        rc.create_from_email(db, _email_row(db), actor_id="u-1", automatic=False)
+    assert str(exc.value) == (
+        "A project with this name from this sender was created 7 minutes ago: 26.9.7124 Warehouse HVAC. "
+        "Merge this email into it, or rename the project, before creating another."
+    )
+    assert _email_row(db)["status"] == "done"
 
 
 def test_the_guard_covers_the_button_path_and_releases_a_harvest_claim(db, rec, no_insert):
@@ -1377,6 +1498,10 @@ def test_recent_project_sentence_names_the_project_and_its_age():
     # Missing pieces never break the sentence.
     assert "another project" in rc.recent_project_sentence(None)
     assert "0 minutes ago" in rc.recent_project_sentence({"number": "26.9.1", "created_at": None})
+    # The tie it names: the GC (default), or the sender when no GC resolved.
+    assert "with this name for this GC was" in rc.recent_project_sentence(project, rc.MATCHED_ON_GC)
+    assert "with this name from this sender was" in rc.recent_project_sentence(
+        project, rc.MATCHED_ON_SENDER)
 
 
 # ── The RFP test bench's tag and event (docs/RFP_TESTING.md 4.4) ───────────

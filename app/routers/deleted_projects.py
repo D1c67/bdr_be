@@ -90,9 +90,10 @@ def list_deleted_projects(
     """Newest first (`deleted_at desc, id desc`), paged on the last row's
     `(deleted_at, id)`: `before` is its `deleted_at`, `before_id` its id.
     `restored=false` (default) lists the projects still deleted, `true` the
-    restored ones, `all` both; `reason` narrows to one reason code (400 on
-    an unknown one)."""
-    if reason is not None and reason not in project_delete.REASONS:
+    restored ones, `all` both; `reason` narrows to one reason code, `merged`
+    included (400 on an unknown one). A merged row carries `merged_into`
+    `{project_id, number, name}` (docs/PROJECT_MERGE.md 7.2)."""
+    if reason is not None and reason not in project_delete.LIST_REASONS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown reason")
     before_iso = _parse_before(before)
     before_uuid = (

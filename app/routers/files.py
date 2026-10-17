@@ -21,6 +21,7 @@ an addendum number + issue date instead of a note, and estimators never upload
 them.
 """
 
+import logging
 import os
 import threading
 from datetime import date, datetime, timedelta, timezone
@@ -81,8 +82,17 @@ from app.core.ratelimit import (
 from app.core.roles import WRITER_ROLES, Role
 from app.core.supabase_client import get_supabase
 from app.models.schemas import FilesExportIn
-from app.services import estimator_rounds, file_export, files_needed, office_preview, storage
+from app.services import (
+    estimator_rounds,
+    file_export,
+    files_needed,
+    office_preview,
+    rfp_file_issues,
+    storage,
+)
 from app.services.notifications import audit, notify_role, notify_user
+
+logger = logging.getLogger(__name__)
 
 # Rate limit estimator file traffic (no-op for internal roles).
 router = APIRouter(
@@ -455,15 +465,7 @@ async def upload_file(
     elif category in DOC_TYPE_REQUIRED_CATEGORIES:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, DOC_TYPE_REQUIRED_MESSAGE)
 
-    if category in UPDATE_CATEGORIES:
-        # Updates only exist relative to a hand-off, and each must say what it
-        # is - the note travels with the file to the estimators.
-        if not note:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, NOTE_REQUIRED_MESSAGE)
-        if not await run_in_threadpool(handoff_locked, project_id):
-            raise HTTPException(status.HTTP_409_CONFLICT, NOT_LOCKED_MESSAGE)
-    elif category in INITIAL_CATEGORIES and await run_in_threadpool(handoff_locked, project_id):
-        raise HTTPException(status.HTTP_409_CONFLICT, LOCKED_MESSAGE)
+    await run_in_threadpool(check_upload_lock, project_id, category, note)
 
     settings = get_settings()
     # The external estimator (the one untrusted role) gets a lower per-file cap;
@@ -487,48 +489,41 @@ async def upload_file(
         del content
 
     convertible = office_preview.is_convertible(file.filename, category)
-    insert = (
-        get_supabase()
-        .table("project_files")
-        .insert(
-            {
-                "project_id": project_id,
-                "category": category,
-                "storage_path": path,
-                "filename": file.filename,
-                "material_category_id": material_category_id,
-                "uploaded_by": user.id,
-                "mime_type": stored_mime,
-                "size_bytes": size_bytes,
-                "preview_status": "pending" if convertible else "none",
-                "note": note,
-                # NULL for everything except revisions/addenda (0077 CHECK).
-                "doc_type": doc_type,
-                # Both NULL for non-addenda (required by the 0076 DB CHECK);
-                # `issued_on` is only bound in the addendum branch above, so the
-                # conditional never evaluates it for other categories.
-                "addendum_number": addendum_number or None,
-                "addendum_issued_on": (
-                    issued_on.isoformat() if category == ADDENDUM_CATEGORY else None
-                ),
-                # Estimator deliverables start as drafts of the open round -
-                # sealed (submission_round stamped) only when they press Send.
-                "estimator_deliverable": user.role == Role.ESTIMATOR
-                and category in ESTIMATOR_WRITE,
-            }
-        )
+    # The missing-files first-file rule (docs/RFP_MISSING_FILES.md 4) needs
+    # to know whether this is the project's first drawing or specification,
+    # asked BEFORE the insert; best effort (False on any trouble).
+    first_file = await run_in_threadpool(
+        rfp_file_issues.is_first_file, get_supabase(), project_id, category
     )
-    try:
-        row = (await run_in_threadpool(insert.execute)).data[0]
-    except Exception:
-        # The object was PUT before this insert; without its row nothing would
-        # ever reclaim it (e.g. the project was discarded mid-upload, making the
-        # insert fail its FK). Best-effort - the original error is the answer.
-        try:
-            await run_in_threadpool(storage.delete_file, path)
-        except Exception:  # noqa: BLE001
-            pass
-        raise
+    row = await run_in_threadpool(
+        _insert_file_row,
+        {
+            "project_id": project_id,
+            "category": category,
+            "storage_path": path,
+            "filename": file.filename,
+            "material_category_id": material_category_id,
+            "uploaded_by": user.id,
+            "mime_type": stored_mime,
+            "size_bytes": size_bytes,
+            "preview_status": "pending" if convertible else "none",
+            "note": note,
+            # NULL for everything except revisions/addenda (0077 CHECK).
+            "doc_type": doc_type,
+            # Both NULL for non-addenda (required by the 0076 DB CHECK);
+            # `issued_on` is only bound in the addendum branch above, so the
+            # conditional never evaluates it for other categories.
+            "addendum_number": addendum_number or None,
+            "addendum_issued_on": (
+                issued_on.isoformat() if category == ADDENDUM_CATEGORY else None
+            ),
+            # Estimator deliverables start as drafts of the open round -
+            # sealed (submission_round stamped) only when they press Send.
+            "estimator_deliverable": user.role == Role.ESTIMATOR
+            and category in ESTIMATOR_WRITE,
+        },
+        path,
+    )
     audit_payload = {"category": category}
     if doc_type:
         audit_payload["doc_type"] = doc_type
@@ -541,22 +536,136 @@ async def upload_file(
         # Sync task → runs in the threadpool after the response; never blocks.
         background.add_task(office_preview.generate_preview, row["id"])
 
+    await run_in_threadpool(_after_file_added, project_id, row, category, user, first_file)
+    return row
+
+
+def check_upload_lock(project_id: str, category: str, note: str | None) -> None:
+    """The hand-off lock rules every team-side upload path shares (sync;
+    async callers run it in the threadpool): an update (revision /
+    additional) needs its note AND the lock already in place; an initial
+    package block refuses once the package has sent. Addenda and the rest
+    never consult the lock. Raises the HTTPException with the sentence."""
+    if category in UPDATE_CATEGORIES:
+        # Updates only exist relative to a hand-off, and each must say what it
+        # is - the note travels with the file to the estimators.
+        if not note:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, NOTE_REQUIRED_MESSAGE)
+        if not handoff_locked(project_id):
+            raise HTTPException(status.HTTP_409_CONFLICT, NOT_LOCKED_MESSAGE)
+    elif category in INITIAL_CATEGORIES and handoff_locked(project_id):
+        raise HTTPException(status.HTTP_409_CONFLICT, LOCKED_MESSAGE)
+
+
+def _insert_file_row(payload: dict, path: str) -> dict:
+    """Insert the project_files row for an object already PUT at `path`
+    (sync). A failed insert reclaims the object: without its row nothing
+    would ever reclaim it (e.g. the project was discarded mid-upload, making
+    the insert fail its FK). Best-effort - the original error is the answer."""
+    try:
+        return get_supabase().table("project_files").insert(payload).execute().data[0]
+    except Exception:
+        try:
+            storage.delete_file(path)
+        except Exception:  # noqa: BLE001
+            pass
+        raise
+
+
+def _after_file_added(
+    project_id: str, row: dict, category: str, user: CurrentUser, first_file: bool
+) -> list[str]:
+    """The side effects of a new file on the project, after its audit row
+    (sync). Returns the missing-files items it resolved."""
     # Adding a drawing after intake means whoever prices off the drawings should
     # re-check their work. (Multiple drawings per project are legitimate.)
     if category in DRAWING_CATEGORIES:
-        await run_in_threadpool(
-            _notify_drawing_changed, project_id, user, "added", category
-        )
+        _notify_drawing_changed(project_id, user, "added", category)
 
     # The "files were not pulled from BuildingConnected" flag clears on the
     # first drawing or specification (docs/RFP_BUILDINGCONNECTED.md 3.8). The
     # service is best effort and never raises; the upload is already in.
     if category in files_needed.CLEAR_CATEGORIES:
-        await run_in_threadpool(
-            files_needed.clear_if_satisfied, get_supabase(), project_id, category, user.id
-        )
+        files_needed.clear_if_satisfied(get_supabase(), project_id, category, user.id)
 
-    return row
+    # The missing files of an RFP-created project (docs/RFP_MISSING_FILES.md
+    # 4): a file of the same name resolves its item, and the first drawing or
+    # specification on a project whose harvest brought nothing resolves them
+    # all. Best effort, never raises.
+    return rfp_file_issues.after_file_insert(
+        get_supabase(), project_id, category=category, filenames=[row.get("filename")],
+        actor_id=user.id, first_file=first_file, by_person=True,
+    )
+
+
+def add_team_file(
+    project_id: str,
+    category: str,
+    filename: str,
+    content: bytes,
+    user: CurrentUser,
+    *,
+    note: str | None,
+    background: BackgroundTasks | None = None,
+    audit_extra: dict | None = None,
+) -> tuple[dict, list[str]]:
+    """A team-side file the server already holds (the project's missing-files
+    drop zone, docs/RFP_MISSING_FILES.md 5) through the upload route's own
+    policy and insert, as `user`: the writer gate, the note cap, the hand-off
+    lock (`check_upload_lock`), the safe content type, the object, the row
+    (`_insert_file_row`), the audit, the preview and every file-add hook
+    (`_after_file_added`). Sync; async callers run it in the threadpool.
+    Categories that need upload-only metadata (an addendum's number and
+    date, a revision's doc_type) and the estimator's own are refused.
+    Returns `(row, the missing-files items the hooks resolved)`."""
+    if category not in VALID_CATEGORIES or category in ESTIMATOR_WRITE:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid category")
+    if category == ADDENDUM_CATEGORY or category in DOC_TYPE_REQUIRED_CATEGORIES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "This category needs the upload form")
+    if user.role not in WRITER_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
+    note = (note or "").strip() or None
+    if note and len(note) > FILE_NOTE_MAX_CHARS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Note is too long")
+    check_upload_lock(project_id, category, note)
+    stored_mime = _safe_content_type(filename)
+    path = storage.build_object_path(project_id, category, filename or "upload")
+    convertible = office_preview.is_convertible(filename, category)
+    first_file = rfp_file_issues.is_first_file(get_supabase(), project_id, category)
+    storage.upload_file(path, content, stored_mime)
+    row = _insert_file_row(
+        {
+            "project_id": project_id,
+            "category": category,
+            "storage_path": path,
+            "filename": filename,
+            "material_category_id": None,
+            "uploaded_by": user.id,
+            "mime_type": stored_mime,
+            "size_bytes": len(content),
+            "preview_status": "pending" if convertible else "none",
+            "note": note,
+            "doc_type": None,
+            "addendum_number": None,
+            "addendum_issued_on": None,
+            "estimator_deliverable": False,
+        },
+        path,
+    )
+    # The row is in: everything after it is best effort, so a caller never
+    # reads a failure for a file that is stored.
+    try:
+        audit(user.id, "file.upload", "project_file", row["id"], {"category": category, **(audit_extra or {})})
+    except Exception:  # noqa: BLE001
+        logger.exception("files: audit failed for %s", row.get("id"))
+    if convertible and background is not None:
+        background.add_task(office_preview.generate_preview, row["id"])
+    try:
+        resolved = _after_file_added(project_id, row, category, user, first_file)
+    except Exception:  # noqa: BLE001
+        logger.exception("files: after-add hooks failed for %s", row.get("id"))
+        resolved = []
+    return row, resolved
 
 
 def _notify_drawing_changed(

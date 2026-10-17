@@ -417,7 +417,7 @@ def test_summary_counts_by_reason(db):
     out = dr.deleted_projects_summary(_user(Role.IT_ADMIN))
     assert out == {"total": 3, "not_restored": 2, "restored": 1,
                    "by_reason": {"rfp_should_not_exist": 1, "duplicate": 1, "created_by_mistake": 0,
-                                 "other": 1}}
+                                 "other": 1, "merged": 0}}
 
 
 def test_restore_success_is_audited(db, audits):

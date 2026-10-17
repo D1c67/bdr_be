@@ -277,7 +277,9 @@ def test_list_shape_order_flags_and_one_query_per_table(db):
                   "split_status": None, "split_job_id": None, "split_files_total": 0, "split_files_done": 0,
                   "split_segments": 0, "split_failed": False,
                   # The splitter flag (docs/RFP_SPLIT.md 10): nothing to say.
-                  "split_partial": False, "split_issue": None},
+                  "split_partial": False, "split_issue": None,
+                  # The missing files (docs/RFP_MISSING_FILES.md 7): no items.
+                  "files_issue": None},
         "cleared_at": None,
         "cleared_by": None,
     }

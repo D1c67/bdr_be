@@ -495,6 +495,11 @@ def email_item(row: dict, lane: str, stuck: dict | None, *, projects: dict, gcs:
         # Additive: the copy this row waits behind while a person reviews it,
         # `{id, lane}`, else null. Only ever a row this viewer can see.
         "waiting_on": waiting_on,
+        # Additive: why a review lane holds the row, so a review_match row
+        # with no proposed project reads "new invitation, GC unknown"
+        # (`new_gc_unresolved`) instead of a bare "no candidate". The queue
+        # list serves the same column to the same roles.
+        "flag_reason": row.get("flag_reason"),
     }
 
 
@@ -528,6 +533,7 @@ def portal_item(row: dict, lane: str, stuck: dict | None, *, projects: dict,
         "llm_confidence": None,
         "llm_reasoning": None,
         "waiting_on": None,
+        "flag_reason": row.get("flag_reason"),
     }
 
 

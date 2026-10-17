@@ -49,7 +49,14 @@ REASON_RFP = "rfp_should_not_exist"
 REASON_DUPLICATE = "duplicate"
 REASON_MISTAKE = "created_by_mistake"
 REASON_OTHER = "other"
+# The reasons a person picks (POST /projects/{id}/delete). `merged` is not
+# one of them: only Merge Projects archives with it (docs/PROJECT_MERGE.md,
+# merge_rfp_project), and the delete function refuses it as bad_reason.
 REASONS = (REASON_RFP, REASON_DUPLICATE, REASON_MISTAKE, REASON_OTHER)
+REASON_MERGED = "merged"
+# Every reason an archive row can carry: the Deleted Projects page's filter
+# and the summary's by_reason.
+LIST_REASONS = REASONS + (REASON_MERGED,)
 
 NOTE_MAX_CHARS = 2000
 CONFIRM_MAX_CHARS = 500
@@ -78,7 +85,8 @@ COUNT_TABLES = {
 LIST_SELECT = (
     "id, project_id, project_number, project_name, project_stage, gc_names, reason, note, "
     "from_rfp, rfp_source_kind, rfp_source_id, rfp_source_label, deleted_by, deleted_at, "
-    "row_counts, row_total, restored_at, restored_by, restore_error"
+    "row_counts, row_total, restored_at, restored_by, restore_error, merged_into_project_id, "
+    "merged_into_number, merged_into_name"
 )
 REF_SELECT = (
     "id, project_id, project_number, project_name, reason, note, deleted_by, deleted_at, "
@@ -403,6 +411,20 @@ def _item(row: dict, profiles: dict[str, dict]) -> dict:
         "restored_at": row.get("restored_at"),
         "restored_by": _person(profiles, row.get("restored_by")),
         "restore_error": row.get("restore_error"),
+        "merged_into": _merged_into(row),
+    }
+
+
+def _merged_into(row: dict) -> dict | None:
+    """`{project_id, number, name}` for an archive the merge wrote (reason
+    `merged`), else None. `project_id` is null once that project is itself
+    deleted (the foreign key sets it null; the label stays)."""
+    if row.get("reason") != REASON_MERGED and not row.get("merged_into_number"):
+        return None
+    return {
+        "project_id": row.get("merged_into_project_id"),
+        "number": row.get("merged_into_number"),
+        "name": row.get("merged_into_name"),
     }
 
 
@@ -436,7 +458,7 @@ def list_deleted(
 def summary(sb) -> dict:
     """Exact counts for the page header and the "how often was RFP ingestion
     wrong" question: total, still deleted, restored, and per reason (every
-    deletion ever, restored or not)."""
+    deletion ever, restored or not; `merged` included)."""
 
     def count(apply) -> int:
         res = apply(sb.table(TABLE).select("id", count="exact", head=True)).execute()
@@ -444,7 +466,7 @@ def summary(sb) -> dict:
 
     total = count(lambda q: q)
     not_restored = count(lambda q: q.is_("restored_at", "null"))
-    by_reason = {code: count(lambda q, c=code: q.eq("reason", c)) for code in REASONS}
+    by_reason = {code: count(lambda q, c=code: q.eq("reason", c)) for code in LIST_REASONS}
     return {
         "total": total,
         "not_restored": not_restored,
@@ -580,7 +602,9 @@ def tombstone_for_email(sb, row: dict, settings: Settings) -> str | None:
 
     Candidates are archives whose bid date is inside the matcher's candidate
     window (RFP_MATCH_CANDIDATE_WINDOW_DAYS), in the row's test-bench scope,
-    and not in the row's `excluded_project_ids`. Each is scored with the
+    and not in the row's `excluded_project_ids`; never a `merged` archive
+    (that bid lives on as the project it was merged into, which the matcher
+    sees). Each is scored with the
     matcher's own deterministic scorer (`rfp_match.score_candidate`) and must
     pass the deterministic half of its confidence rule (the total, the name
     floor, no discriminator conflict, a date score of 1.0 when the email has
@@ -602,6 +626,9 @@ def tombstone_for_email(sb, row: dict, settings: Settings) -> str | None:
             sb.table(TABLE)
             .select(_TOMBSTONE_SELECT)
             .is_("restored_at", "null")
+            # A merged project lives on as the project it was merged into,
+            # which the matcher finds itself (docs/PROJECT_MERGE.md 3.2).
+            .neq("reason", REASON_MERGED)
             .gte("project_bid_at", lo.isoformat())
             .order("deleted_at", desc=True)
             .limit(_TOMBSTONE_CAP)

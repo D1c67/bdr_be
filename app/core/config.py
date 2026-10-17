@@ -68,7 +68,7 @@ def _parse_hhmm(raw: str, env_name: str) -> tuple[int, int]:
 # Which self-hosted endpoint is live (SELF_HOSTED_LLM_TARGET). Each target is a
 # base URL + API key + served-model triple: SELF_HOSTED_LLM_<TARGET>_{BASE_URL,
 # API_KEY,MODEL}. Adding a box = a new entry here plus its three fields.
-SELF_HOSTED_LLM_TARGETS: tuple[str, ...] = ("local", "ec2", "ec2b")
+SELF_HOSTED_LLM_TARGETS: tuple[str, ...] = ("local", "ec2", "ec2b", "ec2c")
 
 
 class Settings(BaseSettings):
@@ -137,10 +137,15 @@ class Settings(BaseSettings):
     #   local - a server on this machine (or an SSH tunnel to a box)
     #   ec2   - box A: g6.xlarge, serves qwen-3.5-4b at llm.g3electrical.com
     #   ec2b  - box B: g7e.2xlarge, serves qwen-3.8-27b at llm2.g3electrical.com
+    #   ec2c  - box C: g7e.2xlarge in us-east-1 (N. Virginia), standby for when
+    #           us-west-2 has no g7e capacity
+    # IT Admins and devs can override the target live from Settings (stored in
+    # llm_runtime_settings, see services/llm_target); this env value is the
+    # default whenever no override is set.
     # Each target also names the model it serves (SELF_HOSTED_LLM_<TARGET>_MODEL);
     # every feature whose SELF_HOSTED_<FEATURE>_MODEL is empty uses that, so the
     # per-feature lines only need touching to override or switch a feature off.
-    self_hosted_llm_target: str = "local"       # local | ec2 | ec2b
+    self_hosted_llm_target: str = "local"       # local | ec2 | ec2b | ec2c
     self_hosted_llm_local_base_url: str = ""    # e.g. http://localhost:11434/v1
     self_hosted_llm_local_api_key: str = ""
     self_hosted_llm_local_model: str = ""
@@ -150,6 +155,9 @@ class Settings(BaseSettings):
     self_hosted_llm_ec2b_base_url: str = ""
     self_hosted_llm_ec2b_api_key: str = ""
     self_hosted_llm_ec2b_model: str = ""
+    self_hosted_llm_ec2c_base_url: str = ""
+    self_hosted_llm_ec2c_api_key: str = ""
+    self_hosted_llm_ec2c_model: str = ""
     self_hosted_llm_timeout_seconds: int = 120
     # TLS hardening: verification stays on; for internal ALB certs point
     # ca_bundle at your private CA's PEM instead of disabling verification.
@@ -711,7 +719,7 @@ class Settings(BaseSettings):
     rfp_match_date_score_far: float = 0.5
     rfp_match_exact_time_bonus: float = 0.1          # same instant to the minute, email gave a time
     rfp_match_conflict_cap: float = 0.4              # name cap on a discriminator conflict (Phase 1 vs 2)
-    rfp_match_candidate_window_days: int = 30        # bid date not older than this
+    rfp_match_candidate_window_days: int = 30        # bid date OR created_at not older than this
     rfp_match_auto_threshold: float = 0.85           # floor on the TOTAL for a confident candidate
     rfp_match_review_threshold: float = 0.55         # floor for a candidate to reach review / the model
     rfp_match_name_min_auto: float = 0.8             # name floor for a confident candidate

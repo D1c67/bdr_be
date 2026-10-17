@@ -297,6 +297,41 @@ def test_keywords_tolerate_none():
     assert auth.keyword_hits(None, None) == []
 
 
+# ── Procore change-order RFQs (doc 3.4.1) ──────────────────────────────────────
+
+
+def test_procore_overdue_rfq_digest_is_caught():
+    from tests import fixtures_procore as fx
+
+    rule = auth.is_procore_change_order_rfq
+    assert rule(fx.CO_RFQ_FROM, fx.CO_RFQ_SUBJECT, fx.CO_RFQ_BODY)
+    # The plural digest, a regional subdomain, upper case: the same thing.
+    assert rule("monument_construction_notifications@US02.procoretech.com",
+                "Monument Construction: You have 2 overdue Requests for Quote", fx.CO_RFQ_BODY)
+    # Either signal alone is enough: the subject with an empty body, or an
+    # RFQ link under any subject (a new change-order RFQ, not the digest).
+    assert rule(fx.CO_RFQ_FROM, fx.CO_RFQ_SUBJECT, "")
+    assert rule(fx.CO_RFQ_FROM, "Cobblestone: Request for Quote #16", fx.CO_RFQ_BODY)
+
+
+def test_procore_bid_mail_and_other_senders_are_never_caught():
+    from tests import fixtures_procore as fx
+
+    rule = auth.is_procore_change_order_rfq
+    # A real invitation (bid sheet, zip, intents) is never caught, even under
+    # the digest's subject or with an RFQ link pasted beside the bid link.
+    assert not rule("noreply@procoretech.com", "Invitation to bid on Warehouse HVAC", fx.EMAIL_BODY)
+    assert not rule("noreply@procoretech.com", fx.CO_RFQ_SUBJECT, fx.EMAIL_BODY)
+    assert not rule("noreply@procoretech.com", fx.CO_RFQ_SUBJECT, fx.EMAIL_BODY + fx.CO_RFQ_BODY)
+    # Procore mail that is neither (a billing invite, a meeting): left to the model.
+    assert not rule("noreply@procoretech.com", "Rancho Park: Pat Example has invited you to bill",
+                    "https://app.procore.com/12/project/commitments/billings_invites_landing/3/update_invite")
+    # Only Procore's own domain, on a label boundary.
+    for sender in ("pm@gc.example", "noreply@notprocoretech.com", "noreply@procoretech.com.evil.example",
+                   None, ""):
+        assert not rule(sender, fx.CO_RFQ_SUBJECT, fx.CO_RFQ_BODY), sender
+
+
 # ── Message-ID normalization ───────────────────────────────────────────────────
 
 

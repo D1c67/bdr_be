@@ -84,7 +84,7 @@ except for the locked-rule 403, where the code itself IS the detail (the
 | `rfp_rule_invalid` | 400 | The rule value is not a valid email address (kind `address`) or bare hostname (kind `domain`). `detail` explains which. | Show `detail` under the value field. |
 | `rfp_rule_public_domain` | 400 | A `domain` rule named a public mailbox provider (gmail.com, outlook.com, yahoo.com …). Trusting one would authorize every account there. | Show `detail`; offer to switch the form to kind `address` with the same value. |
 | `rfp_rule_duplicate` | 409 | That (kind, value) rule already exists. | Show `detail`; highlight the existing row. |
-| `rfp_email_not_actionable` | 409 | The review / continue / dismiss action lost its race: the message already left the state that action belongs to (another reviewer, or the sweep). | Show `detail` and refresh the tab. |
+| `rfp_email_not_actionable` | 409 | The review / continue / dismiss action lost its race: the message already left the state that action belongs to (another reviewer, or the sweep). Dismiss serves `review_llm`, `flagged_unauthorized` and, as "Not an RFP", `review_match`. | Show `detail` and refresh the tab. |
 
 A GC contact saved at a public mailbox provider is **not** refused. `POST
 /gc-contacts` returns the contact with an extra `rfp_notice` string (null for
@@ -100,11 +100,11 @@ Same header contract as the intake table above: the code rides in
 
 | Code | HTTP | Meaning | Frontend action |
 | --- | --- | --- | --- |
-| `rfp_match_not_actionable` | 409 | The merge, "already on project", not-a-match, set-GC, reopen, unmerge or acknowledge action lost its race: the email or the match row already left the state that action belongs to (another reviewer, the sweep, or an unmerge that finished first). Also `dismiss` on a `review_match` row (the only rejection exit there is "Not a match"). | Show `detail` and refresh the tab or modal. |
+| `rfp_match_not_actionable` | 409 | The merge, "already on project", not-a-match, set-GC, reopen, unmerge or acknowledge action lost its race: the email or the match row already left the state that action belongs to (another reviewer, the sweep, or an unmerge that finished first). Also "Not an RFP" (`dismiss` on a `review_match` row, 2026-10-05) or "Not a match" while an open merge still holds a link on a project: merge again to finish it, or unmerge it first. | Show `detail` and refresh the tab or modal. |
 | `rfp_match_gc_required` | 400 | Merge or "already on project" was asked for on an email whose GC is not resolved and no `gc_id` was sent. | Open the GC picker: set the GC first. |
 | `rfp_match_gc_not_on_project` | 409 | "Already on project" named a project the resolved GC is not on. | Show `detail`; offer "Merge into this project" instead. |
 | `rfp_match_gc_already_sent` | 409 | Unmerge refused: a proposal to that GC is sent or sending, so the GC stays on the project. | Show `detail`; disable Unmerge for that row. |
-| `rfp_match_project_closed` | 409 | The target project is abandoned, declined, PM-only or CP-only, or its bid date is outside the candidate window. | Show `detail`; the reviewer picks another project. |
+| `rfp_match_project_closed` | 409 | The target project is abandoned, declined, PM-only or CP-only, or outside the candidate window (neither its bid date nor its creation date is inside it). | Show `detail`; the reviewer picks another project. |
 | `rfp_match_project_excluded` | 409 | The target project was unmerged from this email before; it is never offered again. | Show `detail`; the "Unmerged from" line lists it. |
 | `rfp_match_unmerge_required` | 409 | `DELETE /projects/{id}/gcs/{gc_id}` on a GC the matcher added. Only Unmerge (Merged by System modal; Estimating Admin, Executive, IT Admin) detaches it, so the reversal is recorded with who and why. | Open the Merged by System modal at that GC. |
 | `rfp_harvest_active` | 409 | `POST /rfp-emails/{id}/harvest` while a harvest job for that email is already queued or running. | Show `detail`; keep polling the detail. |
@@ -119,7 +119,7 @@ app-authored sentence. Design record: `docs/RFP_NGEM_PORTAL.md`, section 5.
 | Code | HTTP | Meaning | Frontend action |
 | --- | --- | --- | --- |
 | `rfp_portal_not_actionable` | 409 | The resolve, "not a match", reopen, ignore or un-ignore action lost its race: the invitation is not (or no longer) at the status that action belongs to (another reviewer, or the sweep moved it first). Also `POST /rfp-portal/invitations/{id}/harvest` on a BuildingConnected row: its invitations carry no documents to harvest, so no job is queued. | Show `detail` and refresh the portal tab or modal; hide Harvest on BuildingConnected rows. |
-| `rfp_portal_project_required` | 400 | Resolve was asked for without a usable `project_id`: missing, malformed, unknown, excluded from this invitation, or outside the candidate window and not one of the stored candidates. | Open the project picker; pick one of the candidates. |
+| `rfp_portal_project_required` | 400 | Resolve was asked for without a usable `project_id`: missing, malformed, unknown, excluded from this invitation, or outside the candidate window (neither its bid date nor its creation date is inside it) and not one of the stored candidates. | Open the project picker; pick one of the candidates. |
 | `rfp_portal_harvest_active` | 409 | `POST /rfp-portal/invitations/{id}/harvest` while a harvest job for that invitation is already queued or running. | Show `detail`; keep polling the detail. |
 | `rfp_portal_run_active` | 409 | `POST /rfp-portal/ngem/runs` or `POST /rfp-portal/buildingconnected/run` while a scan is already queued or running. | Show `detail`; keep polling the portal's status route. |
 | `rfp_portal_gc_required` | 400 | `POST /rfp-portal/invitations/{id}/gc` (or `/projects/{id}/gc-confirm`) with decision `same` on a row that has no provisional GC, `pick` without `gc_id`, `create` without the create object, or an unknown GC id. | Show `detail`; let the user pick or add a GC. |

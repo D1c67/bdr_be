@@ -40,7 +40,9 @@ from app.services import (
     file_export,
     llm,
     llm_queue,
-    pdf_split,
+    # Kept as a module attribute (tests reach pdf_split through this router);
+    # the upload validation that used it moved to bid_split.check_upload.
+    pdf_split as pdf_split,
     rfp_split,
     storage,
 )
@@ -164,22 +166,10 @@ def _dispatch(
 ) -> None:
     """Queue one file run, degrading to inline dispatch exactly like BOQ.
     `forced_kind` pins a user verdict on the run (reprocess): triage is
-    skipped and the split pass runs as that kind."""
-    if get_settings().llm_queue_enabled:
-        try:
-            payload = {"file_id": file_id}
-            if forced_kind is not None:
-                payload["forced_kind"] = forced_kind
-            llm_queue.enqueue(
-                llm_queue.JOB_BID_SPLIT,
-                target_id=file_id,
-                payload=payload,
-                created_by=user_id,
-            )
-            return
-        except Exception:  # noqa: BLE001 - queue outage degrades to inline dispatch
-            logger.exception("bid_split enqueue failed; falling back to BackgroundTasks")
-    background.add_task(bid_split.run_file, file_id, forced_kind)
+    skipped and the split pass runs as that kind. The body lives in
+    `bid_split.dispatch`, shared with the project's missing-files drop zone
+    (docs/RFP_MISSING_FILES.md 5); this name stays the router's seam."""
+    bid_split.dispatch(background, file_id, user_id, forced_kind)
 
 
 # ── Status / create / read ───────────────────────────────────────────────
@@ -271,63 +261,14 @@ async def upload_job_file(
     job = await run_in_threadpool(_job_or_404, sb, job_id)
     filename = file.filename or "upload.pdf"
     content = await _read_capped(file, s.upload_max_bytes)
-    if not filename.lower().endswith(".pdf") or content[:5] != b"%PDF-":
-        raise HTTPException(
-            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            f"{filename}: the splitter accepts PDF files only",
-        )
+    # The per-file validation and the staging live in services/bid_split,
+    # shared with the project's missing-files drop zone
+    # (docs/RFP_MISSING_FILES.md 5): one policy, two routes.
     try:
-        pages = await run_in_threadpool(pdf_split.page_count, content)
-    except ValueError as exc:
-        raise HTTPException(
-            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, f"{filename}: {exc}"
-        ) from exc
-    if pages > s.bid_split_max_pages_per_file:
-        raise HTTPException(
-            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            f"{filename}: {pages} pages exceeds the "
-            f"{s.bid_split_max_pages_per_file}-page limit per file",
-        )
-
-    def _stage() -> dict:
-        existing = (
-            sb.table("bid_split_files").select("id").eq("job_id", job["id"]).execute()
-        ).data or []
-        if len(existing) >= s.bid_split_max_files_per_job:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                f"This job already holds {s.bid_split_max_files_per_job} files.",
-            )
-        path = storage.build_bid_split_source_path(job["id"], filename)
-        storage.upload_file(path, content, "application/pdf")
-        try:
-            frow = (
-                sb.table("bid_split_files")
-                .insert(
-                    {
-                        "job_id": job["id"],
-                        "filename": filename,
-                        "storage_path": path,
-                        "size_bytes": len(content),
-                        "page_count": pages,
-                        "status": "pending",
-                    }
-                )
-                .execute()
-            ).data[0]
-        except Exception:
-            # The object is already stored; drop it so a failed insert leaves
-            # no orphan (submittals precedent).
-            storage.delete_file(path)
-            raise
-        # Re-stamp file_count with reality: the create's value was the plan,
-        # and a browser closed mid-batch must not overstate it forever.
-        sb.table("bid_split_jobs").update({"file_count": len(existing) + 1}).eq(
-            "id", job["id"]
-        ).execute()
-        return frow
-
-    frow = await run_in_threadpool(_stage)
+        pages = await run_in_threadpool(bid_split.check_upload, filename, content, s)
+        frow = await run_in_threadpool(bid_split.stage_upload, sb, job, filename, content, pages, user.id)
+    except bid_split.UploadRefused as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
     await run_in_threadpool(_dispatch, background, frow["id"], user.id)
     return frow
 
@@ -406,11 +347,19 @@ def _attach_projects(sb, jobs: list[dict]) -> None:
 
 
 def _attach_segments(sb, files: list[dict]) -> list[dict]:
-    """Hang each file's segments (in sort order) off the file row, in place."""
+    """Hang each file's segments (in sort order) off the file row, in place.
+    No file ids, no query: an `in` list holding a placeholder that is not a
+    uuid makes Postgres refuse the read (a job with no files then answered
+    500)."""
+    file_ids = [f["id"] for f in files if f.get("id")]
+    if not file_ids:
+        for f in files:
+            f["segments"] = []
+        return files
     segments = (
         sb.table("bid_split_segments")
         .select("*")
-        .in_("file_id", [f["id"] for f in files] or ["-"])
+        .in_("file_id", file_ids)
         .order("sort_order")
         .execute()
     ).data or []
@@ -776,8 +725,13 @@ def delete_job(job_id: str, user: CurrentUser = Depends(require_writer)):
     Refused while any of its files still has a live queue run."""
     sb = get_supabase()
     job = _job_or_404(sb, job_id)
+    # A job that files a project's documents (an RFP split, or a project's
+    # missing-files drop zone, docs/RFP_MISSING_FILES.md 5) carries the
+    # provenance of those rows: it stays while the project exists.
     if job.get("source") == rfp_split.SOURCE_RFP and job.get("project_id"):
         raise HTTPException(status.HTTP_409_CONFLICT, rfp_split.MSG_JOB_HAS_PROJECT)
+    if job.get("source") == rfp_split.SOURCE_PROJECT and job.get("project_id"):
+        raise HTTPException(status.HTTP_409_CONFLICT, rfp_split.MSG_PROJECT_JOB_HAS_PROJECT)
     active = (
         sb.table("bid_split_files")
         .select("id, status")

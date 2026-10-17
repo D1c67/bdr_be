@@ -649,6 +649,8 @@ def test_list_attaches_rfp_created_from_one_query_per_page(env):
         "likely_gc_name": None,
         # The splitter flag is computed by the detail route only.
         "split_issue": None,
+        # So is the missing-files issue (docs/RFP_MISSING_FILES.md 7).
+        "files_issue": None,
     }
     assert out[P1]["rfp_intake_missing"] == [
         "internal_bid_at",

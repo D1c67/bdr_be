@@ -38,6 +38,18 @@ FE page `/deleted-projects`, i18n namespaces `deleteProject` and
 | Silence | A delete and a restore send nothing: no email, no bell, no stage event of their own. |
 | Trail | The archive row stays after a restore (`restored_at`, `restored_by` filled). Deleting the same project again later writes a new row. |
 
+A fifth reason, `merged`, exists since migration 0149 and is written only by
+Merge Projects (docs/PROJECT_MERGE.md): merging an RFP-created project into a
+project already being bid moves its GCs, RFP links, email filing and new
+documents to that project, then archives it through this same archive with
+reason `merged`, the `merged_into_*` columns and a `merge_summary`, and
+without the RFP block (every RFP pointer already points at the other
+project). A person can never pick it: `POST /projects/{id}/delete` and
+`archive_and_delete_project` refuse it (`bad_reason`), the tombstone check
+(5.3) ignores `merged` archives, and Deleted Projects lists them with
+`merged_into` and counts them in `by_reason`. Restoring one brings back only
+what did not move.
+
 ## 2. Why a hard delete with a snapshot
 
 About 64 foreign keys point at `projects(id)` (51 ON DELETE CASCADE, 13 SET

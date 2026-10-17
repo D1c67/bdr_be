@@ -636,6 +636,8 @@ ITEM_KEYS = {
     "llm_answer", "llm_confidence", "llm_reasoning",
     # additive: the copy in a review lane a sibling-wait row is parked behind
     "waiting_on",
+    # additive: why a review lane holds the row (new_gc_unresolved and the rest)
+    "flag_reason",
 }
 
 
@@ -673,7 +675,7 @@ def test_the_item_shape_for_both_sources(db):
         "match_project": {"id": P1, "name": "Sunrise Elementary", "number": "26.9.7301"},
         "created_project_id": None, "primary_mailbox": None, "portal": "ngem",
         "llm_answer": None, "llm_confidence": None, "llm_reasoning": None,
-        "waiting_on": None,
+        "waiting_on": None, "flag_reason": None,
     }
     # A portal row at harvest with no record yet reads `pending`, like the NGEM tab.
     assert by_id[I_HARVEST]["harvest_status"] == "pending"

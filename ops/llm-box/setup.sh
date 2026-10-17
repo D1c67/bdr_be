@@ -42,10 +42,17 @@ say "apt: base packages + Caddy"
 $APT update
 $APT install python3-venv python3-pip curl debian-keyring debian-archive-keyring apt-transport-https gnupg
 if ! command -v caddy >/dev/null; then
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
-  $APT update
-  $APT install caddy
+  # Prefer Caddy's own repo; it started answering 402 Payment Required in
+  # 2026-10, so fall back to the distro package (2.6.x is enough for this
+  # Caddyfile) and drop the broken source so later apt runs stay clean.
+  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg || true
+  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null || true
+  if ! { $APT update && $APT install caddy; }; then
+    say "Caddy repo unavailable; installing the Ubuntu caddy package"
+    sudo rm -f /etc/apt/sources.list.d/caddy-stable.list
+    $APT update
+    $APT install caddy
+  fi
 fi
 
 # 2. vLLM in its own venv; weights cached on the root EBS volume (persistent

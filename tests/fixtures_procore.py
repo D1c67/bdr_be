@@ -461,6 +461,43 @@ Download Bidding Documents <{_safelink(ZIP_URL)}>
 Replace evaporative coolers in the warehouse with rooftop air conditioning units.
 """
 
+# Procore's daily overdue Request for Quote digest (RFP_EMAIL_INGESTION.md
+# 3.4.1): a change event priced against a contract G3 already holds, never a
+# bid. The shape of the real 2026-09-29 message (every link wrapped in an
+# Outlook safelink, percent-encoded; a stale Quote Due Date), with stand-in
+# ids, names and the example.com tenant.
+CO_RFQ_SUBJECT = "Benchmark Contracting dba Cobblestone Construction: You have 1 overdue Request for Quote"
+CO_RFQ_FROM = "cobblestone_construction_notifications@procoretech.com"
+CO_RFQ_URL = "https://app.procore.com/2870001/project/commitments/work_order_contracts/12490001/request_for_quotes/2380001"
+CO_RFQ_YES_URL = (
+    f"{CO_RFQ_URL}/quotes/set_cost_impact?intent_to_quote=true&rfq_uuid=0fb7412459bd63b3ac63c943"
+)
+CO_RFQ_ATTACHMENT_URL = "https://app.procore.com/utilities/emailed_attachment/a1670da9e5055501?company_id=6333"
+CO_RFQ_BODY = f"""Benchmark Contracting dba Cobblestone Construction
+[https://storage.procore.com/api/v5/files/us-east-1/pro-core.com/3336-c/logo?companyId=6333&sig=test]
+
+DO NOT REPLY TO THIS EMAIL
+
+This is a notification sent from an unmonitored email address.
+
+Email generated on Tue Sep 29, 2026 at 03:48 am PDT
+1 Request for Quote assigned to you is overdue.
+Click the button at the bottom of the page to respond to the Requests for Quote
+Overdue Request for Quote (1 of 1)
+Request for Quote Details
+Title:  CE #015 - Network Interface Enclosure, Fiber Routing-RFI #25<{_safelink(CO_RFQ_URL)}>
+Project:        DOA 3087 - LAS Terminal 1 - Elevator-Escalator Modifications
+Requested By:   Jordan Example (Benchmark Contracting dba Cobblestone Construction)
+Quote Due Date: 09/23/25
+Request for Quote Details:
+
+Please see attached DOA response to RFI #025
+
+Attachments:    3087-rfi#25-network_interface_enclosure.pdf<{_safelink(CO_RFQ_ATTACHMENT_URL)}>
+Do you have a cost or schedule impact associated with this scope?
+Yes<{_safelink(CO_RFQ_YES_URL)}>
+"""
+
 # The login pages, as the Rails forms render them (captured 2026-09-14).
 EMAIL_TOKEN = "M1JLDEEbL17oi9Nzje2kJW2qorz1KvR3UfSrQDGu_D2pphZ61GutFSqQ9ydmwqHDhFirzHmn30R7O0p1aXnoFQ"
 PASSWORD_TOKEN = "Zq8Lk2Pw9Xn4Vb6Hd1Tf3Gs5Jr7Mc0Ye2Ua4Ib6Od8Ep1Wq3Rt5Yu7Io9Pa1Sd3Fg5Hj7Kl9Zx2Cv4Bn6"

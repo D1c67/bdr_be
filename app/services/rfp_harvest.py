@@ -1445,6 +1445,7 @@ def mark_from_queue(email_id: str, status: str, error: str | None) -> None:
             {"status": STATUS_FAILED, "last_error": message, "finished_at": _iso(_now()),
              "claim_token": None}
         ).eq("id", harvest_id).in_("status", [STATUS_PENDING, STATUS_RUNNING]).execute()
+        _sync_file_issues(sb, harvest_id)
     if email.get("status") == "harvest":
         _finish_email(sb, email_id, harvest_id, error=message)
 
@@ -1930,6 +1931,28 @@ def _complete_harvest(
             "claim_token": None,
         },
     )
+    # Pipeline harvests have no project yet (the row says so): no read.
+    if "project_id" not in harvest or harvest.get("project_id"):
+        _sync_file_issues(sb, harvest.get("id"))
+
+
+def _sync_file_issues(sb, harvest_id: str | None) -> None:
+    """"Harvest again" on a harvest that already made a project: the new
+    failures become the project's missing-files items
+    (docs/RFP_MISSING_FILES.md 4; a file that now landed is resolved by the
+    promotion's name-match hook, never here). Re-reads the harvest so the
+    sync sees the row as written. Best effort, never raises."""
+    if not harvest_id:
+        return
+    try:
+        row = _load_harvest(sb, harvest_id)
+        if not row or not row.get("project_id"):
+            return
+        from app.services import rfp_file_issues
+
+        rfp_file_issues.sync_project(sb, str(row["project_id"]), harvest=row)
+    except Exception:  # noqa: BLE001 - the harvest outcome stands
+        logger.exception("rfp harvest: missing-files sync failed for harvest %s", harvest_id)
 
 
 def _check_caps(

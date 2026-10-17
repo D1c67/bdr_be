@@ -59,7 +59,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 
 from app.core.config import Settings, get_settings
-from app.services import llm
+from app.services import llm, llm_target
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +128,9 @@ class Snapshot:
 
 
 # SELF_HOSTED_LLM_TARGET -> the short place name shown in the status modal.
-_TARGET_LABELS = {"local": "local", "ec2": "EC2 box A", "ec2b": "EC2 box B"}
+_TARGET_LABELS = {
+    "local": "local", "ec2": "EC2 box A", "ec2b": "EC2 box B", "ec2c": "EC2 box C",
+}
 
 
 def _provider_label(provider: str, settings: Settings) -> str:
@@ -139,7 +141,7 @@ def _provider_label(provider: str, settings: Settings) -> str:
 
 
 def _probe(
-    provider: str, route: llm.Route, settings: Settings
+    provider: str, route: llm.Route, settings: Settings, *, max_retries: int | None = None
 ) -> tuple[ProviderStatus, list[str]]:
     """One free catalog call against a provider → (status, model ids it serves).
 
@@ -165,6 +167,8 @@ def _probe(
     started = time.monotonic()
     try:
         client = llm._client_for(route, settings).with_options(timeout=timeout)
+        if max_retries is not None:
+            client = client.with_options(max_retries=max_retries)
         ids = [getattr(m, "id", "") for m in client.models.list()]
     except Exception as exc:  # noqa: BLE001 — every failure is a status, not a raise
         elapsed = int((time.monotonic() - started) * 1000)
@@ -251,7 +255,9 @@ def check(settings: Settings | None = None) -> Snapshot:
     Sequential by design: the active pool is at most two providers (one when
     self-hosted), and each probe is a single sub-second metadata call.
     """
-    s = settings or get_settings()
+    # The live box override (Settings > AI model server) applies here too, so
+    # the label and the probed endpoint match what the features really use.
+    s = llm_target.apply(settings or get_settings())
     started = time.monotonic()
 
     routes = {key: llm.resolve(key, s) for key in llm._FEATURES}

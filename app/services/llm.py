@@ -46,6 +46,7 @@ import httpx
 import openai
 
 from app.core.config import Settings, get_settings
+from app.services import llm_target
 from app.services import llm_gate
 
 logger = logging.getLogger(__name__)
@@ -180,8 +181,9 @@ def _self_hosted_model(spec: _Feature, s: Settings) -> str:
 
 
 def resolve(feature: str, settings: Settings | None = None) -> Route:
-    """Resolve a feature to (provider, model, credentials) from the env."""
-    s = settings or get_settings()
+    """Resolve a feature to (provider, model, credentials) from the env, with
+    the live box override from Settings (services/llm_target) applied."""
+    s = llm_target.apply(settings or get_settings())
     spec = _FEATURES[feature]
     if s.full_self_hosted_llms_enabled:
         return Route(
@@ -225,7 +227,7 @@ def active_model(feature: str, settings: Settings | None = None) -> str:
 
 
 def _require_route(feature: str, settings: Settings | None) -> tuple[Route, Settings]:
-    s = settings or get_settings()
+    s = llm_target.apply(settings or get_settings())
     route = resolve(feature, s)
     if route.provider == "self_hosted":
         if not route.base_url:

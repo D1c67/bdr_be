@@ -464,6 +464,7 @@ def _env(monkeypatch, db, settings, portal):
     monkeypatch.setattr(m, "get_supabase", lambda: db)
     monkeypatch.setattr(m, "_now", lambda: NOW)
     monkeypatch.setattr(ngc, "_now", lambda: NOW)
+    monkeypatch.setattr(rfp_email_ingest, "_now", lambda: NOW)
     monkeypatch.setattr(m, "time", SimpleNamespace(sleep=lambda s: None, monotonic=time.monotonic))
     monkeypatch.setattr(llm_queue, "get_supabase", lambda: db)
     monkeypatch.setattr(llm_queue, "get_settings", lambda: settings)
@@ -1208,6 +1209,32 @@ def test_match_uncertain_and_ambiguous_wait_at_review_match_with_the_rebid_hint(
     assert row["possible_rebid_project_id"] == P2 and row["possible_rebid_score"] >= 0.85
 
 
+def test_match_finds_a_project_created_inside_the_window_with_no_bid_date(db, llm_answer):
+    """2026-10-12: a project with no bid date (or one older than the rebid
+    lookback) created inside the candidate window is a candidate. The
+    invitation carries a close date and the project none, so it is never
+    confident (rule 2 needs date 1.0): a person decides."""
+    calls = llm_answer({"verdicts": [{"index": 0, "verdict": "same", "confidence": 0.95, "reasoning": "same"}]})
+    title = "Emergency Phone Tower Installations and Upgrades"
+    fresh = m._iso(NOW - timedelta(days=1))
+    _seed_match(db, [
+        {**_project(P1, title), "internal_bid_at": None, "created_at": fresh},
+        {**_project(P2, title, number="25.1.7000"), "internal_bid_at": None,
+         "actual_bid_at": m._iso(NOW - timedelta(days=400)), "created_at": fresh},
+        # Created before the window with no bid date: never a candidate.
+        {**_project(P3, title, number="26.1.7001"), "internal_bid_at": None,
+         "created_at": m._iso(NOW - timedelta(days=45))},
+    ])
+    _sweep(db)
+    row = _inv(db)
+    assert {c["project_id"] for c in row["match_candidates"]} == {P1, P2}
+    # P1 scores on the name alone (1.0); P2's old date scores 0 (total 0.667).
+    assert row["status"] == "review_match" and row["flag_reason"] == "match_uncertain"
+    assert row["match_project_id"] == P1
+    assert row["possible_rebid_project_id"] is None
+    assert len(calls) == 1
+
+
 def test_match_excluded_ids_are_never_candidates(db, llm_answer):
     calls = llm_answer({"verdicts": [{"index": 0, "verdict": "same", "confidence": 0.95, "reasoning": "same"}]})
     _seed_match(db, [_project(P1, "Emergency Phone Tower Installations and Upgrades", days=1)],
@@ -1867,6 +1894,29 @@ def test_resolve_exists_validates_the_project_and_writes_the_resolution(db):
     db.tables["rfp_portal_invitations"].append(_invitation(id="inv-2", status="review_match", bid_number="x",
                                                            match_candidates=_candidates(P1)))
     assert m.resolve_exists(db, "inv-2", P2, U1)["match_project_id"] == P2
+
+
+def test_resolve_exists_accepts_a_project_created_inside_the_window(db):
+    """2026-10-12: the "same as" check for a non-candidate reuses
+    candidate_query with the window as its only bound, so a project with no
+    bid date (or a stale one) created inside the window is accepted and one
+    created before it is refused."""
+    fresh = m._iso(NOW - timedelta(days=1))
+    db.tables["projects"] = [
+        _project(P1, "A"),
+        {**_project(P2, "B"), "internal_bid_at": None, "created_at": fresh},
+        {**_project(P3, "C", days=-100), "created_at": m._iso(NOW - timedelta(days=45))},
+    ]
+    db.tables["rfp_portal_invitations"].append(_invitation(status="review_match", match_project_id=P1,
+                                                           match_candidates=_candidates(P1)))
+    with pytest.raises(m.RfpPortalError) as exc:
+        m.resolve_exists(db, INV, P3, U1)
+    assert exc.value.code == m.CODE_PROJECT_REQUIRED and "creation date" in str(exc.value)
+    assert m.resolve_exists(db, INV, P2, U1)["match_project_id"] == P2
+    db.tables["projects"][2]["created_at"] = fresh   # stale date, created yesterday
+    db.tables["rfp_portal_invitations"].append(_invitation(id="inv-2", status="review_match", bid_number="x",
+                                                           match_candidates=_candidates(P1)))
+    assert m.resolve_exists(db, "inv-2", P3, U1)["match_project_id"] == P3
 
 
 def test_resolve_new_excludes_every_candidate_and_moves_to_harvest(db, portal):

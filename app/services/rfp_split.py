@@ -71,6 +71,10 @@ CREATED_TABLE = "rfp_created_projects"
 
 SOURCE_RFP = "rfp"
 SOURCE_MANUAL = "manual"
+# A job opened from a project page's missing-files drop zone (migration
+# 0151, docs/RFP_MISSING_FILES.md 5): linked to the project from birth, no
+# harvest, its files' sources are the PDFs the person dropped.
+SOURCE_PROJECT = "project"
 
 # rfp_harvests.split_status
 SPLIT_NONE = "none"
@@ -141,6 +145,10 @@ MSG_JOB_HAS_PROJECT = (
     "This split was staged from an RFP invitation and its project still exists; "
     "discard the project first."
 )
+MSG_PROJECT_JOB_HAS_PROJECT = (
+    "This split was started from a project's missing-files drop zone and its project still exists; "
+    "discard the project first."
+)
 MSG_NOT_A_PDF = "This file is not a PDF; it was identified, not split, and cannot be re-cut."
 _MSG_JOB_MISSING = "The split job is missing."
 _MSG_ALL_FAILED = "Every document failed to split."
@@ -182,7 +190,7 @@ _SEGMENT_SELECT = (
 )
 _PROJECT_ROW_SELECT = (
     "id, project_id, category, storage_path, filename, note, rfp_harvest_id, rfp_sandbox_file_id, "
-    "bid_split_segment_id, bid_split_file_id, is_source_set, preview_path"
+    "bid_split_segment_id, bid_split_file_id, is_source_set, preview_path, size_bytes"
 )
 
 # "Addendum 3", "Addendum No. 3", "Add. #3", "ADD-03", "Addenda 2A": the
@@ -1581,11 +1589,21 @@ def _delete_row(sb, row: dict) -> None:
     sb.table(PROJECT_FILES_TABLE).delete().eq("id", row["id"]).execute()
 
 
-def _insert_row(sb, row: dict, key: str) -> dict | None:
+def _insert_row(sb, row: dict, key: str, *, source_name: str | None = None,
+                by_person: bool = False) -> dict | None:
     """Insert, reading the unique race as "already there" (the fresh object
     is deleted). Storage trouble propagates. A new drawing or specification
     row clears the project's files flag (docs/RFP_BUILDINGCONNECTED.md 3.8),
-    best effort inside that service."""
+    and every new row runs the missing-files hook
+    (docs/RFP_MISSING_FILES.md 4) with its own filename and `source_name`,
+    the splitter source PDF's filename (a segment is named after its trade,
+    not after the file a person fetched); both best effort inside their
+    services. `by_person` is True only for a project drop job's segments (a
+    person dropped the file): only then may the first-file rule run."""
+    from app.services import rfp_file_issues
+
+    project_id, category = row.get("project_id"), row.get("category")
+    first = by_person and rfp_file_issues.is_first_file(sb, project_id, category)
     try:
         inserted = sb.table(PROJECT_FILES_TABLE).insert(row).execute().data[0]
     except Exception as exc:  # noqa: BLE001
@@ -1596,7 +1614,11 @@ def _insert_row(sb, row: dict, key: str) -> dict | None:
         if _is_unique_violation(exc):
             return None
         raise
-    files_needed.clear_if_satisfied(sb, row.get("project_id"), row.get("category"), None)
+    files_needed.clear_if_satisfied(sb, project_id, category, None)
+    rfp_file_issues.after_file_insert(
+        sb, project_id, category=category, filenames=[row.get("filename"), source_name],
+        actor_id=None, first_file=first, by_person=by_person,
+    )
     return inserted
 
 
@@ -1621,7 +1643,8 @@ def _base_row(project_id: str, harvest_id: str | None, split_file: dict, key: st
     }
 
 
-def _promote_segment(sb, project_id: str, harvest_id: str | None, split_file: dict, seg: dict) -> dict | None:
+def _promote_segment(sb, project_id: str, harvest_id: str | None, split_file: dict, seg: dict, *,
+                     by_person: bool = False) -> dict | None:
     """One cut segment into the project: a server-side copy of the split
     PDF under the mapped category, filename = segment name + .pdf."""
     category = file_category_for_segment(seg)
@@ -1632,7 +1655,7 @@ def _promote_segment(sb, project_id: str, harvest_id: str | None, split_file: di
                     int(seg.get("size_bytes") or 0), seg.get("description"))
     row.update(category_fields(category, seg))
     row["bid_split_segment_id"] = seg["id"]
-    inserted = _insert_row(sb, row, key)
+    inserted = _insert_row(sb, row, key, source_name=split_file.get("filename"), by_person=by_person)
     if inserted is not None:
         audit(None, "file.upload", "project_file", inserted.get("id"),
               {"category": category, "source": "rfp", "split": True})
@@ -1641,7 +1664,7 @@ def _promote_segment(sb, project_id: str, harvest_id: str | None, split_file: di
 
 def _upload_original(
     sb, project_id: str, harvest_id: str | None, split_file: dict, decision, data: bytes, *,
-    category: str, seg: dict | None, note: str | None, is_source_set: bool,
+    category: str, seg: dict | None, note: str | None, is_source_set: bool, by_person: bool = False,
 ) -> dict | None:
     """The verified original bytes (the intact file, or the kept source
     set) as one row carrying the sandbox id."""
@@ -1657,7 +1680,7 @@ def _upload_original(
     row["rfp_sandbox_file_id"] = split_file.get("rfp_sandbox_file_id")
     row["bid_split_segment_id"] = seg["id"] if seg else None
     row["is_source_set"] = bool(is_source_set)
-    inserted = _insert_row(sb, row, key)
+    inserted = _insert_row(sb, row, key, source_name=split_file.get("filename"), by_person=by_person)
     if inserted is None:
         return None
     audit(None, "file.upload", "project_file", inserted.get("id"),
@@ -1672,7 +1695,7 @@ def _upload_original(
 
 def promote_split_file(
     sb, *, project_id: str, harvest_id: str | None, split_file: dict, segments: list[dict],
-    existing: list[dict], fetch_original: Callable[[], Any], name: str,
+    existing: list[dict], fetch_original: Callable[[], Any], name: str, by_person: bool = False,
 ) -> PromoteResult:
     """Reconcile one harvest entry's splitter outcome into project_files
     (section 4), idempotently:
@@ -1700,6 +1723,10 @@ def promote_split_file(
     by_seg = {str(r.get("bid_split_segment_id")): r for r in existing if r.get("bid_split_segment_id")}
     current_ids = {str(s["id"]) for s in segs}
     sandbox_rows = [r for r in existing if sid and str(r.get("rfp_sandbox_file_id") or "") == sid]
+    if not sid:
+        # A drop-zone (`project`) job's file has no sandbox id: the row that
+        # holds its original bytes plays the sandbox row's part.
+        sandbox_rows = _original_rows(existing, split_file)
 
     if is_split(segs):
         for seg in segs:
@@ -1710,7 +1737,7 @@ def promote_split_file(
                     sb.table(PROJECT_FILES_TABLE).update(category_fields(category, seg)).eq("id", row["id"]).execute()
                 result.documents += 1
                 continue
-            inserted = _promote_segment(sb, project_id, harvest_id, split_file, seg)
+            inserted = _promote_segment(sb, project_id, harvest_id, split_file, seg, by_person=by_person)
             result.documents += 1
             if inserted is not None:
                 result.inserted += 1
@@ -1737,7 +1764,8 @@ def promote_split_file(
             if isinstance(fetched, tuple):
                 decision, data = fetched
                 inserted = _upload_original(sb, project_id, harvest_id, split_file, decision, data,
-                                            category=CATEGORY_OTHER, seg=None, note=note, is_source_set=True)
+                                            category=CATEGORY_OTHER, seg=None, note=note, is_source_set=True,
+                                            by_person=by_person)
                 if inserted is None:
                     # The unique index on the sandbox id: a whole-file row
                     # landed after `existing` was read (the promotion job
@@ -1780,7 +1808,8 @@ def promote_split_file(
         return result
     decision, data = fetched
     inserted = _upload_original(sb, project_id, harvest_id, split_file, decision, data,
-                                category=category, seg=seg, note=decision.note, is_source_set=False)
+                                category=category, seg=seg, note=decision.note, is_source_set=False,
+                                by_person=by_person)
     result.documents += 1
     if inserted is None:
         # Same race as the source set above: the promotion's whole row won
@@ -1794,6 +1823,29 @@ def promote_split_file(
         if category in DRAWING_FILE_CATEGORIES:
             result.drawings += 1
     return result
+
+
+def _original_rows(existing: list[dict], split_file: dict) -> list[dict]:
+    """For a file with no sandbox id (a project drop job's,
+    docs/RFP_MISSING_FILES.md 5): the row holding the original bytes (the
+    kept source set, or the intact file), recognised by the source's own
+    filename AND byte size (a cut segment is named after its trade and is
+    never the whole file's size). It then becomes the source set, or takes
+    the splitter's category, in place on a re-file, never deleted and
+    uploaded again."""
+    name = split_file.get("filename")
+    size = split_file.get("size_bytes")
+    if not name or size is None:
+        return []
+    out = []
+    for row in existing:
+        try:
+            same_size = row.get("size_bytes") is not None and int(row["size_bytes"]) == int(size)
+        except (TypeError, ValueError):
+            same_size = False
+        if row.get("filename") == name and same_size:
+            out.append(row)
+    return out
 
 
 def _adopt_sandbox_row(sb, project_id: str, sandbox_file_id: str, fields: dict) -> None:
@@ -1834,6 +1886,8 @@ def resync_project_files(sb, file_id: str, *, actor_id: str | None = None) -> Pr
     split_file, job = job_for_file(sb, file_id)
     if split_file is None or job is None or not job.get("project_id"):
         return None
+    if job.get("source") == SOURCE_PROJECT:
+        return _resync_project_job(sb, split_file, job, actor_id=actor_id)
     project_id = str(job["project_id"])
     records = sb.table(CREATED_TABLE).select("project_id, harvest_id").eq("project_id", project_id).limit(1).execute().data or []
     record = records[0] if records else {}
@@ -1880,10 +1934,170 @@ def resync_project_files(sb, file_id: str, *, actor_id: str | None = None) -> Pr
     return result
 
 
+def project_original(split_file: dict):
+    """`fetch_original` for a drop-zone (`project`) job's file
+    (docs/RFP_MISSING_FILES.md 5): the job's own stored source PDF, the
+    bytes the person dropped, as `(Promote, bytes)`; a `Skip` when the
+    object is gone. The category is the splitter's (the segment's), exactly
+    as for an RFP job; `Promote` only names the file and its type here."""
+    from app.services import rfp_create_files as rcf
+
+    path = str(split_file.get("storage_path") or "")
+    name = str(split_file.get("filename") or "").strip() or "document.pdf"
+    if not path:
+        return rcf.Skip(rcf.REASON_NO_SOURCE)
+    try:
+        data = storage.download_file(path)
+    except Exception:  # noqa: BLE001 - the segments still land; the skip says why
+        logger.exception("rfp split: the dropped source %s could not be read", path)
+        return rcf.Skip(rcf.REASON_MISSING_IN_STORAGE)
+    return rcf.Promote(storage.BUCKET, path, name, "application/pdf", False), data
+
+
+def _resync_project_job(sb, split_file: dict, job: dict, *, actor_id: str | None) -> PromoteResult:
+    """`resync_project_files` for a drop-zone job: no harvest, no sandbox id;
+    the rows carry `bid_split_file_id` / `bid_split_segment_id` only, so a
+    correction in the splitter re-files the project exactly as for an RFP
+    job. The created record's `files_promoted` (the promotion's count) is
+    left alone."""
+    project_id = str(job["project_id"])
+    file_id = str(split_file["id"])
+    segments = segments_for(sb, [file_id]).get(file_id, [])
+    existing = rows_for_file(project_rows(sb, project_id), split_file)
+    name = str(split_file.get("filename") or "").strip() or "document.pdf"
+    # A person dropped this file: its segments are a person's insert for the
+    # first-file rule (docs/RFP_MISSING_FILES.md 4).
+    result = promote_split_file(
+        sb, project_id=project_id, harvest_id=None, split_file=split_file, segments=segments,
+        existing=existing, fetch_original=lambda: project_original(split_file), name=name, by_person=True,
+    )
+    if result.used_split:
+        audit(actor_id, "rfp_split.resync", "project", project_id, {
+            "bid_split_file_id": file_id, "source": SOURCE_PROJECT, "documents": result.documents,
+            "inserted": result.inserted, "replaced": result.replaced, "skipped": result.skipped[:20],
+        })
+    return result
+
+
+MSG_WHOLE_NOT_SPLIT = "The Bid File Splitter could not split this file ({reason}); it was added whole."
+MSG_WHOLE_NOT_SPLIT_SENT = (
+    "The Bid File Splitter could not split this file ({reason}); it was added whole under Additional files "
+    "because the package had already been sent."
+)
+MSG_WHOLE_SENT = (
+    "The Bid File Splitter split this file, but the package had already been sent when the split finished, "
+    "so it was added whole under Additional files."
+)
+_WHY_REFILE_FAILED = "its documents could not be filed"
+_WHY_NO_DOCUMENTS = "it found no documents in it"
+_WHY_RUN_FAILED = "the run failed"
+
+
+def _reason_clause(reason: str | None) -> str:
+    text = " ".join(str(reason or "").split()).rstrip(".")[:300] or _WHY_RUN_FAILED
+    if len(text) > 1 and text[0].isupper() and text[1].islower():
+        text = text[0].lower() + text[1:]
+    return text
+
+
+def file_project_job_whole(sb, file_id: str, reason: str | None, *,
+                           package_sent: bool | None = None) -> dict | None:
+    """A dropped PDF is never lost (docs/RFP_MISSING_FILES.md 5, review
+    finding 1): when a project drop job's file could not be filed by trade
+    (its run failed, the package sent before the run ended, the re-file
+    raised), file the job's stored source PDF whole into the project.
+
+    Idempotent on the file: nothing happens when a row of this
+    `bid_split_file_id` already holds the original bytes (`_original_rows`:
+    the kept source set, the intact file, or an earlier whole filing). When
+    the file already has OTHER rows (a re-file that landed some segments,
+    then failed), the original is kept as the source set (`other`,
+    `is_source_set`, the source-set note), exactly what the next successful
+    re-file keeps in place, and never whole in a hand-off category beside
+    its own segments (review N1). Otherwise the category is `specification`
+    when the name says so, else `drawing`, and `additional` once the
+    package has sent (the upload lock policy); the note says why (`reason`
+    None = the split finished after the package sent); `uploaded_by` is the
+    person who dropped it (the job's `created_by`). The normal insert hooks
+    run as a system insert (`by_person=False`). None for any other job, or
+    when the source object is gone. Raises on storage or database trouble
+    (callers wrap it)."""
+    from app.routers.files import handoff_locked
+    from app.services import rfp_file_drop
+
+    split_file, job = job_for_file(sb, file_id)
+    if split_file is None or job is None or job.get("source") != SOURCE_PROJECT or not job.get("project_id"):
+        return None
+    project_id = str(job["project_id"])
+    existing = rows_for_file(project_rows(sb, project_id), split_file)
+    held = _original_rows(existing, split_file)
+    if held:
+        return held[0]
+    fetched = project_original(split_file)
+    if not isinstance(fetched, tuple):
+        logger.warning("rfp split: dropped file %s could not be filed whole (%s)", file_id,
+                       getattr(fetched, "reason", "unknown"))
+        return None
+    decision, data = fetched
+    if existing:
+        # Some of its segments are already in: the original joins them as the
+        # source set, the row a later successful re-file keeps in place.
+        segs = segments_for(sb, [str(split_file["id"])]).get(str(split_file["id"]), [])
+        logger.warning("rfp split: dropped file %s re-filed partly; its original is kept as the source set",
+                       file_id)
+        return _upload_original(
+            sb, project_id, None, split_file, decision, data, category=CATEGORY_OTHER, seg=None,
+            note=SOURCE_SET_NOTE.format(n=len(segs) or len(existing)), is_source_set=True, by_person=False,
+        )
+    if package_sent is None:
+        package_sent = bool(handoff_locked(project_id))
+    if reason is None:
+        note = MSG_WHOLE_SENT
+    elif package_sent:
+        note = MSG_WHOLE_NOT_SPLIT_SENT.format(reason=_reason_clause(reason))
+    else:
+        note = MSG_WHOLE_NOT_SPLIT.format(reason=_reason_clause(reason))
+    if package_sent:
+        category = rfp_file_drop.CATEGORY_ADDITIONAL
+    elif rfp_file_drop.looks_like_spec(decision.filename):
+        category = rfp_file_drop.CATEGORY_SPECIFICATION
+    else:
+        category = rfp_file_drop.CATEGORY_DRAWING
+    key = storage.build_object_path(project_id, category, decision.filename)
+    storage.upload_file(key, data, decision.content_type)
+    row = _base_row(project_id, None, split_file, key, decision.filename, decision.content_type, len(data), note)
+    row.update(category_fields(category, None, decision.filename))
+    row["uploaded_by"] = job.get("created_by")
+    inserted = _insert_row(sb, row, key, source_name=decision.filename, by_person=False)
+    if inserted is not None:
+        audit(job.get("created_by"), "file.upload", "project_file", inserted.get("id"), {
+            "category": category, "source": "rfp_files_drop", "whole": True, "bid_split_file_id": file_id,
+            "reason": None if reason is None else _reason_clause(reason),
+        })
+    return inserted
+
+
+def file_project_job_whole_quietly(file_id: str, reason: str | None, *, sb=None,
+                                   package_sent: bool | None = None) -> None:
+    """`file_project_job_whole` for the splitter worker's hooks: never
+    raises."""
+    try:
+        if sb is None:
+            from app.core.supabase_client import get_supabase
+
+            sb = get_supabase()
+        file_project_job_whole(sb, file_id, reason, package_sent=package_sent)
+    except Exception:  # noqa: BLE001 - the run's outcome stands; the file stays in the splitter
+        logger.exception("rfp split: filing dropped file %s whole failed", file_id)
+
+
 def resync_after_run(file_id: str) -> None:
-    """Called by the splitter worker when a run on an rfp job's file ends
-    `done`: re-file the project's rows when the job has a project and its
-    package has not sent. Best effort, never raises."""
+    """Called by the splitter worker when a run on an rfp job's file (or a
+    project drop-zone job's, SOURCE_PROJECT) ends `done`: re-file the
+    project's rows when the job has a project and its package has not sent.
+    A drop job's file that cannot be filed by trade (the package sent before
+    the run ended, the re-file raised, the run found no documents) is filed
+    whole instead (`file_project_job_whole`). Best effort, never raises."""
     from app.core.supabase_client import get_supabase
     from app.routers.files import handoff_locked
 
@@ -1892,10 +2106,21 @@ def resync_after_run(file_id: str) -> None:
         split_file, job = job_for_file(sb, file_id)
         if split_file is None or job is None or not job.get("project_id"):
             return
+        dropped = job.get("source") == SOURCE_PROJECT
         if handoff_locked(str(job["project_id"])):
             logger.info("rfp split: package sent for %s; run on %s not re-filed", job["project_id"], file_id)
+            if dropped:
+                file_project_job_whole_quietly(file_id, None, sb=sb, package_sent=True)
             return
-        resync_project_files(sb, file_id, actor_id=None)
+        try:
+            result = resync_project_files(sb, file_id, actor_id=None)
+        except Exception:  # noqa: BLE001
+            logger.exception("rfp split: re-file after run failed for %s", file_id)
+            if dropped:
+                file_project_job_whole_quietly(file_id, _WHY_REFILE_FAILED, sb=sb)
+            return
+        if dropped and (result is None or not result.used_split):
+            file_project_job_whole_quietly(file_id, _WHY_NO_DOCUMENTS, sb=sb)
     except Exception:  # noqa: BLE001
         logger.exception("rfp split: resync after run failed for %s", file_id)
 

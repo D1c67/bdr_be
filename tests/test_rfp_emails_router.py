@@ -1265,6 +1265,25 @@ def test_a_row_that_moved_on_is_a_409(db, ingest, call):
     assert not db.tables.get("audit_log")
 
 
+def test_not_an_rfp_on_review_match_keeps_the_match_guards_code(db, ingest):
+    """Dismiss on a review_match row ("Not an RFP", RFP_MATCHING.md 3.8)
+    reaches the same service call under the same review-queue roles; the
+    open-merge guard's refusal comes back under its own code, not as the
+    plain "moved on" 409."""
+    _seed(db)
+    rr.dismiss_rfp_email(E5, user=_user(uid="u7"))
+    assert ("dismiss", E5, "u7") in ingest.calls
+
+    def refuse(sb, email_id, actor_id):
+        raise _MatchErr(ErrorCode.RFP_MATCH_NOT_ACTIONABLE, "This email has an open merge on a project.")
+    ingest.dismiss = refuse
+    with pytest.raises(HTTPException) as exc:
+        rr.dismiss_rfp_email(E5, user=_user())
+    assert exc.value.status_code == 409
+    assert exc.value.headers["X-Error-Code"] == ErrorCode.RFP_MATCH_NOT_ACTIONABLE
+    assert exc.value.detail == "This email has an open merge on a project."
+
+
 def test_actions_404_a_missing_row_before_the_service_is_touched(db, ingest):
     _seed(db)
     with pytest.raises(HTTPException) as exc:

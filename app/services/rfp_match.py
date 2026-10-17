@@ -26,8 +26,9 @@ What lives here:
   check, and the settings snapshot stored with every decision.
 
 SCORER_VERSION is bumped whenever a stop token, discriminator word, the
-containment rule, the date ladder or the aggregation changes, so a stored
-decision can always be re-read against the scorer that produced it.
+containment rule, the date ladder, the aggregation or the candidate
+membership rule changes, so a stored decision can always be re-read against
+the scorer that produced it.
 
 The email delimiters, clamp_confidence and truncate_words were moved here
 from rfp_email_ingest (which imports them back); this module imports
@@ -51,7 +52,9 @@ from app.services.rfp_email_auth import address_domain, is_public_mailbox_domain
 
 logger = logging.getLogger(__name__)
 
-SCORER_VERSION = "rfp_match_scorer_v1"
+# v2 = candidate membership also by created_at (2026-10-12): a project created
+# inside the candidate window is a candidate whatever its bid date.
+SCORER_VERSION = "rfp_match_scorer_v2"
 EXTRACT_PROMPT_VERSION = "rfp_extract_v3"  # v2: platform list without BuildingConnected and NGEM; v3: without PlanHub
 MATCH_PROMPT_VERSION = "rfp_match_v1"
 
@@ -93,6 +96,9 @@ REASON_CONFIDENT = "match_confident"
 REASON_UNCERTAIN = "match_uncertain"
 REASON_LLM_UNUSABLE = "match_llm_unusable"
 REASON_SIBLING = "sibling"
+# Rule 8b: nothing matched AND the GC is unknown. Held for a person instead
+# of going on to create a project nobody can attribute (2026-10-05).
+REASON_NEW_GC_UNRESOLVED = "new_gc_unresolved"
 
 VERDICT_SAME = "same"
 VERDICT_DIFFERENT = "different"
@@ -117,8 +123,11 @@ EXCLUDED_STAGES = ("declined", "pm_only", "cp_only")
 # The sender kinds the automatic decision trusts (rule 3). Never override.
 VERIFIED_AUTH_KINDS = ("address", "domain", "gc_domain")
 
+# created_at is load-bearing: the candidate window also admits a project
+# created inside it (in_candidate_window), and PostgREST drops any column the
+# select does not name, so leaving it out silently disables that rule.
 CANDIDATE_SELECT = (
-    "id, name, number, current_stage, internal_bid_at, actual_bid_at, bid_notes, "
+    "id, name, number, current_stage, internal_bid_at, actual_bid_at, bid_notes, created_at, "
     "project_gcs(id, gc_id, needs_by, general_contractors(name))"
 )
 
@@ -968,31 +977,39 @@ def rebid_lookup(name, projects, settings) -> tuple[str, float] | None:
 
 
 def in_candidate_window(project: dict, now: datetime, settings) -> bool:
-    """coalesce(actual_bid_at, internal_bid_at) not older than the candidate
-    window; projects with neither date are never candidates. Stage and
+    """Candidate window membership: coalesce(actual_bid_at, internal_bid_at)
+    not older than RFP_MATCH_CANDIDATE_WINDOW_DAYS, OR created_at inside that
+    same window. The second leg catches a project whose bid date is missing
+    or stale (an RFP-created project made from a reminder email), so the next
+    copy of the same invitation finds it (2026-10-12). A project with no bid
+    date and a missing or older created_at is never a candidate. Stage and
     abandonment exclusions are the query's job (candidate_query)."""
-    bid_at = project_bid_at(project)
-    if bid_at is None:
-        return False
     lo = now - timedelta(days=int(settings.rfp_match_candidate_window_days))
-    return bid_at >= lo
+    bid_at = project_bid_at(project)
+    if bid_at is not None and bid_at >= lo:
+        return True
+    created_at = parse_dt(project.get("created_at"))
+    return created_at is not None and created_at >= lo
 
 
 def split_bands(projects, now: datetime, settings, *, excluded_ids=()) -> tuple[list, list]:
-    """(candidates, rebid band) from the bundle's projects: the candidate
-    window, and everything older inside the lookback, minus the excluded ids."""
+    """(candidates, rebid band) from the bundle's projects, minus the excluded
+    ids. A project inside the candidate window (by bid date or by created_at)
+    is a candidate, whatever its bid date; otherwise a project whose bid date
+    is inside the rebid lookback is in the rebid band; anything else is
+    dropped. The window check comes first, so a recently created project with
+    no bid date, or with one older than the lookback, is still a candidate."""
     excluded = {str(x) for x in (excluded_ids or ())}
     lookback = now - timedelta(days=int(settings.rfp_match_rebid_lookback_days))
     candidates, rebid = [], []
     for project in projects or []:
         if str(project.get("id")) in excluded:
             continue
-        bid_at = project_bid_at(project)
-        if bid_at is None or bid_at < lookback:
-            continue
         if in_candidate_window(project, now, settings):
             candidates.append(project)
-        else:
+            continue
+        bid_at = project_bid_at(project)
+        if bid_at is not None and bid_at >= lookback:
             rebid.append(project)
     return candidates, rebid
 
@@ -1224,24 +1241,34 @@ def route(
     auto_merge: bool,
     settings,
     llm_unusable: bool = False,
+    hold_new_without_gc: bool = False,
 ) -> Route:
     """Rules 0 to 8 of section 3.5. `candidates` is the stored top list with
     verdicts applied (None for an unjudged entry). `llm_unusable` marks the
     'unusable output twice' exit: any review_match outcome then carries
-    match_llm_unusable so the reviewer knows the model never answered."""
+    match_llm_unusable so the reviewer knows the model never answered.
+    `hold_new_without_gc` (the email step, rule 8b) turns the two "no
+    existing project" exits into `review_match` with `new_gc_unresolved`
+    when the GC is unresolved: a person picks the GC, continues it as new,
+    or says it is not an RFP. The portal steps never pass it."""
     if not has_name:
         return Route(STATUS_DONE, REASON_NO_PROJECT_NAME, None)
     review = float(settings.rfp_match_review_threshold)
     threshold = float(settings.rfp_match_llm_confidence_threshold)
     gap = float(settings.rfp_match_runner_up_gap)
 
+    def no_project(reason: str) -> Route:
+        if hold_new_without_gc and not gc_resolved:
+            return Route(STATUS_REVIEW_MATCH, REASON_NEW_GC_UNRESOLVED, None)
+        return Route(STATUS_DONE, reason, None)
+
     if not any(c["breakdown"]["total"] >= review for c in candidates):
-        return Route(STATUS_DONE, REASON_NO_CANDIDATE, None)
+        return no_project(REASON_NO_CANDIDATE)
     ranked = sorted(
         (c for c in candidates if not _confident_different(c, threshold)), key=_rank_key
     )
     if not ranked or ranked[0]["breakdown"]["total"] < review:
-        return Route(STATUS_DONE, REASON_ALL_DIFFERENT, None)
+        return no_project(REASON_ALL_DIFFERENT)
     best = ranked[0]
     best_total = best["breakdown"]["total"]
 
@@ -1536,16 +1563,26 @@ def redact_candidates(obj, role):
     return out
 
 
-def candidate_query(sb, lo_iso: str, *, select: str = CANDIDATE_SELECT):
+def candidate_query(sb, lo_iso: str, *, created_lo_iso: str | None = None,
+                    select: str = CANDIDATE_SELECT):
     """The one projects read per sweep (3.3): open, non-excluded stages, with
-    coalesce(actual_bid_at, internal_bid_at) >= lo as a PostgREST or-group
-    (filters accept now() but not now() - interval or coalesce())."""
+    coalesce(actual_bid_at, internal_bid_at) >= lo_iso OR created_at >=
+    created_lo_iso as a PostgREST or-group (filters accept now() but not
+    now() - interval or coalesce()). created_lo_iso defaults to lo_iso, so a
+    caller that passes the candidate window as lo_iso (the portal "same as"
+    check) gets the full window rule; the sweep bundle passes the rebid
+    lookback as lo_iso and the candidate window as created_lo_iso."""
+    created_lo = created_lo_iso or lo_iso
     return (
         sb.table("projects")
         .select(select)
         .is_("abandoned_at", "null")
         .not_.in_("current_stage", list(EXCLUDED_STAGES))
-        .or_(f"actual_bid_at.gte.{lo_iso},and(actual_bid_at.is.null,internal_bid_at.gte.{lo_iso})")
+        .or_(
+            f"actual_bid_at.gte.{lo_iso},"
+            f"and(actual_bid_at.is.null,internal_bid_at.gte.{lo_iso}),"
+            f"created_at.gte.{created_lo}"
+        )
     )
 
 

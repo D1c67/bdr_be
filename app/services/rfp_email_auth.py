@@ -15,6 +15,8 @@ and the settings router without either dragging in Supabase or Graph:
   public provider is refused because blocking it would drop every GC contact
   who uses it.
 - evaluate_authorization: the sender precedence from docs 3.7 and 3.8.
+- is_procore_change_order_rfq: the free rule that ends Procore's
+  change-order Request for Quote mail before any model call (doc 3.4.1).
 
 The From address is the RFC 5322 From, already authenticated by the auth
 step, never the display name and never Reply-To.
@@ -24,6 +26,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+
+from app.services import procore_client
 
 # ── Invitation methods (doc 3.8) ─────────────────────────────────────────────
 # One platform, Procore, the GC-portal source, plus the three non-platform
@@ -341,6 +345,45 @@ def keyword_hits(subject: str | None, body: str | None) -> list[str]:
     for match in _KEYWORD_RE.finditer(text):
         seen.setdefault(match.group(0).lower(), None)
     return list(seen)
+
+
+# ── Procore change-order RFQs (doc 3.4.1) ────────────────────────────────────
+# Procore's Request for Quote tool prices a change event on a contract G3
+# already holds; its mail ("<GC>: You have 2 overdue Requests for Quote",
+# daily, with a stale Quote Due Date) reads like an invitation to the model
+# and to the extractor, but it is never a bid. Decided here for free, before
+# the classify call, so no model is spent on it.
+
+FLAG_PROCORE_CHANGE_ORDER_RFQ = "procore_change_order_rfq"
+PROCORE_SENDER_DOMAIN = "procoretech.com"
+
+_PROCORE_OVERDUE_RFQ_SUBJECT = re.compile(
+    r"\byou\s+have\s+\d+\s+overdue\s+requests?\s+for\s+quotes?\b", re.IGNORECASE
+)
+
+
+def is_procore_change_order_rfq(
+    from_address: str | None, subject: str | None, body_text: str | None
+) -> bool:
+    """True for Procore notification mail about a change-order Request for
+    Quote rather than a bid invitation. All three must hold:
+
+    1. the sender is Procore (`procoretech.com` or a subdomain, on a label
+       boundary: `us02.procoretech.com` yes, `notprocoretech.com` no);
+    2. the body carries NO Procore bid link (`procore_client.parse_reference`,
+       the harvester's own reader: the bid sheet route, the bid page, the
+       documents zip or a bid intent link). A bid invitation, reminder or
+       addendum always carries one, so it can never be caught here;
+    3. the subject is the "You have N overdue Request(s) for Quote" digest,
+       or the body links a commitment or change-event Request for Quote
+       (`procore_client.has_change_order_rfq_link`, safelinks unwrapped)."""
+    if not domain_covered_by(address_domain(from_address), PROCORE_SENDER_DOMAIN):
+        return False
+    if procore_client.parse_reference(body_text) is not None:
+        return False
+    if _PROCORE_OVERDUE_RFQ_SUBJECT.search(subject or ""):
+        return True
+    return procore_client.has_change_order_rfq_link(body_text)
 
 
 # ── Message-ID normalization (doc 3.1) ───────────────────────────────────────

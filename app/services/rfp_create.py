@@ -71,6 +71,7 @@ from app.services import (
     gono,
     llm_queue,
     notification_email,
+    rfp_file_issues,
     rfp_match,
     rfp_split,
     rfp_test,
@@ -79,6 +80,7 @@ from app.services import (
 from app.services.notifications import audit, dismiss_notifications, notify_role
 from app.services.rfp_email_auth import (
     METHOD_NONORGANIC,
+    METHOD_SMARTBID,
     address_domain,
     is_public_mailbox_domain,
 )
@@ -1012,18 +1014,35 @@ def _project_number(sb, project_id: str) -> str:
 _DUPLICATE_PROJECT_CAP = 200
 
 WHY_SIBLING = "sibling"            # another copy of this same email made it
-WHY_RECENT_PROJECT = "recent_project"   # same name, same GC, made minutes ago
+WHY_RECENT_PROJECT = "recent_project"   # same name, same GC (or sender), made minutes ago
+
+# What tied a recent-project hit to this row besides the name (4.6 half 2):
+# the resolved GC on the project, or (no GC resolved) the same sender address
+# on the email that made it.
+MATCHED_ON_GC = "gc"
+MATCHED_ON_SENDER = "sender"
+# Methods whose sender address is one platform mailbox shared by every GC
+# that invites through it, so the same sender says nothing about the GC:
+# SmartBid sends every invitation from notifications@com2.smartbidnet.com
+# (four GCs from that one address on dev, 2026-10-05). A no-GC row of such a
+# method gets no sender tie; GC B's invitation must never land on GC A's
+# same-name project with GC B never attached. Procore senders are per GC
+# (`<gc>_notifications@procoretech.com`), PipelineSuite, organic, general and
+# nonorganic senders are the GC's own people.
+SHARED_SENDER_METHODS = (METHOD_SMARTBID,)
 
 
 @dataclass(frozen=True)
 class _Duplicate:
     """What the guard found (4.6). `project` is the matched `projects` row,
-    carried so the manual path's refusal can name it."""
+    carried so the manual path's refusal can name it; `matched_on` says what
+    tied a recent-project hit to this row (MATCHED_ON_GC / _SENDER)."""
 
     project_id: str
     why: str
     sibling_email_id: str | None = None
     project: dict | None = None
+    matched_on: str | None = None
 
 
 def normalized_name(value: Any) -> str:
@@ -1068,18 +1087,63 @@ def _sibling_created_project(sb, row: dict, settings: Settings) -> _Duplicate | 
     return None
 
 
+def _sender_key(address: Any) -> str:
+    return str(address or "").strip().lower()
+
+
+def _projects_from_sender(sb, project_ids: list[str], sender: str) -> set[str]:
+    """The projects among `project_ids` that an email from `sender`
+    (case-insensitive) made or joined: the email the `rfp_created_projects`
+    record names (written right behind the project, 4.5 step 2, so a creation
+    still in flight counts), and every `rfp_emails` row whose
+    `created_project_id` is the project (the creator once its CAS lands, and
+    the rows linked to it since)."""
+    hits: set[str] = set()
+    creators: dict[str, str] = {}
+    for chunk in _chunks(project_ids):
+        for rec in (
+            sb.table(TABLE).select("project_id, rfp_email_id").in_("project_id", chunk).execute()
+        ).data or []:
+            if rec.get("rfp_email_id"):
+                creators[str(rec["rfp_email_id"])] = str(rec["project_id"])
+        for email in (
+            sb.table(EMAILS_TABLE)
+            .select("created_project_id, from_address")
+            .in_("created_project_id", chunk)
+            .execute()
+        ).data or []:
+            if _sender_key(email.get("from_address")) == sender:
+                hits.add(str(email["created_project_id"]))
+    pending = {eid: pid for eid, pid in creators.items() if pid not in hits}
+    for chunk in _chunks(list(pending)):
+        for email in (
+            sb.table(EMAILS_TABLE).select("id, from_address").in_("id", chunk).execute()
+        ).data or []:
+            if _sender_key(email.get("from_address")) == sender:
+                hits.add(pending[str(email["id"])])
+    return hits
+
+
 def _recent_duplicate_project(sb, row: dict, settings: Settings) -> _Duplicate | None:
     """The project a moment ago that IS this invitation: created inside
     `RFP_CREATE_DUPLICATE_WINDOW_MINUTES` (0 disables), the same normalized
-    name as this row's extracted name, and already linked to this row's
-    resolved GC. A row with no resolved GC never matches here: a name alone
-    is the matcher's job, not a blind guard's. An excluded or abandoned
-    project is never a hit, and the read stays inside the row's test-bench
-    scope the way the sweep does."""
+    name as this row's extracted name, and tied to this row by more than the
+    name: with a resolved GC, the project is already linked to that GC; with
+    none, an email from this row's own sender address made (or joined) that
+    project (`_projects_from_sender`: the same mailbox sending the same notice
+    again, as three copies of one Procore notice did 7 minutes apart on
+    2026-10-02). A name alone never links: deciding that two invitations are
+    one project is the matcher's job, not a blind guard's. An excluded or
+    abandoned project is never a hit, and the read stays inside the row's
+    test-bench scope the way the sweep does. A shared platform sender
+    (`SHARED_SENDER_METHODS`) never ties: with no GC, such a row gets the
+    sibling half only."""
     minutes = int(getattr(settings, "rfp_create_duplicate_window_minutes", 0) or 0)
     gc_id = row.get("resolved_gc_id")
+    shared = row.get("invitation_method") in SHARED_SENDER_METHODS
+    sender = "" if shared else _sender_key(row.get("from_address"))
     name = normalized_name(row.get("extracted_project_name"))
-    if minutes <= 0 or not gc_id or not name:
+    if minutes <= 0 or not name or not (gc_id or sender):
         return None
     excluded = {str(x) for x in (row.get("excluded_project_ids") or [])}
     cutoff = _iso(_now() - timedelta(minutes=minutes))
@@ -1114,19 +1178,23 @@ def _recent_duplicate_project(sb, row: dict, settings: Settings) -> _Duplicate |
         return None
     by_id = {str(p["id"]): p for p in matched}
     linked: set[str] = set()
-    for chunk in _chunks(list(by_id)):
-        rows = (
-            sb.table("project_gcs")
-            .select("project_id, gc_id")
-            .in_("project_id", chunk)
-            .eq("gc_id", gc_id)
-            .execute()
-        ).data or []
-        linked.update(str(r["project_id"]) for r in rows if r.get("project_id"))
+    if gc_id:
+        for chunk in _chunks(list(by_id)):
+            rows = (
+                sb.table("project_gcs")
+                .select("project_id, gc_id")
+                .in_("project_id", chunk)
+                .eq("gc_id", gc_id)
+                .execute()
+            ).data or []
+            linked.update(str(r["project_id"]) for r in rows if r.get("project_id"))
+    else:
+        linked = _projects_from_sender(sb, list(by_id), sender)
     hit = next((p for p in matched if str(p["id"]) in linked), None)
     if hit is None:
         return None
-    return _Duplicate(project_id=str(hit["id"]), why=WHY_RECENT_PROJECT, project=hit)
+    return _Duplicate(project_id=str(hit["id"]), why=WHY_RECENT_PROJECT, project=hit,
+                      matched_on=MATCHED_ON_GC if gc_id else MATCHED_ON_SENDER)
 
 
 def duplicate_project_for(sb, row: dict, settings: Settings) -> _Duplicate | None:
@@ -1140,17 +1208,20 @@ def duplicate_project_for(sb, row: dict, settings: Settings) -> _Duplicate | Non
     )
 
 
-def recent_project_sentence(project: dict | None) -> str:
+def recent_project_sentence(project: dict | None, matched_on: str | None = MATCHED_ON_GC) -> str:
     """The manual path's refusal for the recent-project half (4.6). A person
     is told what exists and what to do; the app never silently attaches an
-    email a person is creating from to a project it guessed at."""
+    email a person is creating from to a project it guessed at. The sentence
+    names what tied the project to this email: the GC, or (no GC resolved)
+    the sender."""
     created = _parse_ts((project or {}).get("created_at"))
     minutes = max(int((_now() - created).total_seconds() // 60), 0) if created else 0
     label = " ".join(
         part for part in [(project or {}).get("number"), (project or {}).get("name")] if part
     ) or "another project"
+    tie = "from this sender" if matched_on == MATCHED_ON_SENDER else "for this GC"
     return (
-        f"A project with this name for this GC was created {minutes} minutes ago: {label}. "
+        f"A project with this name {tie} was created {minutes} minutes ago: {label}. "
         "Merge this email into it, or rename the project, before creating another."
     )
 
@@ -1177,7 +1248,7 @@ def _link_duplicate(
     # hit. The rule that found it is `why`, beside it, never in its place.
     detail = {"project_id": project_id, "number": number,
               "duplicate_of": sibling_id or project_id, "why": why,
-              "sibling_of_email_id": sibling_id}
+              "matched_on": duplicate.matched_on, "sibling_of_email_id": sibling_id}
     audit(actor_id, AUDIT_LINK_ACTION, source.kind, source.row["id"], detail)
     if test_session_id:
         rfp_test.record(
@@ -1451,16 +1522,25 @@ def _start_rescan(project_id: str) -> None:
     threading.Thread(target=run, name=f"rfp-create-rescan-{project_id[:8]}", daemon=True).start()
 
 
-def _notify(sb, project: dict, missing: list[str], source_kind: str, split_note: str | None = None) -> None:
+def _notify(
+    sb, project: dict, missing: list[str], source_kind: str, split_note: str | None = None,
+    files_note: str | None = None,
+) -> None:
     """The two creation bells (email mirrored). `split_note` is the Bid File
     Splitter sentence when the split failed or partly failed
-    (rfp_split.creation_note, docs/RFP_SPLIT.md 10), appended to both."""
+    (rfp_split.creation_note, docs/RFP_SPLIT.md 10) and `files_note` the
+    missing-files sentence when some of the invitation's files did not come
+    in (rfp_file_issues.creation_note, docs/RFP_MISSING_FILES.md 9), both
+    appended to both bells (metadata `split_note` / `files_note`)."""
     number, name = project.get("number") or "", project.get("name") or ""
     label = f"{number} {name}".strip()
     meta = {"project_id": project["id"], "number": number, "missing": list(missing), "source_kind": source_kind}
     if split_note:
         meta["split_note"] = split_note
-    tail = f". {split_note}" if split_note else ""
+    if files_note:
+        meta["files_note"] = files_note
+    notes = [n for n in (split_note, files_note) if n]
+    tail = f". {' '.join(notes)}" if notes else ""
     notify_role(
         Role.EXECUTIVE, project["id"], NOTIFY_CREATED,
         f"Project {label} was created from an RFP invitation and is waiting in Go/No-Go{tail}",
@@ -1683,9 +1763,10 @@ def _create(
             raise CreateInProgress(_MSG_IN_PROGRESS)
 
     # 4.6: the last read before the insert. An email whose copy already made
-    # the project (or whose project was made minutes ago for the same GC)
-    # joins it instead of making a second one. Email rows only: a portal
-    # invitation has no sender, no subject and no copies.
+    # the project (or whose project was made minutes ago for the same GC, or
+    # from the same sender when no GC resolved) joins it instead of making a
+    # second one. Email rows only: a portal invitation has no sender, no
+    # subject and no copies.
     if source.kind == SOURCE_EMAIL:
         duplicate = duplicate_project_for(sb, row, settings)
         if duplicate is not None:
@@ -1693,7 +1774,7 @@ def _create(
                 # A person is creating: never attach their click to a project
                 # the app only inferred. Say what exists and let them decide.
                 _release_claim(sb, harvest_id, token, project_id=None)
-                raise CreateRefused(recent_project_sentence(duplicate.project))
+                raise CreateRefused(recent_project_sentence(duplicate.project, duplicate.matched_on))
             made = _link_duplicate(
                 sb, source, duplicate, actor_id, test_session_id=test_session_id,
             )
@@ -1846,12 +1927,18 @@ def _create(
 
     # Steps 9 and 10: the bells, the audit row, the learn-back.
     missing: list[str] = []
+    email_row = row if source.kind == SOURCE_EMAIL else None
     try:
         missing = project_intake.missing_intake_fields(project, bid_time_unknown=facts.bid_time_unknown)
-        _notify(sb, project, missing, source.kind, rfp_split.creation_note(sb, harvest))
+        _notify(sb, project, missing, source.kind, rfp_split.creation_note(sb, harvest),
+                files_note=rfp_file_issues.note_for_harvest(harvest, email_row))
     except Exception as exc:  # noqa: BLE001
         logger.exception("rfp create: notifications failed for %s", project_id)
         _note_error(sb, project_id, f"Notifications failed: {exc}")
+    # The missing files (docs/RFP_MISSING_FILES.md 4): every file or link the
+    # harvest could not bring in becomes an item on the project, from the
+    # same harvest the bells read. Best effort inside the service.
+    rfp_file_issues.sync_project(sb, project_id, harvest=harvest, email=email_row)
     try:
         audit(actor_id, AUDIT_ACTION, "project", project_id, {
             "source_kind": source.kind, "source_id": row["id"], "harvest_id": harvest_id,

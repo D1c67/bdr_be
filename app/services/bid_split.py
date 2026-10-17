@@ -272,6 +272,112 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# ── Staging one uploaded file (shared by the splitter page and the project's
+#    missing-files drop zone, docs/RFP_MISSING_FILES.md 5) ──────────────────
+
+
+class UploadRefused(Exception):
+    """A file the splitter will not take; `str(exc)` is the sentence for the
+    person and `status_code` the HTTP answer."""
+
+    def __init__(self, message: str, status_code: int = 400, *, pages: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        # The page count when the refusal is the page cap (413): the
+        # missing-files drop zone files such a PDF whole instead.
+        self.pages = pages
+
+
+def is_pdf_upload(filename: str | None, content: bytes) -> bool:
+    """Extension AND magic bytes: the splitter takes PDFs only."""
+    return (filename or "").lower().endswith(".pdf") and content[:5] == b"%PDF-"
+
+
+def check_upload(filename: str, content: bytes, settings: Settings | None = None) -> int:
+    """The splitter's per-file validation (extension and magic, must open,
+    page cap), before anything is written. Returns the page count; raises
+    UploadRefused (415 / 413) with the sentence. Sync: `page_count` parses
+    the whole PDF, so async callers run this in the threadpool."""
+    s = settings or get_settings()
+    if not is_pdf_upload(filename, content):
+        raise UploadRefused(f"{filename}: the splitter accepts PDF files only", 415)
+    try:
+        pages = pdf_split.page_count(content)
+    except ValueError as exc:
+        raise UploadRefused(f"{filename}: {exc}", 415) from exc
+    if pages > s.bid_split_max_pages_per_file:
+        raise UploadRefused(
+            f"{filename}: {pages} pages exceeds the {s.bid_split_max_pages_per_file}-page limit per file",
+            413, pages=pages,
+        )
+    return pages
+
+
+def stage_upload(sb, job: dict, filename: str, content: bytes, pages: int | None, user_id: str | None) -> dict:
+    """Add one validated PDF to a job: the per-job file cap, the source
+    object, the `bid_split_files` row (pending) and the job's `file_count`
+    re-stamped with reality. A failed insert removes the stored object.
+    Returns the inserted row; raises UploadRefused (400) when the job is
+    full. `user_id` is the person staging it (kept for the signature the two
+    callers share; the run's queue job carries it through `dispatch`)."""
+    s = get_settings()
+    existing = (
+        sb.table("bid_split_files").select("id").eq("job_id", job["id"]).execute()
+    ).data or []
+    if len(existing) >= s.bid_split_max_files_per_job:
+        raise UploadRefused(f"This job already holds {s.bid_split_max_files_per_job} files.", 400)
+    path = storage.build_bid_split_source_path(job["id"], filename)
+    storage.upload_file(path, content, "application/pdf")
+    try:
+        frow = (
+            sb.table("bid_split_files")
+            .insert(
+                {
+                    "job_id": job["id"],
+                    "filename": filename,
+                    "storage_path": path,
+                    "size_bytes": len(content),
+                    "page_count": pages,
+                    "status": "pending",
+                }
+            )
+            .execute()
+        ).data[0]
+    except Exception:
+        # The object is already stored; drop it so a failed insert leaves
+        # no orphan (submittals precedent).
+        storage.delete_file(path)
+        raise
+    # Re-stamp file_count with reality: the create's value was the plan,
+    # and a browser closed mid-batch must not overstate it forever.
+    sb.table("bid_split_jobs").update({"file_count": len(existing) + 1}).eq("id", job["id"]).execute()
+    return frow
+
+
+def dispatch(background, file_id: str, user_id: str | None, forced_kind: str | None = None) -> None:
+    """Queue one file run, degrading to inline dispatch exactly like BOQ.
+    `background` is the request's BackgroundTasks (the inline fallback).
+    `forced_kind` pins a user verdict on the run (reprocess): triage is
+    skipped and the split pass runs as that kind."""
+    from app.services import llm_queue
+
+    if get_settings().llm_queue_enabled:
+        try:
+            payload = {"file_id": file_id}
+            if forced_kind is not None:
+                payload["forced_kind"] = forced_kind
+            llm_queue.enqueue(
+                llm_queue.JOB_BID_SPLIT,
+                target_id=file_id,
+                payload=payload,
+                created_by=user_id,
+            )
+            return
+        except Exception:  # noqa: BLE001 - queue outage degrades to inline dispatch
+            logger.exception("bid_split enqueue failed; falling back to BackgroundTasks")
+    background.add_task(run_file, file_id, forced_kind)
+
+
 # ── Domain row marks (queue adapter) ─────────────────────────────────────
 
 
@@ -292,6 +398,22 @@ def _mark(file_id: str, **fields) -> None:
     ).data or []
     if rows:
         refresh_job(rows[0]["job_id"])
+        if status == "failed":
+            _after_failed(file_id, fields.get("error"))
+
+
+def _after_failed(file_id: str, error: str | None) -> None:
+    """A file that ended `failed` on a project's missing-files drop job is
+    filed whole into the project instead (docs/RFP_MISSING_FILES.md 5:
+    a dropped PDF is never lost). No-op for every other job. Best effort:
+    the failed mark stands whatever happens here."""
+    try:
+        from app.services import rfp_split
+
+        # A reason, never None (None reads as "split, then the package sent").
+        rfp_split.file_project_job_whole_quietly(file_id, error or "", sb=get_supabase())
+    except Exception:  # noqa: BLE001
+        logger.exception("bid_split: whole-file fallback failed for %s", file_id)
 
 
 def refresh_job(job_id: str, _recheck: bool = True) -> None:

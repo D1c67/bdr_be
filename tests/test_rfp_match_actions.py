@@ -20,7 +20,7 @@ from app.services import (
     rfp_email_ingest as ingest,
     rfp_match,
 )
-from tests import test_rfp_email_ingest as base
+from tests import fixtures_procore as fx, test_rfp_email_ingest as base
 from tests.test_rfp_email_ingest import (
     EXO_PASS,
     _calls_for,
@@ -40,6 +40,7 @@ NOW = ingest._now()
 BID_AT = ingest._iso((NOW + timedelta(days=5)).replace(microsecond=0))
 DUE_DATE = (NOW + timedelta(days=5)).astimezone(ingest._COMPANY_TZ).date().isoformat()
 OLD_BID_AT = ingest._iso(NOW - timedelta(days=200))   # rebid band, outside the window
+CREATED_YESTERDAY = ingest._iso(NOW - timedelta(days=1))   # inside the window by created_at
 
 
 def _extract(name="Riverside Plaza", gc_name=None, due=None, notes=None):
@@ -62,14 +63,18 @@ SAME = _verdicts((0, "same", 0.95))
 
 
 def _project(db, pid, name, *, number=None, bid_at=BID_AT, actual=None, stage="rfq",
-             gcs=(), bid_notes=None, abandoned_at=None):
+             gcs=(), bid_notes=None, abandoned_at=None, created_at=None):
     """A projects row with its GC links embedded (the shape the bundle query
-    returns) and mirrored in project_gcs (what _gc_link and the rpc read)."""
+    returns) and mirrored in project_gcs (what _gc_link and the rpc read).
+    created_at is only set when given, so the older fixtures keep matching on
+    the bid date alone."""
     row = {
         "id": pid, "name": name, "number": number, "current_stage": stage,
         "internal_bid_at": bid_at, "actual_bid_at": actual, "bid_notes": bid_notes,
         "abandoned_at": abandoned_at, "project_gcs": [],
     }
+    if created_at is not None:
+        row["created_at"] = created_at
     for gc_id in gcs:
         link = {"id": f"link-{pid}-{gc_id}", "project_id": pid, "gc_id": gc_id,
                 "needs_by": None, "rfp_match_id": None}
@@ -295,6 +300,262 @@ def test_no_candidate_when_nothing_clears_review_threshold(db, llm_answer):
     assert _calls_for(calls, "rfp_match") == []
 
 
+# ── Rule 8b: a new invitation with no GC waits for a person (3.5) ───────────────
+
+
+def _no_gc(db, **over):
+    """A row at extract whose GC cannot resolve: a user-rule sender (no GC
+    domain, no contact) and an extract with no GC name."""
+    fields = dict(from_address="bids@unknown-gc.example", authorization_kind="address",
+                  authorization_rule_id="r-user", invitation_method="general")
+    fields.update(over)
+    return _at_extract(db, **fields)
+
+
+@pytest.mark.parametrize("auto_merge", [False, True])
+def test_no_candidate_without_a_gc_waits_for_a_person(db, llm_answer, monkeypatch, auto_merge):
+    """The 2026-10-01..05 junk: nothing matched AND nobody knows the GC, so
+    the row is held at review_match instead of going on to create. No
+    proposed project, near misses and the rebid lookup kept, the review
+    bell counted; the auto-merge switch plays no part."""
+    if auto_merge:
+        _auto_merge(monkeypatch)
+    calls = llm_answer(None, extract=_extract(), match=SAME)
+    _project(db, "p1", "Sunrise Elementary Modernization")
+    _project(db, "p-old", "Riverside Plaza", bid_at=OLD_BID_AT)   # rebid band
+    _no_gc(db)
+    outcome, stats = _walk(db)
+    row = _row(db)
+    assert outcome is None
+    assert row["status"] == "review_match" and row["flag_reason"] == "new_gc_unresolved"
+    assert row["decided_at_step"] == "match" and row["matched_at"]
+    assert row["resolved_gc_id"] is None and row["gc_match_kind"] is None
+    assert row["match_project_id"] is None and row["match_score"] is None
+    assert [c["project_id"] for c in row["match_candidates"]] == ["p1"]
+    assert row["possible_rebid_project_id"] == "p-old"
+    assert stats.match_review_new == 1 and _calls_for(calls, "rfp_match") == []
+    assert row.get("harvest_id") is None and row.get("created_project_id") is None
+
+
+# ── 2026-10-12: a project created inside the window is a candidate ─────────────
+#
+# The prod shapes behind the 9 duplicate projects of 2026-10-06..09: daily
+# Procore reminders whose first copy made a project with no bid date (CCRPM
+# Lake Mead), a stale quote date (DOA 3087, older than the rebid lookback) or
+# no date with the GC linked (Hydrogen SMF). The next copy must find it.
+
+CCRPM = "CCRPM- Lake Mead and Englestad - Microbusiness"
+STALE_ACTUAL = "2026-05-06T21:00:00+00:00"   # 2026-05-06 2 PM Pacific
+
+
+def _due(day):
+    return {"date": day, "time": None, "timezone": None}
+
+
+def test_reminder_copy_of_a_dateless_project_is_held_on_it(db, llm_answer):
+    """CCRPM day 2: the copy has no due date and no GC; the first copy's
+    project has no dates and was made yesterday. Proposed, never created."""
+    calls = llm_answer(None, extract=_extract(name=CCRPM), match=SAME)
+    _project(db, "p-ccrpm", CCRPM, bid_at=None, created_at=CREATED_YESTERDAY)
+    _no_gc(db)
+    outcome, stats = _walk(db)
+    row = _row(db)
+    assert outcome is None
+    assert row["status"] == "review_match" and row["flag_reason"] == "match_gc_unresolved"
+    assert row["match_project_id"] == "p-ccrpm" and row["match_score"] == 1.0
+    breakdown = row["match_candidates"][0]["breakdown"]
+    assert breakdown["date"] is None and breakdown["total"] == breakdown["name"] == 1.0
+    assert row.get("created_project_id") is None and row.get("harvest_id") is None
+    assert row.get("possible_rebid_project_id") is None
+    assert _links(db) == [] and _matches(db) == []
+    assert len(_calls_for(calls, "rfp_match")) == 1 and stats.match_review_new == 1
+
+
+def test_dated_copy_against_a_dateless_project_is_uncertain(db, llm_answer):
+    """A copy that carries a due date can never be confident against a
+    project with no date (rule 2 needs date 1.0), so a person decides."""
+    llm_answer(None, extract=_extract(name=CCRPM, due=_due("2026-05-06")), match=SAME)
+    _project(db, "p-ccrpm", CCRPM, bid_at=None, created_at=CREATED_YESTERDAY)
+    _no_gc(db)
+    _walk(db)
+    row = _row(db)
+    assert row["status"] == "review_match" and row["flag_reason"] == "match_uncertain"
+    assert row["match_project_id"] == "p-ccrpm"
+    assert row["match_candidates"][0]["breakdown"]["date"] is None
+    assert row.get("created_project_id") is None
+
+
+def test_stale_dated_new_project_is_a_candidate_not_a_rebid(db, llm_answer):
+    """The copy carries the same stale date the first copy's project got.
+    Before 2026-10-12 that project sat in the rebid band (name-only hint)."""
+    llm_answer(None, extract=_extract(name=CCRPM, due=_due("2026-05-06")), match=SAME)
+    _project(db, "p-stale", CCRPM, bid_at=None, actual=STALE_ACTUAL,
+             created_at=CREATED_YESTERDAY)
+    _no_gc(db)
+    _walk(db)
+    row = _row(db)
+    assert row["status"] == "review_match" and row["flag_reason"] == "match_gc_unresolved"
+    assert row["match_project_id"] == "p-stale" and row["match_score"] == 1.0
+    breakdown = row["match_candidates"][0]["breakdown"]
+    assert breakdown["date"] == 1.0 and breakdown["total"] == 1.0
+    assert row.get("possible_rebid_project_id") != "p-stale"
+    assert row.get("created_project_id") is None
+
+
+def test_stale_dated_new_project_with_another_date_is_uncertain(db, llm_answer):
+    llm_answer(None, extract=_extract(name=CCRPM, due=_due("2026-07-13")), match=SAME)
+    _project(db, "p-stale", CCRPM, bid_at=None, actual=STALE_ACTUAL,
+             created_at=CREATED_YESTERDAY)
+    _no_gc(db)
+    _walk(db)
+    row = _row(db)
+    assert row["status"] == "review_match" and row["flag_reason"] == "match_uncertain"
+    assert row["match_project_id"] == "p-stale"
+    breakdown = row["match_candidates"][0]["breakdown"]
+    assert breakdown["date"] == 0.0
+    assert breakdown["total"] == pytest.approx(0.6667, abs=1e-3)
+
+
+def test_several_reminder_copies_are_ambiguous(db, llm_answer):
+    llm_answer(None, extract=_extract(name=CCRPM, due=_due("2026-05-06")),
+               match=_verdicts((0, "same", 0.95), (1, "same", 0.95), (2, "same", 0.95)))
+    _project(db, "p-7252", CCRPM, bid_at=None, created_at=CREATED_YESTERDAY)
+    _project(db, "p-7256", CCRPM, bid_at=None, created_at=CREATED_YESTERDAY)
+    _project(db, "p-7257", CCRPM, bid_at=None, actual=STALE_ACTUAL,
+             created_at=CREATED_YESTERDAY)
+    _no_gc(db)
+    _walk(db)
+    row = _row(db)
+    assert row["status"] == "review_match" and row["flag_reason"] == "match_ambiguous"
+    assert {c["project_id"] for c in row["match_candidates"]} == {"p-7252", "p-7256", "p-7257"}
+    assert _links(db) == [] and _matches(db) == []
+
+
+def test_new_project_with_a_date_older_than_the_lookback_is_found(db, llm_answer):
+    """DOA 3087: the first copy's project carries 2025-09-23, older than the
+    365-day rebid lookback, so the bid-date terms never loaded it. The
+    created_at term does."""
+    name = "DOA 3087 Building Renovation"
+    llm_answer(None, extract=_extract(name=name, due=_due("2025-09-23")), match=SAME)
+    _project(db, "p-doa", name, bid_at=None, actual="2025-09-23T21:00:00+00:00",
+             created_at=CREATED_YESTERDAY)
+    _no_gc(db)
+    _walk(db)
+    row = _row(db)
+    assert row["status"] == "review_match" and row["flag_reason"] == "match_gc_unresolved"
+    assert row["match_project_id"] == "p-doa"
+    assert row["match_candidates"][0]["breakdown"]["date"] == 1.0
+    assert row.get("created_project_id") is None
+
+
+def test_reminder_copy_with_the_gc_on_a_dateless_project_is_a_duplicate(
+        db, llm_answer, monkeypatch):
+    """Hydrogen SMF: GC resolved and already on the dateless project made
+    yesterday, sender verified, auto-merge on. The duplicate executor
+    (_open_project) must accept the project the matcher proposed instead of
+    parking the row as 'outside the matching window'."""
+    _auto_merge(monkeypatch)
+    name = "Hydrogen Fueling at SMF"
+    llm_answer(None, extract=_extract(name=name), match=SAME)
+    _project(db, "p-h2", name, bid_at=None, created_at=CREATED_YESTERDAY, gcs=["gc-1"])
+    _at_extract(db)
+    _walk(db)
+    row = _row(db)
+    assert row["status"] == "duplicate" and row["flag_reason"] is None
+    assert row["match_project_id"] == "p-h2"
+    assert row.get("last_error") is None
+    (match,) = _matches(db)
+    assert match["kind"] == "duplicate" and match["project_id"] == "p-h2"
+    assert len(_links(db, "p-h2")) == 1
+
+
+def test_dateless_project_created_before_the_window_is_not_a_candidate(db, llm_answer):
+    calls = llm_answer(None, extract=_extract(name=CCRPM), match=SAME)
+    _project(db, "p-ccrpm", CCRPM, bid_at=None,
+             created_at=ingest._iso(NOW - timedelta(days=45)))
+    _at_extract(db)
+    _walk(db)
+    row = _row(db)
+    assert row["status"] == "done" and row["flag_reason"] == "no_candidate"
+    assert row["resolved_gc_id"] == "gc-1"
+    assert row["match_candidates"] == [] and row["match_project_id"] is None
+    assert _calls_for(calls, "rfp_match") == []
+
+
+def test_all_different_without_a_gc_waits_for_a_person(db, llm_answer):
+    calls = llm_answer(None, extract=_extract(), match=_verdicts((0, "different", 0.9)))
+    _project(db, "p1", "Riverside Plaza")
+    _no_gc(db)
+    _walk(db)
+    row = _row(db)
+    assert row["status"] == "review_match" and row["flag_reason"] == "new_gc_unresolved"
+    assert row["match_project_id"] is None
+    assert row["match_candidates"][0]["verdict"] == "different"
+    assert len(_calls_for(calls, "rfp_match")) == 1
+
+
+def test_a_nonorganic_row_without_a_gc_still_goes_on_as_new(db, llm_answer):
+    """A person already allowed this unknown sender ("Allow and continue"),
+    and the create step makes the GC from the sender by design
+    (RFP_CREATE.md 4.4): rule 8b does not hold it a second time."""
+    llm_answer(None, extract=_extract(), match=SAME)
+    _no_gc(db, authorization_kind="override", authorization_rule_id=None,
+           invitation_method="nonorganic", continued_by="u1")
+    _walk(db)
+    row = _row(db)
+    assert row["status"] == "done" and row["flag_reason"] == "no_candidate"
+    assert row["decided_at_step"] == "create"
+
+
+def test_a_resolved_gc_still_goes_on_as_new(db, llm_answer):
+    llm_answer(None, extract={**_extract(), "gc_name": "GC Example Builders"}, match=SAME)
+    _no_gc(db)
+    _walk(db)
+    row = _row(db)
+    assert row["resolved_gc_id"] == "gc-1" and row["gc_match_kind"] == "name"
+    assert row["status"] == "done" and row["flag_reason"] == "no_candidate"
+
+
+def test_a_platform_bid_that_already_has_a_project_is_not_held(db, llm_answer):
+    """A Procore reminder or addendum for a bid whose harvest already made a
+    project: the create step only links it, so nothing is held. Another bid
+    (a different external key), or a harvest with no project yet, is held."""
+    llm_answer(None, extract=_extract(), match=SAME)
+    key = f"procore:{fx.COMPANY_ID}:{fx.BID_ID}"
+    db.tables["rfp_harvests"] = [{"id": "h1", "method": "procore", "external_key": key,
+                                  "project_id": "p-made"}]
+    _no_gc(db, from_address="noreply@procoretech.com", authorization_kind="domain",
+           authorization_rule_id="r-procore", invitation_method="procore", body_text=fx.EMAIL_BODY)
+    _walk(db)
+    assert _row(db)["status"] == "done" and _row(db)["flag_reason"] == "no_candidate"
+
+    db.tables["rfp_harvests"][0]["project_id"] = None
+    # A day later, so it is the next reminder rather than a copy of the first.
+    _no_gc(db, id="e2", internet_message_id="m2", from_address="noreply@procoretech.com",
+           received_at="2026-09-10T10:00:00+00:00", created_at="2026-09-10T10:00:00+00:00",
+           authorization_kind="domain", authorization_rule_id="r-procore",
+           invitation_method="procore", body_text=fx.EMAIL_BODY)
+    _walk(db, "e2")
+    assert _row(db, "e2")["status"] == "review_match"
+    assert _row(db, "e2")["flag_reason"] == "new_gc_unresolved"
+
+
+def test_a_held_row_takes_the_gc_then_goes_on_as_new(db, llm_answer):
+    """The exits a person has (3.8): pick or add the GC (stays in review, the
+    reason with it), then "Not a match" sends it on to harvest or create
+    with that GC; "Not an RFP" (dismiss) is the other way out."""
+    llm_answer(None, extract=_extract(), match=SAME)
+    _no_gc(db)
+    _walk(db)
+    out = ingest.set_match_gc(db, "e1", "gc-1", "u1")
+    assert out["status"] == "review_match" and out["flag_reason"] == "new_gc_unresolved"
+    assert out["resolved_gc_id"] == "gc-1" and out["gc_match_kind"] == "human"
+    out = ingest.reject_match(db, "e1", "u1")
+    assert out["status"] == "create" and out["decided_at_step"] == "review_match"
+    assert out["match_review_decision"] == "no_match" and out["resolved_gc_id"] == "gc-1"
+    assert out["flag_reason"] == "new_gc_unresolved"   # untouched, as for every reason
+
+
 def test_date_far_outside_tolerance_is_review_only(db, llm_answer, monkeypatch):
     """A closest date outside the tolerance blocks the confident rule even
     with a perfect name and a confident 'same'."""
@@ -369,6 +630,20 @@ def test_bundle_queries_order_on_id_as_the_paging_tiebreaker(db, monkeypatch):
     assert orders["general_contractors"] == [("name", False), ("id", False)]
     assert orders["gc_contacts"] == [("created_at", False), ("id", False)]
     assert orders["projects"] == [("internal_bid_at", True), ("id", False)]
+
+
+def test_bundle_loads_dateless_projects_only_inside_the_candidate_window(db):
+    """reference_bundle passes two bounds: the bid-date terms over the rebid
+    lookback and the created_at term over the candidate window. Dropping the
+    second (so created_lo falls back to the lookback) would load every open
+    dateless project from the last year while every behaviour test stays
+    green, so this pins it at the bundle level."""
+    sixty_days_ago = ingest._iso(NOW - timedelta(days=60))
+    _project(db, "p-fresh", "Fresh No Date", bid_at=None, created_at=CREATED_YESTERDAY)
+    _project(db, "p-stale-made", "Old No Date", bid_at=None, created_at=sixty_days_ago)
+    _project(db, "p-dated", "Dated Old Project", bid_at=BID_AT, created_at=sixty_days_ago)
+    bundle = ingest._reference_bundle(db, ingest._SweepState(), _settings())
+    assert sorted(p["id"] for p in bundle["projects"]) == ["p-dated", "p-fresh"]
 
 
 def test_page_all_drains_ties_across_page_boundaries(db, monkeypatch):
@@ -765,12 +1040,45 @@ def test_merge_refuses_closed_and_out_of_window_projects(db):
     _project(db, "p-declined", "Riverside Plaza", stage="declined")
     _project(db, "p-old", "Riverside Plaza", bid_at=OLD_BID_AT)
     _project(db, "p-nodate", "Riverside Plaza", bid_at=None)
+    long_ago = ingest._iso(NOW - timedelta(days=45))
+    _project(db, "p-nodate-old", "Riverside Plaza", bid_at=None, created_at=long_ago)
+    _project(db, "p-stale-old", "Riverside Plaza", bid_at=OLD_BID_AT, created_at=long_ago)
     _at_match(db, status="review_match")
-    for pid in ("p-declined", "p-old", "p-nodate", "p-missing"):
+    for pid in ("p-declined", "p-old", "p-nodate", "p-nodate-old", "p-stale-old", "p-missing"):
         with pytest.raises(ingest.RfpMatchError) as exc:
             ingest.merge_email(db, "e1", pid, None, "u1")
         assert exc.value.code == ingest.CODE_PROJECT_CLOSED, pid
+        if pid not in ("p-declined", "p-missing"):
+            assert "outside the matching window" in str(exc.value), pid
     assert _matches(db) == [] and _row(db)["status"] == "review_match"
+
+
+@pytest.mark.parametrize("action", ["merge", "duplicate"])
+def test_human_merge_into_a_project_created_inside_the_window(db, action):
+    """2026-10-12: a project with no bid date (or a stale one) created inside
+    the window is a candidate, so a reviewer's Merge / Already-on click on it
+    is accepted, not refused as outside the window."""
+    three_days_ago = ingest._iso(NOW - timedelta(days=3))
+    gcs = ["gc-1"] if action == "duplicate" else []
+    _project(db, "p-nodate", "Riverside Plaza", bid_at=None, created_at=three_days_ago, gcs=gcs)
+    _at_match(db, status="review_match")
+    if action == "merge":
+        out = ingest.merge_email(db, "e1", "p-nodate", None, "u1")
+        assert out["status"] == "merged"
+    else:
+        out = ingest.duplicate_email(db, "e1", "p-nodate", "u1")
+        assert out["status"] == "duplicate"
+    assert out["match_project_id"] == "p-nodate"
+    (match,) = _matches(db)
+    assert match["project_id"] == "p-nodate" and match["decided_by"] == "u1"
+
+
+def test_human_merge_into_a_stale_dated_project_created_inside_the_window(db):
+    _project(db, "p-stale", "Riverside Plaza", bid_at=OLD_BID_AT,
+             created_at=ingest._iso(NOW - timedelta(days=3)))
+    _at_match(db, status="review_match")
+    out = ingest.merge_email(db, "e1", "p-stale", None, "u1")
+    assert out["status"] == "merged" and out["match_project_id"] == "p-stale"
 
 
 def test_merge_refuses_when_not_at_review_match_and_system_when_not_at_match(db):
@@ -1287,12 +1595,59 @@ def test_reopen_on_done_and_on_duplicate(db):
         ingest.reopen_match(db, "e2", "x" * 501, "u2")
 
 
-def test_dismiss_on_review_match_is_refused_and_leaves_the_row(db):
+@pytest.mark.parametrize("reason", ["match_uncertain", "new_gc_unresolved"])
+def test_not_an_rfp_on_review_match_ends_the_row(db, reason):
+    """"Not an RFP" (dismiss on review_match, 3.8): terminal at
+    rejected_by_review with the exact shape used by hand in production on
+    2026-10-05. Nothing on any project is touched, the candidates stay for
+    training, and a second click finds nothing to decide."""
+    _project(db, "p1", "Riverside Plaza", gcs=["gc-1"])
+    candidates = [{"project_id": "p1", "name": "Riverside Plaza", "breakdown": {"total": 0.7}}]
+    _at_match(db, status="review_match", flag_reason=reason, match_candidates=candidates,
+              last_error="x", next_attempt_at="2026-09-09T10:00:00+00:00")
+    out = ingest.dismiss(db, "e1", "u1")
+    assert out["status"] == "rejected_by_review" and out["flag_reason"] == "dismissed"
+    assert out["decided_at_step"] == "review_match"
+    assert out["last_error"] is None and out["next_attempt_at"] is None
+    assert out["match_candidates"] == candidates
+    assert out.get("review_decision") is None and out.get("match_review_decision") is None
+    (entry,) = _audits(db, "rfp_email.dismiss")
+    assert entry["actor_id"] == "u1" and entry["args"][2] == {"from_status": "review_match"}
+    assert _matches(db) == [] and len(_links(db)) == 1
+    with pytest.raises(LookupError):
+        ingest.dismiss(db, "e1", "u2")
+    assert len(_audits(db, "rfp_email.dismiss")) == 1
+
+
+def test_not_an_rfp_refuses_while_an_open_merge_exists(db):
+    """The reject_match guard: a merge that crashed before its email write
+    still holds a link on the project; ending the email would strand it."""
+    _project(db, "p1", "Riverside Plaza")
     _at_match(db, status="review_match", flag_reason="match_uncertain")
+    _open_merge_row(db, gc_added=True, project_gc_id="l-sys")
+    db.tables["project_gcs"].append({"id": "l-sys", "project_id": "p1", "gc_id": "gc-1",
+                                     "needs_by": None, "rfp_match_id": "mr-1"})
     before = dict(_row(db))
+    with pytest.raises(ingest.RfpMatchError) as exc:
+        ingest.dismiss(db, "e1", "u1")
+    assert exc.value.code == ingest.CODE_NOT_ACTIONABLE
+    assert _row(db) == before and not _audits(db, "rfp_email.dismiss")
+    assert len(_links(db)) == 1 and _matches(db)[0]["unmerged_at"] is None
+
+
+def test_not_an_rfp_loses_cleanly_to_a_concurrent_decision(db, monkeypatch):
+    """The CAS is on review_match: when another reviewer moved the row
+    between the read and the write, nothing is written and nothing audited."""
+    _at_match(db, status="review_match", flag_reason="new_gc_unresolved")
+    real_cas = ingest._cas
+
+    def moved_first(sb, email_id, expected, fields, **kw):
+        _row(db)["status"] = "harvest"
+        return real_cas(sb, email_id, expected, fields, **kw)
+    monkeypatch.setattr(ingest, "_cas", moved_first)
     with pytest.raises(LookupError):
         ingest.dismiss(db, "e1", "u1")
-    assert _row(db) == before
+    assert _row(db)["status"] == "harvest" and not _audits(db, "rfp_email.dismiss")
 
 
 @pytest.mark.parametrize("status", ["extract", "match", "review_match", "merged", "duplicate"])

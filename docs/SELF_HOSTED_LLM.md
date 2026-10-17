@@ -1,12 +1,15 @@
 # Self-hosted LLM boxes
 
-Two EC2 boxes serve the app's AI features through vLLM. Exactly one is live at
-a time, chosen by `SELF_HOSTED_LLM_TARGET`; the other can stay stopped.
+EC2 boxes serve the app's AI features through vLLM. Exactly one is live at a
+time: `SELF_HOSTED_LLM_TARGET` is the default, and IT Admins / dev accounts can
+override it live from Settings > AI model server (see "Live switch" below);
+the others can stay stopped.
 
 | Target | Instance | GPU | Model (HF repo) | Served alias | Public endpoint | Dev tunnel |
 |---|---|---|---|---|---|---|
 | `ec2`  | g6.xlarge (`i-087a58e7a8ee2f11b`) | L4, 24 GB | `Qwen/Qwen3.5-4B`, online FP8 | `qwen-3.5-4b`  | `https://llm.g3electrical.com/v1`  | `localhost:8000` |
 | `ec2b` | g7e.2xlarge | RTX PRO 6000 Blackwell, 96 GB | `Qwen/Qwen3.8-27B`, online FP8 | `qwen-3.8-27b` | `https://llm2.g3electrical.com/v1` | `localhost:8001` |
+| `ec2c` | g7e.2xlarge (`i-0857dc01cc7ef0847`), **us-east-1 (N. Virginia)** | RTX PRO 6000 Blackwell, 96 GB | `Qwen/Qwen3.8-27B`, online FP8 | `qwen-3.8-27b` | `https://llm4.g3electrical.com/v1` | `localhost:8002` |
 | `local` | this machine | | whatever `SELF_HOSTED_LLM_LOCAL_MODEL` says | | `SELF_HOSTED_LLM_LOCAL_BASE_URL` | |
 
 Both models are vision-language models, so the bid file splitter (page images)
@@ -18,7 +21,7 @@ server-side because the app expects plain JSON.
 Each target is a base URL + API key + served model:
 
 ```
-SELF_HOSTED_LLM_TARGET=ec2b            # local | ec2 | ec2b
+SELF_HOSTED_LLM_TARGET=ec2b            # local | ec2 | ec2b | ec2c
 SELF_HOSTED_LLM_EC2_BASE_URL=https://llm.g3electrical.com/v1
 SELF_HOSTED_LLM_EC2_API_KEY=...
 SELF_HOSTED_LLM_EC2_MODEL=qwen-3.5-4b
@@ -44,6 +47,32 @@ the target's model line says.
 Prod (Railway) flips the same way. Both `EC2B_*` lines must be set there
 before `TARGET=ec2b`, or the backend refuses to boot. Rollback is
 `TARGET=ec2` (or `FULL_SELF_HOSTED_LLMS_ENABLED=false`).
+
+## Live switch (Settings > AI model server)
+
+GPU capacity is unreliable, so the live box can be changed without a redeploy.
+IT Admins and dev accounts see an "AI model server" card on /settings listing
+every target, its model, and whether the API has it configured. "Use this box"
+calls `PUT /model-status/target`, which:
+
+1. Refuses a target with no base URL / model in the env ("Not set up"), or one
+   where a feature is pinned (`SELF_HOSTED_<FEATURE>_MODEL`) to a model that
+   box does not serve.
+2. Probes the box (`/models`, one retry). If it does not answer or does not
+   serve the configured model, nothing changes and the UI offers
+   "Switch anyway".
+3. Writes `llm_runtime_settings.self_hosted_target` (0150; null = the env
+   default) and logs the switch to `llm_target_changes`.
+
+Every worker polls that row every 10 s (`app/services/llm_target.py`), so both
+uvicorn workers move within ~10 s. Only the target NAME is stored; URLs, keys
+and models stay in the env, so a browser can only pick among endpoints the
+operator configured. An override pointing at a target whose env vars were later
+removed is ignored and the env default serves.
+
+Adding a box: add it to `SELF_HOSTED_LLM_TARGETS` + its three Settings fields in
+`app/core/config.py`, a `TARGET_INFO` entry in `llm_target.py`, and the
+`SELF_HOSTED_LLM_<BOX>_*` vars in Railway. No migration.
 
 ## From the Mac (`~/bin/bdr-llm`)
 

@@ -175,6 +175,13 @@ _ROUTE_RE = re.compile(rf"^/({_ID})/company/planroom/route_to_bid_sheet/({_ID})$
 _ZIP_RE = re.compile(rf"^/({_ID})/company/planroom/download_zip$")
 _PACKAGE_RE = re.compile(rf"^/({_ID})/company/planroom/bid_packages/({_ID})/bids/({_ID})$")
 _INTENT_RE = re.compile(rf"^/({_ID})/project/public/bid/({_ID})/intents/")
+# A Request for Quote on a contract G3 already holds (a change event priced
+# against a commitment), never a bid: `/<project>/project/commitments/
+# work_order_contracts/<id>/request_for_quotes/<id>`, its `.../quotes/...`
+# answer links, and the change-events tool's own RFQ pages.
+_CHANGE_ORDER_RFQ_RE = re.compile(
+    rf"^/{_ID}/project/(?:commitments|change_events)/(?:[\w-]+/)*request_for_quotes(?:/|$)"
+)
 
 
 def unwrap_link(url: str) -> str:
@@ -242,6 +249,25 @@ def parse_reference(body_text: str | None) -> ProcoreRef | None:
             return None
         company, bid = fallback
     return ProcoreRef(company_id=company, bid_id=bid, package_id=package, project_id=project)
+
+
+def has_change_order_rfq_link(body_text: str | None) -> bool:
+    """True when the text body links a Procore change-order Request for Quote
+    (`_CHANGE_ORDER_RFQ_RE`), read the way `parse_reference` reads links:
+    every Outlook safelink unwrapped and percent-decoded first, app host
+    only. Says nothing about bid links; callers pair it with
+    `parse_reference` (rfp_email_auth.is_procore_change_order_rfq)."""
+    if not body_text:
+        return False
+    for raw in _URL_RE.findall(body_text):
+        url = unwrap_link(html_lib.unescape(raw))
+        try:
+            parsed = urlparse(url)
+        except ValueError:
+            continue
+        if (parsed.netloc or "").lower() == APP_HOST and _CHANGE_ORDER_RFQ_RE.match(parsed.path or ""):
+            return True
+    return False
 
 
 # ── Session store protocol ───────────────────────────────────────────────────

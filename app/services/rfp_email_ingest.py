@@ -113,6 +113,7 @@ from app.services.rfp_email_auth import (
     AUTH_PASS,
     BUDGET_KEY_ADDRESS,
     BUDGET_KEY_DOMAIN,
+    FLAG_PROCORE_CHANGE_ORDER_RFQ,
     GMAIL_DOMAINS,
     INVITATION_METHODS,
     KIND_ADDRESS,
@@ -125,6 +126,7 @@ from app.services.rfp_email_auth import (
     classify_budget_key,
     domain_covered_by,
     evaluate_authorization,
+    is_procore_change_order_rfq,
     is_public_mailbox_domain,
     keyword_hits,
     method_for_rule,
@@ -177,8 +179,14 @@ STATUS_BLOCKABLE = STATUS_PENDING + STATUS_HUMAN
 # Statuses the method step has not yet passed: the only ones a method
 # correction refuses (no later step writes invitation_method).
 STATUS_PRE_METHOD = ("received", "auth", "keywords", "classify", "authorize", "method")
-# The two human lanes `dismiss` serves; review_match has its own exits (3.8).
-_DISMISSABLE = ("review_llm", "flagged_unauthorized")
+# The human lanes `dismiss` serves, and the step each records as deciding.
+# On review_match it is the "Not an RFP" exit, beside "Not a match" (3.8).
+_DISMISS_STEP = {
+    "review_llm": "classify",
+    "flagged_unauthorized": "authorize",
+    "review_match": "review_match",
+}
+_DISMISSABLE = tuple(_DISMISS_STEP)
 _CLOSED_STAGES = ("declined", "pm_only", "cp_only")
 
 ANSWER_YES = "yes"
@@ -1207,6 +1215,12 @@ def _process_email(
         elif status == "keywords":
             status = _step_keywords(sb, row)
         elif status == "classify":
+            # Free, ahead of the model gate: a Procore change-order RFQ that
+            # reached classify before the rule existed (or waited here for the
+            # model) never needs the model (doc 3.4.1).
+            if _is_change_order_rfq(row):
+                _end_change_order_rfq(sb, row, "classify")
+                return None
             if FEATURE in llm_down:
                 if stamp_skipped:
                     _skip_behind_down_model(sb, row, "classify", FEATURE)
@@ -1652,19 +1666,44 @@ def _step_auth(sb, row: dict) -> str | None:
     return "keywords"
 
 
+def _is_change_order_rfq(row: dict) -> bool:
+    return is_procore_change_order_rfq(row.get("from_address"), row.get("subject"), row.get("body_text"))
+
+
+def _end_change_order_rfq(sb, row: dict, expected_status: str, extra: dict | None = None) -> None:
+    """Doc 3.4.1: Procore's change-order Request for Quote mail (a quote on a
+    contract G3 already holds, never a bid) ends at `flagged_llm_no` with
+    `flag_reason = procore_change_order_rfq`, decided at the step that ran
+    the rule, before any model call. A lost CAS leaves the row to whoever
+    moved it."""
+    _terminal(sb, row["id"], expected_status, "flagged_llm_no", FLAG_PROCORE_CHANGE_ORDER_RFQ,
+              expected_status, extra, row=row)
+
+
 def _step_keywords(sb, row: dict) -> str | None:
     hits = keyword_hits(row.get("subject"), row.get("body_text"))
+    # The free rule runs on rows that cleared the gate, so the gate keeps its
+    # meaning and the rule only ever saves a classify call (doc 3.4.1).
+    change_order = bool(hits) and _is_change_order_rfq(row)
     if rfp_test.session_for_email(row):
         rfp_test.record(
             sb, session_id=row["test_session_id"], source=rfp_test.SOURCE_INTAKE, kind="keywords",
-            level=rfp_test.LEVEL_INFO if hits else rfp_test.LEVEL_WARN,
-            title=f"Keywords: {', '.join(hits) if hits else 'none'}", rfp_email_id=row["id"],
-            detail={"hits": hits, "next_status": "classify" if hits else "flagged_no_keywords",
+            level=rfp_test.LEVEL_INFO if hits and not change_order else rfp_test.LEVEL_WARN,
+            title=f"Keywords: {', '.join(hits) if hits else 'none'}"
+                  + (" (Procore change-order RFQ, not an invitation)" if change_order else ""),
+            rfp_email_id=row["id"],
+            detail={"hits": hits,
+                    "next_status": ("flagged_llm_no" if change_order
+                                    else "classify" if hits else "flagged_no_keywords"),
+                    "rule": FLAG_PROCORE_CHANGE_ORDER_RFQ if change_order else None,
                     "step": "keywords"},
         )
     if not hits:
         _terminal(sb, row["id"], "keywords", "flagged_no_keywords", "no_keywords",
                   "keywords", {"keyword_hits": []}, row=row)
+        return None
+    if change_order:
+        _end_change_order_rfq(sb, row, "keywords", {"keyword_hits": hits})
         return None
     fields = {"keyword_hits": hits, "status": "classify", "attempts": 0,
               "last_error": None, "next_attempt_at": None}
@@ -2700,8 +2739,9 @@ def _page_all(query_factory) -> list[dict]:
 
 def reference_bundle(sb, sweep: _SweepState, settings) -> dict:
     """The per-sweep reference data (3.3), built by the first row that reaches
-    `match`: every GC, every GC contact, and one projects query over the
-    rebid lookback with the GC links embedded. Keys: gcs, contacts, projects
+    `match`: every GC, every GC contact, and one projects query (bid date
+    inside the rebid lookback, or created inside the candidate window) with
+    the GC links embedded. Keys: gcs, contacts, projects
     (each a list of PostgREST rows). `sweep` is any object with a `bundle`
     attribute (the NGEM portal sweep passes its own state); public for that
     caller, `_reference_bundle` stays as the private alias."""
@@ -2720,9 +2760,17 @@ def reference_bundle(sb, sweep: _SweepState, settings) -> dict:
         .order("created_at", desc=False)
         .order("id", desc=False)
     )
-    lo = _now() - timedelta(days=settings.rfp_match_rebid_lookback_days)
+    # Bid-date terms over the rebid lookback; the created_at term over the
+    # candidate window, so a recently created project with no bid date (or a
+    # stale one) is loaded too (2026-10-12).
+    now = _now()
+    lo = now - timedelta(days=settings.rfp_match_rebid_lookback_days)
+    created_lo = now - timedelta(days=settings.rfp_match_candidate_window_days)
     projects = _page_all(
-        lambda: rfp_match.candidate_query(sb, rfp_match.pg_ts(lo), select=_PROJECT_SELECT)
+        lambda: rfp_match.candidate_query(
+            sb, rfp_match.pg_ts(lo), created_lo_iso=rfp_match.pg_ts(created_lo),
+            select=_PROJECT_SELECT,
+        )
         .order("internal_bid_at", desc=True)
         .order("id", desc=False)
     )
@@ -2732,11 +2780,6 @@ def reference_bundle(sb, sweep: _SweepState, settings) -> dict:
 
 
 _reference_bundle = reference_bundle
-
-
-def _project_bid_at(project: dict) -> datetime | None:
-    """coalesce(actual_bid_at, internal_bid_at)."""
-    return _parse_ts(project.get("actual_bid_at")) or _parse_ts(project.get("internal_bid_at"))
 
 
 def _facts_from_row(row: dict):
@@ -2786,6 +2829,46 @@ def _total(candidate: dict | None) -> float | None:
         return None
     total = (candidate.get("breakdown") or {}).get("total")
     return round(float(total), 3) if total is not None else None
+
+
+def _platform_project_exists(sb, row: dict) -> bool:
+    """The platform object this email names (a Procore bid, a PipelineSuite
+    or SmartBid project) already has a harvest with a project: the create
+    step's link-only path will join it, so nothing new can be created. One
+    read, by the same (method, external_key) the harvest step reuses. A
+    failed read answers False (the row is held, the safe side)."""
+    method = row.get("invitation_method")
+    ref = rfp_harvest.platform_reference(method, row.get("body_text"))
+    if ref is None:
+        return False
+    try:
+        rows = (
+            sb.table("rfp_harvests")
+            .select("id")
+            .eq("method", method)
+            .eq("external_key", ref.external_key)
+            .not_.is_("project_id", "null")
+            .limit(1)
+            .execute()
+        ).data or []
+    except Exception:  # noqa: BLE001
+        logger.exception("RFP match: harvest project lookup failed for %s", row.get("id"))
+        return False
+    return bool(rows)
+
+
+def _holds_new_without_gc(sb, row: dict, gc_id: str | None) -> bool:
+    """Rule 8b's switch (RFP_MATCHING.md 3.5): a row that matched no project
+    and whose GC did not resolve waits at `review_match` (`new_gc_unresolved`)
+    for a person instead of going on to create a project nobody can attribute.
+    Two exceptions go on as before:
+    - `nonorganic`: a person already allowed this unknown sender, and the
+      create step makes the GC from the sender by design (RFP_CREATE.md 4.4);
+    - a platform object that already has a project (a Procore reminder or
+      addendum for a bid whose project exists): the create step only links."""
+    if gc_id or row.get("invitation_method") == METHOD_NONORGANIC:
+        return False
+    return not _platform_project_exists(sb, row)
 
 
 def _step_match(
@@ -2863,14 +2946,9 @@ def _step_match(
 
     facts = _facts_from_row(row)
     excluded = {str(x) for x in (row.get("excluded_project_ids") or [])}
-    window_lo = now - timedelta(days=settings.rfp_match_candidate_window_days)
-    in_window: list[dict] = []
-    rebid_band: list[dict] = []
-    for project in bundle["projects"]:
-        bid_at = _project_bid_at(project)
-        if bid_at is None or str(project.get("id")) in excluded:
-            continue
-        (in_window if bid_at >= window_lo else rebid_band).append(project)
+    in_window, rebid_band = rfp_match.split_bands(
+        bundle["projects"], now, settings, excluded_ids=excluded
+    )
 
     candidates = rfp_match.rank_candidates(facts, in_window, settings, excluded_ids=excluded)
     # The members of the stored top list at or above the review threshold,
@@ -2934,6 +3012,7 @@ def _step_match(
             sender_verified=_sender_verified(row),
             auto_merge=bool(settings.rfp_match_auto_merge_enabled),
             settings=settings,
+            hold_new_without_gc=_holds_new_without_gc(sb, row, gc_id),
         )
         best, status, flag_reason = route.best, route.status, route.flag_reason
 
@@ -3369,7 +3448,9 @@ def _close_match_row(sb, match_id: str, actor_id: str | None, reason: str) -> bo
 
 def _open_project(sb, project_id: str, settings) -> dict:
     """The project a merge or duplicate targets, refused when it is closed or
-    outside the candidate window so the backend and the drawer's search agree."""
+    outside the candidate window (rfp_match.in_candidate_window: bid date in
+    the window, or created inside it), the same rule the matcher uses to list
+    candidates, so a proposed candidate can always be merged into."""
     rows = (
         sb.table("projects").select(_PROJECT_SELECT).eq("id", project_id).limit(1).execute()
     ).data or []
@@ -3378,12 +3459,8 @@ def _open_project(sb, project_id: str, settings) -> dict:
     project = rows[0]
     if project.get("abandoned_at") or project.get("current_stage") in _CLOSED_STAGES:
         raise RfpMatchError(CODE_PROJECT_CLOSED, "That project is closed to new GCs.")
-    bid_at = _project_bid_at(project)
-    lo = _now() - timedelta(days=settings.rfp_match_candidate_window_days)
-    if bid_at is None or bid_at < lo:
-        raise RfpMatchError(
-            CODE_PROJECT_CLOSED, "That project's bid date is outside the matching window."
-        )
+    if not rfp_match.in_candidate_window(project, _now(), settings):
+        raise RfpMatchError(CODE_PROJECT_CLOSED, "That project is outside the matching window.")
     return project
 
 
@@ -3875,6 +3952,19 @@ def _require_status(row: dict, *statuses: str) -> str:
     return row["status"]
 
 
+def _refuse_open_merge(sb, email_id: str) -> None:
+    """A merge that crashed before its email write still holds a link on the
+    project: leaving review_match by "Not a match" or "Not an RFP" would
+    strand it. Finish or unmerge it first."""
+    open_row = _open_match_row(sb, email_id)
+    if open_row and open_row.get("kind") == KIND_MERGED:
+        raise RfpMatchError(
+            CODE_NOT_ACTIONABLE,
+            "This email has an open merge on a project; merge it again to finish, "
+            "or unmerge it from that project first.",
+        )
+
+
 def reject_match(sb, email_id: str, actor_id: str) -> dict:
     """"Not a match": the candidates are kept for training, flag_reason is
     untouched, and the row takes the same road as the match step's own
@@ -3884,15 +3974,7 @@ def reject_match(sb, email_id: str, actor_id: str) -> dict:
     parking at done."""
     row = _get(sb, email_id)
     _require_status(row, "review_match")
-    open_row = _open_match_row(sb, email_id)
-    if open_row and open_row.get("kind") == KIND_MERGED:
-        # A merge that crashed before its email write still holds a link on
-        # the project: "not a match" would strand it. Finish or unmerge it.
-        raise RfpMatchError(
-            CODE_NOT_ACTIONABLE,
-            "This email has an open merge on a project; merge it again to finish, "
-            "or unmerge it from that project first.",
-        )
+    _refuse_open_merge(sb, email_id)
     target = _park_target(row)
     ok = _cas(sb, email_id, "review_match", {
         "status": target,
@@ -4282,17 +4364,22 @@ def continue_unauthorized(sb, email_id: str, actor_id: str) -> dict:
 
 
 def dismiss(sb, email_id: str, actor_id: str) -> dict:
-    """Reject a row waiting in the LLM review or unauthorized lane. A
-    review_match row is not dismissable: its only rejection exit is
-    reject_match."""
+    """Reject a row waiting in a human lane: "Dismiss" on review_llm and
+    flagged_unauthorized, "Not an RFP" on review_match (RFP_MATCHING.md 3.8).
+    Terminal at rejected_by_review with flag_reason `dismissed` and the lane
+    as `decided_at_step`. On review_match it is refused while an open merge
+    holds a link on a project (the reject_match guard); "Not a match" is the
+    other exit there, and it goes on to harvest and create instead."""
     row = _get(sb, email_id)
     expected = row.get("status")
     if expected not in _DISMISSABLE:
         raise LookupError("This email is not waiting on a decision.")
+    if expected == "review_match":
+        _refuse_open_merge(sb, email_id)
     fields = {
         "status": "rejected_by_review",
         "flag_reason": "dismissed",
-        "decided_at_step": "classify" if expected == "review_llm" else "authorize",
+        "decided_at_step": _DISMISS_STEP[expected],
         "last_error": None,
         "next_attempt_at": None,
     }

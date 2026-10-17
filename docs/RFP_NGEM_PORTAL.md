@@ -221,7 +221,9 @@ of its own per tick):
    A title that normalizes to nothing goes straight to `harvest` with
    `flag_reason = no_project_name` (it cannot be scored; a person can still
    ignore it).
-2. Candidates: the bundle's projects inside the candidate window, minus
+2. Candidates: the bundle's projects inside the candidate window (bid date
+   inside it, or created inside it whatever the bid date, since 2026-10-12;
+   `rfp_match.split_bands`, the same split the email step uses), minus
    `excluded_project_ids`, through `rfp_match.rank_candidates` and
    `model_candidates`.
 3. When something clears the review threshold: the LLM gate. The health
@@ -333,7 +335,7 @@ exception is a bug and answers 500.
 
 | action | from | to | effect |
 |---|---|---|---|
-| `resolve_exists(project_id)` | `review_match` | `exists` | `match_project_id = project_id` (must be one of the stored candidates or any project in the window; validated), `resolution = 'human'`, `resolved_by`, `resolved_at`; the project marker appears |
+| `resolve_exists(project_id)` | `review_match` | `exists` | `match_project_id = project_id` (must be one of the stored candidates or any project in the window, by bid date or creation date; validated), `resolution = 'human'`, `resolved_by`, `resolved_at`; the project marker appears |
 | `resolve_new()` | `review_match` | `harvest` | `excluded_project_ids += match_project_id` (and every candidate the person saw, so the re-run cannot pick them), `resolution = 'human'`, attempts reset |
 | `reopen(reason)` | `exists` | `match` | `excluded_project_ids += match_project_id`, `match_project_id = null`, `reopen_reason`, attempts reset; the project marker disappears |
 | `ignore(reason)` | `match`, `review_match`, `harvest` | `ignored` | `ignored_by`, `ignored_at`, `ignore_reason`; a still-queued harvest job is canceled through `llm_queue.cancel` (the AI monitor's); a running one is left to finish (its writes are field-scoped; a `done` CAS from `harvest` loses because the status moved and the link is written field-scoped instead) |

@@ -1952,14 +1952,9 @@ def _step_match(
             bid_notes=None, reasoning="",
         )
     excluded = {str(x) for x in (row.get("excluded_project_ids") or [])}
-    window_lo = now - timedelta(days=settings.rfp_match_candidate_window_days)
-    in_window: list[dict] = []
-    rebid_band: list[dict] = []
-    for project in bundle.get("projects") or []:
-        bid_at = rfp_match.project_bid_at(project)
-        if bid_at is None or str(project.get("id")) in excluded:
-            continue
-        (in_window if bid_at >= window_lo else rebid_band).append(project)
+    in_window, rebid_band = rfp_match.split_bands(
+        bundle.get("projects") or [], now, settings, excluded_ids=excluded
+    )
     candidates = rfp_match.rank_candidates(facts, in_window, settings, excluded_ids=excluded)
     projects_by_id = {p.get("id"): p for p in in_window}
     to_judge = rfp_match.model_candidates(candidates, projects_by_id, settings)
@@ -3768,8 +3763,8 @@ def resolve_exists(sb, invitation_id: str, project_id, actor_id: str) -> dict:
         if not hits:
             raise RfpPortalError(
                 CODE_PROJECT_REQUIRED,
-                "That project is not one of the candidates and its bid date is outside the "
-                "matching window.",
+                "That project is not one of the candidates and neither its bid date nor its "
+                "creation date is inside the matching window.",
             )
     elif not (sb.table("projects").select("id").eq("id", pid).limit(1).execute().data or []):
         # A stored candidate outlives its project (a deleted project,

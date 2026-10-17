@@ -21,6 +21,18 @@ _RFP_SELF_TEST_BOOT_SECONDS = 120
 
 @contextlib.asynccontextmanager
 async def lifespan(_: FastAPI):
+    # Live self-hosted box override (Settings > AI model server): each worker
+    # re-reads the one-row llm_runtime_settings table so a switch made through
+    # either worker reaches both within seconds (services/llm_target).
+    llm_target_task: asyncio.Task | None = None
+    if settings.supabase_url:
+        from app.services import llm_target
+
+        # Load it once before any poller or queue worker can make an AI call
+        # on the env default; a failed read just leaves the env default.
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(asyncio.to_thread(llm_target.refresh), timeout=15)
+        llm_target_task = asyncio.create_task(llm_target.polling_loop())
     # RFQ reply polling — watches the bids@ inbox while RFQ sends are active.
     # Run one worker, or set RFQ_POLLING_ENABLED=false on the extras (a DB lease
     # also guards against double-running). Bidding-only: with the sub-app off
@@ -222,7 +234,7 @@ async def lifespan(_: FastAPI):
     rfp_ingest_service.SHUTTING_DOWN.set()
     for task in (
         poll_task, reminder_task, digest_task, email_task, rfp_email_task,
-        rfp_portal_task, llm_health_task, llm_queue_task, call_in_task,
+        rfp_portal_task, llm_health_task, llm_queue_task, call_in_task, llm_target_task,
     ):
         if task:
             task.cancel()
@@ -558,6 +570,7 @@ from app.routers import (  # noqa: E402
     rfp_created,
     rfp_ingest,
     rfp_emails,
+    rfp_files,
     rfp_portal,
     rfp_processing,
     rfp_testing,
@@ -676,6 +689,10 @@ app.include_router(deleted_projects.router, dependencies=_BIDDING)
 app.include_router(analytics.router, dependencies=_BIDDING)
 app.include_router(notes.router, dependencies=_BIDDING)
 app.include_router(files.router, dependencies=_BIDDING)
+# Missing files on an RFP-created project (docs/RFP_MISSING_FILES.md 7): the
+# project page's callout and its drop zone. Gated on the router itself too
+# (RFP_INGESTION_ENABLED: the only way a project carries items).
+app.include_router(rfp_files.router, dependencies=_BIDDING)
 app.include_router(change_review.router, dependencies=_BIDDING)
 app.include_router(training.router, dependencies=_BIDDING)
 

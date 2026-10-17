@@ -373,6 +373,32 @@ def test_parse_reference_rejects_ids_over_twelve_digits():
     assert pc.parse_reference(f"{APP}/5662/company/planroom/route_to_bid_sheet/abc") is None
 
 
+def test_change_order_rfq_link_is_read_through_the_safelink():
+    """The overdue Request for Quote digest (RFP_EMAIL_INGESTION.md 3.4.1):
+    every link is a percent-encoded safelink; the RFQ page and its answer
+    links are change-order RFQs, and the digest carries no bid reference."""
+    assert pc.has_change_order_rfq_link(fx.CO_RFQ_BODY)
+    assert pc.parse_reference(fx.CO_RFQ_BODY) is None
+    assert pc.has_change_order_rfq_link(fx.CO_RFQ_URL)                  # bare link too
+    assert pc.has_change_order_rfq_link(fx._safelink(fx.CO_RFQ_YES_URL))
+    assert pc.has_change_order_rfq_link(f"{APP}/12/project/change_events/request_for_quotes/34")
+    assert pc.has_change_order_rfq_link(
+        f"{APP}/12/project/commitments/purchase_order_contracts/56/request_for_quotes/78")
+
+
+def test_change_order_rfq_link_is_never_a_bid_or_another_tool():
+    # A real invitation's links (bid sheet, zip, intents) are not RFQs.
+    assert not pc.has_change_order_rfq_link(fx.EMAIL_BODY)
+    for path in ("/12/project/commitments/work_order_contracts/34/requisitions",
+                 "/12/project/commitments/billings_invites_landing/34/update_invite",
+                 "/12/project/rfi/show/34",
+                 "/utilities/emailed_attachment/abc123"):
+        assert not pc.has_change_order_rfq_link(f"{APP}{path}"), path
+    # Another host with the same path shape is ignored.
+    assert not pc.has_change_order_rfq_link(fx.CO_RFQ_URL.replace("app.procore.com", "evil.example"))
+    assert not pc.has_change_order_rfq_link(None) and not pc.has_change_order_rfq_link("")
+
+
 # ── Login flow ───────────────────────────────────────────────────────────
 
 

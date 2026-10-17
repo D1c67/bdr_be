@@ -300,9 +300,12 @@ def _item(
     rec: dict, project: dict | None, gc_names: dict[str, str], links: dict[str, list[str]],
     profiles: dict[str, dict], emails: dict[str, dict], invitations: dict[str, dict],
     splits: dict[str, dict] | None = None, issues: dict[str, dict | None] | None = None,
+    files_issues: dict[str, dict | None] | None = None,
 ) -> dict:
     """One page row (section 8's shape) from the loaded tables. `issues` is
-    `rfp_split.issues_for_records` over the page (docs/RFP_SPLIT.md 10)."""
+    `rfp_split.issues_for_records` over the page (docs/RFP_SPLIT.md 10),
+    `files_issues` `rfp_file_issues.flags_for_records` over the page
+    (docs/RFP_MISSING_FILES.md 7)."""
     create = _create()
     project = project or {}
     project_id = str(rec["project_id"])
@@ -417,6 +420,10 @@ def _item(
             ),
             "split_partial": (issue or {}).get("state") == "partial",
             "split_issue": issue,
+            # The missing files (docs/RFP_MISSING_FILES.md 7): `{state, open,
+            # total}` or null when the project has no items. The page shows
+            # "Files to get" in place of "Missing files" while it is open.
+            "files_issue": (files_issues or {}).get(project_id),
         },
         "cleared_at": rec.get("cleared_at"),
         "cleared_by": _person(profiles, rec.get("cleared_by")),
@@ -446,6 +453,18 @@ def _split_issues(sb, records: list[dict], profiles: dict[str, dict]) -> dict[st
                 logger.exception("rfp created: hand-off lock read failed for %s", pid)
                 issue["package_sent"] = False
     return issues
+
+
+def _files_issues(sb, records: list[dict]) -> dict[str, dict | None]:
+    """`flags.files_issue` per record (docs/RFP_MISSING_FILES.md 7): one
+    batched read over the page. A flag, never a gate: trouble answers {}."""
+    try:
+        from app.services import rfp_file_issues
+
+        return rfp_file_issues.flags_for_records(sb, records)
+    except Exception:  # noqa: BLE001
+        logger.exception("rfp created: missing-files flags failed")
+        return {}
 
 
 def issue_for_project(sb, rec: dict) -> dict | None:
@@ -567,9 +586,10 @@ def list_rfp_created(
     splits = _split_summary(
         sb, [(issues.get(str(r.get("project_id"))) or {}).get("job_id") or r.get("split_job_id") for r in records]
     )
+    files_issues = _files_issues(sb, records)
     return [
         _item(rec, projects.get(str(rec.get("project_id"))), gc_names, links, profiles, emails,
-              invitations, splits, issues)
+              invitations, splits, issues, files_issues)
         for rec in records
     ]
 

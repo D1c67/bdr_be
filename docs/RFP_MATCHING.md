@@ -51,11 +51,11 @@ Refactors in this slice, all in the backend:
 | Signals scored | Project name (required signal, highest weight), bid due date, bid notes (boost only). Invitation date and address are NOT used. |
 | Required name | An email with no usable extracted project name is never scored against any project; it lands at `done` with `flag_reason = no_project_name`. |
 | Date column | The email's due date is compared against `projects.actual_bid_at` first, `internal_bid_at` when the actual is null, and every existing GC's `project_gcs.needs_by`. The closest wins. |
-| Date tolerance | Up to `RFP_MATCH_BID_DATE_TOLERANCE_DAYS` (3) apart scores 1.0, the same as an identical date; only the exact-time bonus ranks above it. Inside the band the date can raise a total, never lower it below the no-date total. Farther apart scores down; beyond the candidate window the project is not a candidate. |
+| Date tolerance | Up to `RFP_MATCH_BID_DATE_TOLERANCE_DAYS` (3) apart scores 1.0, the same as an identical date; only the exact-time bonus ranks above it. Inside the band the date can raise a total, never lower it below the no-date total. Farther apart scores down. A project whose bid date is outside the candidate window is not a candidate unless it was created inside the window (see "Candidate window"); its own date, stale or not, is still what the email's date is scored against. |
 | Missing signals | A missing due date never penalizes: its weight is dropped from the denominator. Bid notes are boost-only: shared notes raise the total, different notes (two GCs' own instructions for the same job) change nothing. A name-only match must clear a higher name floor to auto-merge. |
 | Bid notes | New `projects.bid_notes` column, separate from `projects.notes`, on intake and project details. The extracted notes are stored on the email and shown in the merge record; they are never written into the project automatically. |
 | Name matching | Layered: deterministic trigram plus token scoring in Python, reference numbers stripped first, a hard cap for conflicting discriminator tokens (Phase 1 vs Phase 2), then an LLM verdict per candidate. Auto-merge requires the score AND a confident LLM "same". Two candidates too close to call (within `RFP_MATCH_RUNNER_UP_GAP` after the confident-different filter) always go to review; the system never picks between equals. No auto-merge ever happens on the deterministic score alone. |
-| Candidate window | Only projects whose bid date (`actual_bid_at`, else `internal_bid_at`) is not more than `RFP_MATCH_CANDIDATE_WINDOW_DAYS` (30) in the past. Projects with neither date, abandoned, declined, PM-only and CP-only projects are never candidates. Won, lost and no-award projects are candidates only inside that window. |
+| Candidate window | Only projects whose bid date (`actual_bid_at`, else `internal_bid_at`) is not more than `RFP_MATCH_CANDIDATE_WINDOW_DAYS` (30) in the past, OR that were created (`projects.created_at`) in the last `RFP_MATCH_CANDIDATE_WINDOW_DAYS` days whatever their bid date (2026-10-12). Projects with neither a recent bid date nor a recent creation, and abandoned, declined, PM-only and CP-only projects, are never candidates. Won, lost and no-award projects are candidates only inside that window. One rule, `rfp_match.in_candidate_window`, used by both match steps (through `split_bands`) and by the merge executor (`_open_project`, 3.6). |
 | Same GC already on the project | Terminal status `duplicate`. Nothing is added, nothing on the project changes, the record links the email to the project and GC. A wrong duplicate is reversed with `reopen` (3.8). A per-recipient sibling (3.1) of a row a person or the system already merged or marked duplicate follows the leader's decision without the switch or the sender gate, because it is the same message. |
 | GC resolution | Organic senders resolve by contact email address, then contact domain. Everything else resolves by fuzzy name against `general_contractors`. Below the GC threshold, or ambiguous, the email waits in the Matches tab where a person picks or adds the GC. |
 | Verified sender | The system merges or marks a duplicate automatically only when the tenant header shows an aligned pass (`auth_dmarc = pass` or `auth_compauth = pass`) and `authorization_kind` is `address`, `domain` or `gc_domain`. A human-continued (override) row always waits for a person. |
@@ -65,8 +65,10 @@ Refactors in this slice, all in the backend:
 | Unmerge | Estimating Admin, Executive and IT Admin, with a required reason. Refused once a proposal has been sent (or is sending) to that GC. Removes exactly the link the system added (by link id, never one a person added), records who and why, adds the project to the email's `excluded_project_ids` and returns the email to `match` so the sweep re-runs it against everything else. Cascades to the sibling duplicates that only existed because of this merge. The ordinary GC panel Remove is refused for a system-added GC; unmerge is the only detach path. |
 | Auto-merge switch | `RFP_MATCH_AUTO_MERGE_ENABLED` (default false). While off, every confident match and duplicate still lands in the Matches tab for one human click, labeled as confident, and the Matches tab reports how often reviewers agreed with the system so the switch can be turned on with evidence. |
 | New Bid check | `POST /projects/similar {name}` runs the deterministic name scorer (no LLM, no dates) at a lower threshold over a wider window on `internal_bid_at`, plus the rebid lookup. The New Bid form calls it before creating; a modal lists similar projects and possible rebids with links and offers Cancel, Create anyway, or Create as a rebid. Advisory: it fails open. |
-| Weights in env | Every weight, threshold, tolerance and window is an env value. Each decision stores the full resolved `rfp_match_*` settings plus `SCORER_VERSION` (a constant in `rfp_match.py`, bumped when a stop token, discriminator word, the containment rule, the date ladder or the aggregation changes), so tuning never makes an old decision unexplainable. |
+| Weights in env | Every weight, threshold, tolerance and window is an env value. Each decision stores the full resolved `rfp_match_*` settings plus `SCORER_VERSION` (a constant in `rfp_match.py`, bumped when a stop token, discriminator word, the containment rule, the date ladder, the aggregation or the candidate membership rule changes; `rfp_match_scorer_v2` since 2026-10-12), so tuning never makes an old decision unexplainable. |
 | Backfill | Rows parked at `done` by the intake slice with no `extracted_at` are moved to `extract` by the migration, and the new backend repeats the same guarded move once at startup. Idempotent. |
+| No project and no GC (2026-10-05) | A row that matched no project (`no_candidate`, `all_different`) AND whose GC did not resolve is held at `review_match` with `flag_reason = new_gc_unresolved` instead of going on to harvest and create (rule 8b, 3.5). Exempt: `nonorganic` rows (a person already allowed the unknown sender, and creation makes the GC from the sender by design, RFP_CREATE.md 4.4) and rows whose platform object already has a project (the create step only links them). A person sets the GC, continues it as new ("Not a match"), merges it, or ends it with "Not an RFP" (3.8). Prompted by 12 junk projects in 5 days in production from Procore change-order reminders (also stopped at intake, RFP_EMAIL_INGESTION.md 3.4.1). |
+| Recently created projects are candidates (2026-10-12) | The candidate window also admits a project created in the last `RFP_MATCH_CANDIDATE_WINDOW_DAYS` days whatever its bid date: the query's or-group gains `created_at.gte.<window lo>`, and `in_candidate_window` / `split_bands` check the window before the rebid band. No new setting, no migration, no scoring change; `SCORER_VERSION` moved to `rfp_match_scorer_v2`. Why: between 2026-10-06 and 2026-10-09 production made 9 duplicate projects (CCRPM Lake Mead x6, DOA 3087 x2, Hydrogen SMF x1) from daily Procore reminders. The first copy's project had no bid date (or a stale quote date, for DOA older than the 365-day rebid lookback), so the next day's copy never saw it: a dateless project was not even loaded and a stale-dated one landed in the name-only rebid band. The merge executor (`_open_project`) uses the same rule, so a proposed candidate can always be merged into. Same-tick copies (before the first project exists) stay the create guard's job (RFP_CREATE.md). |
 
 ---
 
@@ -95,9 +97,13 @@ Refactors in this slice, all in the backend:
         |                  confident but auto-merge off, sender unverified,
         |                    GC unresolved, middle band, or unusable output   -> review_match
         |                  nothing above the review threshold, or every
-        |                    candidate confidently different                  -> done
+        |                    candidate confidently different:
+        |                      GC unresolved, not nonorganic, no project on
+        |                        the platform object yet (rule 8b)           -> review_match
+        |                      otherwise                                      -> done
         v
-   review_match  (human: merge into X / already on X / not a match / pick or add the GC)
+   review_match  (human: merge into X / already on X / not a match / pick or add the GC /
+                  not an RFP)
    merged        (terminal; unmerge returns the row to `match` with the project excluded)
    duplicate     (terminal; reopen returns it to review_match)
    done          (terminal here; reopen returns it to review_match; the creation step attaches later)
@@ -116,9 +122,11 @@ and the `_process_email` loop key on it); `STATUS_HUMAN` gains
 `review_match` (badge counts); `STATUS_TERMINAL` gains `merged` and
 `duplicate`. Two existing guards stop keying off those tuples:
 
-- `dismiss` accepts exactly `(review_llm, flagged_unauthorized)`; on a
-  `review_match` row it is 409 `rfp_email_not_actionable`. The only
-  rejection exit from `review_match` is `match/reject` (3.8).
+- `dismiss` accepts exactly `(review_llm, flagged_unauthorized,
+  review_match)`; any other status is 409 `rfp_email_not_actionable`.
+  `review_match` joined on 2026-10-05 as "Not an RFP" (3.8): it ends the
+  row, where `match/reject` ("Not a match") sends it on to harvest and
+  create.
 - `set_method` refuses only rows the method step has not yet passed
   (`received, auth, keywords, classify, authorize, method`); every later
   status, pending or not, accepts the correction (no step after `method`
@@ -388,30 +396,55 @@ only), `gc_match_kind`, `gc_match_score`, `gc_candidates`.
 Reference bundle, once per sweep. Built lazily on the first row that reaches
 `match` (most ticks have none): (a) `general_contractors (id, name)`; (b)
 `gc_contacts (id, gc_id, email)` paged once; (c) ONE projects query over the
-rebid lookback with `project_gcs (id, gc_id, needs_by,
-general_contractors(name))` embedded, built by
-`rfp_match.candidate_query(sb, lo_iso, select=...)` (PostgREST, no RPC; the
-same shape as `services/due_reminders.py`; `lo_iso` a Z-suffixed UTC literal
+rebid lookback (bid dates) plus the candidate window (creation date) with
+`project_gcs (id, gc_id, needs_by, general_contractors(name))` embedded,
+built by `rfp_match.candidate_query(sb, lo_iso, *, created_lo_iso=None,
+select=...)` (PostgREST, no RPC; the same shape as
+`services/due_reminders.py`; both bounds are Z-suffixed UTC literals
 computed in Python by `rfp_match.pg_ts`, because PostgREST filters accept
-`now()` but not `now() - interval` or `coalesce()`):
+`now()` but not `now() - interval` or `coalesce()`). The bundle passes
+`lo = now - RFP_MATCH_REBID_LOOKBACK_DAYS` and `created_lo = now -
+RFP_MATCH_CANDIDATE_WINDOW_DAYS`; `created_lo_iso` defaults to `lo_iso`, so
+a caller that passes the window as `lo_iso` (the portal "same as" check,
+RFP_NGEM_PORTAL.md) gets the whole window rule from one bound:
 
 ```
-sb.table("projects").select(<columns>, project_gcs(id, gc_id, needs_by, general_contractors(name)))
+sb.table("projects").select(<columns incl. created_at>, project_gcs(id, gc_id, needs_by, general_contractors(name)))
   .is_("abandoned_at", "null")
   .not_.in_("current_stage", ["declined", "pm_only", "cp_only"])
-  .or_(f"actual_bid_at.gte.{lo},and(actual_bid_at.is.null,internal_bid_at.gte.{lo})")
+  .or_(f"actual_bid_at.gte.{lo},and(actual_bid_at.is.null,internal_bid_at.gte.{lo}),created_at.gte.{created_lo}")
 ```
 
-That or-group is `coalesce(actual_bid_at, internal_bid_at) >= lo`. The
-30-day candidate window, the rebid band (older than the window, inside the
-lookback), and the per-email `excluded_project_ids` are Python filters over
-that one result, which also supplies the `needs_by` dates for scoring and
+That or-group is `coalesce(actual_bid_at, internal_bid_at) >= lo OR
+created_at >= created_lo`. `created_at` must be in the select
+(`rfp_match.CANDIDATE_SELECT`, inherited by `_PROJECT_SELECT`): PostgREST
+drops any column the select does not name, and a project without it simply
+fails the created-at leg. There is no index on `projects.created_at`; the
+or-group is a sequential scan, fine at the current table size.
+
+The bands are one Python filter over that result,
+`rfp_match.split_bands(projects, now, settings, excluded_ids=...)`, used by
+both the email and the portal match steps:
+
+- candidates: `rfp_match.in_candidate_window` is true, that is the bid date
+  is inside the 30-day window OR `created_at` is inside it. The window check
+  comes first, so a project created in the window is a candidate whether
+  its bid date is missing, stale, or older than the rebid lookback (DOA 3087,
+  2026-10-12);
+- rebid band: everything else whose bid date is inside the lookback;
+- dropped: the rest (no bid date and created before the window, which the
+  query does not load anyway), and the per-email `excluded_project_ids`.
+
+That one result also supplies the `needs_by` dates for scoring and
 the GC names for the 3.4 prompt. `resolve_gc`, the scorer and the rebid
 lookup take the bundle as parameters; nothing in `_step_match` queries these
 tables per row. After a merge inside the sweep the step appends the new
 `project_gcs` row to the in-memory bundle so a second email from the same GC
-in the same tick routes to `duplicate` directly. `_run_from` never runs
-`match`, so the bundle is sweep-only.
+in the same tick routes to `duplicate` directly. A project created inside
+the sweep is never appended, so two copies of one invitation in the same
+tick cannot see each other here; that is the create-time guard's job
+(RFP_CREATE.md). `_run_from` never runs `match`, so the bundle is
+sweep-only.
 
 Required name. When `extracted_project_name` is null or normalizes to an
 empty string, the match step runs GC resolution only (so the GC is recorded
@@ -525,8 +558,10 @@ not see), `match_weights` (the full resolved `rfp_match_*` settings except
 model names, plus `scorer_version` and `auto_merge_enabled`), `matched_at`.
 `match_project_id` and `match_score` are the best ranked candidate after the
 confident-different filter when its total is at or above the review
-threshold (every `review_match` reason, `merged`, `duplicate`); null for
-`no_project_name`, `no_candidate` and `all_different`. `match_llm_model` and
+threshold (every `review_match` reason except `new_gc_unresolved`,
+`merged`, `duplicate`); null for `no_project_name`, `no_candidate`,
+`all_different` and `new_gc_unresolved` (rule 8b: a review_match row with
+no proposed project). `match_llm_model` and
 `match_llm_prompt_version` are set only when the model was called. `match_candidates` and `match_weights` always
 reflect the latest evaluation and are replaced whenever the row passes
 `match` again; `rfp_project_matches` is the durable record of every
@@ -535,8 +570,11 @@ change is 3.6 step 3's kind flip). The list route never selects
 `match_candidates`; only the detail route returns it.
 
 Wider rebid lookup (`rfp_match.rebid_lookup(name, projects, settings)`, where
-`projects` is the rebid band the caller slices from the bundle: older than
-the candidate window, inside the lookback, minus excluded ids): runs
+`projects` is the rebid band `split_bands` slices from the bundle: bid date
+older than the candidate window, inside the lookback, minus excluded ids;
+a stale-dated project created inside the window is a candidate, not a
+rebid, so it is scored and judged instead of producing a name-only
+`possible_rebid_project_id` hint): runs
 only when routing is about to land the row at `review_match` or `done`
 (never for `merged` or `duplicate`). Name-scores the projects in the rebid
 band and stores the best at or above `RFP_MATCH_REBID_NAME_THRESHOLD` (0.85)
@@ -633,6 +671,26 @@ runner-up the second.
    above the review threshold, or the window was empty; rule 1 never applies
    when the best is below the review threshold) or `all_different` (the
    model called every judged candidate a confident `different`).
+8b. (2026-10-05, email rows only.) When rule 8 applies and the GC is
+   unresolved, the row goes to `review_match` with `flag_reason =
+   new_gc_unresolved` and no proposed project (`match_project_id` and
+   `match_score` null) instead of `done`, so nothing is harvested or created
+   until a person decides. `rfp_match.route(...,
+   hold_new_without_gc=True)`; `rfp_email_ingest._holds_new_without_gc`
+   passes it for every row except (a) `invitation_method = nonorganic` (a
+   person already allowed the unknown sender with "Allow and continue", and
+   creation makes the GC from the sender by design, RFP_CREATE.md 4.4 step
+   3) and (b) a row whose platform object (`rfp_harvest.platform_reference`:
+   a Procore bid, a PipelineSuite or SmartBid project) already has an
+   `rfp_harvests` row with a `project_id` under the same `(method,
+   external_key)`: the create step's link-only path only joins it, so there
+   is nothing to hold. That one read fails safe (a failed read holds). The
+   portal steps never pass the flag. The auto-merge switch plays no part;
+   the rebid lookup still runs; the row counts as a new match review (badge,
+   bell). A person then sets the GC (`match/gc`, the row stays) and
+   continues it as new (`match/reject`, which keeps `flag_reason` and goes on
+   to harvest or create with that GC), merges it into a project found with
+   the search, or ends it with "Not an RFP" (`dismiss`, 3.8).
 
 Every route stamps `decided_at_step = match` and `matched_at`. The system
 routes to `merged` and `duplicate` write `flag_reason = null`; the status
@@ -663,15 +721,22 @@ point resumes cleanly:
 
 1. Re-read the project; refuse (LookupError, 409 `rfp_match_project_closed`)
    if it is abandoned, declined, PM-only or CP-only, or outside the
-   candidate window (`coalesce(actual_bid_at, internal_bid_at)` older than
-   `RFP_MATCH_CANDIDATE_WINDOW_DAYS`, or null), so the backend and the
-   drawer's search agree. Refuse with 409
+   candidate window (`rfp_match.in_candidate_window` false: the bid date,
+   `coalesce(actual_bid_at, internal_bid_at)`, is null or older than
+   `RFP_MATCH_CANDIDATE_WINDOW_DAYS` AND `created_at` is older than that
+   too; "That project is outside the matching window."). This is the same
+   rule the match steps list candidates by, so every proposed candidate can
+   be merged into or marked duplicate on, by the system, by a reviewer, or
+   through the BuildingConnected `on_exists` hook (since 2026-10-12; before,
+   a dateless or stale-dated candidate was proposed and then refused here).
+   The drawer's search applies the same rule (3.10). Refuse with 409
    `rfp_match_project_excluded` if `project_id` is in the email's
    `excluded_project_ids` (this covers merge and duplicate, system and
    human). For a human merge whose project is not in `match_candidates`
-   (allowed: the reviewer may search any open project in the candidate
-   window), score that project live with the deterministic scorer (no LLM)
-   so the stored breakdown describes the target; `candidate_rank` is null.
+   (allowed: the reviewer may pick any open project in the candidate
+   window, by bid date or by creation date), score that project live with
+   the deterministic scorer (no LLM) so the stored breakdown describes the
+   target; `candidate_rank` is null.
 2. If an open `rfp_project_matches` row already exists for this email
    (`unmerged_at is null`; the partial unique index guarantees at most one):
    with `kind = merged` and the SAME project and GC, a merge request is a
@@ -875,22 +940,25 @@ pill.
 
 ### 3.8 Human actions on `review_match`
 
-Merge, already on X, not a match and set GC pre-read `status =
-review_match` and refuse otherwise (409 `rfp_match_not_actionable`); reopen
-pre-reads `done` or `duplicate`. Reject and set GC are single conditional
-updates; merge and already-on-X write the match row (and the link) before
-their CAS and compensate on a miss as 3.6 describes. Exactly one of two
-concurrent actions on the same email takes effect. Merge, already on X and
-not a match stamp `decided_at_step = review_match`; set GC and reopen leave
-it as it is. Every action is audited once.
+Merge, already on X, not a match, not an RFP and set GC pre-read `status =
+review_match` and refuse otherwise (409 `rfp_match_not_actionable`; not an
+RFP, which is `dismiss`, answers the intake's 409 `rfp_email_not_actionable`
+for a row that moved on); reopen pre-reads `done` or `duplicate`. Reject,
+not an RFP and set GC are single conditional updates; merge and
+already-on-X write the match row (and the link) before their CAS and
+compensate on a miss as 3.6 describes. Exactly one of two concurrent
+actions on the same email takes effect. Merge, already on X, not a match
+and not an RFP stamp `decided_at_step = review_match`; set GC and reopen
+leave it as it is. Every action is audited once.
 
 | action | effect |
 |---|---|
-| merge into X | `merge_email` with `decided_by` set. Requires a resolved GC (`resolved_gc_id`, or `gc_id` in the body, which also stores kind `human`); 400 `rfp_match_gc_required` when neither is set. A malformed `project_id` or `gc_id`, or an unknown GC, is a 404 in the router before the service runs (the service re-checks the body GC and raises a bare LookupError before any write). X must not be excluded (409 `rfp_match_project_excluded`); X may be any open project in the candidate window (scored live when not in `match_candidates`). Silent for the actor. |
+| merge into X | `merge_email` with `decided_by` set. Requires a resolved GC (`resolved_gc_id`, or `gc_id` in the body, which also stores kind `human`); 400 `rfp_match_gc_required` when neither is set. A malformed `project_id` or `gc_id`, or an unknown GC, is a 404 in the router before the service runs (the service re-checks the body GC and raises a bare LookupError before any write). X must not be excluded (409 `rfp_match_project_excluded`); X may be any open project in the candidate window, by bid date or by creation date (scored live when not in `match_candidates`). Silent for the actor. |
 | already on X | duplicate path with `decided_by`. 400 `rfp_match_gc_required` when `resolved_gc_id` is null (set GC first), else 409 `rfp_match_gc_not_on_project` when the GC is not on X. |
 | unmerge (by email) | resolves the email's latest `kind = merged` row (open or closed, via the `(rfp_email_id, decided_at desc)` index) and calls `unmerge(match_id, reason, actor_id)`; 404 when the email has no merged row. Estimating Admin, Executive, IT Admin. |
-| not a match | No GC needed. Writes `match_review_decision = no_match`, `match_review_agreed = false`, status `done`; `flag_reason` untouched. The candidates stay on the row for training. Refused (409 `rfp_match_not_actionable`) while an open `kind = merged` row exists for the email (a merge that crashed before its email write still holds a link on the project): merge again to finish it, or unmerge it on the project. |
-| set GC | `resolved_gc_id = gc_id`, `gc_match_kind = human`. Stays in `review_match`. The GC may have just been created through the existing `POST /gcs`. A malformed or unknown `gc_id` is a 404 in the router. |
+| not a match | No GC needed. Writes `match_review_decision = no_match`, `match_review_agreed = false`, and sends the row on as a new invitation (`_park_target`: `harvest` or `create`, RFP_CREATE.md 3 exit 5) with the resolved GC, if any; `flag_reason` untouched. The candidates stay on the row for training. Refused (409 `rfp_match_not_actionable`) while an open `kind = merged` row exists for the email (a merge that crashed before its email write still holds a link on the project): merge again to finish it, or unmerge it on the project. The FE labels it "Continue as a new project" on a `new_gc_unresolved` row (no proposed project). |
+| not an RFP (2026-10-05) | `POST /rfp-emails/{id}/dismiss` on a `review_match` row: the email is not an invitation at all. Status `rejected_by_review`, `flag_reason = dismissed`, `decided_at_step = review_match`, `last_error` and `next_attempt_at` cleared, one CAS on `status = review_match`; audit `rfp_email.dismiss` with `{from_status: review_match}` and the test bench's `human.dismiss` (`_record_human`). `match_review_*` are not written, so the match-stats tally never counts it. Nothing on any project changes; the candidates stay. Refused with the same guard as not a match (`_refuse_open_merge`: 409 `rfp_match_not_actionable` while an open merged row holds a link). Same review-queue roles as the other match actions. Terminal: there is no undo (the fallback is New Bid). The FE asks "Not an RFP?" before it calls. |
+| set GC | `resolved_gc_id = gc_id`, `gc_match_kind = human`. Stays in `review_match` (`flag_reason` too, `new_gc_unresolved` included: the person then merges or continues it). The GC may have just been created through the existing `POST /gcs`. A malformed or unknown `gc_id` is a 404 in the router. |
 | reopen | on `done` or `duplicate` (not `review_match`). Conditional update to `review_match`; clears `match_review_decision`, `match_review_by`, `match_review_at`, `match_review_agreed`, `last_error`, `next_attempt_at`; `flag_reason` untouched (the reopen is recorded by its audit row). On a `duplicate` row, first CAS `duplicate -> review_match`, then close its open match row (`unmerged_at`, `unmerged_by`, `unmerge_reason = reopened` plus the optional reason); a crash between the two writes is harmless because 3.6 step 2 closes a leftover open duplicate row before any later merge or duplicate inserts. Nothing on the project is touched. Audit `rfp_match.reopen`. Review-queue roles. |
 
 `match_review_agreed` (0122): true when the human's project equals
@@ -989,7 +1057,10 @@ review_match`, `match_review_agreed = true`, `match_review_agreed = false`.
   `internal_bid_at`, `actual_bid_at` (returned only to
   `ACTUAL_BID_VIEWER_ROLES`), GC names, breakdown. No score, membership or
   sort order in this response is a function of the actual date. No snapshot
-  is stored; the check is advisory.
+  is stored; the check is advisory. It stays internal-date-only after
+  2026-10-12: it does not take the matcher's created-at leg, so a project
+  with no `internal_bid_at` (every RFP-created project, which sets only
+  `actual_bid_at`, and any dateless one) is invisible to this check.
 - Notification wiring: register `rfp_match.merged` in
   `notification_email._TYPE_META` ("New RFP matches merged", "Open RFP
   emails") so the type has a title if mirroring is ever enabled; today the
@@ -1021,7 +1092,16 @@ review_match`, `match_review_agreed = true`, `match_review_agreed = false`.
   `flag_reason`: `match_confident` ("The system is confident this is
   {project}. Auto-merge is off, so confirm it."), `match_gc_unresolved`,
   `match_sender_unverified`, `match_ambiguous`, `match_uncertain`,
-  `match_llm_unusable`, and for `done` rows the routing reason. Matches tab
+  `match_llm_unusable`, `new_gc_unresolved` (rule 8b, warn tone, only while
+  the row is at `review_match`: nothing matched and the GC is unknown; pick
+  or add the GC, then continue it or merge it, or say Not an RFP), and for
+  `done` rows the routing reason. A `new_gc_unresolved` row's Matches cell
+  (and its RFP Processing Detail cell, from the additive `flag_reason` on
+  the processing item) reads "New invitation, GC unknown" instead of "No
+  candidate". The review_match footer (drawer and the review sub-dialog)
+  carries "Not an RFP" (ghost, danger text; an are-you-sure dialog, then
+  `POST /dismiss`, closing the drawer) beside "Not a match", which reads
+  "Continue as a new project" on a `new_gc_unresolved` row. Matches tab
   header: "Auto-merge is off. Reviewers agreed with the system on {agreed}
   of {total} confident matches." from `match-stats`. For `review_match`:
   the GC block (resolved GC with its provenance sentence, or a picker over
@@ -1030,7 +1110,11 @@ review_match`, `match_review_agreed = true`, `match_review_agreed = false`.
   `excluded_projects` (never offered as targets), the candidate list with
   per-candidate "Merge into this project" or "Already on this project"
   (when the resolved GC is on it), a "Merge into another project" search
-  over open projects in the candidate window, and "Not a match". For
+  over open projects in the candidate window (the search, in
+  `RfpMergeSearch.tsx`, uses the same rule as the backend since
+  2026-10-12: bid date or creation date inside the window, so a recently
+  created project with no bid date or a stale one is offered too), and
+  "Not a match". For
   `merged`: the match record with a link to the project and Unmerge (roles)
   with a reason field. For `duplicate` and `done`: "Reopen" with an optional
   reason. A `done` row with a closed match row shows "Unmerged from
@@ -1283,7 +1367,7 @@ PostgREST schema reload after the DDL.
 | RFP_MATCH_DATE_SCORE_FAR | 0.5 | |
 | RFP_MATCH_EXACT_TIME_BONUS | 0.1 | added to the total on an exact timestamp match |
 | RFP_MATCH_CONFLICT_CAP | 0.4 | name score cap on a discriminator conflict |
-| RFP_MATCH_CANDIDATE_WINDOW_DAYS | 30 | bid date not older than this |
+| RFP_MATCH_CANDIDATE_WINDOW_DAYS | 30 | bid date OR created_at not older than this (the created-at leg since 2026-10-12) |
 | RFP_MATCH_AUTO_THRESHOLD | 0.85 | floor on the TOTAL score for a confident candidate |
 | RFP_MATCH_REVIEW_THRESHOLD | 0.55 | |
 | RFP_MATCH_NAME_MIN_AUTO | 0.8 | |
@@ -1326,7 +1410,7 @@ Under `/rfp-emails` (review-queue roles unless noted):
 | POST /rfp-emails/{id}/match/gc {gc_id} | set the GC; 404 on a malformed or unknown GC |
 | POST /rfp-emails/{id}/match/reopen {reason?} | done or duplicate back to review |
 | POST /rfp-emails/{id}/match/unmerge {reason} | unmerge by email (Estimating Admin, Executive, IT Admin) |
-| POST /rfp-emails/{id}/dismiss | unchanged; 409 on a review_match row |
+| POST /rfp-emails/{id}/dismiss | review_llm, flagged_unauthorized, and (2026-10-05) review_match as "Not an RFP" (3.8); 409 `rfp_match_not_actionable` on a review_match row with an open merge, 409 `rfp_email_not_actionable` otherwise |
 | PATCH /rfp-emails/{id} {invitation_method} | now succeeds on rows at extract, match and every later status |
 
 Under `/projects`:
@@ -1400,7 +1484,12 @@ Error codes (`app/core/error_codes.py`, `docs/ERROR_CODES.md`):
   recognizes); add `rpc()` for `remove_project_gc_unless_sent`. A regression
   test proves the fake's `not_.in_` and `and(...)` handling: the candidate
   query excludes `declined`, `pm_only`, `cp_only` and the excluded ids, and
-  includes a project whose only in-window date is `actual_bid_at`.
+  includes a project whose only in-window date is `actual_bid_at`. The
+  three-term or-group (2026-10-12): a project with no dates and one with a
+  bid date older than the lookback, both created yesterday, are included
+  (with the default `created_lo_iso` and with the bundle's two bounds); a
+  dateless project created 60 days ago stays out; a declined one created
+  yesterday stays out.
 - Unit (`tests/test_rfp_match.py`): normalization, stop tokens and reference
   number stripping; name score on shortened, reordered, extended and
   misspelled names; a null or all-stop-token side returns 0.0 (not 1.0, not
@@ -1436,7 +1525,17 @@ Error codes (`app/core/error_codes.py`, `docs/ERROR_CODES.md`):
   leader rule: a decided copy on either side is followed (earliest received
   of several), an older undecided one is waited behind, a younger undecided
   one is not, a failed or flagged one is ignored, and a timestamp tie breaks
-  the same way from both sides.
+  the same way from both sides. Candidate window (2026-10-12):
+  `split_bands` puts a dateless project, a stale-dated one and one dated
+  older than the lookback, each created yesterday, in the candidates and
+  never in the rebid band; a dateless project created 31 days ago is in
+  neither; a fixture with no `created_at` key keeps the old bid-date-only
+  behaviour. `rank_candidates` scores a dateless project on the name alone
+  (date null, total equals name). `candidate_query` emits the exact
+  three-term or-group with `created_lo_iso` defaulting to `lo_iso`.
+  `created_at` is asserted by name in `CANDIDATE_SELECT` and
+  `_PROJECT_SELECT`, because the fakes return whole rows for an embedded
+  select and a forgotten column would pass every other test.
 - Pipeline (`tests/test_rfp_email_ingest.py`): walk `done -> extract ->
   match` to each outcome; crash-resume at `extract` and `match`; model down
   waits at both steps without spending; a `match` `model_missing` while
@@ -1475,9 +1574,15 @@ Error codes (`app/core/error_codes.py`, `docs/ERROR_CODES.md`):
   today. Acknowledge clears `rfp_new_count` and keeps `rfp_merged_count`;
   refused after send; unmerge still allowed on an acknowledged row until
   sent; duplicate rows never raise either count. Reopen on `done` and on
-  `duplicate` (closes the match row). Dismiss on `review_match` is 409 and
-  leaves the row untouched; PATCH `invitation_method` succeeds at `extract`
-  and `match`. Sibling follower of a merged leader lands at `duplicate`
+  `duplicate` (closes the match row). Dismiss on `review_match` ("Not an
+  RFP", 2026-10-05) ends the row at `rejected_by_review` / `dismissed` /
+  `review_match`, is refused while an open merge exists, and loses cleanly
+  to a concurrent decision; PATCH `invitation_method` succeeds at `extract`
+  and `match`. Rule 8b: no candidate and all different without a GC land at
+  `review_match` / `new_gc_unresolved` with no proposed project, auto-merge
+  on or off; a resolved GC, a `nonorganic` row and a platform bid that
+  already has a project go on as before; set GC then not a match sends the
+  row on with that GC. Sibling follower of a merged leader lands at `duplicate`
   with no LLM call; of a pending leader waits; of a failed leader extracts.
   Arrival order: the younger copy swept first finishes the work, and the
   older copy arriving on a later tick follows it (to `done`, to `duplicate`
@@ -1496,6 +1601,26 @@ Error codes (`app/core/error_codes.py`, `docs/ERROR_CODES.md`):
   open merge of its own is resumed first.
   Startup backfill moves `done` rows with null `extracted_at` and leaves
   match-decided `done` rows alone.
+  Recently created projects (2026-10-12, `tests/test_rfp_match_actions.py`,
+  modelled on the prod rows): a no-date, no-GC reminder copy against a
+  dateless project made yesterday lands at `review_match` /
+  `match_gc_unresolved` with that project proposed and nothing created; a
+  dated copy against it is `match_uncertain`; a copy with the same stale
+  date as a project made yesterday scores date 1.0 and is
+  `match_gc_unresolved` with no rebid hint on that project; a different
+  date gives total about 0.667 and `match_uncertain`; three copies give
+  `match_ambiguous`; a project dated older than the lookback (DOA) but made
+  yesterday is loaded and proposed; with auto-merge on, a GC-resolved
+  verified copy against a dateless project made yesterday that already has
+  the GC lands at `duplicate` with a match row (the `_open_project`
+  regression); a dateless project made 45 days ago is not a candidate. A
+  reviewer's merge or duplicate into a dateless or stale-dated project made
+  3 days ago succeeds, into one made 45 days ago is refused with
+  `rfp_match_project_closed`. Portal (`tests/test_rfp_portal_ingest.py`):
+  an invitation whose title matches a dateless project made yesterday gets
+  it as a candidate (`match_uncertain`, the invitation has a close date),
+  and `resolve_exists` accepts such a project when it is not a stored
+  candidate and refuses one made 45 days ago.
 - Router (`tests/test_rfp_emails_router.py`, `tests/test_projects_*`): the
   route table and role gating; merge and duplicate refuse an excluded
   project (409); an engineer's detail response for a row past `match`
@@ -1540,7 +1665,8 @@ The contract the pipeline, the routers and the tests code against. All
 functions are pure unless they take `sb`.
 
 ```
-SCORER_VERSION: str                      # e.g. "rfp_match_scorer_v1"
+SCORER_VERSION: str                      # "rfp_match_scorer_v2" (v2 = candidate membership also by created_at, 2026-10-12)
+CANDIDATE_SELECT: str                    # projects columns for the bundle; must name created_at
 EXTRACT_PROMPT_VERSION, MATCH_PROMPT_VERSION: str
 EXTRACT_SCHEMA, MATCH_SCHEMA: dict       # JSON schemas for llm.complete_json
 FEATURE_EXTRACT = "rfp_extract"; FEATURE_MATCH = "rfp_match"
@@ -1562,8 +1688,8 @@ rank_candidates(email_facts, projects, settings, *, excluded_ids) -> list[dict]
     # top MAX_CANDIDATES entries {project_id, name, number, breakdown, verdict: None, ...}
 rebid_lookup(name, projects, settings) -> tuple[str, float] | None
 route(candidates, *, has_name, has_date, gc_resolved, gc_on_project, sender_verified,
-      auto_merge, settings) -> Route
-    # Route(status, flag_reason, best: dict | None)
+      auto_merge, settings, llm_unusable=False, hold_new_without_gc=False) -> Route
+    # Route(status, flag_reason, best: dict | None); hold_new_without_gc is rule 8b
 resolve_gc(email, bundle, settings) -> GcResolution
     # GcResolution(gc_id, contact_id, kind, score, candidates: list[dict])
 sibling_key(row) -> tuple; received_order(row) -> tuple; same_sibling(row, cand) -> bool
@@ -1580,7 +1706,13 @@ build_match_messages(facts, candidates_for_model, settings) -> list[dict]
 parse_verdicts(obj, sent_indexes) -> dict[int, dict]
 settings_snapshot(settings) -> dict
 redact_candidates(obj, role) -> obj
-candidate_query(sb, lo_iso, *, select) -> query          # the or-group builder (coalesce on the actual date)
+project_bid_at(project) -> datetime | None               # coalesce(actual_bid_at, internal_bid_at)
+in_candidate_window(project, now, settings) -> bool      # bid date in the window OR created_at in it
+split_bands(projects, now, settings, *, excluded_ids=()) -> (candidates, rebid_band)
+    # window first, then bid date inside the lookback; used by both match steps
+candidate_query(sb, lo_iso, *, created_lo_iso=None, select) -> query
+    # the or-group builder: coalesce on the actual date >= lo_iso OR created_at >= created_lo_iso
+    # (defaults to lo_iso)
 precreate_query(sb, lo_iso, *, select) -> query          # POST /projects/similar: internal_bid_at only
 pg_ts(dt) -> str                                          # Z-suffixed literal
 ```
