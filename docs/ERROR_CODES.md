@@ -151,6 +151,18 @@ it verbatim); the mailbox preflight appends the Graph status after a colon.
 | `rfp_testing_mailbox_unreachable` | 422 | `GET /users/{mailbox}/mailFolders/inbox` did not answer 200; `detail` carries the status (404: the mailbox does not exist in the tenant; 403: the app registration's access policy does not cover it). | Show `detail`. |
 | `rfp_testing_redirect_invalid` | 422 | The redirect address is malformed. | Show the code. |
 
+### AI Estimating (`/ai-estimating`, docs/PLANS_READER.md sections 6 and 7)
+
+While `PLANS_READER_ENABLED` is false every route 404s with the bare "Not
+Found" body. Same header contract as the RFP tables: the code rides in
+`X-Error-Code` and `detail` holds an app-authored sentence.
+
+| Code | HTTP | Meaning | Frontend action |
+| --- | --- | --- | --- |
+| `ai_estimating_not_actionable` | 409 | The action does not apply to the run's current status: files added after the run started (also when the run started while the file was uploading; that file is marked failed), start on a run that is not new or has no files, cancel on a finished run, resume on a run that is not paused at the spend cap, delete while the run is still working or a step is still talking to the AI model (a running group or an unanswered chat message), a re-render while the run is rendering, a modify while another modify is queued, a chat message while the last answer is still pending. A start over `PLANS_READER_MAX_INPUT_TOKENS_PER_RUN` is a 413 without a code. | Show `detail` and refresh the run. |
+| `ai_estimating_spend_cap` | 409 | The daily spend cap is reached, or the step would pass it. Start, resume and modify refuse before anything is queued; nothing was sent to the model. | Show `detail`; IT Admins and Executives can raise or reset the cap in Settings. |
+| `ai_estimating_unavailable` | 503 | The OpenAI route for AI Estimating is not configured, or it is off by design while `FULL_SELF_HOSTED_LLMS_ENABLED` is true, or the AI job queue (`LLM_QUEUE_ENABLED`) is off. Nothing was queued. | Show `detail`; disable Start, Modify and chat send. |
+
 ---
 
 ## Other stable behaviors

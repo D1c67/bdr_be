@@ -34,9 +34,12 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings, get_settings
+from app.core.roles import INTERNAL_ROLES, Role
 from app.core.features import (
     PM_NOTIFICATION_TYPES,
     SubApp,
+    AI_ESTIMATING_STATE_ROLES,
+    ai_estimating_allowed,
     enabled_map,
     home_path,
     notification_sub_app,
@@ -136,7 +139,7 @@ def test_all_sub_apps_enabled_by_default():
     forgotten var never silently kills a working module. bid_file_splitter and
     rfp_ingest are the odd ones out: they default FALSE (experimental) and read
     True here only because conftest pins them on for the suite."""
-    assert enabled_map() == {
+    assert enabled_map(Role.EXECUTIVE) == {
         "bidding": True,
         "pm": True,
         "certified_payroll": True,
@@ -146,8 +149,10 @@ def test_all_sub_apps_enabled_by_default():
         "rfp_ngem": False,
         "rfp_buildingconnected": False,
         "rfp_testing": False,
+        "ai_estimating": True,
     }
     # The field default (not the pinned env) is what production inherits.
+    assert Settings.model_fields["plans_reader_enabled"].default is False
     assert Settings.model_fields["rfp_ingest_enabled"].default is False
     assert Settings.model_fields["bid_file_splitter_enabled"].default is False
     assert Settings.model_fields["rfp_testing_enabled"].default is False
@@ -488,7 +493,9 @@ def test_rfp_ingest_settings_guard_refuses_each_bad_combination(overrides, names
     the operator has to fix. Enforced whether or not the flag is on, so a
     bad value surfaces at deploy time rather than when the flag flips."""
     with pytest.raises(ValueError, match=names_var):
-        Settings(_env_file=None, rfp_ingest_enabled=False, **overrides)
+        # plans_reader off: its own lease validator would otherwise fire first
+        # on the short-lease case and name a different variable.
+        Settings(_env_file=None, rfp_ingest_enabled=False, plans_reader_enabled=False, **overrides)
 
 
 def test_rfp_ingest_settings_guard_accepts_the_boundaries():
@@ -883,3 +890,63 @@ def test_rfp_ngem_env_names_carry_the_documented_prefixes(monkeypatch):
     s = Settings(_env_file=None)
     assert s.rfp_ngem_enabled is True and s.ngem_configured
     assert s.rfp_ngem_schedule == [(7, 0)] and s.ngem_login_lock_seconds == 3600
+
+
+# ── AI_ESTIMATING_STATE: who may open AI Estimating ─────────────────────────
+
+
+@contextmanager
+def _ai_state(state: str, enabled: bool = True):
+    previous = {k: os.environ.get(k) for k in ("AI_ESTIMATING_STATE", "PLANS_READER_ENABLED")}
+    os.environ["AI_ESTIMATING_STATE"] = state
+    os.environ["PLANS_READER_ENABLED"] = "true" if enabled else "false"
+    get_settings.cache_clear()
+    try:
+        yield
+    finally:
+        for k, v in previous.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        get_settings.cache_clear()
+
+
+def test_ai_estimating_state_defaults_to_dev():
+    assert Settings.model_fields["ai_estimating_state"].default == "dev"
+
+
+def test_ai_estimating_state_rejects_unknown_values():
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, ai_estimating_state="beta")
+
+
+@pytest.mark.parametrize("role", list(Role))
+def test_ai_estimating_live_admits_every_internal_role(role):
+    with _ai_state("live"):
+        assert ai_estimating_allowed(role) is (role in INTERNAL_ROLES)
+        assert enabled_map(role)["ai_estimating"] is (role in INTERNAL_ROLES)
+    assert Role.ESTIMATOR not in AI_ESTIMATING_STATE_ROLES["live"]
+
+
+@pytest.mark.parametrize("role", list(Role))
+def test_ai_estimating_test_admits_executives_and_it_admins(role):
+    with _ai_state("test"):
+        assert ai_estimating_allowed(role) is (role in {Role.EXECUTIVE, Role.IT_ADMIN})
+
+
+@pytest.mark.parametrize("role", list(Role))
+def test_ai_estimating_dev_admits_nobody(role):
+    with _ai_state("dev"):
+        assert ai_estimating_allowed(role) is False
+        assert enabled_map(role)["ai_estimating"] is False
+
+
+def test_ai_estimating_off_switch_wins_over_live():
+    with _ai_state("live", enabled=False):
+        assert ai_estimating_allowed(Role.EXECUTIVE) is False
+
+
+def test_ai_estimating_without_a_caller_reads_false():
+    with _ai_state("live"):
+        assert enabled_map()["ai_estimating"] is False

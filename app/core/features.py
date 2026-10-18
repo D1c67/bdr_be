@@ -35,6 +35,7 @@ from enum import Enum
 from fastapi import HTTPException, status
 
 from app.core.config import get_settings
+from app.core.roles import INTERNAL_ROLES, Role
 
 
 class SubApp(str, Enum):
@@ -56,7 +57,31 @@ def is_enabled(sub_app: SubApp) -> bool:
     }[sub_app]
 
 
-def enabled_map() -> dict[str, bool]:
+# AI_ESTIMATING_STATE -> the roles that may open AI Estimating. test is the
+# owner's preview audience; dev hides it from every account, dev accounts too.
+AI_ESTIMATING_STATE_ROLES: dict[str, frozenset[Role]] = {
+    "live": INTERNAL_ROLES,
+    "test": frozenset({Role.EXECUTIVE, Role.IT_ADMIN}),
+    "dev": frozenset(),
+}
+
+
+def ai_estimating_roles() -> frozenset[Role]:
+    """Roles AI_ESTIMATING_STATE admits. An unknown state admits nobody.
+    getattr: fails closed on a settings stand-in without the field."""
+    state = getattr(get_settings(), "ai_estimating_state", "dev")
+    return AI_ESTIMATING_STATE_ROLES.get(state, frozenset())
+
+
+def ai_estimating_allowed(role: Role | None) -> bool:
+    """Whether this role may use AI Estimating right now: the server switch
+    (PLANS_READER_ENABLED) is on and AI_ESTIMATING_STATE admits the role."""
+    if not getattr(get_settings(), "plans_reader_enabled", False):
+        return False
+    return role is not None and role in ai_estimating_roles()
+
+
+def enabled_map(role: Role | None = None) -> dict[str, bool]:
     """The flag set as the frontend consumes it (GET /features).
 
     `bid_file_splitter` is NOT a sub-app (no switcher tile, no home route, not
@@ -90,6 +115,13 @@ def enabled_map() -> dict[str, bool]:
     # master switch. The frontend additionally requires a dev profile with
     # the it_admin role, the same gate the /rfp-testing router enforces.
     flags["rfp_testing"] = bool(settings.rfp_testing_enabled and settings.rfp_ingest_enabled)
+    # AI Estimating (docs/PLANS_READER.md): per caller. The env switch
+    # (PLANS_READER_ENABLED) plus AI_ESTIMATING_STATE admitting the caller's
+    # role; no role (no caller) reads false. The feature is pinned to OpenAI
+    # in both LLM modes (services/llm openai_only); a missing OpenAI key or a
+    # stopped queue keeps the page reachable but inert, and GET
+    # /ai-estimating/status says so.
+    flags["ai_estimating"] = ai_estimating_allowed(role)
     return flags
 
 
@@ -153,6 +185,18 @@ def require_bid_file_splitter() -> None:
     it was never implemented.
     """
     if not get_settings().bid_file_splitter_enabled:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+
+
+def require_plans_reader() -> None:
+    """Router-level dependency gating /ai-estimating on PLANS_READER_ENABLED.
+
+    Same contract as require_bid_file_splitter: while the flag is false every
+    route 404s with the bare "Not Found" body before auth runs, so a
+    deployment that does not serve AI Estimating is indistinguishable from one
+    where it was never implemented.
+    """
+    if not getattr(get_settings(), "plans_reader_enabled", False):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
 
 

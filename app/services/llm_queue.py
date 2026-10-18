@@ -50,6 +50,21 @@ starving or blocking the AI work:
   terminal CAS. The spec also supplies its own error_message, so an exception
   the sandbox never declared is recorded with a sandbox-authored sentence
   rather than one about "the AI provider" and "the model".
+
+AI Estimating (docs/PLANS_READER.md section 7) adds four LLM job types, one
+job per model-call unit so leases, retries and parallelism are per call: a
+sub, roll-up or escalation group (`plans_reader_agent`), the main
+consolidation (`plans_reader_main`), a chat answer (`plans_reader_chat`) and
+a deliverable modification (`plans_reader_modify`). They are claimed in
+their own pass with their own capacity (PLANS_READER_CONCURRENCY per process),
+never against llm_queue_worker_concurrency: one 600-page run queues dozens of
+group jobs that each hold a slot for minutes, and the bidding pipeline's BOQ,
+proposal and splitter jobs must not wait behind them. Inside that pass the
+interactive types (chat, modify) are claimed first and the batch types
+(agent, main) never take the last slot, so a chat answer waits at most one
+group, not a whole run. The pass runs only while PLANS_READER_ENABLED is on.
+A terminal group failure advances the run so it finishes as done_with_errors
+instead of waiting forever.
 """
 
 from __future__ import annotations
@@ -81,10 +96,28 @@ JOB_RFP_HARVEST = "rfp_harvest"
 JOB_PORTAL_SCAN = "rfp_portal_scan"
 JOB_PORTAL_HARVEST = "rfp_portal_harvest"
 JOB_RFP_CREATE_FILES = "rfp_create_files"
+# AI Estimating (docs/PLANS_READER.md section 7). One job per model-call unit:
+# a sub, roll-up or escalation group (agent), the main consolidation (main),
+# one chat answer (chat) and one deliverable modification (modify).
+JOB_PLANS_AGENT = "plans_reader_agent"
+JOB_PLANS_MAIN = "plans_reader_main"
+JOB_PLANS_CHAT = "plans_reader_chat"
+JOB_PLANS_MODIFY = "plans_reader_modify"
+# Batch: a run's pipeline groups. Interactive: someone is waiting on the page.
+PLANS_BATCH_JOB_TYPES = (JOB_PLANS_AGENT, JOB_PLANS_MAIN)
+PLANS_INTERACTIVE_JOB_TYPES = (JOB_PLANS_CHAT, JOB_PLANS_MODIFY)
+PLANS_JOB_TYPES = PLANS_BATCH_JOB_TYPES + PLANS_INTERACTIVE_JOB_TYPES
+# Long-form aliases (the services written in parallel may use either name).
+JOB_PLANS_READER_AGENT = JOB_PLANS_AGENT
+JOB_PLANS_READER_MAIN = JOB_PLANS_MAIN
+JOB_PLANS_READER_CHAT = JOB_PLANS_CHAT
+JOB_PLANS_READER_MODIFY = JOB_PLANS_MODIFY
 
-# The job types that spend an LLM slot. The sandbox, harvest, portal and
-# promotion types are deliberately not here: each family is claimed in its
-# own pass with its own capacity (see worker_loop).
+# The job types that spend a slot of llm_queue_worker_concurrency (the
+# bidding pipeline's AI work). The sandbox, harvest, portal and promotion
+# types are deliberately not here, and neither are the AI Estimating types:
+# each family is claimed in its own pass with its own capacity (see
+# _claim_tick), so none of them can occupy the pipeline's slots.
 LLM_JOB_TYPES = (JOB_BOQ, JOB_GENERAL_MATERIAL, JOB_PROPOSAL, JOB_BID_SPLIT)
 # The portal request stream (docs/RFP_NGEM_PORTAL.md 2.2): the scan and the
 # portal harvest share the harvest capacity with the Procore harvest, one
@@ -97,6 +130,12 @@ HARVEST_JOB_TYPES = (JOB_RFP_HARVEST,) + PORTAL_JOB_TYPES
 CREATE_JOB_TYPES = (JOB_RFP_CREATE_FILES,)
 THIRD_PASS_JOB_TYPES = HARVEST_JOB_TYPES + CREATE_JOB_TYPES
 NON_LLM_JOB_TYPES = (JOB_RFP_INGEST,) + THIRD_PASS_JOB_TYPES
+# Every job type llm_jobs.job_type accepts (the CHECK in migration 0152).
+ALL_JOB_TYPES = LLM_JOB_TYPES + PLANS_JOB_TYPES + NON_LLM_JOB_TYPES
+
+# The default of PLANS_READER_CONCURRENCY (core/config.py), AI Estimating
+# jobs per worker process (two uvicorn workers in prod, so twice this).
+PLANS_DEFAULT_CONCURRENCY = 2
 
 # Model label recorded for sandbox jobs in place of an LLM model name.
 SANDBOX_MODEL_LABEL = "sandbox"
@@ -111,6 +150,10 @@ _FEATURE_BY_TYPE = {
     JOB_PORTAL_SCAN: "rfp_portal",
     JOB_PORTAL_HARVEST: "rfp_portal",
     JOB_RFP_CREATE_FILES: "rfp_create",
+    JOB_PLANS_AGENT: "plans_sub",
+    JOB_PLANS_MAIN: "plans_main",
+    JOB_PLANS_CHAT: "plans_chat",
+    JOB_PLANS_MODIFY: "plans_modify",
 }
 
 # The job whose spec.run is executing on this thread (None outside _execute,
@@ -333,7 +376,464 @@ def _spec(job_type: str) -> _JobSpec:
             model_label=lambda s: m.MODEL_LABEL,
             error_message=m.error_message,
         )
+    if job_type in (JOB_PLANS_AGENT, JOB_PLANS_MAIN):
+        return _JobSpec(
+            _FEATURE_BY_TYPE[job_type],
+            # One job per plans_reader_groups row (sub, rollup or escalation
+            # for the agent type, the main consolidation for main). run_group
+            # owns the running/done marks, writes the plans_reader_calls row
+            # and advances the run; it leaves a group queued (and returns
+            # normally) when the spend cap stops it.
+            _run_plans_group,
+            _mark_plans_group,
+            _plans_group_status,
+        )
+    if job_type == JOB_PLANS_CHAT:
+        return _JobSpec(
+            "plans_chat",
+            # One job per pending assistant message (target = message id).
+            _run_plans_chat,
+            _mark_plans_message,
+            _plans_message_status,
+        )
+    if job_type == JOB_PLANS_MODIFY:
+        return _JobSpec(
+            "plans_modify",
+            # One job per modify group row (target = group id); the payload
+            # carries the run, the deliverable kind, the instruction and who
+            # asked, so a lease requeue repeats the same request.
+            _run_plans_modify,
+            _mark_plans_group,
+            _plans_group_status,
+        )
     raise KeyError(f"Unknown llm job type: {job_type}")
+
+
+# ── AI Estimating job adapters (docs/PLANS_READER.md section 7) ──────────
+#
+# The services are imported inside each adapter, like the specs above, so
+# this module stays importable without the plans reader modules loaded.
+
+# Group kinds whose terminal failure must move the run's state machine on
+# (a failed group is terminal for advance(), which then finishes the run as
+# done_with_errors instead of leaving it reading forever).
+_PLANS_PIPELINE_KINDS = ("sub", "rollup", "escalation", "main")
+_PLANS_ACTIVE_GROUP = ("queued", "running")
+_PLANS_ACTIVE_MESSAGE = ("pending", "running")
+
+
+class _JobActor(str):
+    """The user a queued AI Estimating job acts for, rebuilt from the user id
+    in its payload. A str (the id) that also answers `.id`, so a service that
+    takes `user` works whether it reads `user.id` or stores `user` as the id.
+    The worker has no request, so there is no role or email to carry."""
+
+    @property
+    def id(self) -> str:  # noqa: A003 - mirrors CurrentUser.id
+        return str(self)
+
+
+def _run_plans_group(payload: dict) -> None:
+    from app.services import plans_reader_agents
+
+    group_id = payload.get("group_id")
+    if not group_id:
+        raise ValueError("The AI Estimating job has no group to run.")
+    plans_reader_agents.run_group(get_supabase(), str(group_id))
+
+
+def _run_plans_chat(payload: dict) -> None:
+    from app.services import plans_reader_chat
+
+    message_id = payload.get("message_id")
+    if not message_id:
+        raise ValueError("The AI Estimating chat job has no message to answer.")
+    plans_reader_chat.run_message(get_supabase(), str(message_id))
+
+
+MSG_MODIFY_UNSAVED = (
+    "The AI model answered, but the new version could not be saved. "
+    "Ask for the change again."
+)
+MSG_MODIFY_STALE = (
+    "This deliverable changed after the change was asked for, so it was not "
+    "applied. Ask for it again on the latest version."
+)
+
+
+def _paid_modify_calls(sb: Any, group_id: str) -> int:
+    """Successful model calls recorded for a modify group (plans_reader_calls
+    rows with ok=true). A count that grew during an attempt means the model
+    answered and was paid, whatever failed afterwards."""
+    rows = (
+        sb.table("plans_reader_calls")
+        .select("id")
+        .eq("group_id", group_id)
+        .eq("ok", True)
+        .execute()
+    ).data or []
+    return len(rows)
+
+
+def _saved_modify_version(sb: Any, run_id: str, kind: str, instruction: str, since: str | None) -> dict | None:
+    """The deliverable version an earlier attempt of this modify already
+    saved (same run, kind and instruction, created since the group started),
+    so a retry finishes the group instead of writing a second version."""
+    if not since:
+        return None
+    rows = (
+        sb.table("plans_reader_deliverables")
+        .select("id, version")
+        .eq("run_id", run_id)
+        .eq("kind", kind)
+        .eq("instruction", instruction)
+        .gte("created_at", since)
+        .order("version", desc=True)
+        .limit(1)
+        .execute()
+    ).data or []
+    return rows[0] if rows else None
+
+
+def _latest_deliverable_version(sb: Any, run_id: str, kind: str) -> int:
+    rows = (
+        sb.table("plans_reader_deliverables")
+        .select("version")
+        .eq("run_id", run_id)
+        .eq("kind", kind)
+        .order("version", desc=True)
+        .limit(1)
+        .execute()
+    ).data or []
+    return int(rows[0].get("version") or 0) if rows else 0
+
+
+def _finish_modify_group(sb: Any, group_id: str, kind: str, row: dict, *, rerender: bool = False) -> None:
+    """Close a modify group with the version it wrote. A re-render keeps
+    `rerender: true` in its output, so the run payload can tell it from a
+    model modification."""
+    output: dict[str, Any] = {"kind": kind, "deliverable_id": row.get("id"), "version": row.get("version")}
+    if rerender:
+        output["rerender"] = True
+    sb.table("plans_reader_groups").update(
+        {
+            "status": "done",
+            "error": None,
+            "finished_at": _now().isoformat(),
+            "output": output,
+        }
+    ).eq("id", group_id).in_("status", list(_PLANS_ACTIVE_GROUP)).execute()
+
+
+def _run_plans_modify(payload: dict) -> None:
+    """Rewrite one deliverable per the user's instruction (a new version),
+    or re-render it (payload `rerender` true, `instruction` null: no model
+    call, see _run_plans_rerender).
+
+    Paid at most once per request. A group already done (or canceled) is
+    left alone, so a retried job never writes a second version. A failure
+    after the model answered is not paid again: the parsed spec is kept on
+    the group before rendering (plans_reader_agents._keep_pending_spec), so
+    a failure while saving it (a storage upload, a worker that died) is
+    retried by rendering the kept spec with no model call; without a kept
+    spec, or when the renderer refused it (a ValueError, which would refuse
+    again), the failure is permanent. The one other exception is an unusable
+    answer (LlmBadOutput), where a fresh call is the remedy; the paid call
+    is noted on the group (output.retry_ok_calls) so the retry is allowed. A
+    retry that finds a paid call it cannot account for finishes the group
+    from the version that attempt saved, else from the kept spec, or fails
+    with a sentence asking for the change again.
+
+    The edit applies to the version the user saw (payload base_version):
+    when another change landed first, the job refuses instead of silently
+    building on a version the user never asked about.
+
+    The spend cap is permanent for this attempt: SpendCapReached becomes a
+    ValueError carrying its app-authored sentence, so the group fails with
+    that text instead of a generic provider message and the queue does not
+    retry into the same cap.
+
+    A run being deleted (claimed `canceled` by plans_reader_runs.delete) or
+    gone stops the job before it writes anything: the group is canceled.
+    The run is read again after the group is marked running, so either the
+    delete's own check after its claim sees the running group (and refuses)
+    or this check sees the claim."""
+    from app.services import ai_spend, llm, plans_reader_agents
+
+    sb = get_supabase()
+    group_id = str(payload.get("group_id") or "")
+    run_id = str(payload.get("run_id") or "")
+    kind = str(payload.get("kind") or "")
+    rerender = payload.get("rerender") is True and payload.get("instruction") is None
+    instruction = "" if rerender else str(payload.get("instruction") or "").strip()
+    if not (group_id and run_id and kind and (rerender or instruction)):
+        raise ValueError("The AI Estimating modify job is missing its request.")
+    groups = (
+        sb.table("plans_reader_groups").select("*").eq("id", group_id).limit(1).execute()
+    ).data or []
+    if not groups or groups[0].get("status") not in _PLANS_ACTIVE_GROUP:
+        return
+    group = groups[0]
+    runs = sb.table("plans_reader_runs").select("*").eq("id", run_id).limit(1).execute().data or []
+    if not runs:
+        raise ValueError("The AI Estimating run no longer exists.")
+    if not _plans_run_open(sb, group_id, run_id, runs[0]):
+        return
+    actor = _JobActor(str(payload.get("user_id") or ""))
+    if rerender:
+        _run_plans_rerender(sb, group, runs[0], kind, payload, actor)
+        return
+
+    paid = _paid_modify_calls(sb, group_id)
+    output = group.get("output") if isinstance(group.get("output"), dict) else {}
+    accounted = int(output.get("retry_ok_calls") or 0)
+    if paid > accounted:
+        # An earlier attempt was paid and then lost (a worker died, the save
+        # failed, or the done mark failed after the version was saved).
+        saved = _saved_modify_version(sb, run_id, kind, instruction, group.get("started_at"))
+        if saved:
+            _finish_modify_group(sb, group_id, kind, saved)
+            return
+        kept = output.get(plans_reader_agents.PENDING_SPEC_KEY)
+        if isinstance(kept, dict) and output.get("pending_kind") in (None, kind):
+            _mark_modify_running(sb, group)
+            if not _plans_run_open(sb, group_id, run_id):
+                return
+            row = plans_reader_agents.render_pending_spec(
+                sb, runs[0], kind=kind, spec=kept, instruction=instruction, user=actor
+            )
+            _finish_modify_group(sb, group_id, kind, row or {})
+            return
+        raise ValueError(MSG_MODIFY_UNSAVED)
+
+    base = payload.get("base_version")
+    if base is not None and _latest_deliverable_version(sb, run_id, kind) != int(base):
+        raise ValueError(MSG_MODIFY_STALE)
+
+    _mark_modify_running(sb, group)
+    if not _plans_run_open(sb, group_id, run_id):
+        return
+    try:
+        row = plans_reader_agents.modify_deliverable(
+            sb,
+            runs[0],
+            kind=kind,
+            instruction=instruction,
+            user=actor,
+            group_id=group_id,
+        )
+    except ai_spend.SpendCapReached as exc:
+        raise ValueError(str(exc)) from exc
+    except Exception as exc:
+        if isinstance(exc, ValueError) and not isinstance(exc, llm.LlmBadOutput):
+            raise  # app-authored refusal (or the renderer refused the spec): already permanent
+        if isinstance(exc, llm.LlmBadOutputPermanent):
+            raise  # declared permanent; nothing will retry it
+        try:
+            now_paid = _paid_modify_calls(sb, group_id)
+        except Exception:  # noqa: BLE001 - cannot tell; never pay twice on a guess
+            logger.exception("llm queue: counting modify calls for group %s failed", group_id)
+            raise ValueError(MSG_MODIFY_UNSAVED) from exc
+        if now_paid <= paid:
+            raise  # the model was never reached: the queue's own retry rule applies
+        if isinstance(exc, llm.LlmBadOutput):
+            sb.table("plans_reader_groups").update(
+                {"output": {**output, "retry_ok_calls": now_paid}}
+            ).eq("id", group_id).execute()
+            raise
+        if _has_pending_spec(sb, group_id, plans_reader_agents.PENDING_SPEC_KEY):
+            raise  # the retry renders the kept spec (above) without a second call
+        raise ValueError(MSG_MODIFY_UNSAVED) from exc
+    _finish_modify_group(sb, group_id, kind, row or {})
+
+
+def _plans_run_open(sb: Any, group_id: str, run_id: str, run: dict | None = None) -> bool:
+    """True while the run of a modify group still exists and is not
+    canceled (delete claims a run as canceled before it sweeps its files;
+    a finished run is never canceled otherwise). False after canceling the
+    group, so the job ends without writing a deliverable nobody owns. `run`
+    is a row already read; without it the run is read now."""
+    if run is None:
+        rows = (
+            sb.table("plans_reader_runs").select("id, status").eq("id", run_id).limit(1).execute()
+        ).data or []
+        run = rows[0] if rows else None
+    if run is not None and run.get("status") != "canceled":
+        return True
+    sb.table("plans_reader_groups").update(
+        {"status": "canceled", "finished_at": _now().isoformat()}
+    ).eq("id", group_id).in_("status", list(_PLANS_ACTIVE_GROUP)).execute()
+    return False
+
+
+def _mark_modify_running(sb: Any, group: dict) -> None:
+    sb.table("plans_reader_groups").update(
+        {
+            "status": "running",
+            "error": None,
+            "attempts": int(group.get("attempts") or 0) + 1,
+            "started_at": group.get("started_at") or _now().isoformat(),
+        }
+    ).eq("id", group["id"]).in_("status", list(_PLANS_ACTIVE_GROUP)).execute()
+
+
+def _has_pending_spec(sb: Any, group_id: str, key: str) -> bool:
+    """True when the modify group holds a kept spec (best effort: an
+    unreadable row counts as no spec, which keeps the failure permanent)."""
+    try:
+        rows = (
+            sb.table("plans_reader_groups").select("output").eq("id", group_id).limit(1).execute()
+        ).data or []
+    except Exception:  # noqa: BLE001 - see docstring
+        logger.exception("llm queue: reading the kept spec of group %s failed", group_id)
+        return False
+    output = rows[0].get("output") if rows and isinstance(rows[0].get("output"), dict) else {}
+    return isinstance(output.get(key), dict)
+
+
+def _saved_rerender_version(sb: Any, run_id: str, kind: str, base: int, since: str | None) -> dict | None:
+    """The version an earlier attempt of this re-render already saved (one
+    newer than the version the request saw, created since the group
+    started), so a retry finishes the group instead of rendering twice. One
+    change runs per run at a time (the modify group's unique index), so a
+    newer version written since the start is this one."""
+    if not since:
+        return None
+    rows = (
+        sb.table("plans_reader_deliverables")
+        .select("id, version, created_at")
+        .eq("run_id", run_id)
+        .eq("kind", kind)
+        .gte("created_at", since)
+        .order("version", desc=True)
+        .limit(1)
+        .execute()
+    ).data or []
+    if rows and int(rows[0].get("version") or 0) > int(base):
+        return rows[0]
+    return None
+
+
+def _run_plans_rerender(sb: Any, group: dict, run: dict, kind: str, payload: dict, actor: "_JobActor") -> None:
+    """A queued re-render (plans_reader_runs.rerender_deliverable): render
+    the deliverable again as a new version with no model call. A renderer
+    refusal is a RunRefused (ValueError, permanent, its sentence on the
+    group); a storage hiccup is retried by the queue, and a retry that finds
+    the version an earlier attempt saved finishes from it."""
+    from app.services import plans_reader_runs
+
+    base = int(payload.get("base_version") or 0)
+    saved = _saved_rerender_version(sb, str(run["id"]), kind, base, group.get("started_at"))
+    if saved:
+        _finish_modify_group(sb, str(group["id"]), kind, saved, rerender=True)
+        return
+    _mark_modify_running(sb, group)
+    if not _plans_run_open(sb, str(group["id"]), str(run["id"])):
+        return
+    row = plans_reader_runs.rerender_now(sb, run, kind, user=actor)
+    _finish_modify_group(sb, str(group["id"]), kind, row or {}, rerender=True)
+
+
+def _mark_plans_group(target: str, fields: dict) -> None:
+    """Queue marks on a plans_reader_groups row: `pending` (a retry is
+    scheduled) reads as `queued` there, `failed` is terminal. Fenced on the
+    active statuses so a canceled or finished group never takes a mark. A
+    terminal failure of a pipeline group then advances the run."""
+    sb = get_supabase()
+    status = fields.get("status")
+    patch: dict[str, Any] = {"error": fields.get("error")}
+    if status == "pending":
+        patch["status"] = "queued"
+    elif status == "failed":
+        patch["status"] = "failed"
+        patch["finished_at"] = _now().isoformat()
+    elif status:
+        patch["status"] = status
+    rows = (
+        sb.table("plans_reader_groups")
+        .update(patch)
+        .eq("id", target)
+        .in_("status", list(_PLANS_ACTIVE_GROUP))
+        .execute()
+    ).data or []
+    if status != "failed" or not rows:
+        return
+    group = rows[0]
+    if group.get("kind") not in _PLANS_PIPELINE_KINDS or not group.get("run_id"):
+        return
+    try:
+        from app.services import plans_reader_runs
+
+        plans_reader_runs.advance(sb, str(group["run_id"]))
+    except Exception:  # noqa: BLE001 - the mark itself landed; advance is idempotent and re-runs on the next group
+        logger.exception("llm queue: advancing AI Estimating run %s after a failed group errored", group["run_id"])
+
+
+def _plans_group_status(target: str) -> str | None:
+    """The group's status for the monitor's retry guard. Every terminal
+    status reads as done, so the AI monitor's Retry refuses: a canceled
+    group belongs to a canceled run, and a failed one cannot be revived by a
+    fresh job (the marks are fenced on queued/running and run_group skips a
+    settled group, so the retry would report success and do nothing). The
+    page's own paths are the retry: Resume or a new run for a pipeline
+    group, asking again for a modify."""
+    status = _row_status("plans_reader_groups", "id", target)
+    return "done" if status in ("canceled", "failed") else status
+
+
+def _mark_plans_message(target: str, fields: dict) -> None:
+    """Queue marks on a pending assistant message (pending or failed),
+    fenced so an answered message never flips back."""
+    status = fields.get("status")
+    patch: dict[str, Any] = {"error": fields.get("error")}
+    if status:
+        patch["status"] = status
+    get_supabase().table("plans_reader_chat_messages").update(patch).eq("id", target).in_(
+        "status", list(_PLANS_ACTIVE_MESSAGE)
+    ).execute()
+
+
+def _plans_message_status(target: str) -> str | None:
+    """A failed answer reads as done for the same reason as a failed group
+    (run_message leaves a failed message alone); the user sends the message
+    again instead."""
+    status = _row_status("plans_reader_chat_messages", "id", target)
+    return "done" if status == "failed" else status
+
+
+def _plans_concurrency(s: Settings) -> int:
+    """AI Estimating jobs this process runs at once: PLANS_READER_CONCURRENCY
+    (config validates 1 to 32). The fallback and the floor of 1 only guard
+    a Settings built without validation (model_copy)."""
+    try:
+        value = int(s.plans_reader_concurrency)
+    except (TypeError, ValueError):
+        value = PLANS_DEFAULT_CONCURRENCY
+    return max(1, value)
+
+
+def _claim_plans(s: Settings, types: list[str]) -> list[dict]:
+    """The AI Estimating pass (module docstring): skipped while
+    PLANS_READER_ENABLED is off (queued jobs wait for the flag or an
+    operator cancel, never spending on a feature that is switched off).
+    Interactive jobs are claimed first; batch jobs never take the last slot
+    when there is more than one, so a chat answer or modify waits at most
+    for the next free slot, never behind a whole run."""
+    if not getattr(s, "plans_reader_enabled", False):
+        return []
+    total = _plans_concurrency(s)
+    running = [jt for jt in types if jt in PLANS_JOB_TYPES]
+    free = total - len(running)
+    if free <= 0:
+        return []
+    claimed = _claim(s, free, list(PLANS_INTERACTIVE_JOB_TYPES))
+    free -= len(claimed)
+    batch_slots = total - 1 if total > 1 else total
+    running_batch = sum(1 for jt in running if jt in PLANS_BATCH_JOB_TYPES)
+    batch_free = min(free, batch_slots - running_batch)
+    if batch_free > 0:
+        claimed.extend(_claim(s, batch_free, list(PLANS_BATCH_JOB_TYPES)))
+    return claimed
 
 
 def _is_unique_violation(exc: Exception) -> bool:
@@ -354,12 +854,17 @@ def enqueue(
     priority: int = 100,
     settings: Settings | None = None,
     raise_on_active: bool = False,
+    next_attempt_at: datetime | str | None = None,
 ) -> dict:
     """Queue a job. If an active job already exists for the same target the
     existing job is returned instead (double-clicks and racing tabs collapse
     onto one run; the partial unique index is the authority). Callers that
     need to KNOW they collapsed (to warn the user) pass raise_on_active=True
-    and catch JobAlreadyActive, which carries the existing job."""
+    and catch JobAlreadyActive, which carries the existing job.
+    `next_attempt_at` delays the first claim (the claim RPC only takes jobs
+    due by now); None means due at once (the column default). AI Estimating
+    uses it to pace group jobs against the account's tokens-per-minute
+    limit."""
     s = settings or get_settings()
     sb = get_supabase()
     row = {
@@ -372,6 +877,10 @@ def enqueue(
         "priority": priority,
         "max_attempts": 1 + len(s.llm_retry_delay_list),
     }
+    if next_attempt_at is not None:
+        row["next_attempt_at"] = (
+            next_attempt_at.isoformat() if isinstance(next_attempt_at, datetime) else str(next_attempt_at)
+        )
     try:
         resp = sb.table("llm_jobs").insert(row).execute()
         return resp.data[0]
@@ -489,16 +998,18 @@ def _claim(s: Settings, max_jobs: int, job_types: list[str] | None = None) -> li
 
 
 def _claim_tick(s: Settings, running_types: Iterable[str]) -> list[dict]:
-    """One tick's claims, in two passes with independent capacities: the LLM
+    """One tick's claims, in passes with independent capacities: the LLM
     job types against llm_queue_worker_concurrency, then the sandbox type
-    against rfp_ingest_sandbox_concurrency. `running_types` is the job type of
-    every job still executing in this process. The sandbox pass is skipped
-    while the feature flag is off (a disabled feature must never spawn a
-    child; its queued jobs wait for the flag or an operator cancel)."""
+    against rfp_ingest_sandbox_concurrency, the harvest family, and last the
+    AI Estimating types against their own capacity (_claim_plans).
+    `running_types` is the job type of every job still executing in this
+    process. The sandbox pass is skipped while the feature flag is off (a
+    disabled feature must never spawn a child; its queued jobs wait for the
+    flag or an operator cancel)."""
     types = list(running_types)
     claimed: list[dict] = []
     llm_capacity = s.llm_queue_worker_concurrency - sum(
-        1 for jt in types if jt not in NON_LLM_JOB_TYPES
+        1 for jt in types if jt in LLM_JOB_TYPES
     )
     if llm_capacity > 0:
         claimed.extend(_claim(s, llm_capacity, list(LLM_JOB_TYPES)))
@@ -528,6 +1039,7 @@ def _claim_tick(s: Settings, running_types: Iterable[str]) -> list[dict]:
         )
         if harvest_capacity > 0:
             claimed.extend(_claim(s, harvest_capacity, harvest_types))
+    claimed.extend(_claim_plans(s, types))
     return claimed
 
 
@@ -1059,8 +1571,14 @@ async def worker_loop() -> None:
     running: dict[asyncio.Task, str] = {}
     while True:
         s = get_settings()
+        # The sweep and the claim are separate so a sweep that fails (one
+        # stale pooled connection after the host slept, a transient 5xx)
+        # does not also skip this tick's claims and leave due jobs waiting.
         try:
             await asyncio.to_thread(_sweep, s)
+        except Exception:  # noqa: BLE001 - a bad tick must not kill the loop
+            logger.exception("llm queue sweep failed")
+        try:
             for job in await asyncio.to_thread(_claim_tick, s, list(running.values())):
                 task = asyncio.create_task(asyncio.to_thread(_execute, job))
                 running[task] = job["job_type"]

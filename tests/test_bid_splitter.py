@@ -449,6 +449,8 @@ def test_validate_batch_rejects_unknown_categories_and_clamps():
         {"pages": [_page(1, "rfp", other_type="Nope")]}, [1]
     )
     assert out[0]["other_type"] is None
+    # A reply without page_role (pre-0152 shape) still validates, as 'other'.
+    assert out[0]["page_role"] == "other"
 
 
 # ── Confidence reasoning (what the hover panel shows) ────────────────────

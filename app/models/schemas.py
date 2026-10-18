@@ -2651,3 +2651,103 @@ class ExternalSubmissionIn(BaseModel):
     # a bid already sent to every GC posts no rows. The service enforces "at
     # least one GC included" over both.
     gcs: list[ExternalSubmissionGcIn] = Field(default_factory=list, max_length=100)
+
+
+# ── AI Estimating (plans reader; docs/PLANS_READER.md sections 6 and 7) ────
+# Request bodies for routers/plans_reader.py. The responses are the dict
+# payloads the plans_reader_* services build (section 7), passed through
+# as-is, so only the status readout has a model here.
+
+AiEstimatingSource = Literal["upload", "project"]
+AiEstimatingRenderMode = Literal["adaptive", "tiles_260"]
+
+
+def _not_blank(value: str | None) -> str | None:
+    """Strip surrounding whitespace; a whitespace-only string is refused."""
+    if value is None:
+        return None
+    value = value.strip()
+    if not value:
+        raise ValueError("must not be blank")
+    return value
+
+
+class AiEstimatingRunIn(BaseModel):
+    """POST /ai-estimating/runs. `project_id` names the project whose files
+    the run will copy (read only); it is required when source is `project`
+    and ignored otherwise. `render_mode` falls back to adaptive."""
+
+    name: str = Field(..., min_length=1, max_length=200)
+    source: AiEstimatingSource = "upload"
+    project_id: str | None = Field(default=None, max_length=64)
+    render_mode: AiEstimatingRenderMode | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        return _not_blank(v)  # type: ignore[return-value]
+
+    @model_validator(mode="after")
+    def _project_source(self) -> "AiEstimatingRunIn":
+        if self.source == "project" and not (self.project_id or "").strip():
+            raise ValueError("project_id is required when source is project")
+        if self.source == "upload":
+            self.project_id = None
+        return self
+
+
+class AiEstimatingProjectFilesIn(BaseModel):
+    """POST /ai-estimating/runs/{id}/project-files: project_files ids to copy
+    into the run (server-side storage copy; the project is never changed)."""
+
+    project_file_ids: list[str] = Field(..., min_length=1, max_length=200)
+
+
+class AiEstimatingModifyIn(BaseModel):
+    """POST /ai-estimating/runs/{id}/deliverables/{kind}/modify."""
+
+    instruction: str = Field(..., min_length=1, max_length=4000)
+
+    @field_validator("instruction")
+    @classmethod
+    def _instruction(cls, v: str) -> str:
+        return _not_blank(v)  # type: ignore[return-value]
+
+
+class AiEstimatingThreadIn(BaseModel):
+    """POST /ai-estimating/runs/{id}/chat/threads. The title is optional."""
+
+    title: str | None = Field(default=None, max_length=200)
+
+    @field_validator("title")
+    @classmethod
+    def _title(cls, v: str | None) -> str | None:
+        if v is None or not v.strip():
+            return None
+        return v.strip()
+
+
+class AiEstimatingMessageIn(BaseModel):
+    """POST /ai-estimating/runs/{id}/chat/threads/{tid}/messages. `pro_max`
+    lets the assistant render and look at the actual pages (read_pages)."""
+
+    content: str = Field(..., min_length=1, max_length=8000)
+    pro_max: bool = False
+
+    @field_validator("content")
+    @classmethod
+    def _content(cls, v: str) -> str:
+        return _not_blank(v)  # type: ignore[return-value]
+
+
+class AiEstimatingStatusOut(BaseModel):
+    """GET /ai-estimating/status: the page header readout."""
+
+    enabled: bool
+    unavailable_reason: str | None = None
+    model: str | None = None
+    reasoning_effort: str
+    render_modes: list[str]
+    promax_max_pages: int
+    upload_max_mb: int
+    spend: dict[str, Any]

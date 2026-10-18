@@ -403,3 +403,75 @@ def delete_draft_prefix(draft_id: str) -> None:
         store.remove(paths)
         for p in paths:
             _signed_url_cache.pop(p, None)
+
+
+# ── AI Estimating objects (0152, docs/PLANS_READER.md 3.7) ───────────────────
+
+# One path segment of a plans-reader object kind ("source", "deliverables",
+# "v1"). Kinds are app-chosen, never user input, but a stray ".." or an empty
+# segment would mint a key outside the run's prefix, so they are checked.
+_PLANS_READER_KIND_SEGMENT = frozenset(string.ascii_letters + string.digits + "_-")
+# deliverables/v{n}/{object} is the deepest layout in use; the sweep walks a
+# little deeper than that so a future sub-folder is still reclaimed.
+_PLANS_READER_MAX_DEPTH = 5
+
+
+def build_plans_reader_path(run_id: str, kind: str, filename: str) -> str:
+    """Object path for an AI Estimating run object:
+    `plans-reader/{run_id}/{kind}/{uuid}-{safe filename}`.
+
+    AI Estimating is standalone (a run is not a project), so its objects live
+    under a reserved `plans-reader/` prefix in the same private bucket, keyed
+    by run, like the splitter's `bid-splits/`. `kind` is the folder under the
+    run: `source` for uploads and project copies, `deliverables/v{n}` for the
+    rendered files of version n. It may hold `/`-separated segments of
+    letters, digits, `_` and `-` only, so no kind can climb out of the run."""
+    segments = (kind or "").split("/")
+    if not segments or any(not s or not set(s) <= _PLANS_READER_KIND_SEGMENT for s in segments):
+        raise ValueError("Invalid AI Estimating object folder.")
+    return f"plans-reader/{run_id}/{kind}/{uuid.uuid4().hex}-{safe_key_component(filename)}"
+
+
+def delete_plans_reader_prefix(run_id: str) -> None:
+    """Remove EVERY object under `plans-reader/{run_id}/` (sources and every
+    deliverable version).
+
+    Mirror of delete_bid_split_prefix for AI Estimating runs: the run delete
+    must not trust the DB rows alone (a worker racing the delete can land a
+    deliverable after the rows were read). Deliverables sit three levels deep
+    (`deliverables/v{n}/{object}`) while sources sit two deep, so this walk
+    recurses: an entry Storage lists without an `id` is a folder."""
+    if not run_id or "/" in str(run_id):
+        raise ValueError("Invalid AI Estimating run id.")
+    store = get_supabase().storage.from_(BUCKET)
+    root = f"plans-reader/{run_id}"
+
+    def _list_all(path: str) -> list[dict]:
+        out: list[dict] = []
+        offset = 0
+        while True:
+            page = store.list(path, {"limit": _LIST_PAGE, "offset": offset}) or []
+            out.extend(page)
+            if len(page) < _LIST_PAGE:
+                return out
+            offset += _LIST_PAGE
+
+    paths: list[str] = []
+
+    def _walk(path: str, depth: int) -> None:
+        for entry in _list_all(path):
+            name = entry.get("name")
+            if not name:
+                continue
+            child = f"{path}/{name}"
+            if entry.get("id") is None and depth < _PLANS_READER_MAX_DEPTH:
+                _walk(child, depth + 1)
+            elif entry.get("id") is not None:
+                paths.append(child)
+
+    _walk(root, 1)
+    for start in range(0, len(paths), _LIST_PAGE):
+        chunk = paths[start : start + _LIST_PAGE]
+        store.remove(chunk)
+        for p in chunk:
+            _signed_url_cache.pop(p, None)

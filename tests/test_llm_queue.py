@@ -301,6 +301,11 @@ def _user(role=Role.ESTIMATING_ADMIN, uid="u1", is_dev=False):
 
 
 def _settings(**over):
+    # The suite's environment turns PLANS_READER_ENABLED on for the AI
+    # Estimating routes; these tests pin the pipeline passes, so the AI
+    # Estimating pass (its own RPC call) stays off unless a test turns it on
+    # (tests/test_plans_reader_routes.py covers that pass).
+    over.setdefault("plans_reader_enabled", False)
     return Settings(_env_file=None, **over)
 
 
@@ -1002,8 +1007,11 @@ def test_rfp_ingest_is_a_job_type_but_not_an_llm_one():
     assert lq.JOB_RFP_INGEST == "rfp_ingest"
     assert lq.JOB_RFP_INGEST not in lq.LLM_JOB_TYPES
     assert set(lq.LLM_JOB_TYPES) == {
-        lq.JOB_BOQ, lq.JOB_GENERAL_MATERIAL, lq.JOB_PROPOSAL, lq.JOB_BID_SPLIT
+        lq.JOB_BOQ, lq.JOB_GENERAL_MATERIAL, lq.JOB_PROPOSAL, lq.JOB_BID_SPLIT,
     }
+    # AI Estimating (docs/PLANS_READER.md 7) has its own claim pass and
+    # capacity, so its types never count against the pipeline's LLM slots.
+    assert not set(lq.PLANS_JOB_TYPES) & set(lq.LLM_JOB_TYPES)
 
 
 def test_enqueue_rfp_ingest_records_its_feature_and_priority(monkeypatch):
@@ -2118,3 +2126,293 @@ def test_claim_tick_promotion_type_needs_only_the_master_switch(monkeypatch):
     calls_before = len(db.rpc_calls)
     assert lq._claim_tick(off, []) == []
     assert all(lq.JOB_RFP_CREATE_FILES not in c.get("job_types", []) for c in db.rpc_calls[calls_before:])
+
+
+# -- AI Estimating: pacing, capacity, re-render and kept-spec recovery --
+
+
+def test_enqueue_can_delay_the_first_claim(monkeypatch):
+    db = _queue_env(monkeypatch)
+    later = NOW + timedelta(seconds=120)
+    lq.enqueue(lq.JOB_PLANS_AGENT, target_id="g1", payload={"group_id": "g1"}, next_attempt_at=later)
+    lq.enqueue(lq.JOB_PLANS_AGENT, target_id="g2", payload={"group_id": "g2"}, next_attempt_at=later.isoformat())
+    lq.enqueue(lq.JOB_PLANS_AGENT, target_id="g3", payload={"group_id": "g3"})
+    rows = {r["target_id"]: r for r in db.tables["llm_jobs"]}
+    assert rows["g1"]["next_attempt_at"] == later.isoformat() == rows["g2"]["next_attempt_at"]
+    assert rows["g3"]["next_attempt_at"] == NOW.isoformat()  # the column default: due at once
+    assert [j["target_id"] for j in lq._claim(_settings(), 10, [lq.JOB_PLANS_AGENT])] == ["g3"]
+    db.now = later
+    assert sorted(j["target_id"] for j in lq._claim(_settings(), 10, [lq.JOB_PLANS_AGENT])) == ["g1", "g2"]
+
+
+def test_plans_capacity_comes_from_plans_reader_concurrency(monkeypatch):
+    db = _queue_env(monkeypatch)
+    assert lq._plans_concurrency(_settings()) == lq.PLANS_DEFAULT_CONCURRENCY == 2
+    assert lq._plans_concurrency(_settings(plans_reader_concurrency=5)) == 5
+    s = _settings(plans_reader_enabled=True, plans_reader_concurrency=3)
+    lq._claim_plans(s, [])
+    # Interactive first with every free slot, then batch never takes the last one.
+    assert [(c["max_jobs"], tuple(c["job_types"])) for c in db.rpc_calls] == [
+        (3, lq.PLANS_INTERACTIVE_JOB_TYPES), (2, lq.PLANS_BATCH_JOB_TYPES),
+    ]
+
+
+@pytest.mark.parametrize(
+    "overrides, ok",
+    [
+        ({}, True),
+        ({"plans_reader_concurrency": 0}, False),
+        ({"plans_reader_concurrency": 33}, False),
+        ({"plans_reader_tokens_per_minute": 0}, True),
+        ({"plans_reader_tokens_per_minute": 5_000}, False),
+        ({"plans_reader_tokens_per_minute": 1_000_000}, True),
+    ],
+)
+def test_plans_pacing_and_capacity_settings_are_validated(overrides, ok):
+    if ok:
+        s = Settings(_env_file=None, plans_reader_enabled=False, **overrides)
+        assert s.plans_reader_tokens_per_minute == overrides.get("plans_reader_tokens_per_minute", 800_000)
+    else:
+        with pytest.raises(ValueError):
+            Settings(_env_file=None, plans_reader_enabled=False, **overrides)
+
+
+def _openai_status_error(cls, status, message, body):
+    request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+    return cls(message, response=httpx.Response(status, request=request), body=body)
+
+
+def test_openai_tokens_per_minute_429_is_a_transient_rate_limit():
+    import openai
+
+    tpm = _openai_status_error(
+        openai.RateLimitError, 429,
+        "Rate limit reached for gpt-6-astra on tokens per min (TPM): Limit 1000000, Used 990000, Requested 240000.",
+        {"error": {"code": "rate_limit_exceeded", "type": "tokens"}},
+    )
+    assert llm_errors.classify(tpm) == "rate_limited" and llm_errors.is_transient(tpm)
+    quota = _openai_status_error(
+        openai.RateLimitError, 429, "You exceeded your current quota.",
+        {"error": {"code": "insufficient_quota", "type": "insufficient_quota"}},
+    )
+    assert llm_errors.classify(quota) == "out_of_tokens" and not llm_errors.is_transient(quota)
+
+
+def _plans_modify_tables(*, group=None, deliverables=None, calls=None):
+    return {
+        "plans_reader_runs": [{"id": "r1", "status": "done", "reasoning_effort": "medium"}],
+        "plans_reader_groups": [
+            {"id": "g1", "run_id": "r1", "kind": "modify", "status": "queued", "attempts": 0,
+             "started_at": None, "output": None, **(group or {})}
+        ],
+        "plans_reader_deliverables": deliverables
+        if deliverables is not None
+        else [{"id": "d1", "run_id": "r1", "kind": "boq", "version": 1, "instruction": None,
+               "created_at": (NOW - timedelta(days=1)).isoformat()}],
+        "plans_reader_calls": calls or [],
+    }
+
+
+def _rerender_payload(**over):
+    payload = {"group_id": "g1", "run_id": "r1", "kind": "boq", "instruction": None, "rerender": True,
+               "user_id": "u1", "base_version": 1}
+    payload.update(over)
+    return payload
+
+
+def test_queued_rerender_renders_without_a_model_call(monkeypatch):
+    from app.services import plans_reader_agents, plans_reader_runs
+
+    db = _queue_env(monkeypatch, tables=_plans_modify_tables())
+    seen = []
+    monkeypatch.setattr(plans_reader_agents, "modify_deliverable", lambda *a, **k: pytest.fail("no model call"))
+
+    def rerender_now(sb, run, kind, *, user=None):
+        seen.append((run["id"], kind, str(user)))
+        return {"id": "d2", "version": 2}
+
+    monkeypatch.setattr(plans_reader_runs, "rerender_now", rerender_now)
+    lq._spec(lq.JOB_PLANS_MODIFY).run(_rerender_payload())
+    assert seen == [("r1", "boq", "u1")]
+    group = db.tables["plans_reader_groups"][0]
+    assert group["status"] == "done" and group["attempts"] == 1 and group["started_at"]
+    # The output keeps the rerender mark, so the run page can tell it from a modification.
+    assert group["output"] == {"kind": "boq", "deliverable_id": "d2", "version": 2, "rerender": True}
+    # A missing request is still refused.
+    db.tables["plans_reader_groups"][0]["status"] = "queued"
+    with pytest.raises(ValueError, match="missing its request"):
+        lq._spec(lq.JOB_PLANS_MODIFY).run(_rerender_payload(rerender=False))
+
+
+def test_rerender_retry_finishes_from_the_version_an_earlier_attempt_saved(monkeypatch):
+    from app.services import plans_reader_runs
+
+    started = (NOW - timedelta(minutes=5)).isoformat()
+    deliverables = [
+        {"id": "d1", "run_id": "r1", "kind": "boq", "version": 1, "created_at": (NOW - timedelta(days=1)).isoformat()},
+        {"id": "d2", "run_id": "r1", "kind": "boq", "version": 2, "created_at": (NOW - timedelta(minutes=4)).isoformat()},
+    ]
+    db = _queue_env(monkeypatch, tables=_plans_modify_tables(
+        group={"status": "running", "started_at": started}, deliverables=deliverables))
+    monkeypatch.setattr(plans_reader_runs, "rerender_now", lambda *a, **k: pytest.fail("must not render twice"))
+    lq._spec(lq.JOB_PLANS_MODIFY).run(_rerender_payload())
+    group = db.tables["plans_reader_groups"][0]
+    assert group["status"] == "done" and group["output"]["deliverable_id"] == "d2"
+
+
+@pytest.mark.parametrize("rerender", [True, False])
+def test_a_modify_or_rerender_job_stops_on_a_run_being_deleted(monkeypatch, rerender):
+    """A run claimed canceled by delete (or gone) stops the job before it
+    writes anything; the group is canceled, not failed."""
+    from app.services import plans_reader_agents, plans_reader_runs
+
+    tables = _plans_modify_tables()
+    tables["plans_reader_runs"][0]["status"] = "canceled"
+    db = _queue_env(monkeypatch, tables=tables)
+    monkeypatch.setattr(plans_reader_runs, "rerender_now", lambda *a, **k: pytest.fail("no render"))
+    monkeypatch.setattr(plans_reader_agents, "modify_deliverable", lambda *a, **k: pytest.fail("no model call"))
+    lq._spec(lq.JOB_PLANS_MODIFY).run(_rerender_payload() if rerender else _modify_payload())
+    group = db.tables["plans_reader_groups"][0]
+    assert group["status"] == "canceled" and group["finished_at"]
+
+
+@pytest.mark.parametrize("rerender", [True, False])
+def test_a_delete_claim_after_the_running_mark_stops_the_job(monkeypatch, rerender):
+    """The run is read again after the group is marked running: a delete
+    that claimed the run in between is seen and nothing is written."""
+    from app.services import plans_reader_agents, plans_reader_runs
+
+    db = _queue_env(monkeypatch, tables=_plans_modify_tables())
+    real_mark = lq._mark_modify_running
+
+    def mark_then_delete_claims(sb, group):
+        real_mark(sb, group)
+        db.tables["plans_reader_runs"][0]["status"] = "canceled"
+
+    monkeypatch.setattr(lq, "_mark_modify_running", mark_then_delete_claims)
+    monkeypatch.setattr(plans_reader_runs, "rerender_now", lambda *a, **k: pytest.fail("no render"))
+    monkeypatch.setattr(plans_reader_agents, "modify_deliverable", lambda *a, **k: pytest.fail("no model call"))
+    lq._spec(lq.JOB_PLANS_MODIFY).run(_rerender_payload() if rerender else _modify_payload())
+    assert db.tables["plans_reader_groups"][0]["status"] == "canceled"
+
+
+def test_a_renderer_refusal_fails_the_rerender_for_good(monkeypatch):
+    from app.services import plans_reader_runs
+
+    _queue_env(monkeypatch, tables=_plans_modify_tables())
+
+    def refuse(*_a, **_k):
+        raise plans_reader_runs.RunRefused("This run has nothing to render for that deliverable.", 404)
+
+    monkeypatch.setattr(plans_reader_runs, "rerender_now", refuse)
+    with pytest.raises(ValueError) as exc:
+        lq._spec(lq.JOB_PLANS_MODIFY).run(_rerender_payload())
+    assert not llm_errors.is_transient(exc.value)
+
+
+def _modify_payload(**over):
+    payload = {"group_id": "g1", "run_id": "r1", "kind": "boq", "instruction": "Add 4 GFCI", "user_id": "u1",
+               "base_version": 1}
+    payload.update(over)
+    return payload
+
+
+def test_a_paid_modify_that_failed_while_saving_is_retried_from_the_kept_spec(monkeypatch):
+    from app.services import plans_reader_agents
+
+    db = _queue_env(monkeypatch, tables=_plans_modify_tables())
+
+    def paid_then_upload_fails(sb, run, *, kind, instruction, user, group_id=None, thread_id=None):
+        db.tables["plans_reader_calls"].append({"id": "c1", "group_id": group_id, "ok": True})
+        plans_reader_agents._keep_pending_spec(sb, group_id, kind, {"title": "Revised"})
+        raise RuntimeError("storage upload timed out")
+
+    monkeypatch.setattr(plans_reader_agents, "modify_deliverable", paid_then_upload_fails)
+    with pytest.raises(RuntimeError) as exc:
+        lq._spec(lq.JOB_PLANS_MODIFY).run(_modify_payload())
+    assert llm_errors.is_transient(exc.value)  # the queue retries it
+    group = db.tables["plans_reader_groups"][0]
+    assert group["output"]["pending_spec"] == {"title": "Revised"}
+
+    # The retry renders the kept spec and never calls the model again.
+    group["status"] = "queued"  # the queue's pending mark
+    monkeypatch.setattr(plans_reader_agents, "modify_deliverable", lambda *a, **k: pytest.fail("must not pay again"))
+    rendered = []
+
+    def render_pending_spec(sb, run, *, kind, spec, instruction, user):
+        rendered.append((kind, spec, instruction, str(user)))
+        return {"id": "d2", "version": 2}
+
+    monkeypatch.setattr(plans_reader_agents, "render_pending_spec", render_pending_spec)
+    lq._spec(lq.JOB_PLANS_MODIFY).run(_modify_payload())
+    assert rendered == [("boq", {"title": "Revised"}, "Add 4 GFCI", "u1")]
+    group = db.tables["plans_reader_groups"][0]
+    assert group["status"] == "done" and group["output"]["version"] == 2
+
+
+def test_a_paid_modify_without_a_kept_spec_or_refused_by_the_renderer_stays_permanent(monkeypatch):
+    from app.services import plans_reader_agents
+
+    db = _queue_env(monkeypatch, tables=_plans_modify_tables())
+
+    def paid_then_fails(sb, run, **k):
+        db.tables["plans_reader_calls"].append({"id": f"c{len(db.tables['plans_reader_calls'])}", "group_id": "g1",
+                                                "ok": True})
+        raise RuntimeError("storage upload timed out")
+
+    monkeypatch.setattr(plans_reader_agents, "modify_deliverable", paid_then_fails)
+    with pytest.raises(ValueError) as exc:
+        lq._spec(lq.JOB_PLANS_MODIFY).run(_modify_payload())
+    assert str(exc.value) == lq.MSG_MODIFY_UNSAVED
+
+    db = _queue_env(monkeypatch, tables=_plans_modify_tables())
+
+    def paid_then_renderer_refuses(sb, run, *, kind, instruction, user, group_id=None, thread_id=None):
+        db.tables["plans_reader_calls"].append({"id": "c1", "group_id": group_id, "ok": True})
+        plans_reader_agents._keep_pending_spec(sb, group_id, kind, {"title": "Revised"})
+        raise ValueError("The BOQ spec has no areas.")
+
+    monkeypatch.setattr(plans_reader_agents, "modify_deliverable", paid_then_renderer_refuses)
+    with pytest.raises(ValueError, match="no areas"):
+        lq._spec(lq.JOB_PLANS_MODIFY).run(_modify_payload())
+
+
+# ── Worker loop: a failed sweep does not skip the tick's claims ───────────────
+
+
+def test_worker_loop_claims_even_when_the_sweep_fails(monkeypatch):
+    """After the host sleeps, the first sweep calls fail on stale pooled
+    connections; the claim pass of the same tick must still run, or due
+    jobs wait for as many ticks as there are dead connections."""
+    import asyncio
+
+    executed: list[str] = []
+
+    def boom(_s):
+        raise RuntimeError("Server disconnected without sending a response.")
+
+    def claim(_s, _running):
+        return [{"id": "j1", "job_type": "plans_reader_agent"}]
+
+    monkeypatch.setattr(lq, "_sweep", boom)
+    monkeypatch.setattr(lq, "_claim_tick", claim)
+    monkeypatch.setattr(lq, "_execute", lambda job: executed.append(job["id"]))
+
+    async def stop(_seconds):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(lq.asyncio, "sleep", stop)
+
+    async def one_tick():
+        try:
+            await lq.worker_loop()
+        except asyncio.CancelledError:
+            pass
+        # let the claimed job's thread finish
+        for _ in range(50):
+            if executed:
+                break
+            await asyncio.get_running_loop().run_in_executor(None, lambda: None)
+
+    asyncio.run(one_tick())
+    assert executed == ["j1"]

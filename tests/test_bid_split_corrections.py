@@ -396,6 +396,8 @@ def test_correct_kind_collapses_to_the_intact_shape(monkeypatch):
     assert seg["confidence"] is None
     assert seg["name"] == "Specifications"
     assert seg["description"] == "Reclassified by the user; left intact."
+    # The stored model pages cover page 1 only: no partial page_meta (0152).
+    assert "page_meta" in seg and seg["page_meta"] is None
     frow = db.tables["bid_split_files"][0]
     assert frow["file_kind"] == "specifications" and frow["file_kind_label"] is None
     assert frow["file_kind_confidence"] is None  # a user verdict, not an estimate
@@ -685,6 +687,10 @@ def test_put_segments_replaces_rows_with_cover_prefix_and_names(monkeypatch):
     assert frow["user_corrected"] is True
     assert len(out["segments"]) == 3
     assert calls.audits and calls.audits[0][1] == "bid_split.correct_segments"
+    # page_meta (0152) is written on every row; RAW_MODEL_OUTPUT holds page 1
+    # only, so no range is fully covered and each row stores null
+    # (tests/test_bid_split_page_roles.py covers the populated case).
+    assert [s["page_meta"] for s in segs] == [None, None, None]
 
 
 def test_put_segments_reuses_everything_when_nothing_changed(monkeypatch):

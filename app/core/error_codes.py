@@ -95,6 +95,13 @@ class ErrorCode(StrEnum):
     RFP_TESTING_MAILBOX_UNREACHABLE = "rfp_testing_mailbox_unreachable"  # 422: the test mailbox did not answer 200
     RFP_TESTING_REDIRECT_INVALID = "rfp_testing_redirect_invalid"  # 422: redirect address malformed
 
+    # ── AI Estimating (routers/plans_reader.py; docs/PLANS_READER.md sections
+    # 6 and 7). Same header contract as the RFP rows: the code rides in
+    # `X-Error-Code`, `detail` is an app-authored sentence.
+    AI_ESTIMATING_NOT_ACTIONABLE = "ai_estimating_not_actionable"  # 409: the run (or deliverable, or thread) is not in a state that action belongs to
+    AI_ESTIMATING_SPEND_CAP = "ai_estimating_spend_cap"            # 409: the daily spend cap is reached (or this step would pass it)
+    AI_ESTIMATING_UNAVAILABLE = "ai_estimating_unavailable"        # 503: the OpenAI route or the AI job queue is not available here
+
 
 class RateLimitScope(StrEnum):
     """Values emitted in the X-RateLimit-Scope header for a RATE_LIMITED 429.

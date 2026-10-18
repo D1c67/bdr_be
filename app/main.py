@@ -516,7 +516,7 @@ from app.core.features import SubApp, enabled_map, require_feature  # noqa: E402
 
 
 @app.get("/features", tags=["meta"])
-def features(_: CurrentUser = Depends(get_current_user)) -> dict[str, bool]:
+def features(user: CurrentUser = Depends(get_current_user)) -> dict[str, bool]:
     """Which sub-apps this deployment serves — the frontend's source of truth.
 
     Read once at sign-in (see bdr_fe/lib/auth.tsx) to decide which nav entries,
@@ -525,11 +525,12 @@ def features(_: CurrentUser = Depends(get_current_user)) -> dict[str, bool]:
     AAL1_ALLOWED in app/core/deps.py) because the shell loads it alongside the
     profile, before the 2FA gate has been passed.
     """
-    return enabled_map()
+    return enabled_map(user.role)
 
 
 # Routers are mounted as each domain is implemented.
 from app.routers import (  # noqa: E402
+    ai_spend,
     analytics,
     bid_drafts,
     bid_splitter,
@@ -556,6 +557,7 @@ from app.routers import (  # noqa: E402
     payroll_rates,
     payroll_reports,
     payroll_settings,
+    plans_reader,
     pm,
     pm_documents,
     pm_field,
@@ -622,11 +624,17 @@ app.include_router(llm_status.router)
 # Dev AI monitor (queue, failures, retries). Shared for the same reason; every
 # route requires a dev account (require_dev) on top of auth.
 app.include_router(llm_monitor.router)
+app.include_router(ai_spend.router)  # AI Estimating daily spend cap: status + Settings writes
 # Bid File Splitter — experimental standalone AI tool, gated by its OWN env flag
 # (BID_FILE_SPLITTER_ENABLED, default off → every route 404s), not a sub-app:
 # it is not connected to the bidding pipeline yet, so it must not ride the
 # BIDDING flag. The dependency lives on the router itself (core/features.py).
 app.include_router(bid_splitter.router)
+# AI Estimating (docs/PLANS_READER.md): standalone, gated by its OWN env flag
+# (PLANS_READER_ENABLED, default off: every route 404s before auth) and
+# require_internal on the router itself. Not connected to the bidding
+# pipeline, so it must not ride the BIDDING flag (splitter precedent).
+app.include_router(plans_reader.router)
 # RFP Ingestion sandbox: the out-of-process PDF sanitizer's dev-only bench,
 # gated by its OWN env flag (RFP_INGEST_ENABLED, default off: every route
 # 404s) on the router itself, plus require_dev on every endpoint. Not a

@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -60,10 +61,50 @@ from app.core.config import Settings, get_settings
 from app.core.supabase_client import get_supabase
 from app.services import llm, llm_errors, notifications, pdf_split, storage
 from app.services.llm import LlmBadOutput
+from app.services.plans_reader_schemas import PAGE_ROLES
 
 logger = logging.getLogger(__name__)
 
 _ERROR_MAX_CHARS = 500
+
+# bid_split_jobs.source values this module branches on (migration 0152 adds
+# 'plans_reader'). 'manual' is the splitter page; 'rfp' and 'project' file
+# documents into a project and live in rfp_split. A plans_reader job is the
+# AI Estimating page's own split (docs/PLANS_READER.md 3.2): no project, so
+# none of the project re-filing hooks may ever fire for it, and its run page
+# owns the user-facing notice (no splitter bell, which would deep-link into
+# a page that is flagged off wherever AI Estimating runs alone).
+SOURCE_MANUAL = "manual"
+SOURCE_PLANS_READER = "plans_reader"
+NO_PROJECT_EFFECT_SOURCES = frozenset({SOURCE_PLANS_READER})
+
+# What a page is FOR, independent of its trade (shared with AI Estimating's
+# ledger builder through plans_reader_schemas.PAGE_ROLES). Older model
+# outputs carry no role; those pages read as 'other'.
+DEFAULT_PAGE_ROLE = "other"
+
+# The role every page of a file triage left intact carries in its page_meta
+# (no per-page pass ran, so the file-level verdict is all there is). The
+# text kinds are spec_text (the role covers spec, RFP and addendum text);
+# an intact 'other' file says nothing about its pages.
+_INTACT_PAGE_ROLE = {
+    "specifications": "spec_text",
+    "rfp": "spec_text",
+    "addenda": "spec_text",
+    "other": DEFAULT_PAGE_ROLE,
+}
+
+# A plans_reader file still pending or running this long after it last moved
+# is treated as orphaned (its daemon-thread run died with the process, or
+# its dispatch never happened) by sweep_stale_files. Generous on purpose:
+# the largest legal file (bid_split_max_pages_per_file pages) finishes well
+# inside it, so only a dead run ever crosses it.
+STALE_RUN_SECONDS = 2 * 60 * 60
+
+MSG_STALE_RUN = (
+    "The split run for this file stopped without finishing (the server "
+    "restarted while it ran). Start the AI Estimating run again."
+)
 
 # Trade buckets a drawing set splits into. 'other' (with a free-text
 # other_type label) is the open end: an unusual discipline (marine/underwater
@@ -178,6 +219,17 @@ other_type must be null for every category except other.
 
 For every page also give:
 - title: the sheet number and title from the title block (e.g. "E2.1 - Level 2 Lighting Plan"), or a short description when there is no title block; null if unreadable.
+- page_role: what the page is FOR, whatever its trade. Exactly one of:
+  - cover_index: a cover sheet or a drawing index / sheet list.
+  - legend_symbols: symbol legends, abbreviations, fixture or device legends.
+  - general_notes: a general notes sheet (code, scope or installation notes for the set or a discipline).
+  - schedule: panel, fixture, equipment or feeder schedules.
+  - plan: floor plan views (power, lighting, systems, demolition plans of the building).
+  - detail: detail sheets (enlarged details, mounting and installation details, sections).
+  - diagram: one-line, riser or control diagrams.
+  - site: civil or site plans (site lighting, site utilities, grading, paving).
+  - spec_text: specification or narrative text pages (spec sections, RFP and addendum text).
+  - other: anything else.
 - confidence: your confidence in the category assignment, 0 to 1.
 - confidence_reason: ONE short clause (at most 15 words) naming what drove that page's confidence, e.g. "E-series sheet number in a legible title block", "no title block; read from the panel schedule", "duct plan with lighting shown for reference, could be either trade". Say what you saw, not how sure you feel.
 
@@ -196,14 +248,15 @@ _PAGE_SCHEMA = {
                 "type": "object",
                 "additionalProperties": False,
                 "required": [
-                    "page", "category", "other_type", "title", "confidence",
-                    "confidence_reason",
+                    "page", "category", "other_type", "title", "page_role",
+                    "confidence", "confidence_reason",
                 ],
                 "properties": {
                     "page": {"type": "integer"},
                     "category": {"type": "string", "enum": list(CATEGORIES)},
                     "other_type": {"type": ["string", "null"]},
                     "title": {"type": ["string", "null"]},
+                    "page_role": {"type": "string", "enum": list(PAGE_ROLES)},
                     "confidence": {"type": "number"},
                     "confidence_reason": {"type": ["string", "null"]},
                 },
@@ -318,8 +371,24 @@ def stage_upload(sb, job: dict, filename: str, content: bytes, pages: int | None
     object, the `bid_split_files` row (pending) and the job's `file_count`
     re-stamped with reality. A failed insert removes the stored object.
     Returns the inserted row; raises UploadRefused (400) when the job is
-    full. `user_id` is the person staging it (kept for the signature the two
-    callers share; the run's queue job carries it through `dispatch`)."""
+    full. `user_id` is the person staging it (kept for the signature the
+    callers share; the run's queue job carries it through `dispatch`).
+
+    This is also the server-held-bytes entry point (no separate helper):
+    nothing here touches a request. AI Estimating stages bytes it already
+    holds (an upload or a copy of a project file) the same way, on a job it
+    inserted with source='plans_reader' and project_id None:
+
+        pages = check_upload(filename, content)           # UploadRefused
+        frow = stage_upload(sb, job, filename, content, pages, user_id)
+        dispatch(None, frow["id"], user_id)               # no BackgroundTasks
+
+    All three make sync PDF, Supabase or storage calls: async callers run
+    each of them through run_in_threadpool (as upload_job_file does). Stage
+    every file of the job before dispatching any, and learn that a file
+    settled from the plans_reader hook (_after_done / _after_failed), never
+    from the job's aggregate status alone.
+    """
     s = get_settings()
     existing = (
         sb.table("bid_split_files").select("id").eq("job_id", job["id"]).execute()
@@ -349,8 +418,15 @@ def stage_upload(sb, job: dict, filename: str, content: bytes, pages: int | None
         storage.delete_file(path)
         raise
     # Re-stamp file_count with reality: the create's value was the plan,
-    # and a browser closed mid-batch must not overstate it forever.
-    sb.table("bid_split_jobs").update({"file_count": len(existing) + 1}).eq("id", job["id"]).execute()
+    # and a browser closed mid-batch must not overstate it forever. The job
+    # also reads processing again from this moment: it holds a pending file,
+    # and a job an earlier file already settled as done must not keep
+    # reading done while this one waits (refresh_job only sees file rows
+    # that exist, so without this the gap between staging and the first
+    # running mark is a window where a finished-looking job is incomplete).
+    sb.table("bid_split_jobs").update(
+        {"file_count": len(existing) + 1, "status": "processing", "completed_at": None}
+    ).eq("id", job["id"]).execute()
     return frow
 
 
@@ -358,7 +434,15 @@ def dispatch(background, file_id: str, user_id: str | None, forced_kind: str | N
     """Queue one file run, degrading to inline dispatch exactly like BOQ.
     `background` is the request's BackgroundTasks (the inline fallback).
     `forced_kind` pins a user verdict on the run (reprocess): triage is
-    skipped and the split pass runs as that kind."""
+    skipped and the split pass runs as that kind.
+
+    `background=None` is for callers outside a request (AI Estimating stages
+    its split from a queue job or a service call, docs/PLANS_READER.md 3.2):
+    the run is enqueued as usual, and when the queue is off or the enqueue
+    failed it runs on a daemon thread instead (`run_file` owns its own
+    failure marking either way). A thread run has no queue lease: if the
+    process dies under it the file stays `running`, which is what
+    sweep_stale_files clears for plans_reader jobs."""
     from app.services import llm_queue
 
     if get_settings().llm_queue_enabled:
@@ -375,6 +459,14 @@ def dispatch(background, file_id: str, user_id: str | None, forced_kind: str | N
             return
         except Exception:  # noqa: BLE001 - queue outage degrades to inline dispatch
             logger.exception("bid_split enqueue failed; falling back to BackgroundTasks")
+    if background is None:
+        threading.Thread(
+            target=run_file,
+            args=(file_id, forced_kind),
+            name=f"bid-split-{file_id}",
+            daemon=True,
+        ).start()
+        return
     background.add_task(run_file, file_id, forced_kind)
 
 
@@ -399,14 +491,18 @@ def _mark(file_id: str, **fields) -> None:
     if rows:
         refresh_job(rows[0]["job_id"])
         if status == "failed":
-            _after_failed(file_id, fields.get("error"))
+            _after_failed(file_id, fields.get("error"), rows[0].get("job_id"))
 
 
-def _after_failed(file_id: str, error: str | None) -> None:
+def _after_failed(file_id: str, error: str | None, job_id: str | None = None) -> None:
     """A file that ended `failed` on a project's missing-files drop job is
     filed whole into the project instead (docs/RFP_MISSING_FILES.md 5:
-    a dropped PDF is never lost). No-op for every other job. Best effort:
-    the failed mark stands whatever happens here."""
+    a dropped PDF is never lost). A plans_reader job never reaches rfp_split:
+    its AI Estimating run is told the file settled instead
+    (docs/PLANS_READER.md 7). No-op for every other job. Best effort: the
+    failed mark stands whatever happens here."""
+    if _settle_without_project(file_id, job_id):
+        return
     try:
         from app.services import rfp_split
 
@@ -489,7 +585,14 @@ def _notify_job_finished(job: dict, status: str, files: list[dict]) -> None:
     """Tell whoever started the job that it has settled. The run continues on
     the server after they leave the page, so the bell is how they learn it
     finished; no email mirror (a split is a workbench action, not a task
-    hand-off). Best-effort: a notification failure never fails the mark."""
+    hand-off). Best-effort: a notification failure never fails the mark.
+
+    A plans_reader job gets no bell: its AI Estimating run continues past
+    the split and tells the person when the whole run settles, and this
+    bell would deep-link into the splitter page, which is flagged off
+    wherever AI Estimating runs alone."""
+    if job.get("source") in NO_PROJECT_EFFECT_SOURCES:
+        return
     user_id = job.get("created_by")
     if not user_id:
         return
@@ -720,10 +823,19 @@ def _batches(pages: list[int], size: int) -> list[list[int]]:
     return [pages[i : i + size] for i in range(0, len(pages), size)]
 
 
+def _clean_role(value) -> str:
+    """A page role from the PAGE_ROLES vocabulary. A missing or unknown role
+    (an older model output, a model that ignored the enum) reads as 'other':
+    the role is advisory context for AI Estimating's ledger, never a reason
+    to fail a split."""
+    return value if isinstance(value, str) and value in PAGE_ROLES else DEFAULT_PAGE_ROLE
+
+
 def _validate_batch(result: dict, expected_pages: list[int]) -> list[dict]:
     """One entry per requested page, categories from the vocabulary,
     confidence clamped to 0..1. Anything else is unusable output (transient:
-    regeneration usually fixes it)."""
+    regeneration usually fixes it). page_role is the exception: a missing or
+    unknown role defaults to 'other' instead of failing the batch."""
     entries = result.get("pages") if isinstance(result, dict) else None
     if not isinstance(entries, list):
         raise LlmBadOutput("The model reply was missing the pages list. Retry the run.")
@@ -758,6 +870,7 @@ def _validate_batch(result: dict, expected_pages: list[int]) -> list[dict]:
                 "category": category,
                 "other_type": other_type if category == "other" else None,
                 "title": title,
+                "page_role": _clean_role(entry.get("page_role")),
                 "confidence": confidence,
                 "confidence_reason": _clean_reason(
                     entry.get("confidence_reason"), _PAGE_REASON_MAX_CHARS
@@ -887,7 +1000,9 @@ def repair_islands(pages_meta: list[dict], max_island: int) -> list[dict]:
 
     Runs strictly decrease on every absorption, so iterating to a fixpoint
     terminates. Reassigned pages keep their original confidence: the segment
-    mean stays honest about the disagreement.
+    mean stays honest about the disagreement. They keep their title and
+    page_role too: a legend sheet folded into an electrical run is still a
+    legend sheet, which is exactly what AI Estimating's ledger looks for.
     """
     while True:
         runs: list[list] = []  # [key, start_idx, end_idx]
@@ -946,7 +1061,8 @@ def repair_islands(pages_meta: list[dict], max_island: int) -> list[dict]:
 def merge_pages(pages_meta: list[dict]) -> list[dict]:
     """Fold consecutive same-category pages into segments. 'other' pages only
     merge while their other_type matches (case-insensitively), so two unrelated
-    misc documents never collapse into one output PDF."""
+    misc documents never collapse into one output PDF. Each page's role
+    rides on its entry in `pages` (segment_page_meta reads it there)."""
     segments: list[dict] = []
     for entry in pages_meta:
         current = segments[-1] if segments else None
@@ -975,6 +1091,93 @@ def merge_pages(pages_meta: list[dict]) -> list[dict]:
     for seg in segments:
         del seg["_key"]
     return segments
+
+
+def segment_page_meta(
+    entries: list[dict] | None,
+    page_start: int,
+    page_end: int,
+    prefix_pages: list[int] | tuple[int, ...] = (),
+) -> list[dict] | None:
+    """The `bid_split_segments.page_meta` value for one segment (0152): one
+    entry per page of the STORED segment object, in object order:
+
+        {"page": <1-based source page>, "pdf_page": <1-based page in the
+         segment object>, "prepended": <bool>, "title": <str or null>,
+         "page_role": <PAGE_ROLES>, "confidence": <0..1>}
+
+    `prefix_pages` are the General / Cover Sheets pages cut_segment put in
+    front of a trade segment (segment_prefix_pages): they come first, marked
+    prepended=true, so pdf_page always addresses the object correctly and
+    len(page_meta) is its page count. The segment's own pages
+    (page_start..page_end) follow with prepended=false. A reader that wants
+    only the segment's own sheets filters on prepended; the general run is
+    also its own segment, so counting prepended pages twice is the
+    consumer's choice to avoid.
+
+    `entries` are per-page classifications: the repaired pages a run merged
+    (execute), or the pristine `model_output.pages` (the segment-edit path,
+    whose user ranges no longer match any merged run). None when there is
+    nothing to build from, or any page is missing or carries no usable
+    confidence (a partial or damaged list would read as complete): no
+    per-page pass ran for those pages, so the honest answer is no detail."""
+    if not entries or page_start < 1 or page_end < page_start:
+        return None
+    by_page: dict[int, dict] = {}
+    for entry in entries:
+        if isinstance(entry, dict) and isinstance(entry.get("page"), int):
+            by_page.setdefault(entry["page"], entry)
+    order = [(p, True) for p in prefix_pages] + [
+        (p, False) for p in range(page_start, page_end + 1)
+    ]
+    meta: list[dict] = []
+    for pdf_page, (page, prepended) in enumerate(order, start=1):
+        entry = by_page.get(page)
+        if entry is None:
+            return None
+        try:
+            confidence = round(min(1.0, max(0.0, float(entry.get("confidence")))), 3)
+        except (TypeError, ValueError):
+            return None
+        meta.append(
+            {
+                "page": page,
+                "pdf_page": pdf_page,
+                "prepended": prepended,
+                "title": _clean_label(entry.get("title")),
+                "page_role": _clean_role(entry.get("page_role")),
+                "confidence": confidence,
+            }
+        )
+    return meta
+
+
+def intact_page_meta(category: str, page_count: int, confidence) -> list[dict] | None:
+    """page_meta for a file triage identified and left intact (no per-page
+    pass ran): every page carries the file-level verdict, a null title, the
+    role its kind implies (_INTACT_PAGE_ROLE) and the triage confidence.
+    Same shape as segment_page_meta, never prepended (an intact segment is
+    the untouched source object). None when the page count or the
+    confidence is unusable, which only a damaged row produces."""
+    try:
+        pages = int(page_count)
+        score = round(min(1.0, max(0.0, float(confidence))), 3)
+    except (TypeError, ValueError):
+        return None
+    if pages < 1:
+        return None
+    role = _INTACT_PAGE_ROLE.get(category, DEFAULT_PAGE_ROLE)
+    return [
+        {
+            "page": page,
+            "pdf_page": page,
+            "prepended": False,
+            "title": None,
+            "page_role": role,
+            "confidence": score,
+        }
+        for page in range(1, pages + 1)
+    ]
 
 
 # ── Confidence reasoning ─────────────────────────────────────────────────
@@ -1223,6 +1426,17 @@ def _name_segments(
 # ── Execution ────────────────────────────────────────────────────────────
 
 
+def segment_prefix_pages(seg: dict, general_pages: list[int], total_pages: int) -> list[int]:
+    """The General / Cover Sheets pages cut_segment puts in front of this
+    segment's own pages in its stored object: the file's general pages for
+    a trade segment, nothing for anything else or for a segment spanning the
+    whole file (that one is the untouched source). One rule shared by the
+    cut and by page_meta, so the two can never disagree."""
+    if seg["page_start"] == 1 and seg["page_end"] == total_pages:
+        return []
+    return list(general_pages) if seg["category"] in COVER_PREFIX_CATEGORIES else []
+
+
 def cut_segment(
     pdf: bytes, frow: dict, seg: dict, general_pages: list[int], total_pages: int
 ) -> tuple[str, str, int, bool]:
@@ -1240,7 +1454,7 @@ def cut_segment(
     """
     if seg["page_start"] == 1 and seg["page_end"] == total_pages:
         return frow["storage_path"], frow["filename"], frow["size_bytes"], True
-    prefix = general_pages if seg["category"] in COVER_PREFIX_CATEGORIES else []
+    prefix = segment_prefix_pages(seg, general_pages, total_pages)
     if prefix:
         part = pdf_split.extract_pages(
             pdf,
@@ -1409,11 +1623,16 @@ def execute(file_id: str, forced_kind: str | None = None) -> None:
                         "filename": frow["filename"],
                         "size_bytes": frow["size_bytes"],
                         "is_original": True,
+                        # No per-page pass ran: every page carries the
+                        # file-level verdict (spec_text for the text kinds).
+                        "page_meta": intact_page_meta(
+                            category, total_pages, verdict["confidence"]
+                        ),
                     }
                 ).execute()
                 _mark(file_id, status="done", error=None, llm_calls=llm_calls, llm_ms=llm_ms)
                 done = True
-                _after_done(file_id)
+                _after_done(file_id, frow.get("job_id"))
                 return
         else:
             # Forced reprocess: no triage call. The snapshot records the
@@ -1529,13 +1748,23 @@ def execute(file_id: str, forced_kind: str | None = None) -> None:
                     "filename": out_name,
                     "size_bytes": size,
                     "is_original": whole_file,
+                    # The per-page pass ran over these pages (even when the
+                    # segment spans the whole file and points at the source
+                    # object), so their repaired titles and roles are kept,
+                    # in object order: the prepended cover pages first.
+                    "page_meta": segment_page_meta(
+                        pages_meta,
+                        seg["page_start"],
+                        seg["page_end"],
+                        segment_prefix_pages(seg, general_pages, total_pages),
+                    ),
                 }
             )
         if inserts:
             sb.table("bid_split_segments").insert(inserts).execute()
         _mark(file_id, status="done", error=None, llm_calls=llm_calls, llm_ms=llm_ms)
         done = True
-        _after_done(file_id)
+        _after_done(file_id, frow.get("job_id"))
     finally:
         if not done:
             # Persist the spend before the queue writes its failure mark, so
@@ -1548,12 +1777,81 @@ def execute(file_id: str, forced_kind: str | None = None) -> None:
                 logger.exception("bid_split: could not persist llm stats for %s", file_id)
 
 
-def _after_done(file_id: str) -> None:
+def job_source(job_id: str | None, sb=None) -> str | None:
+    """The `source` of a bid_split_jobs row ('manual' when the column is
+    blank), or None when the job cannot be read (no id, row gone, lookup
+    error): callers then fall through to the project hooks, which guard
+    themselves on the job's project_id."""
+    if not job_id:
+        return None
+    try:
+        rows = (
+            (sb or get_supabase())
+            .table("bid_split_jobs")
+            .select("id, source")
+            .eq("id", job_id)
+            .limit(1)
+            .execute()
+        ).data or []
+    except Exception:  # noqa: BLE001 - an unreadable source defers to rfp_split's own guards
+        logger.exception("bid_split: could not read the source of job %s", job_id)
+        return None
+    if not rows:
+        return None
+    return rows[0].get("source") or SOURCE_MANUAL
+
+
+def _notify_plans_reader(file_id: str) -> None:
+    """The split-done hook of docs/PLANS_READER.md 7: tell the AI Estimating
+    run that one of its split files settled (done or failed), so it builds
+    that file's documents and advances once every file has settled. Called
+    once per terminal mark, after the mark and the job refresh landed.
+    Lazy import (plans_reader_runs imports this module) and best effort: a
+    missing module or hook is logged, any error inside it is logged, and
+    neither ever fails the split mark that triggered it."""
+    try:
+        from app.services import plans_reader_runs
+
+        hook = plans_reader_runs.on_split_file_done
+    except (ImportError, AttributeError):
+        logger.warning(
+            "bid_split: plans_reader_runs.on_split_file_done is not available; "
+            "file %s settled without notifying its run", file_id,
+        )
+        return
+    try:
+        hook(file_id)
+    except Exception:  # noqa: BLE001 - the split mark stands
+        logger.exception("bid_split: plans_reader hook failed for file %s", file_id)
+
+
+def _settle_without_project(file_id: str, job_id: str | None) -> bool:
+    """True when the file's job never touches a project (plans_reader): the
+    run hook fires here and the caller skips its project hook. Checked by
+    source, never by project_id alone: an AI Estimating run started from a
+    project's files must never re-file that project, even if a split job row
+    were ever written with its project_id. False (an unreadable source
+    included) leaves the caller's project hook to guard itself."""
+    if not job_id:
+        return False
+    source = job_source(job_id)
+    if source not in NO_PROJECT_EFFECT_SOURCES:
+        return False
+    if source == SOURCE_PLANS_READER:
+        _notify_plans_reader(file_id)
+    return True
+
+
+def _after_done(file_id: str, job_id: str | None = None) -> None:
     """A finished run on a file whose job serves an RFP-created project
     re-files that project's documents (docs/RFP_SPLIT.md 3.3): a retry or a
     reprocess after creation lands on the project like a correction does.
-    No-op for manual jobs and for jobs whose project does not exist yet.
-    Best effort: the run is done whatever happens here."""
+    A plans_reader job tells its AI Estimating run instead
+    (docs/PLANS_READER.md 7). No-op for manual jobs and for jobs whose
+    project does not exist yet. Best effort: the run is done whatever
+    happens here."""
+    if _settle_without_project(file_id, job_id):
+        return
     try:
         from app.services import rfp_split
 
@@ -1696,11 +1994,17 @@ def _execute_non_pdf(sb, frow: dict, s: Settings) -> None:
                 "filename": frow["filename"],
                 "size_bytes": frow["size_bytes"],
                 "is_original": True,
+                # A converted PDF was opened and triaged: its pages carry
+                # the verdict. A name-only file was never opened, so it has
+                # no pages to describe (null).
+                "page_meta": intact_page_meta(seg["category"], pages, seg.get("confidence"))
+                if frow.get("classified_from") == "converted_pdf"
+                else None,
             }
         ).execute()
         _mark(file_id, status="done", error=None, llm_calls=calls, llm_ms=ms)
         done = True
-        _after_done(file_id)
+        _after_done(file_id, frow.get("job_id"))
     finally:
         if not done:
             try:
@@ -1718,3 +2022,68 @@ def run_file(file_id: str, forced_kind: str | None = None) -> None:
         message = llm_errors.user_message(exc, llm.active_model("bid_split"))
         _mark(file_id, status="failed", error=message[:_ERROR_MAX_CHARS])
         logger.exception("bid_split: file %s failed (inline dispatch)", file_id)
+
+
+def _parse_ts(value) -> datetime | None:
+    """A timestamptz string from PostgREST as an aware datetime, or None."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def sweep_stale_files(
+    job_id: str,
+    *,
+    sb=None,
+    max_age_seconds: int = STALE_RUN_SECONDS,
+    now: datetime | None = None,
+) -> list[str]:
+    """Fail the orphaned files of one plans_reader split job and return
+    their ids. A file is orphaned when it is still pending or running, has
+    not moved (latest of started_at, updated_at, created_at) for
+    `max_age_seconds`, and has no live llm_queue job: a thread-run file
+    whose process restarted (dispatch(None) with the queue off or the
+    enqueue failed), or a staged file whose dispatch never happened. A
+    queued file is left to the queue, whose lease requeues a dead worker.
+
+    The failed mark goes through _mark, so the job status refreshes and the
+    plans_reader hook fires (the AI Estimating run sees the file settle and
+    can finish as done_with_errors instead of waiting forever). Meant to be
+    called by the run while it polls a job in `splitting`; refuses any job
+    that is not plans_reader (a splitter-page job has its own Retry).
+    Lookup trouble skips a file rather than failing a live one."""
+    db = sb or get_supabase()
+    if job_source(job_id, db) != SOURCE_PLANS_READER:
+        return []
+    from app.services import llm_queue
+
+    rows = (
+        db.table("bid_split_files")
+        .select("id, status, started_at, updated_at, created_at")
+        .eq("job_id", job_id)
+        .in_("status", ["pending", "running"])
+        .execute()
+    ).data or []
+    current = now or datetime.now(timezone.utc)
+    swept: list[str] = []
+    for row in rows:
+        stamps = [
+            ts for ts in (_parse_ts(row.get(k)) for k in ("started_at", "updated_at", "created_at"))
+            if ts is not None
+        ]
+        if not stamps or (current - max(stamps)).total_seconds() < max_age_seconds:
+            continue
+        try:
+            if llm_queue.active_job(llm_queue.JOB_BID_SPLIT, row["id"]):
+                continue
+        except Exception:  # noqa: BLE001 - unknown queue state: never fail a possibly live run
+            logger.exception("bid_split: active-job lookup failed while sweeping %s", row["id"])
+            continue
+        logger.warning("bid_split: failing orphaned plans_reader file %s (%s)", row["id"], row["status"])
+        _mark(row["id"], status="failed", error=MSG_STALE_RUN)
+        swept.append(row["id"])
+    return swept

@@ -17,7 +17,7 @@ can read results. The flag is off outside dev for now.
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
@@ -121,11 +121,46 @@ def _is_pdf_row(frow: dict) -> bool:
     return frow.get("classified_from") in (None, rfp_split.CLASSIFIED_PAGES)
 
 
+# A plans_reader job is AI Estimating's own split (docs/PLANS_READER.md
+# 3.2): its run reads the segment objects and rows long after the split, so
+# nothing on this page may delete, re-cut, re-run or add to it. The run's
+# own delete sweeps its objects.
+MSG_PLANS_READER_JOB = (
+    "This split belongs to an AI Estimating run and cannot be changed on "
+    "this page. Open the run on the AI Estimating page instead."
+)
+
+
+def _refuse_plans_reader(sb, job_id: str, source: str | None = None) -> None:
+    """409 when the job belongs to an AI Estimating run. `source` skips the
+    lookup when the caller already holds the job row."""
+    if source is None:
+        source = bid_split.job_source(job_id, sb)
+    if source == bid_split.SOURCE_PLANS_READER:
+        raise HTTPException(status.HTTP_409_CONFLICT, MSG_PLANS_READER_JOB)
+
+
 def _project_for_job(sb, job_id: str) -> str | None:
+    """The project a job files documents into, or None. A plans_reader job
+    (AI Estimating's own split, docs/PLANS_READER.md 3.2) never has one for
+    these purposes, whatever its row says: no hand-off lock, no re-file."""
     rows = (
-        sb.table("bid_split_jobs").select("id, project_id").eq("id", job_id).limit(1).execute()
+        sb.table("bid_split_jobs").select("id, project_id, source").eq("id", job_id).limit(1).execute()
     ).data or []
-    return (rows[0].get("project_id") if rows else None) or None
+    if not rows or rows[0].get("source") in bid_split.NO_PROJECT_EFFECT_SOURCES:
+        return None
+    return rows[0].get("project_id") or None
+
+
+def _model_pages(training_io: dict) -> list[dict] | None:
+    """The pristine per-page classifications (`model_output.pages`) when a
+    per-page pass ran on this file; None for a triage-only or non-PDF run.
+    The page-level fields a segment's page_meta keeps (title, role,
+    confidence) are never touched by island repair, so these rebuild the
+    detail for any user range."""
+    output = training_io.get("model_output")
+    pages = output.get("pages") if isinstance(output, dict) else None
+    return pages if isinstance(pages, list) and pages else None
 
 
 def _project_guard(sb, frow: dict) -> str | None:
@@ -259,6 +294,7 @@ async def upload_job_file(
     s = get_settings()
     sb = get_supabase()
     job = await run_in_threadpool(_job_or_404, sb, job_id)
+    _refuse_plans_reader(sb, job_id, job.get("source") or rfp_split.SOURCE_MANUAL)
     filename = file.filename or "upload.pdf"
     content = await _read_capped(file, s.upload_max_bytes)
     # The per-file validation and the staging live in services/bid_split,
@@ -275,6 +311,14 @@ async def upload_job_file(
 
 _JOB_STATUSES = ("processing", "done", "done_with_errors", "failed")
 
+# bid_split_jobs.source values (CHECK in migration 0152).
+_JOB_SOURCES = (
+    rfp_split.SOURCE_MANUAL,
+    rfp_split.SOURCE_RFP,
+    rfp_split.SOURCE_PROJECT,
+    bid_split.SOURCE_PLANS_READER,
+)
+
 
 @router.get("/jobs")
 def list_jobs(
@@ -282,21 +326,39 @@ def list_jobs(
     offset: int = 0,
     status_filter: str | None = Query(default=None, alias="status"),
     _: CurrentUser = Depends(require_internal),
+    source_filter: Annotated[str | None, Query(alias="source")] = None,
 ):
     """Job history, newest first, with per-status file counts and page totals
     so the list renders without a per-row fetch. `status` narrows to one job
     status: the app shell polls `?status=processing` for its in-flight
-    marker, which must stay a cheap read."""
+    marker, which must stay a cheap read. `source` narrows to one job source
+    (manual, rfp, project, plans_reader); without it every source EXCEPT
+    plans_reader is listed: those are AI Estimating's internal jobs, kept
+    out of this page's history and out of the app shell's in-flight marker
+    unless asked for by name."""
     limit = max(1, min(limit, 250))
     if status_filter is not None and status_filter not in _JOB_STATUSES:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             f"status must be one of {', '.join(_JOB_STATUSES)}",
         )
+    if source_filter is not None and source_filter not in _JOB_SOURCES:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"source must be one of {', '.join(_JOB_SOURCES)}",
+        )
     sb = get_supabase()
     query = sb.table("bid_split_jobs").select("*")
     if status_filter is not None:
         query = query.eq("status", status_filter)
+    if source_filter is not None:
+        query = query.eq("source", source_filter)
+    else:
+        # source is NOT NULL (default 'manual'), so an in_ over the other
+        # sources is the exact complement.
+        query = query.in_(
+            "source", [s for s in _JOB_SOURCES if s != bid_split.SOURCE_PLANS_READER]
+        )
     jobs = (
         query.order("created_at", desc=True)
         .range(offset, offset + limit - 1)
@@ -326,8 +388,15 @@ def _attach_projects(sb, jobs: list[dict]) -> None:
     """The project an rfp job serves (docs/RFP_SPLIT.md 3.3): number, name
     and whether its hand-off package has sent (corrections then answer
     409). One projects query for the page; the lock is read once per
-    distinct project. Manual jobs carry nulls."""
-    project_ids = sorted({str(j["project_id"]) for j in jobs if j.get("project_id")})
+    distinct project. Manual and plans_reader jobs carry nulls (a
+    plans_reader job never serves a project, whatever its row says)."""
+
+    def _pid(job: dict) -> str:
+        if job.get("source") in bid_split.NO_PROJECT_EFFECT_SOURCES:
+            return ""
+        return str(job.get("project_id") or "")
+
+    project_ids = sorted({_pid(j) for j in jobs if _pid(j)})
     projects: dict[str, dict] = {}
     for i in range(0, len(project_ids), 200):
         for p in (
@@ -336,7 +405,7 @@ def _attach_projects(sb, jobs: list[dict]) -> None:
             projects[str(p["id"])] = p
     sent: dict[str, bool] = {}
     for job in jobs:
-        pid = str(job.get("project_id") or "")
+        pid = _pid(job)
         proj = projects.get(pid)
         job.setdefault("source", rfp_split.SOURCE_MANUAL)
         job["project_number"] = proj.get("number") if proj else None
@@ -692,6 +761,7 @@ def retry_file(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, _NOT_CONFIGURED_MESSAGE)
     sb = get_supabase()
     rec = _file_or_404(sb, file_id)
+    _refuse_plans_reader(sb, rec["job_id"])
     if rec["status"] != "failed":
         raise HTTPException(
             status.HTTP_409_CONFLICT, "Only a failed file can be retried."
@@ -725,6 +795,7 @@ def delete_job(job_id: str, user: CurrentUser = Depends(require_writer)):
     Refused while any of its files still has a live queue run."""
     sb = get_supabase()
     job = _job_or_404(sb, job_id)
+    _refuse_plans_reader(sb, job_id, job.get("source") or rfp_split.SOURCE_MANUAL)
     # A job that files a project's documents (an RFP split, or a project's
     # missing-files drop zone, docs/RFP_MISSING_FILES.md 5) carries the
     # provenance of those rows: it stays while the project exists.
@@ -826,6 +897,7 @@ def correct_file_kind(
     """
     sb = get_supabase()
     frow = _file_or_404(sb, file_id)
+    _refuse_plans_reader(sb, frow["job_id"])
     _require_done(frow)
     if (
         frow.get("file_kind") == body.file_kind
@@ -883,6 +955,11 @@ def correct_file_kind(
                 "filename": frow["filename"],
                 "size_bytes": frow["size_bytes"],
                 "is_original": True,
+                # Per-page detail survives the re-type when a per-page pass
+                # ran (a drawing set re-typed intact); null otherwise.
+                "page_meta": bid_split.segment_page_meta(
+                    _model_pages(before), 1, page_end
+                ),
             }
         ).execute()
 
@@ -926,6 +1003,7 @@ def reprocess_file(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, _NOT_CONFIGURED_MESSAGE)
     sb = get_supabase()
     rec = _file_or_404(sb, file_id)
+    _refuse_plans_reader(sb, rec["job_id"])
     _require_done(rec)
     if not _is_pdf_row(rec):
         raise HTTPException(status.HTTP_409_CONFLICT, rfp_split.MSG_NOT_A_PDF)
@@ -1051,6 +1129,7 @@ def correct_segments(
     """
     sb = get_supabase()
     frow = _file_or_404(sb, file_id)
+    _refuse_plans_reader(sb, frow["job_id"])
     _require_done(frow)
     if not _is_pdf_row(frow):
         raise HTTPException(status.HTTP_409_CONFLICT, rfp_split.MSG_NOT_A_PDF)
@@ -1141,6 +1220,7 @@ def correct_segments(
         for i, seg in enumerate(segs)
     )
     pdf = storage.download_file(frow["storage_path"]) if needs_cut else b""
+    model_pages = _model_pages(before)
     inserts = []
     for order, seg in enumerate(segs):
         reused = reuse_by_index.get(order)
@@ -1154,6 +1234,19 @@ def correct_segments(
         else:
             path, out_name, size, is_original = bid_split.cut_segment(
                 pdf, frow, seg, general_pages, total_pages
+            )
+        # An untouched row keeps its stored page detail (same pages, same
+        # prepended covers: a trade row whose covers changed is never
+        # reused); any other row rebuilds it from the model's per-page pass,
+        # in object order (prepended covers first), or null when no
+        # per-page pass ran on this file.
+        page_meta = reused.get("page_meta") if reused is not None else None
+        if page_meta is None:
+            page_meta = bid_split.segment_page_meta(
+                model_pages,
+                seg["page_start"],
+                seg["page_end"],
+                bid_split.segment_prefix_pages(seg, general_pages, total_pages),
             )
         inserts.append(
             {
@@ -1173,6 +1266,7 @@ def correct_segments(
                 "filename": out_name,
                 "size_bytes": size,
                 "is_original": is_original,
+                "page_meta": page_meta,
             }
         )
     bid_split._delete_segments(

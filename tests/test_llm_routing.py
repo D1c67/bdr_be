@@ -70,10 +70,99 @@ def test_flag_off_routes_to_third_party_vendors():
 
 def test_flag_on_routes_everything_self_hosted_even_with_3p_keys():
     s = _sh(self_hosted_boq_model="m1", self_hosted_email_match_model="m2")
-    for feature in llm._FEATURES:
+    for feature, spec in llm._FEATURES.items():
+        if spec.openai_only:  # pinned to OpenAI in both modes
+            continue
         assert llm.resolve(feature, s).provider == "self_hosted"
     assert llm.resolve("boq", s).model == "m1"
     assert llm.resolve("boq", s).base_url == "http://localhost:11434/v1"
+
+
+PLANS_FEATURES = ("plans_sub", "plans_main", "plans_modify", "plans_chat")
+
+
+def test_plans_features_are_openai_only_on_the_astra_model():
+    s = _s(openai_api_key="o")
+    for feature in PLANS_FEATURES:
+        assert llm._FEATURES[feature].openai_only is True
+        route = llm.resolve(feature, s)
+        assert route.provider == "openai"
+        assert route.model == "gpt-6-astra" == s.openai_plans_model
+        assert llm.is_configured(feature, s) is True
+        assert llm.unavailable_reason(feature, s) is None
+    assert llm.resolve("plans_sub", _s(openai_api_key="o", openai_plans_model="x-1")).model == "x-1"
+    # Every pre-existing feature stays routable in self-hosted mode.
+    assert [f for f, spec in llm._FEATURES.items() if spec.openai_only] == list(PLANS_FEATURES)
+
+
+def test_self_hosted_flag_keeps_openai_only_features_on_openai():
+    # Owner decision 2026-10-18: the strict switch moves every feature to the
+    # box EXCEPT AI Estimating, which keeps running on the OpenAI key.
+    s = _sh(self_hosted_llm_local_model="qwen", openai_api_key="o")
+    for feature in PLANS_FEATURES:
+        route = llm.resolve(feature, s)
+        assert route.provider == "openai" and route.model == "gpt-6-astra" and route.api_key == "o"
+        assert llm.is_configured(feature, s) is True
+        assert llm.unavailable_reason(feature, s) is None
+        assert llm.active_model(feature, s) == "gpt-6-astra"
+    # Without an OpenAI key the feature is unconfigured, not re-routed.
+    keyless = _sh(self_hosted_llm_local_model="qwen", openai_api_key="")
+    assert llm.resolve("plans_sub", keyless).provider == "openai"
+    assert llm.is_configured("plans_sub", keyless) is False
+    with pytest.raises(llm.LlmNotConfigured):
+        llm.complete_parts("plans_sub", system="s", parts=[{"type": "input_text", "text": "x"}], settings=keyless)
+    # The rest of the app still goes to the box.
+    assert llm.resolve("boq", s).provider == "self_hosted"
+    assert llm.unavailable_reason("boq", s) is None
+
+
+def test_plans_reader_flag_off_is_the_only_by_design_exclusion():
+    # The queue labels a failed job with active_model; a raise there would
+    # replace the by-design reason (not_configured) with the generic
+    # handler-failed text (unknown).
+    from app.services import llm_errors
+
+    for s in (_s(openai_api_key="o", plans_reader_enabled=False),
+              _sh(self_hosted_llm_local_model="qwen", plans_reader_enabled=False)):
+        for feature in PLANS_FEATURES:
+            assert "PLANS_READER_ENABLED" in llm.unavailable_reason(feature, s)
+            assert llm.is_configured(feature, s) is False
+            assert llm.active_model(feature, s) == "gpt-6-astra"
+        assert llm.unavailable_reason("boq", s) is None
+    exc = llm.LlmNotConfigured(llm.PLANS_READER_OFF_MESSAGE)
+    assert llm_errors.classify(exc) == llm_errors.KIND_NOT_CONFIGURED
+    assert llm_errors.user_message(exc, "gpt-6-astra") == llm.PLANS_READER_OFF_MESSAGE
+
+
+def test_plans_lease_check_keeps_headroom():
+    from app.core.config import PLANS_READER_LEASE_HEADROOM_SECONDS
+
+    # Defaults: 600 + 180 + 120 fits a 900 s lease exactly.
+    assert _s(plans_reader_enabled=True).plans_reader_call_timeout_seconds == 600
+    assert PLANS_READER_LEASE_HEADROOM_SECONDS == 120
+    with pytest.raises(ValueError, match="headroom"):
+        _s(plans_reader_enabled=True, plans_reader_call_timeout_seconds=601)
+    # Off, the check does not run.
+    off = _s(plans_reader_enabled=False, plans_reader_call_timeout_seconds=601)
+    assert off.plans_reader_call_timeout_seconds == 601
+
+
+def test_live_box_override_does_not_choke_on_openai_only_features(monkeypatch):
+    from app.services import llm_target
+
+    s = _sh(
+        self_hosted_llm_local_model="qwen",
+        self_hosted_llm_ec2_base_url="https://llm.example.com/v1",
+        self_hosted_llm_ec2_model="qwen-ec2",
+    )
+    monkeypatch.setattr(llm_target, "_override", "ec2")
+    try:
+        switched = llm_target.apply(s)
+        assert switched.self_hosted_llm_target == "ec2"
+        assert llm.resolve("plans_main", s).provider == "openai"  # the box switch never touches it
+        assert llm.resolve("boq", s).model == "qwen-ec2"
+    finally:
+        llm_target.reset()
 
 
 def test_target_selects_ec2_pair():
@@ -352,3 +441,82 @@ def test_flag_off_ignores_self_hosted_config_entirely():
     # Nothing self-hosted is validated (or used) while the switch is off.
     s = _s(self_hosted_llm_target="cloud", self_hosted_llm_local_base_url="")
     assert llm.resolve("boq", s).provider == "anthropic"
+
+
+def test_health_snapshot_grades_openai_only_features_on_openai_in_self_hosted_mode(monkeypatch):
+    from app.services import llm_health
+
+    client = SimpleNamespace(models=SimpleNamespace(list=lambda: [SimpleNamespace(id="qwen")]))
+    client.with_options = lambda **kw: client
+    monkeypatch.setattr(llm, "_client_for", lambda route, settings: client)
+    llm_health.reset_cache()
+    snap = llm_health.check(_sh(self_hosted_llm_local_model="qwen", openai_api_key="o"))
+    by_key = {f.key: f for f in snap.features}
+    assert set(PLANS_FEATURES) <= set(by_key)
+    assert {by_key[k].provider for k in PLANS_FEATURES} == {"OpenAI"}
+    assert {p.provider for p in snap.providers} == {"self_hosted", "openai"}
+    assert snap.status == "ok"
+    # With the page's own flag off the plans features are left out, so a
+    # self-hosted deployment without the page never shows amber for it.
+    llm_health.reset_cache()
+    snap = llm_health.check(_sh(self_hosted_llm_local_model="qwen", openai_api_key="", plans_reader_enabled=False))
+    assert not {f.key for f in snap.features} & set(PLANS_FEATURES)
+    assert snap.status == "ok"
+
+    third_party = llm_health.check(_s(anthropic_api_key="a", openai_api_key="o"))
+    by_key = {f.key: f for f in third_party.features}
+    assert by_key["plans_sub"].label == "AI Estimating: sub agents"
+    assert by_key["plans_chat"].model == "gpt-6-astra"
+    llm_health.reset_cache()
+
+
+# ── Anthropic JSON completions carry the schema ─────────────────────────────
+
+
+def _fake_anthropic_client(text: str):
+    """Messages-API stub that records the system prompt it was given."""
+    calls: list[dict] = []
+
+    def create(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(
+            content=[SimpleNamespace(type="text", text=text)],
+            usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+        )
+
+    client = SimpleNamespace(
+        messages=SimpleNamespace(create=create), with_options=lambda **kw: client
+    )
+    return client, calls
+
+
+def test_complete_json_on_anthropic_puts_the_schema_in_the_system_prompt(monkeypatch):
+    """Claude has no response_format. Without the schema in the prompt the
+    model answers in prose and every call fails to parse (the bid splitter's
+    segment naming did exactly that on claude-opus-5)."""
+    client, calls = _fake_anthropic_client('{"segments": [{"name": "Electrical Drawings"}]}')
+    monkeypatch.setattr(llm, "_client_for", lambda route, settings: client)
+    schema = {"type": "object", "properties": {"segments": {"type": "array"}}}
+    out = llm.complete_json(
+        "bid_split",
+        system="Name each segment.",
+        messages=[{"role": "user", "content": "1. Electrical, pages 1-7"}],
+        schema=schema,
+        settings=_s(anthropic_api_key="a", openai_api_key="o", bid_split_llm_provider="anthropic"),
+    )
+    assert out == {"segments": [{"name": "Electrical Drawings"}]}
+    system_text = "".join(part["text"] for part in calls[0]["system"])
+    assert system_text.startswith("Name each segment.")
+    assert '"segments"' in system_text and "JSON" in system_text
+
+
+def test_complete_json_on_anthropic_without_a_schema_leaves_the_prompt_alone(monkeypatch):
+    client, calls = _fake_anthropic_client('{"ok": true}')
+    monkeypatch.setattr(llm, "_client_for", lambda route, settings: client)
+    llm.complete_json(
+        "bid_split",
+        system="Prompt that defines its own shape.",
+        messages=[{"role": "user", "content": "x"}],
+        settings=_s(anthropic_api_key="a", openai_api_key="o", bid_split_llm_provider="anthropic"),
+    )
+    assert calls[0]["system"][0]["text"] == "Prompt that defines its own shape."

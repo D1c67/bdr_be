@@ -65,10 +65,15 @@ def render_pages(
         try:
             for idx in page_indices:
                 page = doc[idx]
-                width, height = page.get_size()  # points (1/72")
-                scale = long_side / max(width, height, 1.0)
-                bitmap = page.render(scale=scale)
-                image = bitmap.to_pil().convert("RGB")
+                try:
+                    width, height = page.get_size()  # points (1/72")
+                    scale = long_side / max(width, height, 1.0)
+                    bitmap = page.render(scale=scale)
+                    image = bitmap.to_pil().convert("RGB")
+                finally:
+                    # Closed explicitly so a garbage-collected page cannot
+                    # mutate the document's child set while doc.close() walks it.
+                    page.close()
                 buf = io.BytesIO()
                 image.save(buf, "JPEG", quality=jpeg_quality)
                 out.append(buf.getvalue())

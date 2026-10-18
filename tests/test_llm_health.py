@@ -36,6 +36,9 @@ def _sh(**over) -> Settings:
         self_hosted_llm_local_base_url=SH_URL,
         self_hosted_llm_local_api_key=SH_KEY,
         self_hosted_llm_timeout_seconds=1800,
+        # AI Estimating is pinned to OpenAI in both modes; a box-only
+        # deployment leaves its page off, so it is not graded here.
+        plans_reader_enabled=False,
         **{f"self_hosted_{f}_model": "qwen-3.5-4b" for f in llm._FEATURES},
     )
     base.update(over)
@@ -86,7 +89,8 @@ def test_server_up_and_serving_the_configured_model_is_green(monkeypatch):
     assert snap.status == "ok"
     assert snap.mode == "self_hosted"
     assert {f.state for f in snap.features} == {"ok"}
-    assert len(snap.features) == len(llm._FEATURES)
+    # AI Estimating is off by its own flag here, so it is left out.
+    assert len(snap.features) == sum(1 for spec in llm._FEATURES.values() if not spec.openai_only)
     (provider,) = snap.providers
     assert provider.state == "ok"
     assert provider.model_count == 1

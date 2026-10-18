@@ -180,7 +180,9 @@ def test_pins_apply_on_the_default_box():
 def test_override_box_ignores_pins_but_keeps_off():
     s = _sh(**{**_PROD_PINS, "self_hosted_translate_model": "off"})
     llm_target._set_memory("ec2b")
-    for feature in llm._FEATURES:
+    for feature, spec in llm._FEATURES.items():
+        if spec.openai_only:
+            continue  # AI Estimating is pinned to OpenAI; the box switch never touches it
         route = llm.resolve(feature, s)
         assert route.base_url == "https://llm2.example.com/v1"
         expected = "" if feature == "translate" else "qwen-3.8-27b"

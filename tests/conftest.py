@@ -38,6 +38,8 @@ os.environ["CERTIFIED_PAYROLL_ENABLED"] = "true"
 # its router tests exercise real routes whatever the local .env says. Tests
 # that exercise the flag being off set it themselves (test_bid_splitter).
 os.environ["BID_FILE_SPLITTER_ENABLED"] = "true"
+os.environ["PLANS_READER_ENABLED"] = "true"  # AI Estimating routes stay reachable in the suite
+os.environ["AI_ESTIMATING_STATE"] = "live"
 # The RFP Ingestion sandbox flag defaults FALSE too (experimental tool); pin it
 # ON so its router, gate and queue-pass tests exercise the real code paths.
 # Tests that exercise the flag being off set it themselves (test_feature_flags).

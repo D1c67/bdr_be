@@ -7,7 +7,9 @@ question that routing table can't: is what we resolved to actually reachable
 right now? The self-hosted box is the sharp edge — it is a single EC2 instance
 that can be stopped, and while FULL_SELF_HOSTED_LLMS_ENABLED is on there is no
 fallback by design, so a stopped box silently degrades eight features at once.
-Before this, the first sign was a user's BOQ extraction failing.
+Before this, the first sign was a user's BOQ extraction failing. (AI
+Estimating is the exception: its features are pinned to OpenAI in both modes,
+so in self-hosted mode the snapshot probes the box AND OpenAI.)
 
 How a provider is probed
 ------------------------
@@ -80,6 +82,10 @@ FEATURE_LABELS: dict[str, str] = {
     "rfp_classify": "RFP email classification",
     "rfp_extract": "RFP field extraction",
     "rfp_match": "RFP project matching",
+    "plans_sub": "AI Estimating: sub agents",
+    "plans_main": "AI Estimating: main agent",
+    "plans_modify": "AI Estimating: deliverable changes",
+    "plans_chat": "AI Estimating: chat",
 }
 
 _PROVIDER_LABELS = {
@@ -260,7 +266,14 @@ def check(settings: Settings | None = None) -> Snapshot:
     s = llm_target.apply(settings or get_settings())
     started = time.monotonic()
 
-    routes = {key: llm.resolve(key, s) for key in llm._FEATURES}
+    # Features switched off by design (their own flag is off, e.g. AI
+    # Estimating with PLANS_READER_ENABLED=false) are left out: grading them
+    # would mark the snapshot degraded forever.
+    routes = {
+        key: llm.resolve(key, s)
+        for key in llm._FEATURES
+        if llm.unavailable_reason(key, s) is None
+    }
     probes: dict[str, ProviderStatus] = {}
     catalogs: dict[str, list[str]] = {}
     # dict.fromkeys keeps first-seen order, so the modal lists providers in the

@@ -140,6 +140,10 @@ _TYPE_META: dict[str, tuple[str, str]] = {
     # deep-link to the Calling In page opened on the project (see _deep_link).
     "call_in_pre_bid": ("A project is ready for before-bid calls", "Open Calling In"),
     "call_in_post_bid": ("A project is ready for after-bid calls", "Open Calling In"),
+    # AI Estimating spend cap (services/ai_spend): once per window, to IT
+    # Admins and Executives, bell + email. Lands on Settings, where the cap
+    # is raised or reset.
+    "ai_spend.cap_hit": ("AI Estimating spend cap reached", "Open Settings"),
 }
 
 # Calling In notification type -> the call round its link opens.
@@ -275,6 +279,8 @@ def _deep_link(
             param = "invitation" if meta.get("source") == "portal" else "email"
             return f"{base}/rfp-processing?lane=stuck&{param}={quote(str(row_id))}"
         return f"{base}/rfp-processing?lane=stuck"
+    if type_ == "ai_spend.cap_hit" and not is_estimator:
+        return f"{base}/settings"
     # A nudge isn't tied to a project — send the recipient straight to their list.
     if type_ == "nudge":
         return f"{base}/todos"

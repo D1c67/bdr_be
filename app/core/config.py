@@ -3,6 +3,7 @@
 import logging
 import math
 import re
+from typing import Literal
 from functools import lru_cache
 
 from pydantic import AliasChoices, Field, field_validator, model_validator
@@ -69,6 +70,12 @@ def _parse_hhmm(raw: str, env_name: str) -> tuple[int, int]:
 # base URL + API key + served-model triple: SELF_HOSTED_LLM_<TARGET>_{BASE_URL,
 # API_KEY,MODEL}. Adding a box = a new entry here plus its three fields.
 SELF_HOSTED_LLM_TARGETS: tuple[str, ...] = ("local", "ec2", "ec2b", "ec2c")
+
+# reasoning.effort values GPT-6 Astra accepts (no "none"); AI Estimating only.
+PLANS_READER_REASONING_EFFORTS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max")
+# Seconds of a queue lease kept spare beyond one plans call's timeout and
+# gate wait: the upload of up to 50 MB and the row writes after the call.
+PLANS_READER_LEASE_HEADROOM_SECONDS = 120
 
 
 class Settings(BaseSettings):
@@ -240,6 +247,67 @@ class Settings(BaseSettings):
     bid_split_triage_pages: int = 12
     bid_split_triage_min_confidence: float = 0.7
     bid_split_island_max_pages: int = 10
+
+    # ── AI Estimating (plans reader; docs/PLANS_READER.md) ───────────────────
+    # GPT-6 Astra reads a bid set (drawings as PNG images, specs as PDF files)
+    # in token-budgeted groups, consolidates it into a brief plus BOQ,
+    # estimate and markup specs, and answers chat questions about it. Default
+    # OFF everywhere; while off every /ai-estimating route 404s and the
+    # frontend hides the page (`ai_estimating` in GET /features). OpenAI
+    # ONLY: the plans_* features are pinned to OpenAI (services/llm
+    # openai_only), so FULL_SELF_HOSTED_LLMS_ENABLED=true leaves them running
+    # on the OpenAI key instead of moving them to the box.
+    plans_reader_enabled: bool = False
+    # Who may open AI Estimating while PLANS_READER_ENABLED is on
+    # (core/features.ai_estimating_roles): live = every internal role (the
+    # external estimator never), test = Executives and IT Admins only, dev =
+    # nobody (the routes 403 and the page is hidden for every account).
+    # Default dev so a deployment that forgets the variable shows it to no one.
+    ai_estimating_state: Literal["live", "test", "dev"] = "dev"
+    openai_plans_model: str = "gpt-6-astra"
+    # reasoning.effort for every plans call: low | medium | high | xhigh | max.
+    plans_reader_reasoning_effort: str = "medium"
+    # One sub agent group's input budget (ledger and prompt included). Kept
+    # under the 272,000-token line above which GPT-6 Astra bills the whole
+    # request at 2x input and 1.5x output.
+    plans_reader_group_input_tokens: int = 240_000
+    # The ledger (sheet index, legends, general notes, spec TOC) rides with
+    # every group; above this the legend images drop to detail high.
+    plans_reader_ledger_max_tokens: int = 40_000
+    # A run whose estimated input is above this refuses to start (about $100
+    # of input at $10 per 1M). There is no override; raise this setting.
+    plans_reader_max_input_tokens_per_run: int = 10_000_000
+    # Pro Max chat: most pages one message may render and send.
+    plans_reader_promax_max_pages_per_message: int = 12
+    # Second-pass (higher resolution) escalation budget as a fraction of the
+    # first pass's input tokens. 0 disables escalation.
+    plans_reader_escalation_max_fraction: float = 0.5
+    # Escalation tiles render at this ppi.
+    plans_reader_tile_ppi: int = 260
+    # detail "original" images are rejected by OpenAI above 30,000 32px
+    # patches; the native ppi of each sheet is the largest under this.
+    plans_reader_native_max_patches: int = 30_000
+    # OpenAI caps input_file PDFs at 50 MB per file and per request.
+    plans_reader_file_max_bytes: int = 50 * 1024 * 1024
+    # Client timeout for one plans Responses call (a 240k-token group can
+    # take minutes). The SDK does not retry these; the queue does, so one
+    # attempt plus the background gate wait must fit in LLM_QUEUE_LEASE_SECONDS.
+    # complete_parts renews the job's lease right before the request, so page
+    # rendering and payload building BEFORE the call do not count against it;
+    # the validator keeps PLANS_READER_LEASE_HEADROOM_SECONDS spare for the
+    # upload and the row writes after the call.
+    plans_reader_call_timeout_seconds: int = 600
+    # AI Estimating jobs one worker process runs at once, in their own claim
+    # pass (services/llm_queue._claim_plans), never against
+    # LLM_QUEUE_WORKER_CONCURRENCY. Prod runs two uvicorn workers, so twice
+    # this across the deployment.
+    plans_reader_concurrency: int = 2
+    # Pacing against the OpenAI account's tokens-per-minute limit (1,000,000
+    # for this key, shared by every run): before advance() dispatches group
+    # jobs it spreads their start times over 60 s windows so the estimated
+    # input tokens of the jobs scheduled in any one window stay under this
+    # (a 429 still retries on the queue's schedule). 0 turns pacing off.
+    plans_reader_tokens_per_minute: int = 800_000
 
     # ── LLM health monitoring (app/services/llm_health.py) ────────────────────
     # Feeds the sidebar's "Model status" indicator. A background poller keeps a
@@ -1256,6 +1324,79 @@ class Settings(BaseSettings):
                 "BID_SPLIT_LLM_PROVIDER must be 'anthropic', 'openai' or "
                 f"'self_hosted' (got {self.bid_split_llm_provider!r})."
             )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_plans_reader(self) -> "Settings":
+        """AI Estimating knobs: a typo'd effort or a budget past an OpenAI
+        hard limit should refuse to boot, not fail every run at call time."""
+        effort = (self.plans_reader_reasoning_effort or "").strip().lower()
+        if effort not in PLANS_READER_REASONING_EFFORTS:
+            raise ValueError(
+                "PLANS_READER_REASONING_EFFORT must be one of "
+                f"{', '.join(PLANS_READER_REASONING_EFFORTS)} "
+                f"(got {self.plans_reader_reasoning_effort!r})."
+            )
+        self.plans_reader_reasoning_effort = effort
+        if not (self.openai_plans_model or "").strip():
+            raise ValueError("OPENAI_PLANS_MODEL must not be empty.")
+        if not 10_000 <= self.plans_reader_group_input_tokens <= 272_000:
+            raise ValueError(
+                "PLANS_READER_GROUP_INPUT_TOKENS must be between 10000 and 272000 "
+                "(above 272000 tokens the whole request bills at the long-context rate)."
+            )
+        if not 1_000 <= self.plans_reader_ledger_max_tokens < self.plans_reader_group_input_tokens:
+            raise ValueError(
+                "PLANS_READER_LEDGER_MAX_TOKENS must be at least 1000 and below "
+                "PLANS_READER_GROUP_INPUT_TOKENS (the ledger rides inside every group)."
+            )
+        if self.plans_reader_max_input_tokens_per_run < self.plans_reader_group_input_tokens:
+            raise ValueError(
+                "PLANS_READER_MAX_INPUT_TOKENS_PER_RUN must be at least "
+                "PLANS_READER_GROUP_INPUT_TOKENS (a run is at least one group)."
+            )
+        if not 1 <= self.plans_reader_promax_max_pages_per_message <= 100:
+            raise ValueError("PLANS_READER_PROMAX_MAX_PAGES_PER_MESSAGE must be between 1 and 100.")
+        if not 0.0 <= self.plans_reader_escalation_max_fraction <= 1.0:
+            raise ValueError(
+                "PLANS_READER_ESCALATION_MAX_FRACTION must be between 0 and 1 (0 disables)."
+            )
+        if not 72 <= self.plans_reader_tile_ppi <= 600:
+            raise ValueError("PLANS_READER_TILE_PPI must be between 72 and 600.")
+        if not 1_000 <= self.plans_reader_native_max_patches <= 30_000:
+            raise ValueError(
+                "PLANS_READER_NATIVE_MAX_PATCHES must be between 1000 and 30000 "
+                "(OpenAI rejects detail original images above 30000 patches)."
+            )
+        if not 1 <= self.plans_reader_file_max_bytes <= 50 * 1024 * 1024:
+            raise ValueError(
+                "PLANS_READER_FILE_MAX_BYTES must be between 1 and 52428800 "
+                "(OpenAI caps input files at 50 MB)."
+            )
+        if self.plans_reader_call_timeout_seconds < 30:
+            raise ValueError("PLANS_READER_CALL_TIMEOUT_SECONDS must be at least 30.")
+        if not 1 <= self.plans_reader_concurrency <= 32:
+            raise ValueError("PLANS_READER_CONCURRENCY must be between 1 and 32.")
+        if self.plans_reader_tokens_per_minute != 0 and self.plans_reader_tokens_per_minute < 10_000:
+            raise ValueError(
+                "PLANS_READER_TOKENS_PER_MINUTE must be 0 (pacing off) or at least 10000."
+            )
+        if self.plans_reader_enabled:
+            # The lease is renewed after gate admission, so the gate wait is
+            # counted only as a conservative bound; the headroom covers the
+            # upload of up to 50 MB and the writes after the call.
+            needed = (
+                self.plans_reader_call_timeout_seconds
+                + self.llm_background_wait_seconds
+                + PLANS_READER_LEASE_HEADROOM_SECONDS
+            )
+            if needed > self.llm_queue_lease_seconds:
+                raise ValueError(
+                    "PLANS_READER_CALL_TIMEOUT_SECONDS plus LLM_BACKGROUND_WAIT_SECONDS "
+                    f"plus {PLANS_READER_LEASE_HEADROOM_SECONDS}s of headroom ({needed:g}) "
+                    "must fit inside LLM_QUEUE_LEASE_SECONDS so one AI Estimating "
+                    "call fits inside a queue lease."
+                )
         return self
 
     @model_validator(mode="after")

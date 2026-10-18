@@ -10,7 +10,10 @@ Two provider pools, selected by FULL_SELF_HOSTED_LLMS_ENABLED:
   server). STRICT: while the flag is on, no prompt is ever sent to a
   3rd-party provider. A self-hosted outage or an unset per-feature model
   degrades exactly like a missing API key does today (each caller keeps its
-  own graceful fallback) — it never re-routes.
+  own graceful fallback) — it never re-routes. The one exception is the
+  openai_only features (AI Estimating), which are pinned to OpenAI in BOTH
+  modes: a bid set is never sent to a small self-hosted model, so the
+  switch leaves them where they are instead of turning them off.
 
 Call sites keep their own gating, retries and domain validation; this module
 only resolves the route, speaks the three wire protocols, and normalizes the
@@ -30,16 +33,36 @@ Security posture: endpoint URLs and keys come only from env (validated at
 boot in core/config — https enforced in production, TLS verification on by
 default with a private-CA override); nothing here logs prompts, keys, or the
 endpoint URL; every self-hosted call carries a bounded timeout.
+
+Usage and cost (0152): every transport reports the provider's token usage
+into a per-call box that _guarded reads, so each llm_call_log row carries
+input / cached / output / reasoning tokens and the cost from
+services/llm_pricing. The complete_* functions keep their return types; a
+caller that needs the numbers reads last_usage() / last_cost_usd() right
+after the call, in the same thread (they ride a contextvar, so a call made
+inside asyncio.to_thread is visible inside that thread only).
+
+AI Estimating (docs/PLANS_READER.md): complete_parts() is the OpenAI
+Responses transport with mixed content parts (text, images with a detail
+level, PDF files), reasoning effort, tools and tool-call continuation. Its
+features (plans_*) are openai_only: plan sets are never sent to a small
+self-hosted model, so FULL_SELF_HOSTED_LLMS_ENABLED does not move them; they
+keep running on OpenAI with the 3rd-party key (owner decision 2026-10-18,
+reversing the earlier "off in self-hosted mode" rule). The only thing that
+switches them off by design is their own PLANS_READER_ENABLED flag
+(unavailable_reason).
 """
 
 from __future__ import annotations
 
+import contextvars
 import io
 import json
 import logging
 import ssl
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any, Callable
 
 import httpx
@@ -48,6 +71,7 @@ import openai
 from app.core.config import Settings, get_settings
 from app.services import llm_target
 from app.services import llm_gate
+from app.services import llm_pricing
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +103,92 @@ class LlmBadOutput(ValueError):
     (transient, retried by the job queue)."""
 
 
+class LlmBadOutputPermanent(LlmBadOutput):
+    """An unusable answer that regenerating the same request will not fix:
+    the output token limit cut it off, the content filter stopped it, or the
+    model refused. Declared bad_input (llm_errors honors llm_error_kind), so
+    the queue fails fast instead of resending a 240k-token AI Estimating
+    group up to four times at full input cost. The message is app-authored
+    and says what to change."""
+
+    llm_error_kind = "bad_input"
+
+
+class LlmLeaseLost(RuntimeError):
+    """complete_parts refused to send because the queue job running it lost
+    its lease (the attempt is stale; another worker may own the job). Declared
+    infrastructure: its message is app-authored, and the queue's own fenced
+    writes already ignore a stale attempt."""
+
+    llm_error_kind = "infrastructure"
+
+
+@dataclass(frozen=True)
+class LlmUsage:
+    """Provider-reported token usage for one call.
+
+    input_tokens INCLUDES cached_tokens and output_tokens INCLUDES
+    reasoning_tokens (OpenAI's convention; the Anthropic and self-hosted
+    readers normalize to it)."""
+
+    input_tokens: int = 0
+    cached_tokens: int = 0
+    output_tokens: int = 0
+    reasoning_tokens: int = 0
+
+    # Read-only aliases with the field names docs/PLANS_READER.md section 6
+    # uses (LlmUsage(input, cached, output, reasoning)), so modules written to
+    # the contract and modules written to this class read the same numbers.
+    @property
+    def input(self) -> int:
+        """Alias of input_tokens (includes cached)."""
+        return self.input_tokens
+
+    @property
+    def cached(self) -> int:
+        """Alias of cached_tokens."""
+        return self.cached_tokens
+
+    @property
+    def output(self) -> int:
+        """Alias of output_tokens (includes reasoning)."""
+        return self.output_tokens
+
+    @property
+    def reasoning(self) -> int:
+        """Alias of reasoning_tokens."""
+        return self.reasoning_tokens
+
+
+@dataclass(frozen=True)
+class LlmResult:
+    """What complete_parts returns.
+
+    parsed: the JSON object when a schema was given and the model answered
+    with text (None when it answered with tool calls instead, or no schema).
+    tool_calls: [{"call_id", "name", "arguments": dict}] from the response's
+    function_call items, in order. usage is zeros when the provider reported
+    none. model and cost_usd (llm_pricing.cost_for; None without a price
+    row) are extras so callers can record the call without recomputing."""
+
+    parsed: Any
+    text: str
+    usage: LlmUsage
+    response_id: str
+    tool_calls: list[dict] = field(default_factory=list)
+    model: str = ""
+    cost_usd: Decimal | None = None
+
+
+# Sentinel for SELF_HOSTED_<FEATURE>_MODEL: switch that feature off in
+# self-hosted mode even though the live target names a model.
+SELF_HOSTED_MODEL_OFF = "off"
+
+PLANS_READER_OFF_MESSAGE = (
+    "AI Estimating is switched off on this server (PLANS_READER_ENABLED is false)."
+)
+
+
 @dataclass(frozen=True)
 class _Feature:
     # "anthropic" | "openai", or a Settings-reader returning one of those for
@@ -86,6 +196,26 @@ class _Feature:
     third_party: str | Callable[[Settings], str]
     tp_model: Callable[[Settings], str]
     sh_model: Callable[[Settings], str]
+    # True = pinned to OpenAI: never served by the self-hosted pool, and
+    # FULL_SELF_HOSTED_LLMS_ENABLED=true leaves the feature on OpenAI instead
+    # of moving it to the box or switching it off.
+    openai_only: bool = False
+    # The feature's own on/off switch, when it has one. Off = the feature is
+    # unavailable by design (unavailable_reason) whatever the providers say,
+    # so the health snapshot leaves it out instead of grading it forever.
+    switch: Callable[[Settings], bool] | None = None
+
+
+def _plans_feature() -> _Feature:
+    """AI Estimating features: OpenAI only, one model for all four, behind
+    the page's own PLANS_READER_ENABLED switch."""
+    return _Feature(
+        "openai",
+        lambda s: s.openai_plans_model,
+        lambda s: SELF_HOSTED_MODEL_OFF,
+        openai_only=True,
+        switch=lambda s: bool(getattr(s, "plans_reader_enabled", False)),
+    )
 
 
 _FEATURES: dict[str, _Feature] = {
@@ -150,6 +280,13 @@ _FEATURES: dict[str, _Feature] = {
         lambda s: s.openai_rfp_match_model or s.openai_rfp_classify_model,
         lambda s: s.self_hosted_rfp_match_model or s.self_hosted_rfp_classify_model,
     ),
+    # AI Estimating (docs/PLANS_READER.md): sub agent group calls, the main
+    # consolidation, deliverable modifications and the chat. GPT-6 Astra by
+    # default (OPENAI_PLANS_MODEL) in both modes (openai_only).
+    "plans_sub": _plans_feature(),
+    "plans_main": _plans_feature(),
+    "plans_modify": _plans_feature(),
+    "plans_chat": _plans_feature(),
 }
 
 
@@ -159,11 +296,6 @@ class Route:
     model: str
     api_key: str
     base_url: str = ""
-
-
-# Sentinel for SELF_HOSTED_<FEATURE>_MODEL: switch that feature off in
-# self-hosted mode even though the live target names a model.
-SELF_HOSTED_MODEL_OFF = "off"
 
 
 def _self_hosted_model(spec: _Feature, s: Settings) -> str:
@@ -185,6 +317,9 @@ def resolve(feature: str, settings: Settings | None = None) -> Route:
     the live box override from Settings (services/llm_target) applied."""
     s = llm_target.apply(settings or get_settings())
     spec = _FEATURES[feature]
+    if spec.openai_only:
+        # Pinned: the self-hosted switch does not move AI Estimating.
+        return Route(provider="openai", model=spec.tp_model(s), api_key=s.openai_api_key)
     if s.full_self_hosted_llms_enabled:
         return Route(
             provider="self_hosted",
@@ -208,9 +343,23 @@ def resolve(feature: str, settings: Settings | None = None) -> Route:
     return Route(provider="openai", model=spec.tp_model(s), api_key=s.openai_api_key)
 
 
+def unavailable_reason(feature: str, settings: Settings | None = None) -> str | None:
+    """Why the feature is switched off by design (its own switch is off,
+    e.g. PLANS_READER_ENABLED=false for the plans features), or None. A
+    missing key or model is NOT reported here; is_configured covers that."""
+    s = llm_target.apply(settings or get_settings())
+    spec = _FEATURES[feature]
+    if spec.switch is not None and not spec.switch(s):
+        return PLANS_READER_OFF_MESSAGE if spec.openai_only else f"The '{feature}' feature is switched off."
+    return None
+
+
 def is_configured(feature: str, settings: Settings | None = None) -> bool:
     """True when the ACTIVE pool can serve this feature. Callers gate on this
-    exactly as they used to gate on the vendor API key being present."""
+    exactly as they used to gate on the vendor API key being present. A
+    feature whose own switch is off is False, never an exception."""
+    if unavailable_reason(feature, settings) is not None:
+        return False
     route = resolve(feature, settings)
     if route.provider == "self_hosted":
         return bool(route.base_url and route.model)
@@ -219,8 +368,17 @@ def is_configured(feature: str, settings: Settings | None = None) -> bool:
 
 def active_model(feature: str, settings: Settings | None = None) -> str:
     """Model label for DB records / user-facing errors, provider-tagged when
-    self-hosted so stored rows show where an answer actually came from."""
-    route = resolve(feature, settings)
+    self-hosted so stored rows show where an answer actually came from.
+
+    Never raises for a feature whose own switch is off: it returns the
+    3rd-party model name, because the queue labels a failed job with this
+    (llm_queue._JobSpec.model_label) and a raise there would bury the real
+    reason under the generic handler-failed text. Use is_configured /
+    unavailable_reason to ask whether the feature can run."""
+    s = llm_target.apply(settings or get_settings())
+    if unavailable_reason(feature, s) is not None:
+        return _FEATURES[feature].tp_model(s)
+    route = resolve(feature, s)
     if route.provider == "self_hosted":
         return f"self-hosted:{route.model or '(no model set)'}"
     return route.model
@@ -357,6 +515,140 @@ def _schema_hint(system: str, schema: dict | None) -> str:
     )
 
 
+# ── Usage capture ────────────────────────────────────────────────────────────
+
+
+class _UsageBox:
+    """Per-call slot a transport fills with the provider's usage, read back by
+    _guarded. A box (not a return value) so the transports keep returning
+    plain text and every existing call path stays unchanged."""
+
+    __slots__ = ("usage",)
+
+    def __init__(self) -> None:
+        self.usage: LlmUsage | None = None
+
+
+_usage_box: contextvars.ContextVar[_UsageBox | None] = contextvars.ContextVar(
+    "llm_usage_box", default=None
+)
+_last_usage: contextvars.ContextVar[LlmUsage | None] = contextvars.ContextVar(
+    "llm_last_usage", default=None
+)
+_last_cost: contextvars.ContextVar[Decimal | None] = contextvars.ContextVar(
+    "llm_last_cost", default=None
+)
+
+
+def last_usage() -> LlmUsage | None:
+    """Token usage of the most recent LLM call made in this context (thread or
+    task), success or failure; None when the provider reported none or the
+    call failed before reaching the provider (every complete_* clears it
+    first, so it never shows an earlier call's numbers). Read it
+    right after a complete_* call to record tokens without changing that
+    function's return type."""
+    return _last_usage.get()
+
+
+def last_cost_usd() -> Decimal | None:
+    """Cost of the most recent call in this context (llm_pricing.cost_for),
+    None when there was no usage or the model has no price row."""
+    return _last_cost.get()
+
+
+def _reset_last() -> None:
+    """Clear last_usage() / last_cost_usd() at the start of every public
+    complete_* call, before anything can raise. Otherwise a call that fails
+    before reaching _guarded (not configured, bad arguments) would leave the
+    PREVIOUS call's numbers readable, and a caller recording spend in its
+    except path would bill that call twice. Queue threads are pooled, so a
+    stale value could also leak from one job into the next."""
+    _last_usage.set(None)
+    _last_cost.set(None)
+
+
+def _record_usage(usage: LlmUsage | None) -> None:
+    """Hand a transport's usage to the _UsageBox of the call in flight (no-op
+    outside _guarded, e.g. a transport called directly from a test)."""
+    box = _usage_box.get()
+    if box is not None:
+        box.usage = usage
+
+
+def _get(obj: Any, name: str) -> Any:
+    """Attribute or key `name` of an SDK object or a plain dict (tests and
+    some SDK versions hand back dicts), None when absent."""
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        return obj.get(name)
+    return getattr(obj, name, None)
+
+
+def _int(value: Any) -> int:
+    """A non-negative token count; anything that is not a number reads as 0."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    return max(0, int(value))
+
+
+def _openai_usage(resp: Any) -> LlmUsage | None:
+    """Responses API usage: input_tokens (incl. cached), output_tokens (incl.
+    reasoning) and the two detail counts. Never raises."""
+    try:
+        u = _get(resp, "usage")
+        if u is None:
+            return None
+        return LlmUsage(
+            input_tokens=_int(_get(u, "input_tokens")),
+            cached_tokens=_int(_get(_get(u, "input_tokens_details"), "cached_tokens")),
+            output_tokens=_int(_get(u, "output_tokens")),
+            reasoning_tokens=_int(_get(_get(u, "output_tokens_details"), "reasoning_tokens")),
+        )
+    except Exception:  # noqa: BLE001 - accounting must never break the call
+        return None
+
+
+def _anthropic_usage(resp: Any) -> LlmUsage | None:
+    """Messages API usage. Anthropic's input_tokens EXCLUDES cache reads and
+    cache writes, so they are added back to match the OpenAI convention
+    (input includes cached). Never raises."""
+    try:
+        u = _get(resp, "usage")
+        if u is None:
+            return None
+        cache_read = _int(_get(u, "cache_read_input_tokens"))
+        cache_write = _int(_get(u, "cache_creation_input_tokens"))
+        return LlmUsage(
+            input_tokens=_int(_get(u, "input_tokens")) + cache_read + cache_write,
+            cached_tokens=cache_read,
+            output_tokens=_int(_get(u, "output_tokens")),
+            reasoning_tokens=0,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _chat_usage(resp: Any) -> LlmUsage | None:
+    """Chat Completions usage (the self-hosted wire): prompt_tokens and
+    completion_tokens, plus the detail counts when the server sends them.
+    Never raises."""
+    try:
+        u = _get(resp, "usage")
+        if u is None:
+            return None
+        return LlmUsage(
+            input_tokens=_int(_get(u, "prompt_tokens")),
+            cached_tokens=_int(_get(_get(u, "prompt_tokens_details"), "cached_tokens")),
+            output_tokens=_int(_get(u, "completion_tokens")),
+            reasoning_tokens=_int(
+                _get(_get(u, "completion_tokens_details"), "reasoning_tokens")
+            ),
+        )
+    except Exception:  # noqa: BLE001
+        return None
+
+
 # ── Transports ───────────────────────────────────────────────────────────────
 
 
@@ -370,6 +662,7 @@ def _anthropic_call(
         system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
         messages=messages,
     )
+    _record_usage(_anthropic_usage(resp))
     return "".join(b.text for b in resp.content if b.type == "text")
 
 
@@ -396,10 +689,17 @@ def _openai_call(
             }
         }
     resp = client.responses.create(**kwargs)
+    _raise_if_incomplete(resp)
+    return resp.output_text or ""
+
+
+def _raise_if_incomplete(resp: Any) -> None:
+    """Record the usage (an incomplete response still bills) and raise
+    LlmBadOutput when the Responses API cut the answer off."""
+    _record_usage(_openai_usage(resp))
     if getattr(resp, "status", None) == "incomplete":
         reason = getattr(getattr(resp, "incomplete_details", None), "reason", "unknown")
         raise LlmBadOutput(f"Model response was cut off ({reason}). Retry the generation.")
-    return resp.output_text or ""
 
 
 def _merge_same_role(messages: list[dict]) -> list[dict]:
@@ -463,6 +763,7 @@ def _self_hosted_call(
             "timed out). Check that the model server is running, or contact "
             "your IT Director."
         ) from exc
+    _record_usage(_chat_usage(resp))
     choice = resp.choices[0]
     if json_output and getattr(choice, "finish_reason", None) == "length":
         raise LlmBadOutput("Model response was cut off (token limit). Retry the generation.")
@@ -476,33 +777,52 @@ def _guarded(feature: str, route: Route, s: Settings, fn: Callable[[], Any]) -> 
     """Run one provider call inside the concurrency gate and account for it.
 
     The gate caps in-flight calls per provider (LlmBusy on admission
-    timeout); every outcome lands in llm_call_log for the AI monitor."""
+    timeout); every outcome lands in llm_call_log for the AI monitor, with
+    the token usage the transport reported and its cost. The same numbers
+    are exposed through last_usage() / last_cost_usd()."""
     tier = llm_gate.current_tier()
     started = time.monotonic()
+    box = _UsageBox()
+    box_token = _usage_box.set(box)
     try:
         with llm_gate.slot(route.provider, tier, s):
             result = fn()
     except Exception as exc:
-        llm_gate.log_call(
-            feature=feature,
-            provider=route.provider,
-            model=route.model,
-            tier_name=tier,
-            ok=False,
-            error=exc,
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
+        _log(feature, route, tier, started, box.usage, exc)
         raise
+    finally:
+        _usage_box.reset(box_token)
+    _log(feature, route, tier, started, box.usage, None)
+    return result
+
+
+def _log(
+    feature: str,
+    route: Route,
+    tier: str,
+    started: float,
+    usage: LlmUsage | None,
+    error: Exception | None,
+) -> None:
+    """Publish the call's usage and cost to last_usage() / last_cost_usd()
+    and write its llm_call_log row (log_call never raises)."""
+    cost = llm_pricing.cost_for(route.model, usage) if usage is not None else None
+    _last_usage.set(usage)
+    _last_cost.set(cost)
     llm_gate.log_call(
         feature=feature,
         provider=route.provider,
         model=route.model,
         tier_name=tier,
-        ok=True,
-        error=None,
+        ok=error is None,
+        error=error,
         duration_ms=int((time.monotonic() - started) * 1000),
+        input_tokens=usage.input_tokens if usage else None,
+        cached_tokens=usage.cached_tokens if usage else None,
+        output_tokens=usage.output_tokens if usage else None,
+        reasoning_tokens=usage.reasoning_tokens if usage else None,
+        cost_usd=cost,
     )
-    return result
 
 
 def complete_text(
@@ -515,6 +835,7 @@ def complete_text(
     settings: Settings | None = None,
 ) -> str:
     """Plain-text completion. `messages` are neutral {role, content} turns."""
+    _reset_last()
     route, s = _require_route(feature, settings)
     client = _with_timeout(_client_for(route, s), timeout)
 
@@ -548,12 +869,23 @@ def complete_json(
     structured outputs; without one (the Claude extractions, whose prompts
     define the shape), the reply is tolerantly parsed. Domain validation stays
     with the caller."""
+    _reset_last()
     route, s = _require_route(feature, settings)
     client = _with_timeout(_client_for(route, s), timeout)
 
     def call() -> Any:
         if route.provider == "anthropic":
-            text = _anthropic_call(client, route.model, system, messages, max_tokens)
+            # Claude has no response_format: with a schema, the output
+            # contract goes into the system prompt (as the image and PDF
+            # variants already do), or the model answers in prose and the
+            # parse below fails every time.
+            text = _anthropic_call(
+                client,
+                route.model,
+                _schema_hint(system, schema) if schema is not None else system,
+                messages,
+                max_tokens,
+            )
         elif route.provider == "openai":
             input_ = messages if len(messages) > 1 else messages[0]["content"]
             text = _openai_call(
@@ -583,6 +915,7 @@ def complete_pdf_json(
     """Ask a question about a PDF, returning parsed JSON. 3rd-party models read
     the PDF natively; the self-hosted path extracts text locally (pypdf) so the
     file itself never leaves the server."""
+    _reset_last()
     route, s = _require_route(feature, settings)
     client = _with_timeout(_client_for(route, s), timeout)
 
@@ -672,6 +1005,7 @@ def complete_images_json(
     in self-hosted mode the served model must be vision-capable (a text-only
     server rejects the request and the error propagates normally).
     """
+    _reset_last()
     route, s = _require_route(feature, settings)
     client = _with_timeout(_client_for(route, s), timeout)
 
@@ -747,6 +1081,230 @@ def complete_images_json(
                 True,
             )
         return parse_json_loose(text)
+
+    return _guarded(feature, route, s, call)
+
+
+def _tool_output_item(out: dict) -> dict:
+    """One function_call_output input item. The API takes a string output;
+    dict/list outputs are JSON-encoded so callers can pass tool results as
+    data."""
+    call_id = str(out.get("call_id") or "").strip()
+    if not call_id:
+        raise ValueError("Every tool output needs the call_id of the tool call it answers.")
+    output = out.get("output", "")
+    if not isinstance(output, str):
+        output = json.dumps(output, default=str)
+    return {"type": "function_call_output", "call_id": call_id, "output": output}
+
+
+def _parse_tool_calls(resp: Any) -> list[dict]:
+    """The function_call items of a Responses result as
+    [{call_id, name, arguments: dict}], in output order."""
+    calls: list[dict] = []
+    for item in _get(resp, "output") or []:
+        if _get(item, "type") != "function_call":
+            continue
+        raw = _get(item, "arguments")
+        if isinstance(raw, dict):
+            args: Any = raw
+        else:
+            try:
+                args = json.loads(raw or "{}", strict=False)
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise LlmBadOutput(
+                    "Model returned a tool call with invalid arguments. Retry the generation."
+                ) from exc
+        if not isinstance(args, dict):
+            raise LlmBadOutput(
+                "Model returned a tool call with invalid arguments. Retry the generation."
+            )
+        call_id = str(_get(item, "call_id") or "").strip()
+        if not call_id:
+            # Unanswerable: a tool output must name the call it answers.
+            raise LlmBadOutput(
+                "Model returned a tool call without a call id. Retry the generation."
+            )
+        calls.append(
+            {
+                "call_id": call_id,
+                "name": str(_get(item, "name") or ""),
+                "arguments": args,
+            }
+        )
+    return calls
+
+
+# Incomplete reasons a retry of the same request will not fix.
+_PERMANENT_INCOMPLETE_REASONS = frozenset({"max_output_tokens", "content_filter"})
+
+
+def _refusal_text(resp: Any) -> str | None:
+    """The model's refusal, when a Responses message carries a refusal
+    content item (structured outputs answer a refusal that way, with an
+    empty output_text), else None."""
+    for item in _get(resp, "output") or []:
+        if _get(item, "type") != "message":
+            continue
+        for content in _get(item, "content") or []:
+            if _get(content, "type") == "refusal":
+                return str(_get(content, "refusal") or "").strip() or "refused"
+    return None
+
+
+def _raise_if_unusable_parts(resp: Any) -> None:
+    """complete_parts' version of _raise_if_incomplete: records usage (an
+    incomplete or refused response still bills), then raises
+    LlmBadOutputPermanent for a cut-off at the output limit, a content
+    filter stop or a refusal, and plain LlmBadOutput (retried) for any
+    other incomplete reason."""
+    _record_usage(_openai_usage(resp))
+    if getattr(resp, "status", None) == "incomplete":
+        reason = getattr(getattr(resp, "incomplete_details", None), "reason", None) or "unknown"
+        if reason == "max_output_tokens":
+            raise LlmBadOutputPermanent(
+                "Model response was cut off (max_output_tokens). Retrying the same "
+                "request will not help; raise the output token limit and run it again."
+            )
+        if reason in _PERMANENT_INCOMPLETE_REASONS:
+            raise LlmBadOutputPermanent(
+                f"Model response was stopped ({reason}). Retrying the same request "
+                "will not help; change the request and run it again."
+            )
+        raise LlmBadOutput(f"Model response was cut off ({reason}). Retry the generation.")
+    if _refusal_text(resp) is not None:
+        raise LlmBadOutputPermanent(
+            "The AI model declined to answer this request. Retrying the same "
+            "request will not help; change the request and run it again."
+        )
+
+
+def complete_parts(
+    feature: str,
+    *,
+    system: str,
+    parts: list[dict],
+    schema: dict | None = None,
+    schema_name: str = "response",
+    reasoning_effort: str | None = None,
+    tools: list[dict] | None = None,
+    previous_response_id: str | None = None,
+    tool_outputs: list[dict] | None = None,
+    max_tokens: int | None = None,
+    timeout: float | None = None,
+    settings: Settings | None = None,
+) -> LlmResult:
+    """One OpenAI Responses call with mixed content parts (AI Estimating).
+
+    `parts` are already in Responses shape and go out in order as one user
+    message: {"type": "input_text", "text"}, {"type": "input_image",
+    "image_url": data URL, "detail": "original" | "high" | "low"},
+    {"type": "input_file", "filename", "file_data": data URL}.
+
+    Tool loop: pass `tools` (Responses function tool definitions); the
+    result's tool_calls lists what the model asked for. Answer with
+    `tool_outputs=[{"call_id", "output"}]` plus `previous_response_id=` the
+    earlier result's response_id: the input is then the function_call_output
+    items (followed by a user message with `parts` when parts is not empty,
+    which is how rendered page images reach the model after a read_pages
+    tool call). `previous_response_id` without tool outputs continues a
+    conversation with a new user message.
+
+    With `schema` the answer uses strict structured outputs and `parsed`
+    holds the JSON object (None when the model answered with tool calls).
+    A cut-off answer raises LlmBadOutput like every other transport; a
+    cut-off at the output token limit, a content filter stop and a refusal
+    raise LlmBadOutputPermanent instead (bad_input, not retried), because
+    resending the same large request would fail the same way at full cost.
+
+    reasoning_effort defaults to PLANS_READER_REASONING_EFFORT for the
+    plans_* features, so every AI Estimating call carries the owner's
+    effort without each caller remembering to pass it.
+
+    Inside a queue job the lease is renewed right before the request (after
+    gate admission), so render time spent before the call and the gate wait
+    do not eat into the window the call itself needs. A lost lease (the
+    attempt is stale and another worker may own the job) refuses to send.
+
+    OpenAI provider only: an anthropic or self-hosted route raises
+    LlmNotConfigured. The client timeout defaults to
+    PLANS_READER_CALL_TIMEOUT_SECONDS (a 240k-token group can take minutes)
+    and the SDK's own retries are off: the job queue retries transient
+    failures, and one attempt has to fit inside the queue lease.
+    """
+    _reset_last()
+    base = llm_target.apply(settings or get_settings())
+    route = resolve(feature, base)
+    if route.provider != "openai":
+        raise LlmNotConfigured(
+            f"The '{feature}' feature needs the OpenAI provider for mixed content "
+            f"calls; it is routed to {route.provider}."
+        )
+    route, s = _require_route(feature, base)
+    if tool_outputs is not None and not previous_response_id:
+        raise ValueError("Tool outputs need the previous_response_id of the call that asked for them.")
+    if not tool_outputs and not parts:
+        raise ValueError("An AI request needs at least one content part.")
+
+    input_: list[dict] = []
+    if tool_outputs:
+        input_.extend(_tool_output_item(o) for o in tool_outputs)
+    if parts:
+        input_.append({"role": "user", "content": list(parts)})
+
+    kwargs: dict[str, Any] = {"model": route.model, "instructions": system, "input": input_}
+    if previous_response_id:
+        kwargs["previous_response_id"] = previous_response_id
+    if reasoning_effort is None and _FEATURES[feature].openai_only:
+        reasoning_effort = s.plans_reader_reasoning_effort
+    if reasoning_effort:
+        kwargs["reasoning"] = {"effort": reasoning_effort}
+    if tools:
+        kwargs["tools"] = list(tools)
+    if max_tokens is not None:
+        kwargs["max_output_tokens"] = max_tokens
+    if schema is not None:
+        kwargs["text"] = {
+            "format": {
+                "type": "json_schema",
+                "name": schema_name,
+                "schema": schema,
+                "strict": True,
+            }
+        }
+
+    effective_timeout = float(
+        timeout if timeout is not None else s.plans_reader_call_timeout_seconds
+    )
+    client = _client_for(route, s).with_options(timeout=effective_timeout, max_retries=0)
+
+    def call() -> LlmResult:
+        # Late import keeps the queue (and its Supabase client) out of this
+        # module's import graph; renew_lease is a no-op outside a queue job.
+        from app.services import llm_queue
+
+        if not llm_queue.renew_lease():
+            raise LlmLeaseLost(
+                "This AI Estimating attempt lost its queue lease (another worker "
+                "may own the job now), so the request was not sent."
+            )
+        resp = client.responses.create(**kwargs)
+        _raise_if_unusable_parts(resp)
+        usage = _openai_usage(resp)
+        text = getattr(resp, "output_text", None) or ""
+        tool_calls = _parse_tool_calls(resp)
+        parsed: Any = None
+        if schema is not None and not tool_calls:
+            parsed = parse_json_loose(text)
+        return LlmResult(
+            parsed=parsed,
+            text=text,
+            usage=usage or LlmUsage(),
+            response_id=str(getattr(resp, "id", None) or ""),
+            tool_calls=tool_calls,
+            model=route.model,
+            cost_usd=llm_pricing.cost_for(route.model, usage) if usage is not None else None,
+        )
 
     return _guarded(feature, route, s, call)
 

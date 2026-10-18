@@ -13,7 +13,7 @@ import jwt
 from fastapi import Depends, Header, HTTPException, Request, status
 
 from app.core.config import get_settings
-from app.core.features import SubApp, feature_404, is_enabled
+from app.core.features import SubApp, ai_estimating_allowed, feature_404, is_enabled
 from app.core.roles import (
     CP_READ_ROLES,
     CP_WRITE_ROLES,
@@ -259,6 +259,18 @@ async def require_internal(
     use `require_writer`, which additionally excludes the accountant.
     """
     if user.role not in INTERNAL_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
+    return user
+
+
+async def require_ai_estimating(
+    user: CurrentUser = Depends(get_current_user),
+) -> CurrentUser:
+    """Allow only the roles AI_ESTIMATING_STATE admits (core/features
+    ai_estimating_roles): live = every internal role, test = Executives and IT
+    Admins, dev = nobody. Sits beside require_internal on the AI Estimating
+    and AI spend routers; the PLANS_READER_ENABLED 404 runs before it."""
+    if not ai_estimating_allowed(user.role):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
     return user
 
