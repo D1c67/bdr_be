@@ -62,10 +62,67 @@ def test_flag_off_routes_to_third_party_vendors():
     assert llm.resolve("boq", s).provider == "anthropic"
     assert llm.resolve("boq", s).model == s.claude_boq_model
     assert llm.resolve("estimate", s).provider == "anthropic"
-    assert llm.resolve("email_match", s).provider == "openai"
-    assert llm.resolve("email_match", s).model == s.openai_email_match_model
     assert llm.resolve("proposal", s).provider == "openai"
     assert llm.resolve("aliases", s).model == s.openai_alias_model
+
+
+def test_email_match_is_self_hosted_only_on_the_live_box():
+    """The PM email filer runs on the Settings model server whatever the
+    master switch says, with that box's own model (pins ignored, "off"
+    honored)."""
+    assert llm._FEATURES["email_match"].self_hosted_only is True
+    s = _s(
+        openai_api_key="o",
+        self_hosted_llm_target="ec2b",
+        self_hosted_llm_ec2b_base_url="https://box-b.example/v1",
+        self_hosted_llm_ec2b_model="qwen-big",
+        self_hosted_email_match_model="pinned-small",
+    )
+    route = llm.resolve("email_match", s)
+    assert route.provider == "self_hosted"
+    assert route.model == "qwen-big"
+    assert route.base_url == "https://box-b.example/v1"
+    assert llm.is_configured("email_match", s) is True
+    # Flag on behaves the same.
+    on = s.model_copy(update={"full_self_hosted_llms_enabled": True})
+    assert llm.resolve("email_match", on).model == "qwen-big"
+    # "off" still disables it.
+    off = s.model_copy(update={"self_hosted_email_match_model": "off"})
+    assert llm.is_configured("email_match", off) is False
+    # No box set up = not configured (never falls back to OpenAI).
+    bare = _s(openai_api_key="o")
+    assert llm.resolve("email_match", bare).provider == "self_hosted"
+    assert llm.is_configured("email_match", bare) is False
+
+
+def test_email_match_follows_the_settings_override(monkeypatch):
+    from app.services import llm_target
+
+    s = _s(
+        self_hosted_llm_target="ec2",
+        self_hosted_llm_ec2_base_url="https://box-a.example/v1",
+        self_hosted_llm_ec2_model="small",
+        self_hosted_llm_ec2c_base_url="https://box-c.example/v1",
+        self_hosted_llm_ec2c_model="big",
+    )
+    assert llm.resolve("email_match", s).model == "small"
+    llm_target._set_memory("ec2c")
+    try:
+        route = llm.resolve("email_match", s)
+        assert (route.base_url, route.model) == ("https://box-c.example/v1", "big")
+    finally:
+        llm_target.reset()
+
+
+def test_email_match_refuses_plain_http_in_production_with_the_flag_off():
+    s = _s(
+        self_hosted_llm_local_base_url="http://10.0.0.5:8000/v1",
+        self_hosted_llm_local_model="m",
+    )
+    assert llm.is_configured("email_match", s) is True  # dev allows http
+    s = s.model_copy(update={"environment": "production"})  # skip the boot validators
+    assert s.is_production
+    assert llm.is_configured("email_match", s) is False
 
 
 def test_flag_on_routes_everything_self_hosted_even_with_3p_keys():
@@ -258,7 +315,7 @@ def test_unconfigured_errors_name_the_env_var():
 
 
 def test_self_hosted_calls_never_touch_third_party(monkeypatch):
-    s = _sh(self_hosted_email_match_model="local-m")
+    s = _sh(self_hosted_llm_local_model="local-m")
     client, calls = _fake_sh_client(content='{"candidate_index": 1, "confidence": 0.9}')
     monkeypatch.setattr(llm, "_client_for", lambda route, settings: client)
     monkeypatch.setattr(

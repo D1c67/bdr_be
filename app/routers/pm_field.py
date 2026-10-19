@@ -27,7 +27,7 @@ from app.models.schemas import (
     RFISendIn,
     RFIUpdate,
 )
-from app.services import pm_folders, rfi_email, rfi_pdf, storage
+from app.services import pm_folders, pm_rfi_sync, rfi_email, rfi_pdf, storage
 from app.services.notifications import audit
 from app.services.office_preview import ConversionError
 from app.services.pm import require_pm_project
@@ -247,10 +247,36 @@ _ABSENT = object()
 
 
 def _is_rfi_number_conflict(exc: Exception) -> bool:
+    # 0156 replaced the (project_id, rfi_number) constraint with the partial
+    # unique index rfis_project_rfi_number_uidx (imported Procore rows carry
+    # no number); the old name stays recognized for older databases.
     msg = str(exc)
-    return "rfis_project_id_rfi_number_key" in msg or (
-        "23505" in msg and "rfi_number" in msg
+    return (
+        "rfis_project_rfi_number_uidx" in msg
+        or "rfis_project_id_rfi_number_key" in msg
+        or ("23505" in msg and "rfi_number" in msg)
     )
+
+
+def _reject_read_only(row: dict) -> None:
+    """Imported Procore RFIs (0156, docs/PM_RFI_SYNC.md) are read-only in
+    BDR: the GC's Procore is the record. Linked G3 rows stay 'internal' and
+    keep every action."""
+    if (row.get("source") or "internal") == "procore":
+        raise HTTPException(status.HTTP_409_CONFLICT, pm_rfi_sync.READ_ONLY_DETAIL)
+
+
+def _rfi_sort_key(row: dict) -> tuple:
+    """G3's own RFIs by number first, then imported Procore RFIs by their
+    Procore number (natural sort) and revision."""
+    if (row.get("source") or "internal") == "procore":
+        return (
+            1,
+            0,
+            pm_rfi_sync.natural_key(row.get("external_number")),
+            pm_rfi_sync._rev_int(row.get("external_revision")),
+        )
+    return (0, row.get("rfi_number") or 0, (), 0)
 
 
 def _next_rfi_number(project_id: str) -> int:
@@ -492,6 +518,10 @@ def _enrich_rfis(
     last_sends = _latest_sends(rfi_ids)
 
     for r in rows:
+        # Procore's compact record is for the sync and debugging, not the UI.
+        r.pop("external_raw", None)
+        r["source"] = r.get("source") or "internal"
+        r["read_only"] = r["source"] == "procore"
         r["attachments"] = by_rfi.get(r.get("id"), [])
         r["answer_attachments"] = by_rfi_answer.get(r.get("id"), [])
         r["assigned_gc_name"] = gc_names.get(r.get("assigned_gc_id"))
@@ -513,6 +543,7 @@ def list_rfis(project_id: str, _: CurrentUser = Depends(require_pm_read)):
         .order("rfi_number")
         .execute()
     ).data or []
+    rows.sort(key=_rfi_sort_key)
     return _enrich_rfis(project_id, rows)
 
 
@@ -568,6 +599,7 @@ def update_rfi(
 ):
     require_pm_project(project_id)
     current = _row_or_404("rfis", rfi_id, project_id, "RFI")
+    _reject_read_only(current)
     patch = _patch_of(body)
     _reject_cleared(
         patch, "subject", "question", "status", "priority",
@@ -657,6 +689,7 @@ def close_rfi(
     """
     require_pm_project(project_id)
     current = _row_or_404("rfis", rfi_id, project_id, "RFI")
+    _reject_read_only(current)
     if current.get("status") == "closed":
         raise HTTPException(status.HTTP_409_CONFLICT, "This RFI is already closed")
 
@@ -749,6 +782,7 @@ def send_rfi(
     """
     require_pm_project(project_id)
     current = _row_or_404("rfis", rfi_id, project_id, "RFI")
+    _reject_read_only(current)
 
     gc_id = current.get("assigned_gc_id")
     if not gc_id:
@@ -870,6 +904,7 @@ def mark_rfi_sent(
     email is sent; the log's send status simply reflects the external delivery."""
     require_pm_project(project_id)
     current = _row_or_404("rfis", rfi_id, project_id, "RFI")
+    _reject_read_only(current)
 
     get_supabase().table("rfi_sends").insert(
         {
@@ -912,6 +947,7 @@ def delete_rfi(
 ):
     require_pm_project(project_id)
     row = _row_or_404("rfis", rfi_id, project_id, "RFI")
+    _reject_read_only(row)
     # Numbers are NOT re-sequenced: a deleted RFI leaves a gap, keeping every
     # number ever referenced in correspondence unambiguous.
     get_supabase().table("rfis").delete().eq("id", rfi_id).eq(

@@ -150,6 +150,7 @@ def test_all_sub_apps_enabled_by_default():
         "rfp_buildingconnected": False,
         "rfp_testing": False,
         "ai_estimating": True,
+        "pm_rfi_sync": False,
     }
     # The field default (not the pinned env) is what production inherits.
     assert Settings.model_fields["plans_reader_enabled"].default is False

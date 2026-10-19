@@ -15,11 +15,18 @@ no duplicate LLM spend).
 
 Rounds:
   R1  conversation map lookup (email_conversation_projects) — free.
-  R2  deterministic subject match against ALL projects (email_match.r2_match).
-  R3  OpenAI subject-only match with a confidence threshold; below-threshold
-      guesses are stored as suggested_project_id for the triage UI. When the
-      provider is out of credits, attempts are NOT burned: the row waits
-      (next_attempt_at) and IT_ADMIN is notified once (deduped).
+  R2  subject match against ALL projects (email_match.r2_score): the exact
+      job-number / name rules first, then a fuzzy name score built on the RFP
+      matcher's normalization. The top candidates and their similarity are
+      stored in match_candidates for the triage UI; a fuzzy best assigns only
+      when it is high, clear of the runner-up and conflict-free.
+  R3  LLM match on the subject, sender and body excerpt, on the self-hosted
+      box chosen in Settings > AI model server (llm feature email_match is
+      self_hosted_only), with a confidence threshold; below-threshold guesses
+      are stored as suggested_project_id for the triage UI. When the provider
+      is out of credits or the box is unreachable, attempts are NOT burned:
+      the row waits (next_attempt_at); out of credits also tells IT_ADMIN
+      once (deduped).
 
 Every terminal write also stamps `pipeline_round` (fetch/r1/r2/r3/manual/
 retro/rescan) — the step that actually decided the email. `status` can't say
@@ -686,41 +693,105 @@ def _record_round(sb, email: dict, round_: str, outcome: str, detail: dict | Non
     )
 
 
+_R2_OUTCOME = {
+    email_match.MATCH_KIND_NUMBER: "found a project number in the subject",
+    email_match.MATCH_KIND_NAME: "found a project name in the subject",
+    email_match.MATCH_KIND_FUZZY: "fuzzy-matched a project name in the subject",
+}
+
+
 def _step_r2(sb, email: dict) -> str | None:
-    """Deterministic subject match against all projects."""
+    """Subject match against all projects: exact rules, then fuzzy."""
+    settings = get_settings()
     projects = _all_projects(sb)
-    project_id = email_match.r2_match(email.get("subject") or "", projects)
+    result = email_match.r2_score(email.get("subject") or "", projects, settings)
     _record_round(
         sb, email, "r2",
-        "found a project number in the subject" if project_id else "no project number in the subject",
-        {"project_id": project_id, "subject": email.get("subject")},
+        _R2_OUTCOME.get(result.kind or "", "no confident project match in the subject"),
+        {"project_id": result.project_id, "subject": email.get("subject"),
+         "kind": result.kind, "similarity": result.similarity,
+         "candidates": result.candidates},
     )
-    if project_id:
+    if result.project_id:
         outcome = _assign(
-            sb, email, project_id, matched_by="subject", expected_status="id_r2"
+            sb, email, result.project_id, matched_by="subject", expected_status="id_r2",
+            confidence=result.similarity, extra={"match_candidates": result.candidates},
         )
         return "processed" if outcome else None
-    return "id_r3" if _cas(sb, email["id"], "id_r2", {"status": "id_r3"}) else None
+    return "id_r3" if _cas(
+        sb, email["id"], "id_r2", {"status": "id_r3", "match_candidates": result.candidates}
+    ) else None
+
+
+def _r2_fallback_suggestion(email: dict, settings) -> dict:
+    """Round 2's best near-miss as the triage suggestion, used when R3 has
+    nothing to offer (no model, or the model picked no candidate)."""
+    candidates = _email_candidates(email)
+    if not candidates:
+        return {}
+    best = candidates[0]
+    sim = _safe_float(best.get("similarity"))
+    if not best.get("project_id") or sim < settings.email_match_fuzzy_suggest_floor:
+        return {}
+    return {"suggested_project_id": best["project_id"], "suggested_confidence": round(sim, 3)}
+
+
+def _email_candidates(email: dict) -> list[dict]:
+    value = email.get("match_candidates")
+    return [c for c in value if isinstance(c, dict)] if isinstance(value, list) else []
+
+
+def _email_content(sb, email_id: str) -> dict:
+    """The body and sender for the R3 prompt. Read per email (not in the sweep
+    select) because bodies can be up to EMAIL_BODY_MAX_CHARS each."""
+    rows = (
+        sb.table("ingested_emails")
+        .select("body_text, body_preview, from_name, from_address, match_candidates")
+        .eq("id", email_id)
+        .limit(1)
+        .execute()
+    ).data or []
+    return rows[0] if rows else {}
 
 
 def _step_r3(sb, email: dict) -> tuple[str | None, bool]:
-    """LLM subject-only match. Returns (next_status, llm_down)."""
+    """LLM match on subject + sender + body. Returns (next_status, llm_down)."""
     settings = get_settings()
+    content = _email_content(sb, email["id"])
+    email = {**email, "match_candidates": content.get("match_candidates")}
     if not llm.is_configured("email_match", settings):
         # R3 disabled without a configured model — finalize as Unknown; manual
         # triage (and the R1 learn-back it feeds) still works.
         _record_round(sb, email, "r3", "skipped: no model configured")
-        return _finalize_r3(sb, email, {}), False
+        return _finalize_r3(sb, email, _r2_fallback_suggestion(email, settings)), False
 
     projects = _all_projects(sb)
     candidates = email_match.prefilter_candidates(
         email.get("subject") or "", projects, settings.email_match_llm_max_candidates
     )
+    similarity = {
+        c["project_id"]: c.get("similarity") for c in _email_candidates(email) if c.get("project_id")
+    }
     try:
-        result = openai_text.match_subject_to_project(
-            email.get("subject") or "", candidates
+        result = openai_text.match_email_to_project(
+            email.get("subject") or "",
+            content.get("body_text") or content.get("body_preview") or "",
+            candidates,
+            from_name=content.get("from_name"),
+            from_address=content.get("from_address") or email.get("from_address"),
+            similarity=similarity,
         )
     except Exception as exc:  # noqa: BLE001
+        if isinstance(exc, llm.SelfHostedUnreachable):
+            # The Settings box is down or switching: wait for it without
+            # burning attempts (the model-status bar already shows the outage).
+            _cas(sb, email["id"], "id_r3", {
+                "error": user_message(exc, llm.active_model("email_match", settings)),
+                "next_attempt_at": (
+                    _now() + timedelta(seconds=_BACKOFF_BASE_SECONDS)
+                ).isoformat(),
+            })
+            return None, True
         if is_out_of_tokens(exc):
             # Don't burn attempts on a dead account: wait out the outage and
             # tell IT once (deduped). The row resumes when credits return.
@@ -773,6 +844,8 @@ def _step_r3(sb, email: dict) -> tuple[str | None, bool]:
     if valid:
         fields["suggested_project_id"] = candidates[idx]["id"]
         fields["suggested_confidence"] = round(confidence, 3)
+    else:
+        fields.update(_r2_fallback_suggestion(email, settings))
     return _finalize_r3(sb, email, fields), False
 
 
@@ -848,6 +921,7 @@ def _assign(
     confidence: float | None = None,
     model: str | None = None,
     update_map: bool = True,
+    extra: dict | None = None,
 ) -> bool:
     """Automatic assignment. The write is guarded on BOTH the expected status
     and project_id still being null; when the guard misses because a manual
@@ -866,6 +940,7 @@ def _assign(
         # The live round is the step we were on — never 'retro'/'rescan',
         # which assign outside the sweep.
         "pipeline_round": _ROUND_BY_STATUS.get(expected_status),
+        **(extra or {}),
     }
     if _cas(sb, email["id"], expected_status, fields, only_unassigned=True):
         if update_map and email.get("conversation_id"):
@@ -1176,8 +1251,19 @@ def _rescan_unknown_for_project(project_id: str) -> None:
     for email in unknowns:
         # Match against the FULL book: a subject naming two projects must stay
         # ambiguous here exactly as it would in the live R2 round.
-        if email_match.r2_match(email.get("subject") or "", projects) == project_id:
-            _rescan_assign(sb, email, project_id, matched_by="subject")
+        subject = email.get("subject") or ""
+        # Cheap gate first (the Unknown pool times the whole book is a lot of
+        # fuzzy scoring): only a subject that could pick THIS project gets the
+        # full round 2 run.
+        if not email_match.could_match(subject, project, settings):
+            remainder.append(email)
+            continue
+        result = email_match.r2_score(subject, projects, settings)
+        if result.project_id == project_id:
+            _rescan_assign(
+                sb, email, project_id, matched_by="subject",
+                confidence=result.similarity, candidates=result.candidates,
+            )
         else:
             remainder.append(email)
 
@@ -1198,9 +1284,14 @@ def _rescan_unknown_for_project(project_id: str) -> None:
         if at < cutoff:
             continue
         calls += 1
+        content = _email_content(sb, email["id"])
         try:
-            result = openai_text.confirm_subject_matches_project(
-                email.get("subject") or "", project
+            result = openai_text.confirm_email_matches_project(
+                email.get("subject") or "",
+                content.get("body_text") or content.get("body_preview") or "",
+                project,
+                from_name=content.get("from_name"),
+                from_address=content.get("from_address"),
             )
         except Exception:  # noqa: BLE001 — incl. out-of-credits: stop quietly,
             # the emails stay Unknown and manual assign remains the fallback.
@@ -1226,6 +1317,7 @@ def _rescan_assign(
     matched_by: str,
     confidence: float | None = None,
     model: str | None = None,
+    candidates: list[dict] | None = None,
 ) -> None:
     """Assign an Unknown-pool email, guarded so a concurrent manual assignment
     (project_id no longer null) is never overwritten."""
@@ -1233,6 +1325,7 @@ def _rescan_assign(
         sb.table("ingested_emails")
         .update(
             {
+                **({"match_candidates": candidates} if candidates is not None else {}),
                 "project_id": project_id,
                 "matched_by": matched_by,
                 "match_confidence": round(confidence, 3) if confidence is not None else None,

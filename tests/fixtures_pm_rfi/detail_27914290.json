@@ -1,0 +1,146 @@
+{
+ "id": 27914290,
+ "link": "https://app.procore.com/3167322/project/rfi/show/27914290",
+ "project_stage": null,
+ "assignees": [
+  {
+   "id": 11478812,
+   "name": "Nenette Inovero (Cobblestone Construction)",
+   "locale": null,
+   "login": "ninovero@example.com",
+   "response_required": false
+  }
+ ],
+ "initiated_at": "2026-10-09T16:09:25Z",
+ "ball_in_courts": [],
+ "connect_export_origin": null,
+ "cost_impact": {
+  "status": "",
+  "value": null
+ },
+ "custom_fields": {},
+ "due_date": "2026-10-12",
+ "full_number": "Const-198",
+ "number": "Const-198",
+ "prefix": null,
+ "priority": {
+  "name": null,
+  "value": null
+ },
+ "proposed_solution": null,
+ "private": false,
+ "received_from": {
+  "id": 15263129,
+  "login": "aupadhyay@example.com",
+  "name": "Abhishek Upadhyay"
+ },
+ "rfi_manager": {
+  "id": 14819329,
+  "login": "amead@example.com",
+  "name": "Ameilia Mead"
+ },
+ "schedule_impact": {
+  "status": "yes_unknown",
+  "value": null
+ },
+ "status": "closed",
+ "subject": "EF3 Circuit Clarification",
+ "time_resolved": "2026-10-15T21:25:15Z",
+ "translated_status": "Closed",
+ "created_at": "2026-10-07T21:49:55Z",
+ "updated_at": "2026-10-15T21:25:15Z",
+ "revision": "0",
+ "current_revision": true,
+ "source_rfi_header_id": 27914290,
+ "has_revisions": false,
+ "created_by": {
+  "id": 15263129,
+  "locale": null,
+  "login": "aupadhyay@example.com",
+  "name": "Abhishek Upadhyay",
+  "vendor": {
+   "id": 30658288,
+   "name": "G3 Electrical"
+  }
+ },
+ "assignee": {
+  "id": 11478812,
+  "name": "Nenette Inovero (Cobblestone Construction)",
+  "locale": null,
+  "login": "ninovero@example.com"
+ },
+ "ball_in_court": null,
+ "reference": "Please see the attached.",
+ "location_id": null,
+ "questions": [
+  {
+   "id": 27919283,
+   "created_by": "Abhishek Upadhyay",
+   "plain_text_body": "The panel schedule indicates a circuit for EF-2, but no separate circuit is shown for EF-3.\u00a0Please confirm whether EF-3 is intended to be connected to the same circuit as EF-2, or if a\u00a0separate circuit for EF-3 is required.\u00a0Please clarify whether EF-3 is error and supposed to be EF-2?\u00a0",
+   "attachments": [
+    {
+     "id": 6544308044,
+     "attached_to_item_id": null,
+     "attached_to_item_type": null,
+     "can_be_viewed": true,
+     "filename": "RFI 040 - EF3 Circuit Clarification.pdf",
+     "name": "RFI 040 - EF3 Circuit Clarification.pdf",
+     "url": "https://storage.procore.com/api/v5/files/us-east-1/pro-core.com/3336-c/2237613-p/01M4C5FMTMT4Z0S1WBYQ0TZRXM?companyId=6333&projectId=3167322&ctx=dG9vbF9pdGVtX2lkPTI3OTE0MjkwLHRvb2xfbmFtZT1yZmlzLHRvb2xfdGFiX25hbWU9Z2VuZXJhbA&sig=test",
+     "viewable": false
+    }
+   ],
+   "answers": [
+    {
+     "id": 42251078,
+     "answer_date": "2026-10-15T21:24:39Z",
+     "rich_text_body": "<p>Kamaile Makua, 10/14/26</p><p>KME</p><p>Per\u00a0MEP\u00a0response,\u00a0the\u00a0circuit\u00a02B-19\u00a0is\u00a0meant\u00a0to\u00a0serve\u00a0both\u00a0EF-2\u00a0and\u00a0EF-3.\u00a0</p><p>\u00a0</p>",
+     "plain_text_body": "Kamaile Makua, 10/14/26KMEPer\u00a0MEP\u00a0response,\u00a0the\u00a0circuit\u00a02B-19\u00a0is\u00a0meant\u00a0to\u00a0serve\u00a0both\u00a0EF-2\u00a0and\u00a0EF-3.\u00a0\u00a0",
+     "attachments": [
+      {
+       "id": 6563766164,
+       "can_be_viewed": true,
+       "filename": "Response RFI#-198-EF3_Circuit_Clar.pdf",
+       "name": "Response RFI#-198-EF3_Circuit_Clar.pdf",
+       "url": "https://storage.procore.com/api/v5/files/us-east-1/pro-core.com/3336-c/2237613-p/01M50Q7RJY9721XEFBRFWQF564?companyId=6333&projectId=3167322&ctx=dG9vbF9pdGVtX2lkPTI3OTE0MjkwLHRvb2xfbmFtZT1yZmlzLHRvb2xfdGFiX25hbWU9Z2VuZXJhbA&sig=test",
+       "viewable": false
+      }
+     ],
+     "created_by": "Nenette Inovero (Cobblestone Construction)",
+     "created_by_id": 11478812,
+     "official": false
+    }
+   ],
+   "question_date": "2026-10-07T21:49:55Z",
+   "rich_text_body": "<p>The panel schedule indicates a circuit for EF-2, but no separate circuit is shown for EF-3.\u00a0<br>Please confirm whether EF-3 is intended to be connected to the same circuit as EF-2, or if a\u00a0<br>separate circuit for EF-3 is required.\u00a0<br><br>Please clarify whether EF-3 is error and supposed to be EF-2?\u00a0</p>"
+  }
+ ],
+ "accepted": true,
+ "ball_in_court_role": null,
+ "change_events": [],
+ "correspondences": [],
+ "instructions": [],
+ "coordination_issues": [],
+ "custom_textfield_1": {
+  "label": null,
+  "value": ""
+ },
+ "custom_textfield_2": {
+  "label": null,
+  "value": ""
+ },
+ "specification_section": null,
+ "title": "EF3 Circuit Clarification",
+ "previous_revision_id": null,
+ "connect_exported_project_ids": [],
+ "linked_external_rfis": [],
+ "draft": false,
+ "drawing_ids": [],
+ "drawing_number": "E2.02",
+ "cost_code": null,
+ "location": null,
+ "sub_job": null,
+ "responsible_contractor": {
+  "id": 30658288,
+  "name": "G3 Electrical"
+ }
+}

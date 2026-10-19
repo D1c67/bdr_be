@@ -153,6 +153,21 @@ async def lifespan(_: FastAPI):
             "rfp portal: the scheduler is not running (no portal account or APS app "
             "configured, or the LLM queue is off); the /rfp-portal routes still answer"
         )
+    # PM RFI sync from the GC's Procore (docs/PM_RFI_SYNC.md): the daily
+    # 06:30 Pacific slot, the email trigger scan and the run queue, every
+    # worker (the daily unique index is the slot ledger and runs are claimed
+    # under a lease, so the workers stay disjoint). Needs PM_ENABLED and
+    # PM_RFI_SYNC_ENABLED; without Procore credentials runs fail visibly.
+    pm_rfi_sync_task: asyncio.Task | None = None
+    if settings.pm_rfi_sync_active and settings.supabase_url:
+        from app.services import pm_rfi_sync as pm_rfi_sync_service
+
+        if not settings.procore_configured:
+            logging.getLogger(__name__).warning(
+                "pm rfi sync: enabled but PROCORE_LOGIN_EMAIL / PROCORE_LOGIN_PASSWORD are not "
+                "set; runs will fail until they are"
+            )
+        pm_rfi_sync_task = asyncio.create_task(pm_rfi_sync_service.polling_loop())
     # AI model health — keeps the sidebar's Model status indicator warm by
     # probing the active LLM pool (see services/llm_health). No sub-app gate:
     # the features it covers span Bidding and PM. Each worker polls its own
@@ -235,6 +250,7 @@ async def lifespan(_: FastAPI):
     for task in (
         poll_task, reminder_task, digest_task, email_task, rfp_email_task,
         rfp_portal_task, llm_health_task, llm_queue_task, call_in_task, llm_target_task,
+        pm_rfi_sync_task,
     ):
         if task:
             task.cancel()
@@ -563,6 +579,7 @@ from app.routers import (  # noqa: E402
     pm_field,
     pm_financials,
     pm_materials,
+    pm_rfi_sync,
     pm_submittals,
     pricing,
     projects,
@@ -716,6 +733,9 @@ app.include_router(pm_field.router, dependencies=_PM)
 app.include_router(pm_documents.router, dependencies=_PM)
 app.include_router(pm_materials.router, dependencies=_PM)
 app.include_router(pm_submittals.router, dependencies=_PM)
+# PM RFI sync from the GC's Procore (docs/PM_RFI_SYNC.md): also gated on the
+# router itself by PM_RFI_SYNC_ENABLED.
+app.include_router(pm_rfi_sync.router, dependencies=_PM)
 
 # Certified Payroll — everything under /payroll. (Likewise mirrored in
 # require_cp_read/require_cp_write.)

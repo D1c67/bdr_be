@@ -1,0 +1,497 @@
+[
+ {
+  "id": 27914290,
+  "assignee": {
+   "id": 11478812,
+   "locale": null,
+   "login": "ninovero@example.com",
+   "name": "Nenette Inovero (Cobblestone Construction)"
+  },
+  "assignees": [
+   {
+    "id": 11478812,
+    "locale": null,
+    "login": "ninovero@example.com",
+    "name": "Nenette Inovero (Cobblestone Construction)",
+    "response_required": false
+   }
+  ],
+  "ball_in_court": null,
+  "ball_in_courts": [],
+  "connect_export_origin": null,
+  "cost_code": null,
+  "cost_impact": {
+   "status": "",
+   "value": null
+  },
+  "created_at": "2026-10-07T21:49:55Z",
+  "created_by": {
+   "id": 15263129,
+   "login": "aupadhyay@example.com",
+   "name": "Abhishek Upadhyay"
+  },
+  "current_revision": true,
+  "custom_fields": {},
+  "due_date": "2026-10-12",
+  "full_number": "Const-198",
+  "has_revisions": false,
+  "initiated_at": "2026-10-09T16:09:25Z",
+  "link": "https://app.procore.com/3167322/project/rfi/show/27914290",
+  "location": null,
+  "location_id": null,
+  "number": "Const-198",
+  "prefix": null,
+  "priority": {
+   "name": null,
+   "value": null
+  },
+  "private": false,
+  "project_stage": null,
+  "proposed_solution": null,
+  "questions": [
+   {
+    "id": 27919283,
+    "body": "<p>The panel schedule indicates a circuit for EF-2, but no separate circuit is shown for EF-3.\u00a0<br>Please confirm whether EF-3 is intended to be connected to the same circuit as EF-2, or if a\u00a0<br>sepa"
+   }
+  ],
+  "received_from": {
+   "id": 15263129,
+   "login": "aupadhyay@example.com",
+   "name": "Abhishek Upadhyay"
+  },
+  "reference": "Please see the attached.",
+  "responsible_contractor": {
+   "id": 30658288,
+   "name": "G3 Electrical"
+  },
+  "revision": "0",
+  "rfi_manager": {
+   "id": 14819329,
+   "login": "amead@example.com",
+   "name": "Ameilia Mead"
+  },
+  "schedule_impact": {
+   "status": "yes_unknown",
+   "value": null
+  },
+  "source_rfi_header_id": 27914290,
+  "specification_section_id": null,
+  "status": "closed",
+  "sub_job": null,
+  "subject": "EF3 Circuit Clarification",
+  "time_resolved": "2026-10-15T21:25:15Z",
+  "translated_status": "Closed",
+  "updated_at": "2026-10-15T21:25:15Z"
+ },
+ {
+  "id": 27699412,
+  "assignee": {
+   "id": 14819329,
+   "locale": null,
+   "login": "amead@example.com",
+   "name": "Ameilia Mead (Cobblestone Construction)"
+  },
+  "assignees": [
+   {
+    "id": 14819329,
+    "locale": null,
+    "login": "amead@example.com",
+    "name": "Ameilia Mead (Cobblestone Construction)",
+    "response_required": false
+   }
+  ],
+  "ball_in_court": {
+   "id": 11478812,
+   "locale": null,
+   "login": "ninovero@example.com",
+   "name": "Nenette Inovero (Cobblestone Construction)"
+  },
+  "ball_in_courts": [
+   {
+    "id": 11478812,
+    "locale": null,
+    "login": "ninovero@example.com",
+    "name": "Nenette Inovero (Cobblestone Construction)"
+   }
+  ],
+  "connect_export_origin": null,
+  "cost_code": null,
+  "cost_impact": {
+   "status": "tbd",
+   "value": null
+  },
+  "created_at": "2026-09-16T14:26:56Z",
+  "created_by": {
+   "id": 7733944,
+   "login": "gsheets@example.com",
+   "name": "Gary Sheets"
+  },
+  "current_revision": true,
+  "custom_fields": {},
+  "due_date": "2026-09-20",
+  "full_number": "Const-189.1",
+  "has_revisions": false,
+  "initiated_at": "2026-09-17T07:09:39Z",
+  "link": "https://app.procore.com/3167322/project/rfi/show/27699412",
+  "location": {
+   "id": 33249695,
+   "created_at": "2025-05-29T14:00:32Z",
+   "name": "Job Site - 640 W Lake Mead",
+   "node_name": "Job Site - 640 W Lake Mead",
+   "parent_id": null,
+   "updated_at": "2025-05-29T14:00:32Z"
+  },
+  "location_id": 33249695,
+  "number": "Const-189.1",
+  "prefix": null,
+  "priority": {
+   "name": null,
+   "value": null
+  },
+  "private": false,
+  "project_stage": {
+   "id": 3,
+   "default_stage": true,
+   "dependent_projects": 0,
+   "formatted_name": "Course of Construction",
+   "formatted_parent_name": null,
+   "is_concept_stage": false,
+   "name": "Course of Construction",
+   "parent_id": null,
+   "procore_category": false
+  },
+  "proposed_solution": "",
+  "questions": [
+   {
+    "id": 27704405,
+    "body": "<p>Per submittal 08 41 26-01 page 6 of 261 redlines, interior glass doors 206 and 207 are marked up to bot receive floor closers and top pivots. This will require the floor closure to be recessed into"
+   }
+  ],
+  "received_from": {
+   "id": 7733944,
+   "login": "gsheets@example.com",
+   "name": "Gary Sheets"
+  },
+  "reference": "",
+  "responsible_contractor": {
+   "id": 3680431,
+   "name": "Cobblestone Construction"
+  },
+  "revision": "0",
+  "rfi_manager": {
+   "id": 11478812,
+   "login": "ninovero@example.com",
+   "name": "Nenette Inovero"
+  },
+  "schedule_impact": {
+   "status": "tbd",
+   "value": null
+  },
+  "source_rfi_header_id": 27699412,
+  "specification_section_id": 39791723,
+  "status": "open",
+  "sub_job": null,
+  "subject": "Floor closers for 206 and 207",
+  "time_resolved": null,
+  "translated_status": "Open",
+  "updated_at": "2026-10-15T22:07:36Z"
+ },
+ {
+  "id": 25803224,
+  "assignee": {
+   "id": 11478812,
+   "locale": null,
+   "login": "ninovero@example.com",
+   "name": "Nenette Inovero (Cobblestone Construction)"
+  },
+  "assignees": [
+   {
+    "id": 11478812,
+    "locale": null,
+    "login": "ninovero@example.com",
+    "name": "Nenette Inovero (Cobblestone Construction)",
+    "response_required": true
+   }
+  ],
+  "ball_in_court": null,
+  "ball_in_courts": [],
+  "connect_export_origin": null,
+  "cost_code": null,
+  "cost_impact": {
+   "status": "tbd",
+   "value": null
+  },
+  "created_at": "2026-03-04T15:40:52Z",
+  "created_by": {
+   "id": 14819329,
+   "login": "amead@example.com",
+   "name": "Ameilia Mead"
+  },
+  "current_revision": true,
+  "custom_fields": {},
+  "due_date": "2026-03-07",
+  "full_number": "Const-97",
+  "has_revisions": true,
+  "initiated_at": "2026-03-04T15:40:52Z",
+  "link": "https://app.procore.com/3167322/project/rfi/show/25803224",
+  "location": {
+   "id": 33249695,
+   "created_at": "2025-05-29T14:00:32Z",
+   "name": "Job Site - 640 W Lake Mead",
+   "node_name": "Job Site - 640 W Lake Mead",
+   "parent_id": null,
+   "updated_at": "2025-05-29T14:00:32Z"
+  },
+  "location_id": 33249695,
+  "number": "Const-97",
+  "prefix": null,
+  "priority": {
+   "name": null,
+   "value": null
+  },
+  "private": false,
+  "project_stage": {
+   "id": 3,
+   "default_stage": true,
+   "dependent_projects": 0,
+   "formatted_name": "Course of Construction",
+   "formatted_parent_name": null,
+   "is_concept_stage": false,
+   "name": "Course of Construction",
+   "parent_id": null,
+   "procore_category": false
+  },
+  "proposed_solution": "",
+  "questions": [
+   {
+    "id": 25808217,
+    "body": "<p>Please reference the response to RFI-097.\u00a0 Based on the response to the RFI, please confirm if egress signage is required at the Level 2 Conference Room and Computer Lab.</p>\n<p>\u00a0</p>\n<p>Additional"
+   }
+  ],
+  "received_from": {
+   "id": 14819329,
+   "login": "amead@example.com",
+   "name": "Ameilia Mead"
+  },
+  "reference": "",
+  "responsible_contractor": {
+   "id": 3680431,
+   "name": "Cobblestone Construction"
+  },
+  "revision": "1",
+  "rfi_manager": {
+   "id": 14819329,
+   "login": "amead@example.com",
+   "name": "Ameilia Mead"
+  },
+  "schedule_impact": {
+   "status": "tbd",
+   "value": null
+  },
+  "source_rfi_header_id": 25721337,
+  "specification_section_id": null,
+  "status": "closed",
+  "sub_job": null,
+  "subject": "Egress Signage Clarification - Follow Up ",
+  "time_resolved": "2026-04-01T15:02:18Z",
+  "translated_status": "Closed",
+  "updated_at": "2026-04-01T15:02:18Z"
+ },
+ {
+  "id": 25721337,
+  "assignee": {
+   "id": 13402907,
+   "locale": null,
+   "login": "nevans@example.com",
+   "name": "Nicole Evans (Cobblestone Construction)"
+  },
+  "assignees": [
+   {
+    "id": 11478812,
+    "locale": null,
+    "login": "ninovero@example.com",
+    "name": "Nenette Inovero (Cobblestone Construction)",
+    "response_required": true
+   },
+   {
+    "id": 13402907,
+    "locale": null,
+    "login": "nevans@example.com",
+    "name": "Nicole Evans (Cobblestone Construction)",
+    "response_required": false
+   }
+  ],
+  "ball_in_court": null,
+  "ball_in_courts": [],
+  "connect_export_origin": null,
+  "cost_code": null,
+  "cost_impact": {
+   "status": "tbd",
+   "value": null
+  },
+  "created_at": "2026-02-24T18:00:40Z",
+  "created_by": {
+   "id": 14819329,
+   "login": "amead@example.com",
+   "name": "Ameilia Mead"
+  },
+  "current_revision": false,
+  "custom_fields": {},
+  "due_date": "2026-02-27",
+  "full_number": "Const-97",
+  "has_revisions": true,
+  "initiated_at": "2026-02-24T18:16:18Z",
+  "link": "https://app.procore.com/3167322/project/rfi/show/25721337",
+  "location": null,
+  "location_id": null,
+  "number": "Const-97",
+  "prefix": null,
+  "priority": {
+   "name": null,
+   "value": null
+  },
+  "private": false,
+  "project_stage": {
+   "id": 3,
+   "default_stage": true,
+   "dependent_projects": 0,
+   "formatted_name": "Course of Construction",
+   "formatted_parent_name": null,
+   "is_concept_stage": false,
+   "name": "Course of Construction",
+   "parent_id": null,
+   "procore_category": false
+  },
+  "proposed_solution": null,
+  "questions": [
+   {
+    "id": 25726330,
+    "body": "<p>Please refer to attached sheet G0.10. Please confirm if egress signs are required at 231 Foyer, 222 Makerspace, 206 Classroom, and 207 Multi-Purpose Room.</p>"
+   }
+  ],
+  "received_from": {
+   "id": 14819329,
+   "login": "amead@example.com",
+   "name": "Ameilia Mead"
+  },
+  "reference": "",
+  "responsible_contractor": {
+   "id": 3680431,
+   "name": "Cobblestone Construction"
+  },
+  "revision": "0",
+  "rfi_manager": {
+   "id": 14819329,
+   "login": "amead@example.com",
+   "name": "Ameilia Mead"
+  },
+  "schedule_impact": {
+   "status": "tbd",
+   "value": null
+  },
+  "source_rfi_header_id": 25721337,
+  "specification_section_id": null,
+  "status": "closed_with_revision",
+  "sub_job": null,
+  "subject": "Egress Signage Clarification",
+  "time_resolved": "2026-03-04T15:07:48Z",
+  "translated_status": "Closed - Revised",
+  "updated_at": "2026-03-04T15:07:48Z"
+ },
+ {
+  "id": 28008229,
+  "assignee": {
+   "id": 10770882,
+   "locale": null,
+   "login": "mparker@example.com",
+   "name": "Michael Parker (Cobblestone Construction)"
+  },
+  "assignees": [
+   {
+    "id": 10770882,
+    "locale": null,
+    "login": "mparker@example.com",
+    "name": "Michael Parker (Cobblestone Construction)",
+    "response_required": false
+   }
+  ],
+  "ball_in_court": {
+   "id": 10770882,
+   "locale": null,
+   "login": "mparker@example.com",
+   "name": "Michael Parker (Cobblestone Construction)"
+  },
+  "ball_in_courts": [
+   {
+    "id": 10770882,
+    "locale": null,
+    "login": "mparker@example.com",
+    "name": "Michael Parker (Cobblestone Construction)"
+   }
+  ],
+  "connect_export_origin": null,
+  "cost_code": null,
+  "cost_impact": {
+   "status": "",
+   "value": null
+  },
+  "created_at": "2026-10-16T21:29:13Z",
+  "created_by": {
+   "id": 10770882,
+   "login": "mparker@example.com",
+   "name": "Michael Parker"
+  },
+  "current_revision": true,
+  "custom_fields": {},
+  "due_date": "2026-10-19",
+  "full_number": "Int-07",
+  "has_revisions": false,
+  "initiated_at": "2026-10-16T21:29:13Z",
+  "link": "https://app.procore.com/3167322/project/rfi/show/28008229",
+  "location": null,
+  "location_id": null,
+  "number": "Int-07",
+  "prefix": null,
+  "priority": {
+   "name": null,
+   "value": null
+  },
+  "private": false,
+  "project_stage": null,
+  "proposed_solution": null,
+  "questions": [
+   {
+    "id": 28013222,
+    "body": "<p>Reference E136</p><p>\u00a0</p><p>Condition: As previously discussed the new beams 523 and 526 will not access into existing members without extending the shear tabs past flange as \u201cPlan set for approva"
+   }
+  ],
+  "received_from": {
+   "id": 4475890,
+   "login": "butch@example.com",
+   "name": "Butch Immel"
+  },
+  "reference": "",
+  "responsible_contractor": {
+   "id": 20127415,
+   "name": "Integrity Steel & Stone"
+  },
+  "revision": "0",
+  "rfi_manager": {
+   "id": 14819329,
+   "login": "amead@example.com",
+   "name": "Ameilia Mead"
+  },
+  "schedule_impact": {
+   "status": "",
+   "value": null
+  },
+  "source_rfi_header_id": 28008229,
+  "specification_section_id": null,
+  "status": "open",
+  "sub_job": null,
+  "subject": "Clarification on Structural Beams Under Upper Restrooms",
+  "time_resolved": null,
+  "translated_status": "Open",
+  "updated_at": "2026-10-16T21:29:13Z"
+ }
+]

@@ -690,12 +690,18 @@ class Settings(BaseSettings):
     email_ingest_lookback_days: int = 1         # initial-sync window (deployment-forward, no backfill)
     email_ingest_reset_lookback_days: int = 7   # window after a DeltaExpired (410) reset
     email_body_max_chars: int = 100_000         # stored plain-text body cap
-    # Identification round 3 (LLM subject-only match).
+    # Identification round 2 fuzzy tier (the RFP matcher's name score).
+    email_match_fuzzy_auto_threshold: float = 0.9    # auto-assign at/above (no conflict, clear gap)
+    email_match_fuzzy_runner_up_gap: float = 0.1     # best must beat the runner-up by more than this
+    email_match_fuzzy_suggest_floor: float = 0.6     # R2 near-miss offered in triage when R3 has none
+    # Identification round 3 (LLM match on subject + body). Runs on the
+    # self-hosted box chosen in Settings > AI model server (llm self_hosted_only).
     openai_email_match_model: str = "gpt-5.4-mini"
     email_match_confidence_threshold: float = 0.85   # assign at/above; below → Unknown + suggestion
     email_match_max_attempts: int = 5                # transient-failure retries before 'failed'
     email_match_llm_max_candidates: int = 300        # prefilter cap bounding the R3 prompt
     email_llm_outage_retry_seconds: int = 3600       # wait when the provider is out of credits
+    email_match_body_max_chars: int = 6000           # body excerpt sent to the R3 model
     # New-project rescan of the Unknown pool (learn-back on project creation).
     email_rescan_llm_days: int = 14             # only LLM-confirm unknowns this recent
     email_rescan_llm_max: int = 50              # LLM call cap per project creation
@@ -1006,6 +1012,61 @@ class Settings(BaseSettings):
     # the break-glass valve usable while making "2FA off in prod" a deliberate,
     # loud decision rather than a silent config drift.
     mfa_break_glass_acknowledged: bool = False
+
+    # ── PM RFI sync from the GC's Procore (services/pm_rfi_sync) ─────────────
+    # Read-only import of every RFI on a linked GC Procore project into the
+    # PM RFI log, through the shared Procore web session the RFP harvest uses
+    # (PROCORE_LOGIN_EMAIL / PROCORE_LOGIN_PASSWORD, same lock and pace).
+    # Off by default; also needs PM_ENABLED. Design record: docs/PM_RFI_SYNC.md.
+    pm_rfi_sync_enabled: bool = False
+    pm_rfi_sync_daily_time: str = "06:30"            # one Pacific HH:MM (DST aware)
+    pm_rfi_sync_catchup_hours: int = 4               # a missed daily slot still runs inside this window
+    pm_rfi_sync_poll_seconds: int = 30               # worker tick: slots, claims, runs
+    pm_rfi_sync_lease_seconds: int = 900             # a run's lease; renewed while it works
+    pm_rfi_sync_max_attempts: int = 3                # transient failures before a run is failed
+    pm_rfi_sync_retry_seconds: int = 600             # wait before a transient failure is retried
+    pm_rfi_sync_attachment_max_bytes: int = 150 * 1024 * 1024   # per file; larger files are skipped and recorded
+    pm_rfi_sync_max_details_per_run: int = 1000      # RFI detail fetches per run (the rest wait for the next run)
+    pm_rfi_email_scan_enabled: bool = True           # Procore RFI links in filed PM emails trigger a targeted fetch
+    pm_rfi_email_scan_interval_seconds: int = 300
+    pm_rfi_email_scan_lookback_hours: int = 72       # first scan window (no checkpoint yet)
+
+    @property
+    def pm_rfi_sync_active(self) -> bool:
+        """The PM RFI sync runs: the PM sub-app and its own switch."""
+        return bool(self.pm_enabled and self.pm_rfi_sync_enabled)
+
+    @property
+    def pm_rfi_sync_slot(self) -> tuple[int, int]:
+        """PM_RFI_SYNC_DAILY_TIME as one Pacific (hour, minute) pair
+        (validated at boot by `_validate_pm_rfi_sync`)."""
+        return _parse_hhmm(self.pm_rfi_sync_daily_time, "PM_RFI_SYNC_DAILY_TIME")
+
+    @model_validator(mode="after")
+    def _validate_pm_rfi_sync(self) -> "Settings":
+        """Refuse to boot on a PM RFI sync setting that could only fail at run
+        time. Always enforced (the defaults satisfy every rule)."""
+        _parse_hhmm(self.pm_rfi_sync_daily_time, "PM_RFI_SYNC_DAILY_TIME")
+        if not 1 <= self.pm_rfi_sync_catchup_hours <= 23:
+            raise ValueError("PM_RFI_SYNC_CATCHUP_HOURS must be between 1 and 23.")
+        if self.pm_rfi_sync_poll_seconds < 5 or self.pm_rfi_sync_lease_seconds < 60:
+            raise ValueError(
+                "PM_RFI_SYNC_POLL_SECONDS must be at least 5 and PM_RFI_SYNC_LEASE_SECONDS at least 60."
+            )
+        if self.pm_rfi_sync_max_attempts < 1 or self.pm_rfi_sync_retry_seconds < 0:
+            raise ValueError(
+                "PM_RFI_SYNC_MAX_ATTEMPTS must be at least 1 and PM_RFI_SYNC_RETRY_SECONDS not negative."
+            )
+        if self.pm_rfi_sync_attachment_max_bytes < 1 or self.pm_rfi_sync_max_details_per_run < 1:
+            raise ValueError(
+                "PM_RFI_SYNC_ATTACHMENT_MAX_BYTES and PM_RFI_SYNC_MAX_DETAILS_PER_RUN must be positive."
+            )
+        if self.pm_rfi_email_scan_interval_seconds < 30 or self.pm_rfi_email_scan_lookback_hours < 1:
+            raise ValueError(
+                "PM_RFI_EMAIL_SCAN_INTERVAL_SECONDS must be at least 30 and "
+                "PM_RFI_EMAIL_SCAN_LOOKBACK_HOURS at least 1."
+            )
+        return self
 
     @property
     def rfp_email_ingestion_inboxes(self) -> list[str]:

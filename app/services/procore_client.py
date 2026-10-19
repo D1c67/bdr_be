@@ -11,6 +11,10 @@ Three rules this module enforces on its own, so no caller can break them:
   (five GET endpoints) or the login flow (two POSTs, a handful of GETs on the
   two Procore hosts). The bid intent ("Will Bid" / "Will Not Bid"), submit,
   NDA sign, "Email documents" and upload routes are unreachable from code.
+  The PM RFI sync (docs/PM_RFI_SYNC.md) has its own GET-only list,
+  RFI_ALLOWED_PATHS (RFI list and detail, plus two company id lookups),
+  reached only through `get_rfi_json`, and may open a session on
+  us02.procore.com as well as app.procore.com.
 - Pace. Every request waits its turn behind `_pace`: at least
   `procore_min_request_interval_seconds` times a random 1.0 to 2.0 since the
   previous Procore request in this process. Logins, JSON calls and downloads
@@ -45,6 +49,10 @@ import httpx
 logger = logging.getLogger(__name__)
 
 APP_HOST = "app.procore.com"
+# Procore app hosts a GC project can live on (PM RFI sync, docs/PM_RFI_SYNC.md).
+# us02 is the second region; the login host is shared.
+US02_HOST = "us02.procore.com"
+APP_HOSTS: tuple[str, ...] = (APP_HOST, US02_HOST)
 LOGIN_HOST = "login.procore.com"
 STORAGE_HOST = "storage.procore.com"
 APP_BASE = f"https://{APP_HOST}"
@@ -80,6 +88,22 @@ ALLOWED_PATHS: tuple[re.Pattern[str], ...] = (
 )
 # Paths the login chain may pass through, per host. Anything else in a
 # redirect ends the chain with ProcoreLoginFailed.
+# PM RFI ids (docs/PM_RFI_SYNC.md): us02.procore.com ids run to 15 digits,
+# past the harvest's 12-digit bound, so the RFI paths take up to 20.
+_LONG_ID = r"\d{1,20}"
+_LONG_ID_RE = re.compile(rf"^{_LONG_ID}$")
+# The read-only RFI endpoints the PM RFI sync may call (docs/PM_RFI_SYNC.md),
+# plus the two reads that resolve a project's company id. GET only, through
+# `get_rfi_json` / `resolve_company_id`; never part of the harvest allowlist.
+RFI_ALLOWED_PATHS: tuple[re.Pattern[str], ...] = (
+    re.compile(rf"^/rest/v1\.0/projects/{_LONG_ID}/rfis$"),
+    re.compile(rf"^/rest/v1\.0/projects/{_LONG_ID}/rfis/{_LONG_ID}$"),
+    re.compile(r"^/rest/v1\.0/companies$"),
+    re.compile(rf"^/rest/v1\.0/projects/{_LONG_ID}$"),
+)
+# The project home page: requested only to read its redirect Location (the
+# company id lives in the webclient path), never followed.
+_PROJECT_HOME_RE = re.compile(rf"^/({_LONG_ID})/project/home$")
 _LOGIN_APP_PATHS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^/auth/procore$"),
     re.compile(r"^/auth/procore/callback$"),
@@ -143,6 +167,12 @@ class ProcoreSessionExpired(ProcoreError):
 
 class ProcoreForbidden(ProcoreError):
     """403 or 404 on a bid: the account cannot see it. Permanent."""
+
+
+class ProcoreSessionRejected(ProcoreError):
+    """An RFI read still answered "session gone" right after a fresh login
+    (docs/PM_RFI_SYNC.md). Not retried: another login would only churn the
+    shared account."""
 
 
 # ── Reference parsing (pure) ─────────────────────────────────────────────────
@@ -268,6 +298,141 @@ def has_change_order_rfq_link(body_text: str | None) -> bool:
         if (parsed.netloc or "").lower() == APP_HOST and _CHANGE_ORDER_RFQ_RE.match(parsed.path or ""):
             return True
     return False
+
+
+# ── PM RFI references (pure, docs/PM_RFI_SYNC.md) ────────────────────────────
+
+
+@dataclass(frozen=True)
+class ProcoreProjectRef:
+    """A GC project on Procore: the app host it lives on, its id, and the
+    company id when the link carried one."""
+
+    host: str
+    project_id: str
+    company_id: str | None = None
+
+    @property
+    def project_url(self) -> str:
+        return f"https://{self.host}/{self.project_id}/project/home"
+
+
+@dataclass(frozen=True)
+class ProcoreRfiLink:
+    """One `/{project}/project/rfi/show/{rfi}` link found in an email."""
+
+    host: str
+    project_id: str
+    rfi_id: str
+
+
+_RFI_SHOW_RE = re.compile(rf"^/({_LONG_ID})/project/rfi/show/({_LONG_ID})/?$")
+# Any project-scoped app page: /{project}/project/<tool>...
+_PROJECT_PATH_RE = re.compile(rf"^/({_LONG_ID})/project(?:/|$)")
+# The webclient shell: /webclients/host/companies/{company}/projects/{project}/...
+_WEBCLIENT_RE = re.compile(rf"^/webclients/host/companies/({_LONG_ID})/projects/({_LONG_ID})(?:/|$)")
+# The classic company-scoped project URL: /{company}/company/... is never a project,
+# but /companies/{company}/projects/{project} appears in some share links.
+_COMPANY_PROJECT_RE = re.compile(rf"^/companies/({_LONG_ID})/projects/({_LONG_ID})(?:/|$)")
+
+
+def _links(text: str | None) -> list[str]:
+    """Every URL in `text`, entity-decoded and safelinks-unwrapped."""
+    if not text:
+        return []
+    out: list[str] = []
+    for raw in _URL_RE.findall(text):
+        out.append(unwrap_link(html_lib.unescape(raw)))
+    return out
+
+
+def _query_id(parsed, *names: str) -> str | None:
+    qs = parse_qs(parsed.query)
+    for name in names:
+        value = (qs.get(name) or [""])[0]
+        if _LONG_ID_RE.match(value):
+            return value
+    return None
+
+
+def parse_project_url(url: str | None) -> ProcoreProjectRef | None:
+    """The Procore project a pasted URL names (any project page, an RFI link,
+    the webclient shell; Outlook safelinks unwrapped). Only the two app hosts
+    are accepted. The company id comes from the webclient path or a
+    `companyId` / `company_id` query parameter when present. None when the
+    URL names no Procore project."""
+    if not url:
+        return None
+    link = unwrap_link(html_lib.unescape(url.strip()))
+    if "://" not in link:
+        link = "https://" + link
+    try:
+        parsed = urlparse(link)
+    except ValueError:
+        return None
+    if (parsed.scheme or "").lower() != "https":
+        return None
+    host = (parsed.hostname or "").lower()
+    if host not in APP_HOSTS:
+        return None
+    path = parsed.path or ""
+    company = _query_id(parsed, "companyId", "company_id")
+    m = _WEBCLIENT_RE.match(path) or _COMPANY_PROJECT_RE.match(path)
+    if m:
+        return ProcoreProjectRef(host=host, project_id=m.group(2), company_id=m.group(1))
+    m = _PROJECT_PATH_RE.match(path)
+    if m:
+        return ProcoreProjectRef(host=host, project_id=m.group(1), company_id=company)
+    return None
+
+
+def extract_rfi_links(body_text: str | None) -> list[ProcoreRfiLink]:
+    """Every Procore RFI link in an email body, in order, deduped. Bid-phase
+    links (route_to_bid_sheet, planroom) never match: only
+    `/{project}/project/rfi/show/{rfi}` on an app host."""
+    seen: set[tuple[str, str, str]] = set()
+    out: list[ProcoreRfiLink] = []
+    for url in _links(body_text):
+        try:
+            parsed = urlparse(url)
+        except ValueError:
+            continue
+        host = (parsed.hostname or "").lower()
+        if host not in APP_HOSTS:
+            continue
+        m = _RFI_SHOW_RE.match(parsed.path or "")
+        if not m:
+            continue
+        key = (host, m.group(1), m.group(2))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(ProcoreRfiLink(host=host, project_id=m.group(1), rfi_id=m.group(2)))
+    return out
+
+
+def extract_company_id(body_text: str | None, project_id: str) -> str | None:
+    """The Procore company id for `project_id` from the signed
+    storage.procore.com links in the same email (`companyId=...&projectId=...`).
+    A link naming a different project is ignored; one with no projectId is
+    accepted only when no link names the project."""
+    loose: str | None = None
+    for url in _links(body_text):
+        try:
+            parsed = urlparse(url)
+        except ValueError:
+            continue
+        if (parsed.hostname or "").lower() != STORAGE_HOST:
+            continue
+        company = _query_id(parsed, "companyId", "company_id")
+        if not company:
+            continue
+        project = _query_id(parsed, "projectId", "project_id")
+        if project == project_id:
+            return company
+        if project is None and loose is None:
+            loose = company
+    return loose
 
 
 # ── Session store protocol ───────────────────────────────────────────────────
@@ -484,7 +649,15 @@ class ProcoreSession:
         rng: Callable[[float, float], float] = random.uniform,
         now: Callable[[], datetime] = _now,
         on_lock: Callable[[datetime, str], None] | None = None,
+        app_host: str = APP_HOST,
     ) -> None:
+        if app_host not in APP_HOSTS:
+            raise ValueError(f"Not a Procore app host: {app_host}")
+        # The app host this session's cookies and JSON calls belong to. The
+        # harvest always uses app.procore.com; the PM RFI sync may open a
+        # us02.procore.com session (docs/PM_RFI_SYNC.md).
+        self.app_host = app_host
+        self.app_base = f"https://{app_host}"
         self.config = config
         self.store = store
         self._sleep = sleep
@@ -534,7 +707,7 @@ class ProcoreSession:
                 continue
             try:
                 self._client.cookies.set(
-                    c["name"], c["value"], domain=c.get("domain") or APP_HOST, path=c.get("path") or "/"
+                    c["name"], c["value"], domain=c.get("domain") or self.app_host, path=c.get("path") or "/"
                 )
             except (KeyError, TypeError, ValueError):
                 continue
@@ -560,7 +733,7 @@ class ProcoreSession:
 
     def _has_app_session(self) -> bool:
         for cookie in self._client.cookies.jar:
-            if cookie.name == _SESSION_COOKIE and (cookie.domain or "").lower().lstrip(".") == APP_HOST:
+            if cookie.name == _SESSION_COOKIE and (cookie.domain or "").lower().lstrip(".") == self.app_host:
                 return True
         return False
 
@@ -568,7 +741,7 @@ class ProcoreSession:
 
     def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         host = _host(url)
-        if host not in (APP_HOST, LOGIN_HOST):
+        if host not in (self.app_host, LOGIN_HOST):
             raise ValueError(f"Procore request to an unexpected host: {host}")
         _pace(self.config.min_request_interval, sleep=self._sleep, clock=self._clock, rng=self._rng)
         try:
@@ -597,8 +770,14 @@ class ProcoreSession:
             self.ensure_session()
             return self._get_json_once(path, params=params, referer=referer)
 
-    def _get_json_once(self, path: str, *, params: dict | None, referer: str | None) -> Any:
-        resp = self._request("GET", f"{APP_BASE}{path}", params=params, headers=self._json_headers(referer))
+    def _get_json_once(
+        self, path: str, *, params: dict | None, referer: str | None,
+        extra_headers: dict[str, str] | None = None,
+    ) -> Any:
+        headers = self._json_headers(referer)
+        if extra_headers:
+            headers.update(extra_headers)
+        resp = self._request("GET", f"{self.app_base}{path}", params=params, headers=headers)
         if resp.status_code == 401:
             raise ProcoreSessionExpired()
         if resp.status_code in (301, 302, 303, 307, 308):
@@ -624,6 +803,130 @@ class ProcoreSession:
             raise ProcoreUnavailable("Procore answered with unreadable data.") from exc
         self.store.touch()
         return data
+
+    # -- PM RFI reads (docs/PM_RFI_SYNC.md): GET only, RFI_ALLOWED_PATHS ------
+
+    def get_rfi_json(
+        self, path: str, *, company_id: str | None, params: dict | None = None,
+        referer: str | None = None,
+    ) -> Any:
+        """GET an RFI_ALLOWED_PATHS endpoint on this session's app host with
+        the Procore-Company-Id header the REST API wants. Same login-once,
+        retry-once and pacing rules as `get_json`."""
+        if not _allowed(path, RFI_ALLOWED_PATHS):
+            raise ValueError(f"Procore path is not on the RFI allowlist: {path}")
+        if company_id is not None and not _LONG_ID_RE.match(str(company_id)):
+            raise ValueError("Procore company id must be digits.")
+        extra = {"Procore-Company-Id": str(company_id)} if company_id else None
+        if not self._loaded:
+            self._load_store()
+        try:
+            return self._get_json_once(path, params=params, referer=referer, extra_headers=extra)
+        except ProcoreSessionExpired:
+            self.ensure_session()
+        try:
+            return self._get_json_once(path, params=params, referer=referer, extra_headers=extra)
+        except ProcoreSessionExpired:
+            raise ProcoreSessionRejected(
+                "Procore rejected the session for RFI reads right after logging in."
+            ) from None
+
+    def _rfi_referer(self, company_id: str | None, project_id: str) -> str:
+        if company_id:
+            return f"{self.app_base}/webclients/host/companies/{company_id}/projects/{project_id}/tools/rfis"
+        return f"{self.app_base}/{project_id}/project/rfi/list"
+
+    def list_rfis(self, project_id: str, company_id: str | None) -> list[dict]:
+        """Every RFI on the project (Procore returns all rows when per_page is
+        omitted). List rows lack answers and attachments; callers fetch the
+        detail of new or changed rows only."""
+        if not _LONG_ID_RE.match(str(project_id)):
+            raise ValueError("Procore project id must be digits.")
+        data = self.get_rfi_json(
+            f"/rest/v1.0/projects/{project_id}/rfis",
+            company_id=company_id,
+            referer=self._rfi_referer(company_id, project_id),
+        )
+        if not isinstance(data, list):
+            raise ProcoreUnavailable("Procore answered the RFI list with something other than a list.")
+        return [row for row in data if isinstance(row, dict)]
+
+    def get_rfi(self, project_id: str, rfi_id: str, company_id: str | None) -> dict:
+        """One RFI's detail (questions, answers, attachments)."""
+        if not _LONG_ID_RE.match(str(project_id)) or not _LONG_ID_RE.match(str(rfi_id)):
+            raise ValueError("Procore ids must be digits.")
+        data = self.get_rfi_json(
+            f"/rest/v1.0/projects/{project_id}/rfis/{rfi_id}",
+            company_id=company_id,
+            referer=self._rfi_referer(company_id, project_id),
+        )
+        if not isinstance(data, dict):
+            raise ProcoreUnavailable("Procore answered the RFI detail with something other than an object.")
+        return data
+
+    def resolve_company_id(self, project_id: str, *, max_companies: int = 10) -> str | None:
+        """The company that owns `project_id`, for a project URL that did not
+        carry one. First the project home page's redirect Location (the
+        webclient path names the company; never followed), then the
+        account's companies, each asked for the project. GET only. None when
+        neither answers."""
+        if not _LONG_ID_RE.match(str(project_id)):
+            raise ValueError("Procore project id must be digits.")
+        if not self._loaded:
+            self._load_store()
+        path = f"/{project_id}/project/home"
+        try:
+            found = self._company_from_home(path)
+        except ProcoreSessionExpired:
+            self.ensure_session()
+            found = self._company_from_home(path)
+        if found:
+            return found
+        try:
+            companies = self.get_rfi_json("/rest/v1.0/companies", company_id=None)
+        except ProcoreForbidden:
+            return None
+        if not isinstance(companies, list):
+            return None
+        for company in companies[:max_companies]:
+            cid = str((company or {}).get("id") or "") if isinstance(company, dict) else ""
+            if not _LONG_ID_RE.match(cid):
+                continue
+            try:
+                project = self.get_rfi_json(
+                    f"/rest/v1.0/projects/{project_id}", company_id=cid,
+                    params={"company_id": cid},
+                )
+            except ProcoreForbidden:
+                continue
+            if isinstance(project, dict) and str(project.get("id") or "") == str(project_id):
+                return cid
+        return None
+
+    def _company_from_home(self, path: str) -> str | None:
+        if not _PROJECT_HOME_RE.match(path):
+            raise ValueError(f"Procore path is not a project home page: {path}")
+        resp = self._request("GET", f"{self.app_base}{path}", headers={"Accept": _HTML_ACCEPT})
+        if resp.status_code == 401:
+            raise ProcoreSessionExpired()
+        if resp.status_code in (301, 302, 303, 307, 308):
+            target = urljoin(str(resp.url), resp.headers.get("location", ""))
+            if _host(target) == LOGIN_HOST or _path(target).startswith("/auth/procore"):
+                raise ProcoreSessionExpired()
+            if _host(target) == self.app_host:
+                m = _WEBCLIENT_RE.match(_path(target)) or _COMPANY_PROJECT_RE.match(_path(target))
+                if m:
+                    return m.group(1)
+                ref = parse_project_url(target)
+                if ref and ref.company_id:
+                    return ref.company_id
+            return None
+        if resp.status_code == 200 and "html" in resp.headers.get("content-type", ""):
+            m = re.search(rf"/webclients/host/companies/({_LONG_ID})/projects/{re.escape(path.split('/')[1])}\b",
+                          resp.text[:_MAX_HTML_BYTES])
+            if m:
+                return m.group(1)
+        return None
 
     def resolve_bid_sheet(self, ref: ProcoreRef) -> str:
         """The bid package id behind the bid sheet route (its Location header
@@ -735,7 +1038,7 @@ class ProcoreSession:
                 raise ProcoreLoginFailed("redirect", "The Procore login redirected too many times.")
             target = urljoin(str(resp.url), resp.headers.get("location", ""))
             host, path = _host(target), _path(target)
-            if host == APP_HOST:
+            if host == self.app_host:
                 if not _allowed(path, _LOGIN_APP_PATHS):
                     raise ProcoreLoginFailed("redirect", f"The Procore login left the expected flow ({path}).")
             elif host == LOGIN_HOST:
@@ -743,7 +1046,7 @@ class ProcoreSession:
                     raise ProcoreLoginFailed("redirect", f"The Procore login left the expected flow ({path}).")
             else:
                 raise ProcoreLoginFailed("redirect", "The Procore login redirected off Procore.")
-            if host == APP_HOST and (
+            if host == self.app_host and (
                 _PACKAGE_RE.match(path) or _path(str(resp.url)) == "/auth/procore/callback"
             ):
                 # The OAuth callback has set the app session and is handing
@@ -763,7 +1066,7 @@ class ProcoreSession:
         #    route instead of the account's company chooser.
         resp = self._request(
             "GET",
-            self._continue_url or f"{APP_BASE}/auth/procore",
+            self._continue_url or f"{self.app_base}/auth/procore",
             headers={"Accept": _HTML_ACCEPT},
         )
         resp = self._follow(resp, accept=_HTML_ACCEPT)

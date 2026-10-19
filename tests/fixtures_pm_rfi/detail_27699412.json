@@ -1,0 +1,249 @@
+{
+ "id": 27699412,
+ "link": "https://app.procore.com/3167322/project/rfi/show/27699412",
+ "project_stage": {
+  "id": 3,
+  "default_stage": true,
+  "dependent_projects": 0,
+  "formatted_name": "Course of Construction",
+  "formatted_parent_name": null,
+  "is_concept_stage": false,
+  "name": "Course of Construction",
+  "parent_id": null,
+  "procore_category": false
+ },
+ "assignees": [
+  {
+   "id": 14819329,
+   "name": "Ameilia Mead (Cobblestone Construction)",
+   "locale": null,
+   "login": "amead@example.com",
+   "response_required": false
+  }
+ ],
+ "initiated_at": "2026-09-17T07:09:39Z",
+ "ball_in_courts": [
+  {
+   "id": 11478812,
+   "locale": null,
+   "login": "ninovero@example.com",
+   "name": "Nenette Inovero (Cobblestone Construction)"
+  }
+ ],
+ "connect_export_origin": null,
+ "cost_impact": {
+  "status": "tbd",
+  "value": null
+ },
+ "custom_fields": {},
+ "due_date": "2026-09-20",
+ "full_number": "Const-189.1",
+ "number": "Const-189.1",
+ "prefix": null,
+ "priority": {
+  "name": null,
+  "value": null
+ },
+ "proposed_solution": "",
+ "private": false,
+ "received_from": {
+  "id": 7733944,
+  "login": "gsheets@example.com",
+  "name": "Gary Sheets"
+ },
+ "rfi_manager": {
+  "id": 11478812,
+  "login": "ninovero@example.com",
+  "name": "Nenette Inovero"
+ },
+ "schedule_impact": {
+  "status": "tbd",
+  "value": null
+ },
+ "status": "open",
+ "subject": "Floor closers for 206 and 207",
+ "time_resolved": null,
+ "translated_status": "Open",
+ "created_at": "2026-09-16T14:26:56Z",
+ "updated_at": "2026-10-15T22:07:36Z",
+ "revision": "0",
+ "current_revision": true,
+ "source_rfi_header_id": 27699412,
+ "has_revisions": false,
+ "created_by": {
+  "id": 7733944,
+  "locale": null,
+  "login": "gsheets@example.com",
+  "name": "Gary Sheets",
+  "vendor": {
+   "id": 3680431,
+   "name": "Cobblestone Construction"
+  }
+ },
+ "assignee": {
+  "id": 14819329,
+  "name": "Ameilia Mead (Cobblestone Construction)",
+  "locale": null,
+  "login": "amead@example.com"
+ },
+ "ball_in_court": {
+  "id": 11478812,
+  "name": "Nenette Inovero (Cobblestone Construction)",
+  "locale": null,
+  "login": "ninovero@example.com"
+ },
+ "reference": "",
+ "location_id": 33249695,
+ "questions": [
+  {
+   "id": 27704405,
+   "created_by": "Gary Sheets",
+   "plain_text_body": "Per submittal 08 41 26-01 page 6 of 261 redlines, interior glass doors 206 and 207 are marked up to bot receive floor closers and top pivots. This will require the floor closure to be recessed into the concrete deck. The concrete deck will need to be cut out in its entirety 12-1/2\" x 7-1/2\" x 5\"deep in these locations. This will result in the metal deck being exposed in these locations. All materials are on site.\u00a0\n\nPlease advise if cutting and removing the concrete in these areas is acceptable.\u00a0\nIf the removal of concrete is not acceptable, please provide direction.\u00a0\n",
+   "attachments": [
+    {
+     "id": 6492393192,
+     "attached_to_item_id": null,
+     "attached_to_item_type": null,
+     "can_be_viewed": true,
+     "filename": "image2.jpeg",
+     "name": "image2.jpeg",
+     "url": "https://storage.procore.com/api/v5/files/us-east-1/pro-core.com/3336-c/2237613-p/2bde4b3c01cdcf2caa26e9eb1bdc3f868202?companyId=6333&projectId=3167322&ctx=dG9vbF9pdGVtX2lkPTI3Njk5NDEyLHRvb2xfbmFtZT1yZmlzLHRvb2xfdGFiX25hbWU9Z2VuZXJhbA&sig=test",
+     "viewable": true
+    },
+    {
+     "id": 6492393241,
+     "attached_to_item_id": null,
+     "attached_to_item_type": null,
+     "can_be_viewed": true,
+     "filename": "image1.jpeg",
+     "name": "image1.jpeg",
+     "url": "https://storage.procore.com/api/v5/files/us-east-1/pro-core.com/3336-c/2237613-p/008bda4d3ab3ddab9836419524baaedb2e14?companyId=6333&projectId=3167322&ctx=dG9vbF9pdGVtX2lkPTI3Njk5NDEyLHRvb2xfbmFtZT1yZmlzLHRvb2xfdGFiX25hbWU9Z2VuZXJhbA&sig=test",
+     "viewable": true
+    },
+    {
+     "id": 6492393282,
+     "attached_to_item_id": null,
+     "attached_to_item_type": null,
+     "can_be_viewed": true,
+     "filename": "image0.jpeg",
+     "name": "image0.jpeg",
+     "url": "https://storage.procore.com/api/v5/files/us-east-1/pro-core.com/3336-c/2237613-p/4a8895b67d1aebdaab1b743a93a9aeeb9d16?companyId=6333&projectId=3167322&ctx=dG9vbF9pdGVtX2lkPTI3Njk5NDEyLHRvb2xfbmFtZT1yZmlzLHRvb2xfdGFiX25hbWU9Z2VuZXJhbA&sig=test",
+     "viewable": true
+    },
+    {
+     "id": 6492393326,
+     "attached_to_item_id": null,
+     "attached_to_item_type": null,
+     "can_be_viewed": true,
+     "filename": "Screenshot_20260916_052103_Procore.jpg",
+     "name": "Screenshot_20260916_052103_Procore.jpg",
+     "url": "https://storage.procore.com/api/v5/files/us-east-1/pro-core.com/3336-c/2237613-p/1f0efb1f56c0622f4d19c66eca4537417c24?companyId=6333&projectId=3167322&ctx=dG9vbF9pdGVtX2lkPTI3Njk5NDEyLHRvb2xfbmFtZT1yZmlzLHRvb2xfdGFiX25hbWU9Z2VuZXJhbA&sig=test",
+     "viewable": true
+    },
+    {
+     "id": 6492393359,
+     "attached_to_item_id": null,
+     "attached_to_item_type": null,
+     "can_be_viewed": true,
+     "filename": "Screenshot_20260916_051834_Procore.jpg",
+     "name": "Screenshot_20260916_051834_Procore.jpg",
+     "url": "https://storage.procore.com/api/v5/files/us-east-1/pro-core.com/3336-c/2237613-p/778b59254d5acdeb6542bb9d2cd2a51bbc6f?companyId=6333&projectId=3167322&ctx=dG9vbF9pdGVtX2lkPTI3Njk5NDEyLHRvb2xfbmFtZT1yZmlzLHRvb2xfdGFiX25hbWU9Z2VuZXJhbA&sig=test",
+     "viewable": true
+    }
+   ],
+   "answers": [
+    {
+     "id": 42251969,
+     "answer_date": "2026-10-15T22:07:36Z",
+     "rich_text_body": "<p><span style=\"font-size:14px;\">Regarding KME response provided, C-Thru Glass was required to complete the glass systems as a delegated design. Definition of delegated design is: <strong>Delegated design</strong> is a construction and engineering practice where the primary architect or engineer of record (EOR)<u> transfers the </u></span><span style=\"background-color:#FBEEB8;font-size:14px;\"><u>fina</u></span><span style=\"background-color:#FBEEB8;color:#000000;font-size:14px;\"><u>l design responsibility</u></span><span style=\"color:#000000;font-size:14px;\"><u> </u></span><span style=\"font-size:14px;\"><u>for a specific, complex building element to the contractor, subcontractor, or manufacturer.</u></span></p><p>\u00a0</p><p><span style=\"font-size:14px;\">C-Thru Glass, as contracted is responsible for final design, submitted signed and sealed drawings which were reviewed and approved by LR Nelson and submitted to the building department, depict doors 206 and 207 to have a bottom pivot and a top 2 piece header with a top pivot. KME marked up the signed and sealed deferred submittal, revising the design of doors 206 and 207 specifically asking for these doors to receive a PH28N floor closer and top pivot.\u00a0</span></p><p>\u00a0</p><p><span style=\"font-size:14px;\">Since C-Thru's delegated design as approved by LR Nelson and NLV Building Department was redlined/changed by KME, we request KME to provide a solution.\u00a0</span></p><ul><li class=\"ck-list-marker-font-size\" style=\"--ck-content-list-marker-font-size:14px;\" data-list-item-id=\"e0a2b1726d5010b2f39b7599b2b4bad06\"><span style=\"font-size:14px;\">An option would be to revert back to the delegated design as submitted. This will result in C-Thru reordering the necessary hardware.\u00a0</span></li></ul>",
+     "plain_text_body": "Regarding KME response provided, C-Thru Glass was required to complete the glass systems as a delegated design. Definition of delegated design is: Delegated design is a construction and engineering practice where the primary architect or engineer of record (EOR) transfers the final design responsibility for a specific, complex building element to the contractor, subcontractor, or manufacturer.\u00a0C-Thru Glass, as contracted is responsible for final design, submitted signed and sealed drawings which were reviewed and approved by LR Nelson and submitted to the building department, depict doors 206 and 207 to have a bottom pivot and a top 2 piece header with a top pivot. KME marked up the signed and sealed deferred submittal, revising the design of doors 206 and 207 specifically asking for these doors to receive a PH28N floor closer and top pivot.\u00a0\u00a0Since C-Thru's delegated design as approved by LR Nelson and NLV Building Department was redlined/changed by KME, we request KME to provide a solution.\u00a0An option would be to revert back to the delegated design as submitted. This will result in C-Thru reordering the necessary hardware.\u00a0",
+     "attachments": [
+      {
+       "id": 6563875852,
+       "can_be_viewed": true,
+       "filename": "Pages from 08 41 26-01submittal#0-rev-1-revised_all_glass_system_shop_AAN 33.pdf",
+       "name": "Pages from 08 41 26-01submittal#0-rev-1-revised_all_glass_system_shop_AAN 33.pdf",
+       "url": "https://storage.procore.com/api/v5/files/us-east-1/pro-core.com/3336-c/2237613-p/01M50SP0TVY2XYD62XGNF83DKS?companyId=6333&projectId=3167322&ctx=dG9vbF9pdGVtX2lkPTI3Njk5NDEyLHRvb2xfbmFtZT1yZmlzLHRvb2xfdGFiX25hbWU9Z2VuZXJhbA&sig=test",
+       "viewable": false
+      },
+      {
+       "id": 6563851089,
+       "can_be_viewed": true,
+       "filename": "251093.Lake Mead and Englestad.Shop Drawings Stamped (LRN Review).pdf",
+       "name": "251093.Lake Mead and Englestad.Shop Drawings Stamped (LRN Review).pdf",
+       "url": "https://storage.procore.com/api/v5/files/us-east-1/pro-core.com/3336-c/2237613-p/01M50S2SNG5W30SE3TD9AXMGE1?companyId=6333&projectId=3167322&ctx=dG9vbF9pdGVtX2lkPTI3Njk5NDEyLHRvb2xfbmFtZT1yZmlzLHRvb2xfdGFiX25hbWU9Z2VuZXJhbA&sig=test",
+       "viewable": false
+      }
+     ],
+     "created_by": "Ameilia Mead (Cobblestone Construction)",
+     "created_by_id": 14819329,
+     "official": false
+    },
+    {
+     "id": 41935524,
+     "answer_date": "2026-09-25T14:22:01Z",
+     "rich_text_body": "<p>Kamaile Makua, 09/24/26</p><p>KME</p><p>See attached response from Structural EOR. It is not structurally acceptable to cut 5\" deep x 12-1/2\" x 7-1/2\" holes in the 5-1/4\" thick structural suspended composite concrete slab at these two doors. It is not structurally acceptable to add any cuts in the structural suspended composite concrete slab at these two locations. \u00a0It is also not structurally acceptable to cut any portion of the supporting steel beams at these two locations. \u00a0Any cuts in the structural suspended concrete slab or in the supporting steel beams will result in the need for a complete redesign of the structure at the locations in question. Contractor should have coordinated installation of floor closer with second floor pour of the concrete deck. Contractor to submit a proposed alternate solution to the AOR for review and approval prior to proceeding.\u00a0</p>",
+     "plain_text_body": "Kamaile Makua, 09/24/26KMESee attached response from Structural EOR. It is not structurally acceptable to cut 5\" deep x 12-1/2\" x 7-1/2\" holes in the 5-1/4\" thick structural suspended composite concrete slab at these two doors. It is not structurally acceptable to add any cuts in the structural suspended composite concrete slab at these two locations. \u00a0It is also not structurally acceptable to cut any portion of the supporting steel beams at these two locations. \u00a0Any cuts in the structural suspended concrete slab or in the supporting steel beams will result in the need for a complete redesign of the structure at the locations in question. Contractor should have coordinated installation of floor closer with second floor pour of the concrete deck. Contractor to submit a proposed alternate solution to the AOR for review and approval prior to proceeding.\u00a0",
+     "attachments": [
+      {
+       "id": 6515442002,
+       "can_be_viewed": true,
+       "filename": "Response-rfi#const-189.1-floor_closers_for_doors_206_and_207.pdf",
+       "name": "Response-rfi#const-189.1-floor_closers_for_doors_206_and_207.pdf",
+       "url": "https://storage.procore.com/api/v5/files/us-east-1/pro-core.com/3336-c/2237613-p/01M3CF3DJG5P6VZFRKAQZ6GPBX?companyId=6333&projectId=3167322&ctx=dG9vbF9pdGVtX2lkPTI3Njk5NDEyLHRvb2xfbmFtZT1yZmlzLHRvb2xfdGFiX25hbWU9Z2VuZXJhbA&sig=test",
+       "viewable": false
+      }
+     ],
+     "created_by": "Nenette Inovero (Cobblestone Construction)",
+     "created_by_id": 11478812,
+     "official": false
+    }
+   ],
+   "question_date": "2026-09-16T14:26:56Z",
+   "rich_text_body": "<p>Per submittal 08 41 26-01 page 6 of 261 redlines, interior glass doors 206 and 207 are marked up to bot receive floor closers and top pivots. This will require the floor closure to be recessed into the concrete deck. The concrete deck will need to be cut out in its entirety 12-1/2\" x 7-1/2\" x 5\"deep in these locations. This will result in the metal deck being exposed in these locations. All materials are on site.\u00a0</p>\n<ul>\n<li>Please advise if cutting and removing the concrete in these areas is acceptable.\u00a0</li>\n<li>If the removal of concrete is not acceptable, please provide direction.\u00a0</li>\n</ul>"
+  }
+ ],
+ "accepted": false,
+ "ball_in_court_role": "rfi_manager",
+ "change_events": [],
+ "correspondences": [],
+ "instructions": [],
+ "coordination_issues": [],
+ "custom_textfield_1": {
+  "label": null,
+  "value": null
+ },
+ "custom_textfield_2": {
+  "label": null,
+  "value": null
+ },
+ "specification_section": {
+  "id": 39791723,
+  "description": "Door Hardware ",
+  "label": "08 71 01 Door Hardware ",
+  "number": "08 71 01",
+  "current_revision_id": 48897095,
+  "viewable_document_id": null
+ },
+ "title": "Floor closers for 206 and 207",
+ "previous_revision_id": null,
+ "connect_exported_project_ids": [],
+ "linked_external_rfis": [],
+ "draft": false,
+ "drawing_ids": [],
+ "drawing_number": "A2.03",
+ "cost_code": null,
+ "location": {
+  "id": 33249695,
+  "name": "Job Site - 640 W Lake Mead",
+  "node_name": "Job Site - 640 W Lake Mead",
+  "parent_id": null,
+  "created_at": "2025-05-29T14:00:32Z",
+  "updated_at": "2025-05-29T14:00:32Z"
+ },
+ "sub_job": null,
+ "responsible_contractor": {
+  "id": 3680431,
+  "name": "Cobblestone Construction"
+ }
+}

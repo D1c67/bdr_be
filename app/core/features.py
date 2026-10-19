@@ -122,6 +122,11 @@ def enabled_map(role: Role | None = None) -> dict[str, bool]:
     # stopped queue keeps the page reachable but inert, and GET
     # /ai-estimating/status says so.
     flags["ai_estimating"] = ai_estimating_allowed(role)
+    # PM RFI sync from the GC's Procore (docs/PM_RFI_SYNC.md): the PM sub-app
+    # and PM_RFI_SYNC_ENABLED. getattr: fails closed on a settings stand-in.
+    flags["pm_rfi_sync"] = bool(
+        settings.pm_enabled and getattr(settings, "pm_rfi_sync_enabled", False)
+    )
     return flags
 
 
@@ -167,6 +172,10 @@ PM_NOTIFICATION_TYPES: frozenset[str] = frozenset(
         "pm_stage_change",
         "pm_outcome_conflict",
         "submittal.response_received",
+        # PM RFI sync (docs/PM_RFI_SYNC.md): the per-run summary and the
+        # first-sync "linked" notice.
+        "pm_rfi.sync_summary",
+        "pm_rfi.linked",
     }
 )
 
@@ -210,6 +219,15 @@ def require_rfp_ingest() -> None:
     where it was never implemented.
     """
     if not get_settings().rfp_ingest_enabled:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+
+
+def require_pm_rfi_sync() -> None:
+    """Router-level dependency gating the PM RFI sync routes (pm-link, sync,
+    link/unlink) on PM_ENABLED and PM_RFI_SYNC_ENABLED. Same contract as
+    require_bid_file_splitter: a bare 404 before auth runs while off."""
+    settings = get_settings()
+    if not (settings.pm_enabled and getattr(settings, "pm_rfi_sync_enabled", False)):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
 
 

@@ -144,6 +144,11 @@ _TYPE_META: dict[str, tuple[str, str]] = {
     # Admins and Executives, bell + email. Lands on Settings, where the cap
     # is raised or reset.
     "ai_spend.cap_hit": ("AI Estimating spend cap reached", "Open Settings"),
+    # PM RFI sync from the GC's Procore (docs/PM_RFI_SYNC.md): one summary per
+    # project per sync run (new, answered, closed RFIs), bell + email, and the
+    # first sync's in-app "linked" notice. Both land on the project's RFI log.
+    "pm_rfi.sync_summary": ("RFI updates from the GC's Procore", "Open RFIs"),
+    "pm_rfi.linked": ("Project linked to the GC's Procore", "Open RFIs"),
 }
 
 # Calling In notification type -> the call round its link opens.
@@ -247,6 +252,8 @@ def _deep_link(
         # estimator check stays first as a defense-in-depth link floor.
         if not is_estimator:
             if notification_sub_app(type_) is SubApp.PM and is_enabled(SubApp.PM):
+                if (type_ or "").startswith("pm_rfi."):
+                    return f"{base}/pm/projects/{project_id}/rfis"
                 return f"{base}/pm/projects/{project_id}"
             # Bidding's project page is the fallback for everything else — and
             # for a PM row on a PM-less deployment, since the project is still

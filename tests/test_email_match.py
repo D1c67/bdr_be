@@ -143,3 +143,74 @@ def test_prefilter_force_includes_actual_number_hits():
     ids = {p["id"] for p in kept}
     assert {"t1", "t2"} <= ids
     assert len(kept) == 25
+
+
+# ── Fuzzy round 2 (r2_score) ───────────────────────────────────────────────────
+
+from app.core.config import Settings  # noqa: E402
+from app.services.email_match import could_match, r2_score  # noqa: E402
+
+_S = Settings(_env_file=None)
+FUZZY_BOOK = [
+    {"id": "a", "number": "26.8.7180", "name": "Sunrise Elementary School"},
+    {"id": "b", "number": "26.9.7201", "name": "Henderson Fire Station No. 7"},
+    {"id": "c", "number": "26.9.7202", "name": "Henderson Fire Station No. 12"},
+    {"id": "d", "number": "26.10.7267", "name": "Lake Mead Pkwy Apartments Phase 2"},
+    {"id": "e", "number": "26.10.7268", "name": "Lake Mead Pkwy Apartments Phase 1"},
+]
+
+
+def test_exact_hits_score_one_and_keep_their_kind():
+    r = r2_score("RE: 26.9.7201 meeting", FUZZY_BOOK, _S)
+    assert (r.project_id, r.kind, r.similarity) == ("b", "number", 1.0)
+    assert r.candidates[0]["project_id"] == "b" and r.candidates[0]["similarity"] == 1.0
+
+
+def test_fuzzy_abbreviation_assigns_with_its_similarity():
+    r = r2_score("RE: Sunrise Elem School - lighting submittal", FUZZY_BOOK, _S)
+    assert r.project_id == "a" and r.kind == "fuzzy"
+    assert 0.9 <= r.similarity < 1.0
+
+
+def test_typo_gets_partial_credit():
+    r = r2_score("Sunrise Elementery School punch walk", FUZZY_BOOK, _S)
+    assert r.project_id == "a" and r.kind == "fuzzy"
+
+
+def test_discriminator_conflict_caps_the_sibling_and_partial_names_wait_for_r3():
+    r = r2_score("Fire Station 12 panel schedule", FUZZY_BOOK, _S)
+    assert r.project_id is None  # 3 of 4 name words: below the auto threshold
+    by_id = {c["project_id"]: c for c in r.candidates}
+    assert by_id["c"]["similarity"] > by_id["b"]["similarity"]
+    assert by_id["b"]["conflict"] is not None
+    assert by_id["b"]["similarity"] <= _S.rfp_match_conflict_cap
+
+
+def test_a_short_generic_subject_never_fully_matches_a_longer_name():
+    r = r2_score("Apartments phase 1", FUZZY_BOOK, _S)
+    assert r.project_id is None
+    assert r.candidates[0]["project_id"] == "e" and r.candidates[0]["similarity"] < 0.9
+
+
+def test_close_runner_up_blocks_a_fuzzy_assignment():
+    book = [
+        {"id": "x", "number": "26.1.1001", "name": "Summerlin Medical Office"},
+        {"id": "y", "number": "26.1.1002", "name": "Summerlin Medical Offices"},
+    ]
+    r = r2_score("Summerlin Medical Office lighting", book, _S)
+    # "Office" is an exact name hit on x; y fuzzes in too, but the exact
+    # rule decides first.
+    assert r.project_id == "x" and r.kind == "name"
+    r = r2_score("Summerlin Med Office lighting", book, _S)
+    assert r.project_id is None  # x and y within the gap
+
+
+def test_unrelated_subject_has_no_candidates():
+    r = r2_score("Lunch on friday", FUZZY_BOOK, _S)
+    assert r.project_id is None and r.candidates == []
+
+
+def test_could_match_gates_the_rescan():
+    assert could_match("Sunrise Elem School submittal", FUZZY_BOOK[0], _S)
+    assert could_match("26.8.7180 schedule", FUZZY_BOOK[0], _S)
+    assert not could_match("Fire Station 12 panel", FUZZY_BOOK[1], _S)

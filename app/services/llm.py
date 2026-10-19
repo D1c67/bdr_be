@@ -13,7 +13,10 @@ Two provider pools, selected by FULL_SELF_HOSTED_LLMS_ENABLED:
   own graceful fallback) — it never re-routes. The one exception is the
   openai_only features (AI Estimating), which are pinned to OpenAI in BOTH
   modes: a bid set is never sent to a small self-hosted model, so the
-  switch leaves them where they are instead of turning them off.
+  switch leaves them where they are instead of turning them off. The
+  mirror image is the self_hosted_only features (the PM email filer's
+  email_match), which always run on the box chosen in Settings > AI model
+  server, whatever the flag says, with that box's own model.
 
 Call sites keep their own gating, retries and domain validation; this module
 only resolves the route, speaks the three wire protocols, and normalizes the
@@ -200,6 +203,11 @@ class _Feature:
     # FULL_SELF_HOSTED_LLMS_ENABLED=true leaves the feature on OpenAI instead
     # of moving it to the box or switching it off.
     openai_only: bool = False
+    # True = pinned to the self-hosted pool: always the live box (the one
+    # picked in Settings > AI model server, services/llm_target) and that
+    # box's own model, even while FULL_SELF_HOSTED_LLMS_ENABLED=false. The
+    # per-feature env model is not used, except "off" to disable it.
+    self_hosted_only: bool = False
     # The feature's own on/off switch, when it has one. Off = the feature is
     # unavailable by design (unavailable_reason) whatever the providers say,
     # so the health snapshot leaves it out instead of grading it forever.
@@ -240,10 +248,13 @@ _FEATURES: dict[str, _Feature] = {
     "aliases": _Feature(
         "openai", lambda s: s.openai_alias_model, lambda s: s.self_hosted_aliases_model
     ),
+    # PM email filer, identification round 3 (services/email_ingest): owner
+    # decision 2026-10-18, it runs on the Settings model server only.
     "email_match": _Feature(
         "openai",
         lambda s: s.openai_email_match_model,
         lambda s: s.self_hosted_email_match_model,
+        self_hosted_only=True,
     ),
     # Bid File Splitter page classification. The vendor is env-selectable
     # (BID_SPLIT_LLM_PROVIDER: anthropic | openai | self_hosted) rather than
@@ -320,6 +331,21 @@ def resolve(feature: str, settings: Settings | None = None) -> Route:
     if spec.openai_only:
         # Pinned: the self-hosted switch does not move AI Estimating.
         return Route(provider="openai", model=spec.tp_model(s), api_key=s.openai_api_key)
+    if spec.self_hosted_only:
+        off = (spec.sh_model(s) or "").strip().lower() == SELF_HOSTED_MODEL_OFF
+        base_url = s.self_hosted_llm_base_url
+        if (
+            base_url.startswith("http://") and s.is_production and not s.self_hosted_llm_allow_http
+        ) or not base_url.startswith(("https://", "http://")):
+            # The boot validator only checks the box while the master switch
+            # is on; with it off this route must refuse plain http itself.
+            base_url = ""
+        return Route(
+            provider="self_hosted",
+            model="" if off else s.self_hosted_llm_target_model,
+            api_key=s.self_hosted_llm_api_key,
+            base_url=base_url,
+        )
     if s.full_self_hosted_llms_enabled:
         return Route(
             provider="self_hosted",

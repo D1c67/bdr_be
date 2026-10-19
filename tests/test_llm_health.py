@@ -39,14 +39,24 @@ def _sh(**over) -> Settings:
         # AI Estimating is pinned to OpenAI in both modes; a box-only
         # deployment leaves its page off, so it is not graded here.
         plans_reader_enabled=False,
+        # email_match is self_hosted_only: it reads the box's own model.
+        self_hosted_llm_local_model="qwen-3.5-4b",
         **{f"self_hosted_{f}_model": "qwen-3.5-4b" for f in llm._FEATURES},
     )
     base.update(over)
     return Settings(**base)
 
 
+BOX_MODEL = "qwen-box"
+
+
 def _tp(**over) -> Settings:
-    base = dict(_env_file=None, anthropic_api_key="a-key", openai_api_key="o-key")
+    # The email filer's R3 (email_match) is self_hosted_only, so a 3rd-party
+    # deployment still has a box for it.
+    base = dict(
+        _env_file=None, anthropic_api_key="a-key", openai_api_key="o-key",
+        self_hosted_llm_local_base_url=SH_URL, self_hosted_llm_local_model=BOX_MODEL,
+    )
     base.update(over)
     return Settings(**base)
 
@@ -99,11 +109,12 @@ def test_server_up_and_serving_the_configured_model_is_green(monkeypatch):
 
 def test_third_party_pool_probes_both_vendors(monkeypatch):
     s = _tp()
-    _stub_client(monkeypatch, serves=[s.claude_boq_model, s.openai_proposal_model])
+    _stub_client(monkeypatch, serves=[s.claude_boq_model, s.openai_proposal_model, BOX_MODEL])
     snap = llm_health.check(s)
 
     assert snap.mode == "third_party"
-    assert {p.provider for p in snap.providers} == {"anthropic", "openai"}
+    assert {p.provider for p in snap.providers} == {"anthropic", "openai", "self_hosted"}
+    assert _by_key(snap)["email_match"].state == "ok"
     assert snap.status == "ok"
 
 
@@ -196,7 +207,7 @@ def test_one_vendor_unconfigured_leaves_the_rest_green(monkeypatch):
 
 def test_unset_self_hosted_model_is_unconfigured_not_broken(monkeypatch):
     _stub_client(monkeypatch, serves=["qwen-3.5-4b"])
-    snap = llm_health.check(_sh(self_hosted_translate_model=""))
+    snap = llm_health.check(_sh(self_hosted_translate_model="", self_hosted_llm_local_model=""))
     features = _by_key(snap)
 
     assert snap.status == "degraded"
@@ -210,11 +221,11 @@ def test_unset_self_hosted_model_is_unconfigured_not_broken(monkeypatch):
 def test_unlisted_third_party_model_is_a_note_not_a_fault(monkeypatch):
     # 3rd-party catalogs don't necessarily list alias ids — an unlisted model
     # must not paint the whole indicator amber.
-    _stub_client(monkeypatch, serves=["some-other-model"])
+    _stub_client(monkeypatch, serves=["some-other-model", BOX_MODEL])
     snap = llm_health.check(_tp())
 
     assert snap.status == "ok"
-    assert all(f.model_listed is False for f in snap.features)
+    assert all(f.model_listed is False for f in snap.features if f.key != "email_match")
     assert "alias" in _by_key(snap)["boq"].detail
 
 

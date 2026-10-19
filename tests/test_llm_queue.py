@@ -449,7 +449,7 @@ def _sh_settings(**over):
     base = dict(
         full_self_hosted_llms_enabled=True,
         self_hosted_llm_local_base_url="http://localhost:11434/v1",
-        self_hosted_email_match_model="local-m",
+        self_hosted_llm_local_model="local-m",
     )
     base.update(over)
     return _settings(**base)

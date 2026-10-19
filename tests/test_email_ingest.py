@@ -201,6 +201,9 @@ def _email(**over):
 
 def _settings(**over):
     over.setdefault("openai_api_key", "test-key")
+    # R3 (email_match) is self_hosted_only: it runs on the live box.
+    over.setdefault("self_hosted_llm_local_base_url", "https://box.example/v1")
+    over.setdefault("self_hosted_llm_local_model", "test-model")
     return Settings(_env_file=None, **over)
 
 
@@ -304,8 +307,8 @@ def test_r3_confident_match_assigns_and_learns(db, use_settings, monkeypatch):
     use_settings()
     monkeypatch.setattr(
         email_ingest.openai_text,
-        "match_subject_to_project",
-        lambda subject, candidates: {"candidate_index": 1, "confidence": 0.93},
+        "match_email_to_project",
+        lambda subject, body, candidates, **k: {"candidate_index": 1, "confidence": 0.93},
     )
     email = _seed(db, _email(status="id_r3", subject="maplle streeet punch"))
     email_ingest._process_email(db, dict(email))
@@ -322,8 +325,8 @@ def test_r3_below_threshold_stores_suggestion_and_lands_unknown(db, use_settings
     use_settings()
     monkeypatch.setattr(
         email_ingest.openai_text,
-        "match_subject_to_project",
-        lambda subject, candidates: {"candidate_index": 0, "confidence": 0.6},
+        "match_email_to_project",
+        lambda subject, body, candidates, **k: {"candidate_index": 0, "confidence": 0.6},
     )
     email = _seed(db, _email(status="id_r3", subject="ambiguous"))
     email_ingest._process_email(db, dict(email))
@@ -341,8 +344,8 @@ def test_r3_out_of_range_index_is_no_match(db, use_settings, monkeypatch):
     use_settings()
     monkeypatch.setattr(
         email_ingest.openai_text,
-        "match_subject_to_project",
-        lambda subject, candidates: {"candidate_index": 99, "confidence": 0.99},
+        "match_email_to_project",
+        lambda subject, body, candidates, **k: {"candidate_index": 99, "confidence": 0.99},
     )
     email = _seed(db, _email(status="id_r3", subject="whatever"))
     email_ingest._process_email(db, dict(email))
@@ -350,8 +353,8 @@ def test_r3_out_of_range_index_is_no_match(db, use_settings, monkeypatch):
     assert row["project_id"] is None and row.get("suggested_project_id") is None
 
 
-def test_r3_without_api_key_finalizes_unknown(db, use_settings):
-    use_settings(openai_api_key="")
+def test_r3_without_a_model_server_finalizes_unknown(db, use_settings):
+    use_settings(self_hosted_llm_local_base_url="")
     email = _seed(db, _email(status="id_r3", subject="whatever"))
     email_ingest._process_email(db, dict(email))
     assert _row(db)["status"] == "processed"
@@ -361,7 +364,7 @@ def test_r3_without_api_key_finalizes_unknown(db, use_settings):
 def test_out_of_tokens_burns_no_attempts_and_notifies_once(db, use_settings, monkeypatch):
     use_settings()
 
-    def _boom(subject, candidates):
+    def _boom(subject, body, candidates, **k):
         raise RuntimeError("credit balance is too low")
 
     notified = []
@@ -370,7 +373,7 @@ def test_out_of_tokens_burns_no_attempts_and_notifies_once(db, use_settings, mon
         notified.append(type_)
         db.tables["notifications"].append({"type": type_, "created_at": "9999-01-01T00:00:00+00:00"})
 
-    monkeypatch.setattr(email_ingest.openai_text, "match_subject_to_project", _boom)
+    monkeypatch.setattr(email_ingest.openai_text, "match_email_to_project", _boom)
     monkeypatch.setattr(email_ingest, "notify_role", _fake_notify)
 
     email = _seed(db, _email(status="id_r3", subject="whatever"))
@@ -390,10 +393,10 @@ def test_out_of_tokens_burns_no_attempts_and_notifies_once(db, use_settings, mon
 def test_transient_r3_failure_backs_off_then_fails_at_max(db, use_settings, monkeypatch):
     use_settings(email_match_max_attempts=2)
 
-    def _boom(subject, candidates):
+    def _boom(subject, body, candidates, **k):
         raise ValueError("http 500 from provider")
 
-    monkeypatch.setattr(email_ingest.openai_text, "match_subject_to_project", _boom)
+    monkeypatch.setattr(email_ingest.openai_text, "match_email_to_project", _boom)
     monkeypatch.setattr(email_ingest, "notify_role", lambda *a, **k: None)
 
     email = _seed(db, _email(status="id_r3", subject="whatever"))
@@ -415,11 +418,11 @@ def test_llm_down_halts_r3_for_the_rest_of_the_sweep(db, use_settings, monkeypat
 
     calls = []
 
-    def _boom(subject, candidates):
+    def _boom(subject, body, candidates, **k):
         calls.append(subject)
         raise RuntimeError("insufficient_quota")
 
-    monkeypatch.setattr(email_ingest.openai_text, "match_subject_to_project", _boom)
+    monkeypatch.setattr(email_ingest.openai_text, "match_email_to_project", _boom)
     monkeypatch.setattr(email_ingest, "notify_role", lambda *a, **k: None)
     _seed(db, _email(id="e1", graph_message_id="g1", status="id_r3", subject="a"))
     _seed(db, _email(id="e2", graph_message_id="g2", status="id_r3", subject="b"))
@@ -620,8 +623,8 @@ def test_rescan_assigns_deterministic_hits_and_respects_manual_race(db, use_sett
                      message_at="2026-07-01T00:00:00+00:00"))
     monkeypatch.setattr(
         email_ingest.openai_text,
-        "confirm_subject_matches_project",
-        lambda subject, project: {"match": False, "confidence": 0.1},
+        "confirm_email_matches_project",
+        lambda subject, body, project, **k: {"match": False, "confidence": 0.1},
     )
     email_ingest.rescan_unknown_for_project("p1")
     assert _row(db, "e1")["project_id"] == "p1"
@@ -687,8 +690,8 @@ def test_rescan_is_stamped_apart_from_the_live_subject_round(db, use_settings, m
     monkeypatch.setattr(email_ingest, "get_supabase", lambda: db)
     monkeypatch.setattr(
         email_ingest.openai_text,
-        "confirm_subject_matches_project",
-        lambda subject, project: {"match": False, "confidence": 0.1},
+        "confirm_email_matches_project",
+        lambda subject, body, project, **k: {"match": False, "confidence": 0.1},
     )
     _seed(db, _email(status="processed", subject="RE: 26-104 – Riverside",
                      pipeline_round="r3", message_at="2026-07-01T00:00:00+00:00"))
@@ -697,3 +700,98 @@ def test_rescan_is_stamped_apart_from_the_live_subject_round(db, use_settings, m
     assert row["project_id"] == "p1" and row["matched_by"] == "subject"
     # Ran against ONE new project outside the sweep — not the live R2 round.
     assert row["pipeline_round"] == "rescan"
+
+
+# ── Fuzzy round 2 + body-aware round 3 (0155) ──────────────────────────────────
+
+
+def test_r2_exact_hit_records_full_similarity_and_candidates(db, use_settings):
+    use_settings()
+    email = _seed(db, _email(status="id_r2", subject="RE: 26-104 - Riverside BOM"))
+    email_ingest._process_email(db, dict(email))
+    row = _row(db)
+    assert row["project_id"] == "p1" and row["matched_by"] == "subject"
+    assert row["match_confidence"] == 1.0
+    assert row["match_candidates"][0]["project_id"] == "p1"
+    assert row["match_candidates"][0]["kind"] == "number"
+
+
+def test_r2_fuzzy_hit_assigns_with_its_similarity(db, use_settings):
+    use_settings()
+    email = _seed(db, _email(status="id_r2", subject="Maple Streets TI punch list"))
+    email_ingest._process_email(db, dict(email))
+    row = _row(db)
+    assert row["project_id"] == "p2" and row["pipeline_round"] == "r2"
+    assert 0.9 <= row["match_confidence"] < 1.0
+    assert row["match_candidates"][0]["kind"] == "fuzzy"
+
+
+def test_r2_miss_keeps_candidates_and_r3_gets_body_sender_and_hints(db, use_settings, monkeypatch):
+    use_settings()
+    seen = {}
+
+    def _match(subject, body, candidates, **k):
+        seen.update(subject=subject, body=body, **k)
+        return {"candidate_index": 0, "confidence": 0.95}
+
+    monkeypatch.setattr(email_ingest.openai_text, "match_email_to_project", _match)
+    email = _seed(db, _email(status="id_r2", subject="Riverside question",
+                             body_text="Re the plaza job at 26-104, see attached.",
+                             from_name="Pat GC", from_address="pat@gc.example"))
+    email_ingest._process_email(db, dict(email))
+    row = _row(db)
+    assert row["project_id"] == "p1" and row["matched_by"] == "llm"
+    assert row["match_candidates"][0]["project_id"] == "p1"  # written by R2
+    assert seen["body"] == "Re the plaza job at 26-104, see attached."
+    assert seen["from_address"] == "pat@gc.example"
+    assert seen["similarity"]["p1"] > 0
+
+
+def test_r3_no_pick_falls_back_to_the_r2_near_miss(db, use_settings, monkeypatch):
+    use_settings()
+    monkeypatch.setattr(
+        email_ingest.openai_text, "match_email_to_project",
+        lambda subject, body, candidates, **k: {"candidate_index": None, "confidence": 0.0},
+    )
+    email = _seed(db, _email(status="id_r3", subject="x", match_candidates=[
+        {"project_id": "p2", "number": "26-999", "name": "Maple Street TI",
+         "similarity": 0.75, "kind": "fuzzy", "conflict": None}]))
+    email_ingest._process_email(db, dict(email))
+    row = _row(db)
+    assert row["project_id"] is None
+    assert row["suggested_project_id"] == "p2" and row["suggested_confidence"] == 0.75
+
+
+def test_box_unreachable_waits_without_burning_attempts(db, use_settings, monkeypatch):
+    use_settings()
+
+    def _down(subject, body, candidates, **k):
+        raise email_ingest.llm.SelfHostedUnreachable("box down")
+
+    monkeypatch.setattr(email_ingest.openai_text, "match_email_to_project", _down)
+    email = _seed(db, _email(status="id_r3", subject="whatever"))
+    assert email_ingest._process_email(db, dict(email)) == "llm_down"
+    row = _row(db)
+    assert row["status"] == "id_r3" and row["attempts"] == 0
+    assert row["next_attempt_at"] is not None
+
+
+def test_rescan_fuzzy_hit_assigns_and_llm_confirm_gets_the_body(db, use_settings, monkeypatch):
+    use_settings(email_rescan_llm_days=100000)
+    monkeypatch.setattr(email_ingest, "get_supabase", lambda: db)
+    seen = []
+    monkeypatch.setattr(
+        email_ingest.openai_text, "confirm_email_matches_project",
+        lambda subject, body, project, **k: seen.append(body) or {"match": False, "confidence": 0.1},
+    )
+    _seed(db, _email(id="e1", graph_message_id="g1", status="processed",
+                     subject="Riverside Plaz pour schedule", conversation_id="cA",
+                     message_at="2026-07-01T00:00:00+00:00"))
+    _seed(db, _email(id="e2", graph_message_id="g2", status="processed",
+                     subject="unrelated", conversation_id="cB", body_text="the body",
+                     message_at="2026-07-01T00:00:00+00:00"))
+    email_ingest.rescan_unknown_for_project("p1")
+    assert _row(db, "e1")["project_id"] == "p1"
+    assert _row(db, "e1")["match_candidates"][0]["project_id"] == "p1"
+    assert _row(db, "e2")["project_id"] is None
+    assert seen == ["the body"]

@@ -2014,6 +2014,40 @@ class RFIMarkSentIn(BaseModel):
     platform: Literal["procore", "autodesk"]
 
 
+# PM RFI sync from the GC's Procore (0156, docs/PM_RFI_SYNC.md).
+
+
+class PmExternalLinkIn(BaseModel):
+    """PUT /pm/projects/{id}/pm-link. For procore, `url` is any Procore page
+    of the GC's project (project home, an RFI link, the RFIs tool); it may be
+    omitted to toggle `sync_enabled` on an existing Procore link."""
+
+    platform: Literal["procore", "other", "none"]
+    url: str | None = Field(None, max_length=2000)
+    sync_enabled: bool | None = None
+
+
+class PmExternalLinkOut(BaseModel):
+    platform: Literal["procore", "other", "none"] | None = None
+    host: str | None = None
+    external_company_id: str | None = None
+    external_project_id: str | None = None
+    external_url: str | None = None
+    sync_enabled: bool = False
+    linked_via: Literal["manual", "email"] | None = None
+    last_synced_at: datetime | None = None
+    last_sync_status: str | None = None
+    last_error: str | None = None
+    backfilled_at: datetime | None = None
+    running: bool = False
+
+
+class RFILinkIn(BaseModel):
+    """POST /rfis/{rfi_id}/link: merge the imported Procore RFI into this G3 RFI."""
+
+    internal_rfi_id: str = Field(min_length=1, max_length=64)
+
+
 class ManpowerIn(BaseModel):
     work_date: date
     classification: str = Field(min_length=1, max_length=200)

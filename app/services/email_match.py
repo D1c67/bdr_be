@@ -1,4 +1,7 @@
-"""Deterministic email→project subject matching (identification round 2).
+"""Email→project subject matching (identification round 2): the exact
+deterministic rules below, then a fuzzy name score (r2_score) built on the RFP
+matcher's normalization, which assigns only when it is high, clear of the
+runner-up and conflict-free.
 
 Pure functions, no I/O — fully unit-testable. The guardrails exist because a
 false auto-assignment is worse than an Unknown: users treat project email lists
@@ -18,6 +21,7 @@ Guardrails, each pinned by tests:
 import difflib
 import re
 import unicodedata
+from dataclasses import dataclass, field
 
 # A job number must have at least this many alphanumeric characters to be
 # matchable — a legacy number like "21" must never hit "21st Street".
@@ -161,3 +165,178 @@ def prefilter_candidates(subject: str, projects: list[dict], max_n: int) -> list
 
     forced = forced[:max_n]
     return forced + sorted(rest, key=score)[: max_n - len(forced)]
+
+
+# ── Fuzzy round-2 scoring (the RFP matcher's name score) ──────────────────────
+
+# Stored per email (match_candidates) for the triage UI and the R3 prompt.
+FUZZY_TOP_N = 5
+
+MATCH_KIND_NUMBER = "number"
+MATCH_KIND_NAME = "name"
+MATCH_KIND_FUZZY = "fuzzy"
+
+
+@dataclass(frozen=True)
+class R2Result:
+    """Round 2's answer: the project to assign (or None), how it was found,
+    the similarity behind it (1.0 for an exact number or name hit), and the
+    top candidates by similarity so a human (and R3) can see the near-misses."""
+
+    project_id: str | None
+    kind: str | None
+    similarity: float | None
+    candidates: list[dict] = field(default_factory=list)
+
+
+# Partial credit for a project-name token the subject only approximates:
+# an abbreviation ("Elem" for "Elementary") or a typo ("Henderon").
+_PREFIX_CREDIT = 0.9
+_TYPO_CREDIT = 0.85
+_MIN_PREFIX_LEN = 3
+_MIN_TYPO_LEN = 5
+_TYPO_DICE = 0.75
+
+
+def _token_credit(project_token: str, subject_tokens: set[str]) -> float:
+    if project_token in subject_tokens:
+        return 1.0
+    if not project_token.isalpha():
+        return 0.0  # numbers are discriminators: exact or nothing
+    from app.services import rfp_match
+
+    best = 0.0
+    for tok in subject_tokens:
+        if not tok.isalpha():
+            continue
+        short, long_ = (tok, project_token) if len(tok) <= len(project_token) else (project_token, tok)
+        if len(short) >= _MIN_PREFIX_LEN and long_.startswith(short):
+            best = max(best, _PREFIX_CREDIT)
+        elif (
+            len(short) >= _MIN_TYPO_LEN
+            and rfp_match._dice(tok, project_token) >= _TYPO_DICE
+        ):
+            best = max(best, _TYPO_CREDIT)
+    return best
+
+
+def _coverage(subject_tokens: list[str], project_tokens: list[str]) -> float:
+    """How much of the PROJECT's name the subject carries (an email subject is
+    a project name plus other words, so the direction matters: a short
+    generic subject must not fully match a longer name). Counted only when
+    the name has two tokens, or one of six or more characters (the RFP
+    containment rule). Single letters stay out of the denominator."""
+    wanted = [t for t in dict.fromkeys(project_tokens) if len(t) > 1 or t.isdigit()]
+    if not wanted:
+        return 0.0
+    if len(wanted) < 2 and not any(len(t) >= 6 for t in wanted):
+        return 0.0
+    have = set(subject_tokens)
+    return sum(_token_credit(t, have) for t in wanted) / len(wanted)
+
+
+def similarity(subject: str, project: dict, settings) -> tuple[float, dict | None]:
+    """Fuzzy subject-to-project score, built on the RFP matcher's name
+    normalization (rfp_match: reference numbers, stop words, roman numerals
+    and ordinals) and its discriminator conflict cap (Phase 1 vs Phase 2,
+    Station 7 vs Station 12): max(trigram Dice, project-name coverage with
+    prefix and typo credit). The project's own number is stripped from both
+    sides so it never reads as a conflict."""
+    from app.services import rfp_match
+
+    number = project.get("number") or None
+    name = project.get("name") or ""
+    base = rfp_match.name_score(subject, name, a_number=number, b_number=number, settings=settings)
+    subject_tokens = rfp_match.normalize_project_name(subject, project_number=number).split()
+    project_tokens = rfp_match.normalize_project_name(name, project_number=number).split()
+    score = max(base.dice, _coverage(subject_tokens, project_tokens))
+    if base.conflict is not None:
+        score = min(score, float(settings.rfp_match_conflict_cap))
+    return round(score, 4), base.conflict
+
+
+def _stems(norm: str) -> set[str]:
+    """First three letters of each alphabetic word of 3+ chars: the cheap
+    gate in front of the fuzzy score (a prefix or typo match shares them,
+    almost always)."""
+    return {tok[:3] for tok in norm.split() if len(tok) >= 3 and tok.isalpha()}
+
+
+def r2_score(subject: str, projects: list[dict], settings) -> R2Result:
+    """Exact rules first (r2_match: a single job-number hit, else a single
+    name hit), then the fuzzy name score. A fuzzy best assigns only when it
+    clears EMAIL_MATCH_FUZZY_AUTO_THRESHOLD with the runner-up more than
+    EMAIL_MATCH_FUZZY_RUNNER_UP_GAP below, has no discriminator conflict, and
+    the exact rules were not ambiguous (two projects hit = R3 decides)."""
+    subject_norm = normalize(subject)
+    if not subject_norm:
+        return R2Result(None, None, None, [])
+    subject_dehyph = _dehyphenated(subject)
+    subject_stems = _stems(subject_norm)
+
+    scored: list[dict] = []
+    number_matches: set[str] = set()
+    name_matches: set[str] = set()
+    for p in projects:
+        pid = p.get("id")
+        if not pid:
+            continue
+        number_hit = _number_hits(subject_norm, subject_dehyph, p.get("number") or "")
+        name_hit = not number_hit and _name_hits(subject_norm, p.get("name") or "")
+        if number_hit or name_hit:
+            (number_matches if number_hit else name_matches).add(pid)
+            score, conflict = 1.0, None
+        elif not subject_stems & _stems(normalize(p.get("name") or "")):
+            continue  # no word in common: a near-zero score not worth computing
+        else:
+            score, conflict = similarity(subject, p, settings)
+        if score <= 0:
+            continue
+        scored.append({
+            "project_id": pid,
+            "number": p.get("number"),
+            "name": p.get("name"),
+            "similarity": round(float(score), 3),
+            "kind": (MATCH_KIND_NUMBER if number_hit
+                     else MATCH_KIND_NAME if name_hit else MATCH_KIND_FUZZY),
+            "conflict": conflict,
+        })
+    scored.sort(key=lambda c: (-c["similarity"], c["kind"] != MATCH_KIND_NUMBER,
+                               c["number"] or "", c["project_id"]))
+    top = scored[:FUZZY_TOP_N]
+
+    # The r2_match rule, read off the same loop: a single number hit, else
+    # (no number hits at all) a single name hit.
+    if len(number_matches) == 1:
+        return R2Result(next(iter(number_matches)), MATCH_KIND_NUMBER, 1.0, top)
+    if not number_matches and len(name_matches) == 1:
+        return R2Result(next(iter(name_matches)), MATCH_KIND_NAME, 1.0, top)
+    if number_matches or name_matches or not top:
+        return R2Result(None, None, None, top)
+
+    best = top[0]
+    runner_up = top[1]["similarity"] if len(top) > 1 else 0.0
+    threshold = float(settings.email_match_fuzzy_auto_threshold)
+    gap = float(settings.email_match_fuzzy_runner_up_gap)
+    if (
+        best["similarity"] >= threshold
+        and runner_up < best["similarity"] - gap
+        and best["conflict"] is None
+    ):
+        return R2Result(best["project_id"], MATCH_KIND_FUZZY, best["similarity"], top)
+    return R2Result(None, None, None, top)
+
+
+def could_match(subject: str, project: dict, settings) -> bool:
+    """Whether round 2 could pick `project` for this subject at all: an exact
+    number or name hit, or a fuzzy score at the auto threshold. The rescan
+    uses it to skip the full-book r2_score for most of the Unknown pool."""
+    subject_norm = normalize(subject)
+    if not subject_norm:
+        return False
+    if _number_hits(subject_norm, _dehyphenated(subject), project.get("number") or ""):
+        return True
+    if _name_hits(subject_norm, project.get("name") or ""):
+        return True
+    score, conflict = similarity(subject, project, settings)
+    return conflict is None and score >= float(settings.email_match_fuzzy_auto_threshold)
