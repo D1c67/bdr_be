@@ -21,6 +21,12 @@ _RFP_SELF_TEST_BOOT_SECONDS = 120
 
 @contextlib.asynccontextmanager
 async def lifespan(_: FastAPI):
+    # Every httpx / SDK log line goes through core.redact first, so a signed
+    # URL, a Procore attachment signature or a ?key= never reaches the logs
+    # (browser agents SPEC.md 1 "Logging"; harmless for everything else).
+    from app.core.redact import install_httpx_filter
+
+    install_httpx_filter()
     # Live self-hosted box override (Settings > AI model server): each worker
     # re-reads the one-row llm_runtime_settings table so a switch made through
     # either worker reaches both within seconds (services/llm_target).
@@ -162,12 +168,25 @@ async def lifespan(_: FastAPI):
     if settings.pm_rfi_sync_active and settings.supabase_url:
         from app.services import pm_rfi_sync as pm_rfi_sync_service
 
-        if not settings.procore_configured:
+        from app.services import procore_creds
+
+        if not procore_creds.configured(settings):
             logging.getLogger(__name__).warning(
-                "pm rfi sync: enabled but PROCORE_LOGIN_EMAIL / PROCORE_LOGIN_PASSWORD are not "
-                "set; runs will fail until they are"
+                "pm rfi sync: enabled but the Procore account is not configured (PROCORE_LOGIN_EMAIL "
+                "plus a password in Settings > Browser agents or PROCORE_LOGIN_PASSWORD); runs will "
+                "fail until it is"
             )
         pm_rfi_sync_task = asyncio.create_task(pm_rfi_sync_service.polling_loop())
+    # Browser agents (docs/browser_agents/SPEC.md 3.4): the sweeper reclaims
+    # leases of silent workers (after a startup grace, so a redeploy never
+    # kills a live job), parks lapsed help holds, reconciles applying jobs,
+    # expires stale ones and raises the spend and offline alerts. Every
+    # worker runs it; every write is compare-and-set.
+    browser_agents_task: asyncio.Task | None = None
+    if settings.browser_agents_active:
+        from app.services.browser_agents import queue as browser_agent_queue
+
+        browser_agents_task = asyncio.create_task(browser_agent_queue.polling_loop())
     # AI model health — keeps the sidebar's Model status indicator warm by
     # probing the active LLM pool (see services/llm_health). No sub-app gate:
     # the features it covers span Bidding and PM. Each worker polls its own
@@ -250,7 +269,7 @@ async def lifespan(_: FastAPI):
     for task in (
         poll_task, reminder_task, digest_task, email_task, rfp_email_task,
         rfp_portal_task, llm_health_task, llm_queue_task, call_in_task, llm_target_task,
-        pm_rfi_sync_task,
+        pm_rfi_sync_task, browser_agents_task,
     ):
         if task:
             task.cancel()
@@ -546,11 +565,16 @@ def features(user: CurrentUser = Depends(get_current_user)) -> dict[str, bool]:
 
 # Routers are mounted as each domain is implemented.
 from app.routers import (  # noqa: E402
+    agent_worker,
+    agent_worker_help,
+    agent_worker_rfi,
+    agent_worker_turns,
     ai_spend,
     analytics,
     bid_drafts,
     bid_splitter,
     boq_analysis,
+    browser_agents,
     calling_in,
     change_review,
     deleted_projects,
@@ -642,6 +666,22 @@ app.include_router(llm_status.router)
 # route requires a dev account (require_dev) on top of auth.
 app.include_router(llm_monitor.router)
 app.include_router(ai_spend.router)  # AI Estimating daily spend cap: status + Settings writes
+# Browser agents: the Windows worker's API (/agent-worker/v1, its own hashed
+# token, never a user JWT). Gated on the router itself by
+# BROWSER_AGENTS_ENABLED (bare 404 while off); not tied to a sub-app.
+app.include_router(agent_worker.router)
+# POST /agent-worker/v1/jobs/{id}/turns: BDR proxies every agent model call
+# (services/browser_agents/turns.py). Same gate, auth and no-store rules.
+app.include_router(agent_worker_turns.router)
+# Identities (the shared Procore login, O2) and /rfi-capture (an agent's RFI
+# capture handed to the PM RFI sync). Same gate, auth and no-store rules.
+app.include_router(agent_worker_rfi.router)
+# Help (open/join, messages, consume, reply, the one-time helper secret) and
+# RFI contributions. Same gate, auth and no-store rules.
+app.include_router(agent_worker_help.router)
+# The human side: /browser-agents (Agents pages, the help chat, Settings >
+# Browser agents). User JWT and role gates; same BROWSER_AGENTS_ENABLED 404.
+app.include_router(browser_agents.router)
 # Bid File Splitter — experimental standalone AI tool, gated by its OWN env flag
 # (BID_FILE_SPLITTER_ENABLED, default off → every route 404s), not a sub-app:
 # it is not connected to the bidding pipeline yet, so it must not ride the

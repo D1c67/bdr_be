@@ -23,7 +23,7 @@ from app.core.features import require_pm_rfi_sync
 from app.core.supabase_client import get_supabase
 from app.models.schemas import PmExternalLinkIn, PmExternalLinkOut, RFILinkIn
 from app.routers.pm_field import _enrich_rfis
-from app.services import pm_rfi_sync
+from app.services import pm_rfi_sync, procore_creds
 from app.services import procore_client as pc
 from app.services.notifications import audit
 from app.services.pm import require_pm_project
@@ -51,7 +51,7 @@ def _resolve_company(ref: pc.ProcoreProjectRef) -> str | None:
     """Ask the shared Procore session for the project's company id (GET only).
     Skipped when Procore credentials are not configured."""
     settings = get_settings()
-    if not settings.procore_configured:
+    if not procore_creds.configured(settings):
         return None
     with pm_rfi_sync.open_session(ref.host, settings) as session:
         return session.resolve_company_id(ref.project_id)

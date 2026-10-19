@@ -1,0 +1,20 @@
+{
+  "endpoint": "claim",
+  "method": "POST",
+  "path": "/agent-worker/v1/claim",
+  "headers": {
+    "Authorization": "Bearer bdrw_<token>",
+    "X-Agent-Boot": "b0075eed-0000-4000-8000-000000000001"
+  },
+  "request": {
+    "boot_id": "b0075eed-0000-4000-8000-000000000001",
+    "capacity": {
+      "rfi_from_email": 2
+    }
+  },
+  "status": 200,
+  "response": {
+    "jobs": []
+  },
+  "note": "Kill switch off or nothing queued."
+}

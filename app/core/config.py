@@ -1,5 +1,7 @@
 """Application configuration loaded from environment / .env."""
 
+import base64
+import binascii
 import logging
 import math
 import re
@@ -65,6 +67,24 @@ def _parse_hhmm(raw: str, env_name: str) -> tuple[int, int]:
         raise ValueError(f"{env_name} {entry!r} is out of range (00:00 to 23:59).")
     return hour, minute
 
+
+
+def _b64_key(raw: str, env_name: str) -> bytes:
+    """A base64 (standard or url-safe, padding optional) value that must
+    decode to exactly 32 bytes: the browser agent AES and HMAC keys and the
+    Ed25519 release public key. Anything else raises a ValueError naming
+    `env_name` (never the value)."""
+    text = (raw or "").strip()
+    if not text:
+        raise ValueError(f"{env_name} must be set (base64 of 32 random bytes).")
+    padded = text + "=" * (-len(text) % 4)
+    try:
+        data = base64.b64decode(padded.replace("-", "+").replace("_", "/"), validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError(f"{env_name} is not valid base64.") from None
+    if len(data) != 32:
+        raise ValueError(f"{env_name} must decode to exactly 32 bytes (got {len(data)}).")
+    return data
 
 # Which self-hosted endpoint is live (SELF_HOSTED_LLM_TARGET). Each target is a
 # base URL + API key + served-model triple: SELF_HOSTED_LLM_<TARGET>_{BASE_URL,
@@ -1068,6 +1088,107 @@ class Settings(BaseSettings):
             )
         return self
 
+    # ── Browser agents (docs/browser_agents/SPEC.md, services/browser_agents) ─
+    # A Windows PC runs a worker that drives headless Chromium for BDR; BDR
+    # owns the queue, the model transcript, the audit ledger and every write.
+    # The worker talks to /agent-worker/v1 with its own hashed token (never a
+    # user JWT). Off by default. Run migration 0157 first. Provider, model and
+    # spend caps live in the DB (Settings > Browser agents), never on the PC.
+    browser_agents_enabled: bool = False
+    # AES-256-GCM key for the encrypted secret store (the Procore password set
+    # in Settings) and the helper one-time secrets: base64 of 32 random bytes.
+    browser_agent_secrets_key: str = ""
+    browser_agent_secrets_key_id: str = "k1"
+    # Retired keys still able to decrypt during a rotation: "k0:<b64>,..."
+    browser_agent_secrets_old_keys: str = ""
+    # A SEPARATE base64 32-byte key for the HMAC fingerprints shown in Settings.
+    browser_agent_fingerprint_key: str = ""
+    # Ed25519 public key (base64 of the 32 raw bytes) the signed worker
+    # releases are checked against before BDR advertises one. The private key
+    # stays offline on the owner's Mac.
+    browser_agent_release_pubkey: str = ""
+    browser_agent_lease_seconds: int = 90           # a claim's lease; the worker beats every 15 s
+    browser_agent_sweep_seconds: int = 20           # sweeper tick (reclaim, park, reconcile, expire)
+    browser_agent_rate_limit_per_minute: int = 600  # per worker, per process (the DB fence is the real guard)
+    browser_agent_enroll_per_hour: int = 5          # enrollment attempts per IP per hour (DB counter)
+    # The public https base of THIS API as the agent PC reaches it, used in
+    # the install command Settings > Browser agents > Add worker shows. Empty:
+    # derived from the request (https forced).
+    browser_agent_api_base_url: str = ""
+    # Provider keys for the agent model (BDR proxies every model call; the
+    # keys never reach the PC). OPENAI_API_KEY / ANTHROPIC_API_KEY are above.
+    google_api_key: str = ""
+    xai_api_key: str = ""
+    meta_api_key: str = ""
+    # Read the client IP from the rightmost X-Forwarded-For entry (Railway's
+    # edge proxy appends it). Only for the worker IP allowlist and the
+    # enrollment counter; must be true in production when agents are on.
+    trust_forwarded_for: bool = False
+
+    @property
+    def browser_agents_active(self) -> bool:
+        """The worker API, the sweeper and the human routes are served."""
+        return bool(self.browser_agents_enabled and self.supabase_url)
+
+    @property
+    def browser_agent_old_keys(self) -> dict[str, bytes]:
+        """BROWSER_AGENT_SECRETS_OLD_KEYS parsed as {key_id: 32 raw bytes}
+        (validated at boot by `_validate_browser_agents`)."""
+        out: dict[str, bytes] = {}
+        for entry in (self.browser_agent_secrets_old_keys or "").split(","):
+            entry = entry.strip()
+            if not entry:
+                continue
+            key_id, sep, raw = entry.partition(":")
+            if not sep or not re.fullmatch(r"[A-Za-z0-9_-]{1,20}", key_id.strip()):
+                raise ValueError("BROWSER_AGENT_SECRETS_OLD_KEYS entries must look like <key_id>:<base64>.")
+            out[key_id.strip()] = _b64_key(raw, "BROWSER_AGENT_SECRETS_OLD_KEYS")
+        return out
+
+    @model_validator(mode="after")
+    def _validate_browser_agents(self) -> "Settings":
+        """Refuse to boot on a browser agent setting that could only fail at
+        run time. The numeric rules always apply; the key and dependency rules
+        apply once BROWSER_AGENTS_ENABLED is true."""
+        if not 30 <= self.browser_agent_lease_seconds <= 600:
+            raise ValueError("BROWSER_AGENT_LEASE_SECONDS must be between 30 and 600.")
+        if not 5 <= self.browser_agent_sweep_seconds <= 300:
+            raise ValueError("BROWSER_AGENT_SWEEP_SECONDS must be between 5 and 300.")
+        if self.browser_agent_rate_limit_per_minute < 60 or self.browser_agent_enroll_per_hour < 1:
+            raise ValueError(
+                "BROWSER_AGENT_RATE_LIMIT_PER_MINUTE must be at least 60 and "
+                "BROWSER_AGENT_ENROLL_PER_HOUR at least 1."
+            )
+        if self.browser_agent_release_pubkey.strip():
+            _b64_key(self.browser_agent_release_pubkey, "BROWSER_AGENT_RELEASE_PUBKEY")
+        if not self.browser_agents_enabled:
+            return self
+        _b64_key(self.browser_agent_secrets_key, "BROWSER_AGENT_SECRETS_KEY")
+        fingerprint = _b64_key(self.browser_agent_fingerprint_key, "BROWSER_AGENT_FINGERPRINT_KEY")
+        if fingerprint == _b64_key(self.browser_agent_secrets_key, "BROWSER_AGENT_SECRETS_KEY"):
+            raise ValueError(
+                "BROWSER_AGENT_FINGERPRINT_KEY must differ from BROWSER_AGENT_SECRETS_KEY."
+            )
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,20}", self.browser_agent_secrets_key_id or ""):
+            raise ValueError("BROWSER_AGENT_SECRETS_KEY_ID must be 1 to 20 letters, digits, _ or -.")
+        if self.browser_agent_secrets_key_id in self.browser_agent_old_keys:
+            raise ValueError(
+                "BROWSER_AGENT_SECRETS_OLD_KEYS must not reuse BROWSER_AGENT_SECRETS_KEY_ID."
+            )
+        if not self.procore_login_email.strip():
+            raise ValueError("BROWSER_AGENTS_ENABLED=true needs PROCORE_LOGIN_EMAIL.")
+        if not self.pm_rfi_sync_active:
+            raise ValueError(
+                "BROWSER_AGENTS_ENABLED=true needs the PM RFI sync (PM_ENABLED and "
+                "PM_RFI_SYNC_ENABLED): agent captures are applied through it."
+            )
+        if self.is_production and not self.trust_forwarded_for:
+            raise ValueError(
+                "BROWSER_AGENTS_ENABLED=true in production needs TRUST_FORWARDED_FOR=true "
+                "(the worker IP allowlist and the enrollment counter read the client IP)."
+            )
+        return self
+
     @property
     def rfp_email_ingestion_inboxes(self) -> list[str]:
         """Watched mailboxes, lowercased, deduplicated, blanks dropped."""
@@ -1129,15 +1250,19 @@ class Settings(BaseSettings):
     def rfp_harvest_active(self) -> bool:
         """The harvest slice runs: master switch, its own switch, and at least
         one harvester (Procore with credentials, PipelineSuite, SmartBid, or
-        the email harvester; the last three need no credentials)."""
+        the email harvester; the last three need no credentials). Procore
+        counts as configured with the password in Settings > Browser agents
+        too, not only the env value (procore_creds.configured)."""
+        from app.services import procore_creds
+
         return (
             self.rfp_ingest_enabled
             and self.rfp_harvest_enabled
             and (
-                self.procore_configured
-                or self.pipelinesuite_enabled
+                self.pipelinesuite_enabled
                 or self.smartbid_enabled
                 or self.rfp_harvest_email_enabled
+                or procore_creds.configured(self)
             )
         )
 

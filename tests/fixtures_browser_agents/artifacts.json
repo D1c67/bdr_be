@@ -1,0 +1,22 @@
+{
+  "endpoint": "artifacts",
+  "method": "POST",
+  "path": "/agent-worker/v1/jobs/1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d/artifacts",
+  "headers": {
+    "Authorization": "Bearer bdrw_<token>",
+    "X-Agent-Boot": "b0075eed-0000-4000-8000-000000000001",
+    "X-Agent-Lease": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d:3",
+    "Idempotency-Key": "<uuid>"
+  },
+  "request": {
+    "kind": "rfi_detail_json",
+    "sha256": "3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f",
+    "filename": "rfi_27914290.json"
+  },
+  "status": 200,
+  "response": {
+    "artifact_id": "c2c2c2c2-0000-4000-8000-000000000002",
+    "existed": false
+  },
+  "note": "multipart/form-data: these fields plus a `file` part; the file is an RfiDetailEnvelope."
+}

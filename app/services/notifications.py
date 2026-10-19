@@ -31,6 +31,26 @@ ESTIMATOR_NOTIFICATION_TYPES = [
     "estimator_note",
 ]
 
+# Browser agent notices (docs/browser_agents/HUMAN_API.md "Notifications (C3)").
+# Internal roles only (Estimating Admin, IT Admin); never mirrored to an
+# estimator. Their rows usually carry no project, so a dismissal scopes them
+# by `metadata_eq={"help_id": ...}` (see dismiss_notifications).
+BROWSER_AGENT_NOTIFICATION_TYPES = [
+    "browser_agent.help_needed",
+    "browser_agent.help_reminder",
+    "browser_agent.help_expired",
+    "browser_agent.job_failed",
+    "browser_agent.worker_offline",
+    "browser_agent.worker_pending",
+    "browser_agent.worker_suspicious",
+    "browser_agent.login_released",
+    "browser_agent.provider_problem",
+    "browser_agent.spend_alert",
+]
+# A metadata key that alone scopes a dismissal (no project or rfq needed):
+# it names exactly one browser agent help request.
+_SELF_SCOPING_METADATA_KEYS = ("help_id",)
+
 
 def notify_role(
     role: Role,
@@ -40,8 +60,11 @@ def notify_role(
     rfq_id: str | None = None,
     mirror_email: bool = True,
     metadata: dict | None = None,
-) -> None:
-    """Create a notification for every active user holding `role`.
+) -> int:
+    """Create a notification for every active user holding `role`. Returns
+    how many rows were created (0 when nobody holds the role), so a caller
+    can fall back to another role (browser agent help: IT Admin when no
+    active Estimating Admin exists).
 
     Refuses the estimator role outright: the estimator is an external, untrusted
     user scoped to assigned projects only, so an unscoped broadcast would leak a
@@ -63,7 +86,7 @@ def notify_role(
             "estimator notifications must be assignment-scoped.",
             type_,
         )
-        return
+        return 0
     sb = get_supabase()
     users = (
         sb.table("profiles")
@@ -73,7 +96,7 @@ def notify_role(
         .execute()
     ).data or []
     if not users:
-        return
+        return 0
     rows = [
         {
             "user_id": u["id"],
@@ -90,6 +113,7 @@ def notify_role(
     inserted = (sb.table("notifications").insert(rows).execute()).data or rows
     if mirror_email:
         notification_email.queue(inserted)
+    return len(inserted)
 
 
 def notify_user(
@@ -138,14 +162,17 @@ def dismiss_notifications(
     metadata carries that exact value (the external_submission.* family keys
     its rows by {"request_id"}, 0140).
     Requires a project_id or rfq_id scope so a dismissal can never sweep the
-    whole table. The email mirror is already sent and is intentionally left
+    whole table. The one exception: a `metadata_eq` carrying `help_id` (a
+    browser agent help request, whose bells usually have no project) is a
+    scope of its own, since it names exactly one request. The email mirror is already sent and is intentionally left
     untouched.
 
     Exact types and each prefix run as separate UPDATEs (in_ / like) rather than
     one combined or-filter — these are infrequent cleanup writes, and the native
     builder methods avoid any wildcard-escaping ambiguity.
     """
-    if not (project_id or rfq_id):
+    self_scoped = any((metadata_eq or {}).get(k) for k in _SELF_SCOPING_METADATA_KEYS)
+    if not (project_id or rfq_id or self_scoped):
         raise ValueError("dismiss_notifications needs a project_id or rfq_id scope")
     sb = get_supabase()
 

@@ -1,0 +1,17 @@
+{
+  "artifact": "rfi_list_json",
+  "body": {
+    "request_path": "/rest/v1.0/projects/3167322/rfis",
+    "status": 200,
+    "captured_at": "2026-10-19T15:04:05Z",
+    "company_id": "8089",
+    "pages": 1,
+    "body": [
+      {
+        "id": 27914290,
+        "number": "Const-198",
+        "subject": "Conduit routing at grid C"
+      }
+    ]
+  }
+}

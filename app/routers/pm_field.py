@@ -410,6 +410,8 @@ def _attachment_view(row: dict, doc: dict) -> dict:
         "folder": doc.get("folder"),
         "source": doc.get("source"),
         "size_bytes": doc.get("size_bytes"),
+        # A file a helper supplied through a browser agent help request.
+        "from_help": str(row.get("external_file_id") or "").startswith("help:"),
     }
 
 
@@ -472,7 +474,7 @@ def _enrich_rfis(
         (
             get_supabase()
             .table("rfi_attachments")
-            .select("id, rfi_id, doc_key, kind")
+            .select("id, rfi_id, doc_key, kind, external_file_id")
             .in_("rfi_id", rfi_ids)
             .execute()
         ).data
@@ -529,7 +531,24 @@ def _enrich_rfis(
         r["created_by_name"] = creator_names.get(r.get("created_by"))
         r["last_sent_by_name"] = sender_names.get(r.get("last_sent_by"))
         r["last_send"] = last_sends.get(r.get("id"))
+        _agent_provenance(r)
     return rows
+
+
+def _agent_provenance(row: dict) -> None:
+    """Browser agent provenance (0157, docs/browser_agents/SPEC.md 7 "RFI
+    page"): every row carries `import_method` ('web_session' | 'agent' |
+    null), `imported_by_agent_job_id`, and `external_supplement` as a list of
+    {text, by, at} notes a helper supplied through agent help. The notes are
+    verbatim helper text: the UI renders them as plain text, never HTML."""
+    row["import_method"] = row.get("import_method")
+    row["imported_by_agent_job_id"] = row.get("imported_by_agent_job_id")
+    notes = row.get("external_supplement")
+    row["external_supplement"] = [
+        {"text": str(n.get("text") or ""), "by": n.get("by"), "at": n.get("at")}
+        for n in (notes if isinstance(notes, list) else [])
+        if isinstance(n, dict) and n.get("text")
+    ]
 
 
 @router.get("/rfis")

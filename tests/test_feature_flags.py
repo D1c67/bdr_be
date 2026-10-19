@@ -151,12 +151,14 @@ def test_all_sub_apps_enabled_by_default():
         "rfp_testing": False,
         "ai_estimating": True,
         "pm_rfi_sync": False,
+        "browser_agents": False,
     }
     # The field default (not the pinned env) is what production inherits.
     assert Settings.model_fields["plans_reader_enabled"].default is False
     assert Settings.model_fields["rfp_ingest_enabled"].default is False
     assert Settings.model_fields["bid_file_splitter_enabled"].default is False
     assert Settings.model_fields["rfp_testing_enabled"].default is False
+    assert Settings.model_fields["browser_agents_enabled"].default is False
 
 
 def test_every_route_is_reachable_with_all_flags_on(client: TestClient):

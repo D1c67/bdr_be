@@ -1,0 +1,14 @@
+{
+  "endpoint": "config",
+  "method": "GET",
+  "path": "/agent-worker/v1/config",
+  "headers": {
+    "Authorization": "Bearer bdrw_<token>"
+  },
+  "request": null,
+  "status": 200,
+  "response": {
+    "pending": true
+  },
+  "note": "A pending worker gets only this."
+}

@@ -1,0 +1,54 @@
+{
+  "endpoint": "claim",
+  "method": "POST",
+  "path": "/agent-worker/v1/claim",
+  "headers": {
+    "Authorization": "Bearer bdrw_<token>",
+    "X-Agent-Boot": "b0075eed-0000-4000-8000-000000000001"
+  },
+  "request": {
+    "boot_id": "b0075eed-0000-4000-8000-000000000001",
+    "capacity": {
+      "rfi_from_email": 1,
+      "canary": 0
+    }
+  },
+  "status": 200,
+  "response": {
+    "jobs": [
+      {
+        "job_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+        "agent_type": "rfi_from_email",
+        "epoch": 3,
+        "lease_expires_at": "2026-10-19T15:05:35Z",
+        "input": {
+          "platform": "procore",
+          "host": "app.procore.com",
+          "external_project_id": "3167322",
+          "rfi_id": "27914290",
+          "company_id": "8089",
+          "rfi_number_hint": "Const-198",
+          "event_hint": "closed",
+          "email_message_at": "2026-10-19T14:58:00Z",
+          "source_email_ids": [
+            "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
+          ]
+        },
+        "checkpoint": {
+          "phase": "seeded",
+          "company_id": "8089",
+          "rfi_id": "27914290",
+          "detail_artifact_id": null,
+          "captured_at": null,
+          "last_url": null,
+          "contributions_sent": []
+        },
+        "checkpoint_seq": 1,
+        "attempts": 1,
+        "last_resume_reason": null,
+        "turn_count": 0,
+        "unconsumed_help": []
+      }
+    ]
+  }
+}

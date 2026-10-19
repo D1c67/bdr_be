@@ -1,0 +1,51 @@
+<!--
+  WinSW v2.12 service definition for the BDR browser agent (spec 8, D16).
+  install.ps1 fills the {{...}} values, runs "BDRAgent.exe install", then
+  deletes the service account block (with the password) from this file.
+
+  The service runs the stable launcher on the bare Python runtime as the
+  standard local user bdr-agent (never LocalSystem). The launcher runs the
+  current signed worker version and rolls back on local health only.
+-->
+<service>
+  <id>BDRAgent</id>
+  <name>BDR Agent</name>
+  <description>BDR browser agent worker. Runs the BDR launcher, which runs the current signed worker version.</description>
+
+  <executable>{{PYTHON}}</executable>
+  <arguments>-I "{{HOME}}\launcher\launcher.py" --home "{{HOME}}" run</arguments>
+  <workingdirectory>{{HOME}}</workingdirectory>
+
+  <!-- Starts at boot with no one logged on; delayed so the network is up first. -->
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+
+  <!-- Restart on failure after 10 s, 30 s, then 60 s; the count resets after an hour. -->
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <resetfailure>1 hour</resetfailure>
+
+  <!-- Stop: Ctrl+C reaches the launcher and the worker; the worker requeues its
+       jobs, the launcher waits up to 45 s, WinSW kills whatever is left at 60 s. -->
+  <stoptimeout>60 sec</stoptimeout>
+  <stopparentprocessfirst>true</stopparentprocessfirst>
+
+  <logpath>{{HOME}}\logs\service</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>8</keepFiles>
+  </log>
+
+  <env name="BDR_AGENT_HOME" value="{{HOME}}"/>
+  <env name="PLAYWRIGHT_BROWSERS_PATH" value="{{HOME}}\ms-playwright"/>
+
+  <!-- SERVICEACCOUNT-BEGIN -->
+  <serviceaccount>
+    <domain>.</domain>
+    <user>{{SERVICE_USER}}</user>
+    <password>{{SERVICE_PASSWORD}}</password>
+    <allowservicelogon>true</allowservicelogon>
+  </serviceaccount>
+  <!-- SERVICEACCOUNT-END -->
+</service>

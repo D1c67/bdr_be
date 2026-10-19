@@ -1,0 +1,13 @@
+{
+  "endpoint": "canary_page",
+  "method": "GET",
+  "path": "/agent-worker/v1/canary/page",
+  "headers": {
+    "Authorization": "Bearer bdrw_<token>",
+    "X-Agent-Boot": "b0075eed-0000-4000-8000-000000000001"
+  },
+  "request": null,
+  "status": 200,
+  "response": null,
+  "note": "Static HTML containing the text 'BDR canary ok'."
+}

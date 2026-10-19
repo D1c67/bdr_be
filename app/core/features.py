@@ -127,6 +127,10 @@ def enabled_map(role: Role | None = None) -> dict[str, bool]:
     flags["pm_rfi_sync"] = bool(
         settings.pm_enabled and getattr(settings, "pm_rfi_sync_enabled", False)
     )
+    # Browser agents (docs/browser_agents/HUMAN_API.md): BROWSER_AGENTS_ENABLED
+    # on a deployment with a database, the same gate both agent routers use.
+    # The frontend narrows it by role itself. getattr: fails closed.
+    flags["browser_agents"] = bool(getattr(settings, "browser_agents_active", False))
     return flags
 
 
@@ -228,6 +232,15 @@ def require_pm_rfi_sync() -> None:
     require_bid_file_splitter: a bare 404 before auth runs while off."""
     settings = get_settings()
     if not (settings.pm_enabled and getattr(settings, "pm_rfi_sync_enabled", False)):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+
+
+def require_browser_agents() -> None:
+    """Router-level dependency gating /agent-worker/v1 and /browser-agents on
+    BROWSER_AGENTS_ENABLED (and a configured database). Same contract as
+    require_bid_file_splitter: a bare 404 before auth runs while off, so a
+    deployment without agents does not reveal the worker API exists."""
+    if not getattr(get_settings(), "browser_agents_active", False):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
 
 

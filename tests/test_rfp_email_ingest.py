@@ -374,6 +374,12 @@ class _Rpc:
     def execute(self):
         if self.name == "remove_project_gc_unless_sent":
             return SimpleNamespace(data=self.db.remove_project_gc_unless_sent(**self.params))
+        if self.name in ("procore_reserve_login", "procore_record_login_failure"):
+            # 0157: the shared-login RPCs (tests/procore_login_fake.py).
+            from tests import procore_login_fake
+
+            rows = self.db.tables.setdefault("rfp_harvest_sessions", [])
+            return SimpleNamespace(data=procore_login_fake.dispatch(rows, self.db.clock(), self.name, self.params))
         raise ValueError(f"FakeDB has no rpc {self.name!r}")
 
 
@@ -395,6 +401,7 @@ class FakeDB:
         self.tables = {k: [copy.deepcopy(r) for r in v] for k, v in (tables or {}).items()}
         self._id = 0
         self.rpc_calls = []
+        self.clock = ingest._now      # the database's now() for the RPC twins
 
     def next_id(self):
         self._id += 1
@@ -1788,7 +1795,7 @@ PROCORE_RULE = {"id": "r-procore", "kind": "domain", "value": "procoretech.com",
 
 def _harvest_settings(**over):
     base = dict(
-        rfp_ingest_enabled=True, rfp_harvest_enabled=True, procore_configured=True,
+        rfp_ingest_enabled=True, rfp_harvest_enabled=True,
         procore_login_email="bot@example.com", procore_login_password="pw",
         rfp_harvest_poll_seconds=60, rfp_harvest_queue_priority=150,
         rfp_harvest_email_enabled=True,
@@ -1865,7 +1872,7 @@ def test_park_done_routes_to_harvest_only_with_a_harvester_and_a_link(db, harves
         ("e2", {"body_text": "Please bid."}, None),
         ("e3", {"invitation_method": "general"}, None),
         ("e4", {}, _harvest_settings(rfp_harvest_enabled=False)),
-        ("e5", {}, _harvest_settings(procore_configured=False)),
+        ("e5", {}, _harvest_settings(procore_login_password="")),
     ):
         if settings is not None:
             monkeypatch.setattr(rfp_harvest, "get_settings", lambda s=settings: s)
@@ -1928,7 +1935,7 @@ def test_step_harvest_drains_to_create_without_credentials(db, harvest_on, monke
     """A row with nothing to harvest still reaches the create step (docs/
     RFP_CREATE.md 1: it creates flagged "missing files"); the step reports
     `create` so the loop runs it in the same pass."""
-    monkeypatch.setattr(rfp_harvest, "get_settings", lambda: _harvest_settings(procore_configured=False))
+    monkeypatch.setattr(rfp_harvest, "get_settings", lambda: _harvest_settings(procore_login_password=""))
     _seed(db, _procore_email(status="harvest", invitation_method="procore",
                              flag_reason="no_project_name", attempts=3, last_error="old"))
     row_in = dict(_row(db))

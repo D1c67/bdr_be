@@ -1,0 +1,21 @@
+{
+  "endpoint": "release",
+  "method": "GET",
+  "path": "/agent-worker/v1/releases/1.0.0",
+  "headers": {
+    "Authorization": "Bearer bdrw_<token>",
+    "X-Agent-Boot": "b0075eed-0000-4000-8000-000000000001"
+  },
+  "request": null,
+  "status": 200,
+  "response": {
+    "manifest": {
+      "version": "1.0.0",
+      "sha256": "3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f",
+      "min_version": "1.0.0",
+      "created_at": "2026-10-18T20:00:00Z"
+    },
+    "signature": "base64-ed25519-signature==",
+    "url": "https://example.supabase.co/storage/v1/object/sign/agent-releases/1.0.0.zip?token=<redacted>"
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "endpoint": "turns",
+  "method": "POST",
+  "path": "/agent-worker/v1/jobs/1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d/turns",
+  "headers": {
+    "Authorization": "Bearer bdrw_<token>",
+    "X-Agent-Boot": "b0075eed-0000-4000-8000-000000000001",
+    "X-Agent-Lease": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d:3",
+    "Idempotency-Key": "<uuid>"
+  },
+  "request": {
+    "prev_turn_no": 4,
+    "tool_results": [
+      {
+        "call_id": "call_04",
+        "ok": false,
+        "content": "{\"error\":\"challenge\",\"detail\":\"non-JSON response\"}"
+      }
+    ],
+    "screenshot_artifact_id": "c1c1c1c1-0000-4000-8000-000000000001",
+    "url": "https://app.procore.com/3167322/project/home",
+    "title": "Home",
+    "helper_message_ids_seen": []
+  },
+  "status": 200,
+  "response": {
+    "turn_no": 5,
+    "assistant_text": "The REST call hit a challenge. Open the RFI page so the browser can pass it.",
+    "action": {
+      "call_id": "call_05",
+      "tool": "navigate",
+      "args": {
+        "url": "https://app.procore.com/3167322/project/rfi/show/27914290"
+      }
+    },
+    "caps": {
+      "steps_left": 35,
+      "tokens_left": 351200,
+      "cost_left_usd": 1.71
+    }
+  }
+}

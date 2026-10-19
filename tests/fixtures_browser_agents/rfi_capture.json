@@ -1,0 +1,22 @@
+{
+  "endpoint": "rfi_capture",
+  "method": "POST",
+  "path": "/agent-worker/v1/jobs/1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d/rfi-capture",
+  "headers": {
+    "Authorization": "Bearer bdrw_<token>",
+    "X-Agent-Boot": "b0075eed-0000-4000-8000-000000000001",
+    "X-Agent-Lease": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d:3",
+    "Idempotency-Key": "<uuid>"
+  },
+  "request": {
+    "platform": "procore",
+    "detail_artifact_id": "c2c2c2c2-0000-4000-8000-000000000002",
+    "external_rfi_id": "27914290",
+    "company_id": "8089"
+  },
+  "status": 200,
+  "response": {
+    "run_id": "e1e1e1e1-0000-4000-8000-000000000001",
+    "accepted": true
+  }
+}

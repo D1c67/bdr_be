@@ -1,0 +1,18 @@
+{
+  "endpoint": "help_reply",
+  "method": "POST",
+  "path": "/agent-worker/v1/jobs/1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d/help/4e5f6a7b-8c9d-4e0f-a1b2-c3d4e5f6a7b8/messages",
+  "headers": {
+    "Authorization": "Bearer bdrw_<token>",
+    "X-Agent-Boot": "b0075eed-0000-4000-8000-000000000001",
+    "X-Agent-Lease": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d:3",
+    "Idempotency-Key": "<uuid>"
+  },
+  "request": {
+    "body": "Thanks. Attaching the answer file to the RFI."
+  },
+  "status": 200,
+  "response": {
+    "id": 44
+  }
+}

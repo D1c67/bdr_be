@@ -1,0 +1,26 @@
+{
+  "endpoint": "login_begin",
+  "method": "POST",
+  "path": "/agent-worker/v1/jobs/1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d/identities/procore/login/begin",
+  "headers": {
+    "Authorization": "Bearer bdrw_<token>",
+    "X-Agent-Boot": "b0075eed-0000-4000-8000-000000000001",
+    "X-Agent-Lease": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d:3",
+    "Idempotency-Key": "<uuid>"
+  },
+  "request": {
+    "host": "app.procore.com",
+    "rejected_jar_logged_in_at": "2026-10-19T13:30:00Z"
+  },
+  "status": 200,
+  "response": {
+    "granted": true,
+    "attempt_id": "d1d1d1d1-0000-4000-8000-000000000001",
+    "email": "bot@g3electrical.example",
+    "password": "<secret-in-fixture>",
+    "reason": null,
+    "retry_at": null,
+    "help_id": null
+  },
+  "note": "Response has Cache-Control: no-store. The real password is never in a fixture, log or step."
+}

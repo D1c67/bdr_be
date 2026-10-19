@@ -1,0 +1,39 @@
+[project]
+name = "bdr-agent"
+version = "1.0.0"
+description = "BDR browser agent worker (Windows service)"
+requires-python = ">=3.12,<3.13"
+# Exact pins. The release bundle installs with uv pip install --require-hashes
+# from a lock generated off these pins. No LLM SDKs, no LiteLLM, no browser-use:
+# every model call is proxied by BDR (spec D1, D3).
+dependencies = [
+    "httpx==0.28.1",
+    "playwright==1.48.0",
+    "pydantic==2.13.4",
+    "cryptography==48.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.0.3",
+    "pytest-asyncio==1.4.0",
+]
+
+[project.scripts]
+bdr-agent = "bdr_agent.__main__:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["bdr_agent*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = [".", "launcher", "tools"]

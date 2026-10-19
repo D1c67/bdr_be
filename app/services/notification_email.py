@@ -149,7 +149,26 @@ _TYPE_META: dict[str, tuple[str, str]] = {
     # first sync's in-app "linked" notice. Both land on the project's RFI log.
     "pm_rfi.sync_summary": ("RFI updates from the GC's Procore", "Open RFIs"),
     "pm_rfi.linked": ("Project linked to the GC's Procore", "Open RFIs"),
+    # Browser agents (docs/browser_agents/HUMAN_API.md C3). The message is a
+    # fixed server template per type and reason code; it never quotes model
+    # text, page content or screenshots.
+    "browser_agent": ("Browser agent notice", "Open Agents"),
+    "browser_agent.help_needed": ("A browser agent needs help", "Open the help request"),
+    "browser_agent.help_reminder": ("A browser agent is still waiting for help", "Open the help request"),
+    "browser_agent.help_expired": ("A browser agent help request expired", "Open the job"),
+    "browser_agent.job_failed": ("A browser agent job failed", "Open the job"),
+    "browser_agent.worker_offline": ("The browser agent PC is offline", "Open Browser agents settings"),
+    "browser_agent.worker_pending": ("A browser agent PC is waiting for approval", "Open Browser agents settings"),
+    "browser_agent.worker_suspicious": ("A browser agent PC keeps restarting", "Open Browser agents settings"),
+    "browser_agent.login_released": ("The Procore password was released to a browser agent", "Open Browser agents settings"),
+    "browser_agent.provider_problem": ("The browser agent AI provider has a problem", "Open Browser agents settings"),
+    "browser_agent.spend_alert": ("Browser agent AI spend alert", "Open Browser agents settings"),
 }
+
+# Browser agent notice -> page. Help notices open the help chat, job notices
+# the job timeline, the rest Settings > Browser agents.
+_BROWSER_AGENT_HELP_TYPES = ("browser_agent.help_needed", "browser_agent.help_reminder")
+_BROWSER_AGENT_JOB_TYPES = ("browser_agent.help_expired", "browser_agent.job_failed")
 
 # Calling In notification type -> the call round its link opens.
 _CALL_IN_ROUNDS = {"call_in_pre_bid": "pre_bid", "call_in_post_bid": "post_bid"}
@@ -246,6 +265,10 @@ def _deep_link(
     """
     base = get_settings().frontend_url.rstrip("/")
     is_estimator = role == Role.ESTIMATOR.value
+    # Browser agent notices come first: they often carry a project (the
+    # job's), but their page is the agent's own, never the project hub.
+    if (type_ or "").startswith("browser_agent.") and not is_estimator:
+        return f"{base}{_browser_agent_path(type_ or '', metadata or {})}"
     if project_id:
         # PM notifications land on the PM view of the project. Estimators never
         # receive them (notify_role refuses estimator broadcasts), but the
@@ -292,6 +315,18 @@ def _deep_link(
     if type_ == "nudge":
         return f"{base}/todos"
     return f"{base}/estimator" if is_estimator else f"{base}{home_path()}"
+
+
+def _browser_agent_path(type_: str, metadata: dict) -> str:
+    """The app path a browser agent notice opens (HUMAN_API.md C3). A help
+    or job notice without its id falls back to the Agents page."""
+    if type_ in _BROWSER_AGENT_HELP_TYPES:
+        help_id = metadata.get("help_id")
+        return f"/agents/help/{quote(str(help_id))}" if help_id else "/agents"
+    if type_ in _BROWSER_AGENT_JOB_TYPES:
+        job_id = metadata.get("job_id")
+        return f"/agents/jobs/{quote(str(job_id))}" if job_id else "/agents"
+    return "/settings/browser-agents"
 
 
 def _project_label(project: dict | None) -> str | None:

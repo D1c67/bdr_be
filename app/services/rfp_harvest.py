@@ -67,6 +67,7 @@ from app.services import (
     llm_queue,
     pipelinesuite_client as psc,
     procore_client as pc,
+    procore_creds,
     rfp_email_files as ef,
     rfp_ingest,
     rfp_test,
@@ -925,7 +926,7 @@ def harvester_for(row: dict, settings: Settings | None = None) -> str | None:
     if not (s.rfp_ingest_enabled and s.rfp_harvest_enabled):
         return None
     method = row.get("invitation_method")
-    if method == METHOD_PROCORE and s.procore_configured:
+    if method == METHOD_PROCORE and procore_creds.configured(s):
         return METHOD_PROCORE
     if method == METHOD_PIPELINESUITE and s.pipelinesuite_enabled:
         return METHOD_PIPELINESUITE
@@ -1015,7 +1016,7 @@ def can_harvest(row: dict, settings: Settings | None = None) -> tuple[bool, str 
         return True, None
     if method != METHOD_PROCORE:
         return False, _MSG_NO_HARVESTER
-    if not (s.rfp_ingest_enabled and s.rfp_harvest_enabled and s.procore_configured):
+    if not (s.rfp_ingest_enabled and s.rfp_harvest_enabled and procore_creds.configured(s)):
         return False, _MSG_NOT_CONFIGURED
     if reference_for(row) is None:
         return False, _MSG_NO_LINK
@@ -1086,20 +1087,41 @@ class _SessionStore:
         ).execute()
 
     def record_login(self, *, ok: bool, error: str | None) -> dict:
-        state = self.load() or {}
+        """A login attempt's outcome. A failure goes through the atomic
+        procore_record_login_failure RPC (0157): the count and the lock are
+        one UPDATE, so two processes failing at once both count. The attempt
+        stamp is written too (the PipelineSuite and SmartBid sessions space
+        their logins on it; the Procore session already stamped it in
+        reserve_login)."""
         now = _now()
-        row: dict = {"provider": self.provider, "last_login_attempt_at": _iso(now)}
+        sb = get_supabase()
         if ok:
-            row.update(login_failures=0, locked_until=None, last_error=None)
-        else:
-            failures = int(state.get("login_failures") or 0) + 1
-            row.update(login_failures=failures, last_error=(error or "")[:_ERROR_MAX_CHARS])
-            if failures >= self.max_failures:
-                row["locked_until"] = _iso(now + timedelta(seconds=self.lock_seconds))
-        rows = (
-            get_supabase().table(SESSIONS_TABLE).upsert(row, on_conflict="provider").execute()
+            row: dict = {"provider": self.provider, "last_login_attempt_at": _iso(now),
+                         "login_failures": 0, "locked_until": None, "last_error": None}
+            rows = (sb.table(SESSIONS_TABLE).upsert(row, on_conflict="provider").execute()).data or []
+            return rows[0] if rows else row
+        data = sb.rpc("procore_record_login_failure", {
+            "p_provider": self.provider,
+            "p_error": (error or "")[:_ERROR_MAX_CHARS],
+            "p_max_failures": int(self.max_failures),
+            "p_lock_seconds": int(self.lock_seconds),
+        }).execute().data
+        state = (data[0] if isinstance(data, list) and data else data) or {}
+        stamp = {"last_login_attempt_at": _iso(now)}
+        stamped = (
+            sb.table(SESSIONS_TABLE).update(stamp).eq("provider", self.provider).execute()
         ).data or []
-        return rows[0] if rows else {**state, **row}
+        return {**state, **(stamped[0] if stamped else stamp)}
+
+    def reserve_login(self, min_interval: int, source: str) -> dict:
+        """The atomic login gate (procore_reserve_login, 0157): refused while
+        locked or within `min_interval` s of the last attempt by anyone;
+        otherwise the attempt and its source are stamped in the same write."""
+        data = get_supabase().rpc("procore_reserve_login", {
+            "p_provider": self.provider, "p_min_interval": int(min_interval), "p_source": source,
+        }).execute().data
+        out = (data[0] if isinstance(data, list) and data else data) or {}
+        return out if isinstance(out, dict) else {"granted": False, "reason": "spacing"}
 
     def touch(self) -> None:
         now = time.monotonic()
@@ -1115,12 +1137,16 @@ class _SessionStore:
 
 
 def _notify_lock(
-    until: datetime, error: str, portal: str | None = None, *, platform: str | None = None
+    until: datetime, error: str, portal: str | None = None, *, platform: str | None = None,
+    agent: bool = False,
 ) -> None:
     """One bell to every IT Admin when logins lock; deduped while an unread
     one exists. `portal` is the PipelineSuite host (the Procore session
     passes none): the text names it. `platform="smartbid"` is the SmartBid
-    sentence (its session passes no portal; `_notify_smartbid_lock`)."""
+    sentence (its session passes no portal; `_notify_smartbid_lock`).
+    The Procore sentence points at Settings > Browser agents (where the
+    password now lives) when a browser agent's login locked it (`agent`) or
+    the agents are on, else at the env variables."""
     sb = get_supabase()
     pending = (
         sb.table("notifications")
@@ -1145,6 +1171,12 @@ def _notify_lock(
             f"are paused until {when}. The Project ID and Security Key come from the "
             "invitation email."
         )
+    elif agent or _agents_on():
+        message = (
+            f"Procore login failed repeatedly; Procore logins (RFP harvests, the PM RFI sync and "
+            f"the browser agents) are paused until {when}. "
+            "Check the Procore password in Settings > Browser agents."
+        )
     else:
         message = (
             f"Procore login failed repeatedly; RFP harvests are paused until {when}. "
@@ -1165,14 +1197,17 @@ def _notify_lock(
     )
 
 
+def _agents_on() -> bool:
+    try:
+        return bool(get_settings().browser_agents_active)
+    except Exception:  # noqa: BLE001 - the bell text is cosmetic
+        return False
+
+
 def procore_config(settings: Settings) -> pc.ProcoreConfig:
-    return pc.ProcoreConfig(
-        email=settings.procore_login_email.strip(),
-        password=settings.procore_login_password,
-        min_request_interval=settings.procore_min_request_interval_seconds,
-        login_min_interval=settings.procore_login_min_interval_seconds,
-        timeout=settings.procore_request_timeout_seconds,
-    )
+    """The shared account's config: the password from the encrypted secret
+    store (Settings > Browser agents), else PROCORE_LOGIN_PASSWORD."""
+    return procore_creds.config(settings)
 
 
 def open_session(settings: Settings | None = None) -> pc.ProcoreSession:
@@ -1243,7 +1278,7 @@ def availability(
     working), `pipelinesuite:<host>` or `smartbid`."""
     s = settings or get_settings()
     if provider == pc.PROVIDER:
-        if not s.procore_configured:
+        if not procore_creds.configured(s):
             return False, _MSG_NOT_CONFIGURED, None
     elif _is_pipelinesuite_provider(provider):
         if not s.pipelinesuite_enabled:
@@ -1354,7 +1389,7 @@ def session_status(settings: Settings | None = None) -> dict:
     until = pc.lock_state(state, now)
     return {
         "enabled": bool(s.rfp_ingest_enabled and s.rfp_harvest_enabled),
-        "configured": s.procore_configured,
+        "configured": procore_creds.configured(s),
         "account": s.procore_login_email.strip() or None,
         "logged_in_at": state.get("logged_in_at"),
         "last_used_at": state.get("last_used_at"),
@@ -2455,7 +2490,7 @@ def execute(email_id: str, *, force: bool = False) -> None:
                 "external_url": ref.external_url, "force": bool(force), "pipeline": pipeline,
                 "reusable": bool(_reusable(harvest, settings)),
                 "credentials_present": bool(
-                    settings.procore_configured if harvester == MODEL_LABEL else
+                    procore_creds.configured(settings) if harvester == MODEL_LABEL else
                     getattr(ref, "security_key", None) if method == METHOD_PIPELINESUITE else
                     getattr(ref, "passport_key", None) if method == METHOD_SMARTBID else False
                 ),

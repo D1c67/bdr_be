@@ -265,6 +265,16 @@ class FakeDB:
     def rows(self, table, **eq):
         return [r for r in self.tables.get(table, []) if all(r.get(k) == v for k, v in eq.items())]
 
+    def rpc(self, name, params):
+        from types import SimpleNamespace
+
+        from tests.browser_agents_fake import append_rfi_supplement
+
+        if name != "browser_agent_append_rfi_supplement":
+            raise AttributeError(f"FakeDB has no rpc {name}")
+        data = append_rfi_supplement(self.tables.setdefault("rfis", []), params["p_rfi"], params["p_entry"])
+        return SimpleNamespace(execute=lambda: SimpleNamespace(data=data))
+
 
 # ── Fake Procore session ──────────────────────────────────────────────────────
 
@@ -929,16 +939,65 @@ def _email(eid, body, project_id=PROJECT, updated_at="2026-10-18T11:00:00+00:00"
 NOW = datetime(2026, 10, 18, 12, 0, tzinfo=timezone.utc)
 
 
-def test_email_scan_auto_links_an_unlinked_pm_project_and_queues_a_targeted_run():
+# ── The agent route (docs/browser_agents/SPEC.md 5.1, 5.7) ─────────────────────
+#
+# With browser agents on and the rfi_from_email type enabled, Pass A queues
+# one agent job per RFI link (and a web-session `manual` run while the link
+# is not backfilled) instead of the `email` run; Pass C queues a locate job
+# for a link-less Procore RFI email. Off (the default), nothing changes.
+
+
+@pytest.fixture
+def agent_route(monkeypatch):
+    """Switch the route on over this module's FakeDB: jobs land in its
+    browser_agent_jobs table with the (agent_type, dedupe_key) unique index."""
+    from app.core import supabase_client
+    from app.services.browser_agents import queue
+
+    monkeypatch.setattr(svc, "_agent_route_active", lambda settings: True)
+    monkeypatch.setattr(queue, "log_step", lambda *a, **k: None)
+    monkeypatch.setitem(globals(), "_UNIQUE", _UNIQUE + [
+        ("browser_agent_jobs", "browser_agent_jobs_dedupe_uidx", lambda r: True, ("agent_type", "dedupe_key"))])
+
+    def bind(db):
+        monkeypatch.setattr(supabase_client, "get_supabase", lambda: db)
+        return db
+
+    return bind
+
+
+@pytest.mark.parametrize("agent", ["agent_off", "agent_on"])
+def test_email_scan_auto_links_an_unlinked_pm_project_and_queues_a_targeted_run(agent, request):
     db = _db(pm_external_links=[], ingested_emails=[
-        _email("e1", _text("email_closed_const198.txt")),
+        {**_email("e1", _text("email_closed_const198.txt")),
+         "subject": _text("email_closed_const198.txt").splitlines()[0]},
         _email("e2", _text("email_boyd_rfi20.txt")),
     ])
+    if agent == "agent_on":
+        request.getfixturevalue("agent_route")(db)
     stats = svc.scan_emails(db, _settings(), NOW)
-    assert stats["auto_linked_projects"] == 1 and stats["runs_queued"] == 1
+    assert stats["auto_linked_projects"] == 1
     link = svc.get_link(db, PROJECT)
     assert (link["platform"], link["host"], link["external_project_id"], link["external_company_id"],
             link["linked_via"]) == ("procore", "app.procore.com", PROCORE_PROJECT, COMPANY, "email")
+    if agent == "agent_on":
+        assert stats["agent_jobs_queued"] == 1 and stats["runs_queued"] == 1
+        [job] = db.rows("browser_agent_jobs")
+        assert (job["agent_type"], job["dedupe_key"], job["project_id"], job["platform"]) == (
+            "rfi_from_email", "email:e1:rfi:27914290", PROJECT, "procore")
+        seed = job["input"]
+        assert (seed["host"], seed["external_project_id"], seed["rfi_id"], seed["company_id"],
+                seed["rfi_number_hint"], seed["event_hint"]) == (
+            "app.procore.com", PROCORE_PROJECT, "27914290", COMPANY, "Const-198", "closed")
+        assert "Nenette" not in json.dumps(seed)                     # the body never reaches a seed
+        # The link is not backfilled: a full web-session run, no `email` run.
+        [run] = db.rows("pm_rfi_sync_runs")
+        assert (run["trigger"], run["target_external_rfi_id"], run["requested_by"]) == ("manual", None, None)
+        db.table("ingested_emails").update({"updated_at": "2026-10-18T11:30:00+00:00"}).eq("id", "e1").execute()
+        again = svc.scan_emails(db, _settings(), NOW)
+        assert again.get("agent_jobs_queued", 0) == 0 and len(db.rows("browser_agent_jobs")) == 1
+        return
+    assert stats["runs_queued"] == 1 and db.rows("browser_agent_jobs") == []
     [run] = db.rows("pm_rfi_sync_runs")
     assert (run["trigger"], run["target_external_rfi_id"], run["source_email_id"]) == (
         "email", "27914290", "e1")
@@ -946,6 +1005,131 @@ def test_email_scan_auto_links_an_unlinked_pm_project_and_queues_a_targeted_run(
     db.table("ingested_emails").update({"updated_at": "2026-10-18T11:30:00+00:00"}).eq("id", "e1").execute()
     db.table("pm_rfi_sync_runs").update({"status": "done"}).eq("id", run["id"]).execute()
     assert svc.scan_emails(db, _settings(), NOW)["runs_queued"] == 0
+
+
+def test_agent_route_on_a_backfilled_link_queues_jobs_only(agent_route):
+    db = agent_route(_db(pm_external_links=[_link(backfilled_at="2026-10-01T00:00:00+00:00")],
+                         ingested_emails=[{**_email("e1", _text("email_response_const189_1.txt")),
+                                           "subject": _text("email_response_const189_1.txt").splitlines()[0]}]))
+    stats = svc.scan_emails(db, _settings(), NOW)
+    assert stats["agent_jobs_queued"] == 1 and db.rows("pm_rfi_sync_runs") == []
+    assert db.rows("browser_agent_jobs")[0]["input"]["event_hint"] == "response"
+
+
+def test_agent_route_several_links_give_several_jobs_capped_at_five(agent_route):
+    ids = [str(27914290 + i) for i in range(7)]
+    body = " ".join(f"https://app.procore.com/{PROCORE_PROJECT}/project/rfi/show/{i}" for i in ids)
+    db = agent_route(_db(pm_external_links=[_link(backfilled_at="2026-10-01T00:00:00+00:00")],
+                         ingested_emails=[{**_email("e1", body), "from_address": "x@procoretech.com"}]))
+    stats = svc.scan_emails(db, _settings(), NOW)
+    jobs = db.rows("browser_agent_jobs")
+    assert stats["agent_jobs_queued"] == 5 and sorted(j["input"]["rfi_id"] for j in jobs) == sorted(ids)[:5]
+
+
+def test_agent_route_holds_the_checkpoint_at_an_email_whose_enqueue_failed(agent_route, monkeypatch):
+    from app.services.browser_agents.types import rfi_from_email
+
+    body = _text("email_closed_const198.txt")
+    db = agent_route(_db(pm_external_links=[_link(backfilled_at="2026-10-01T00:00:00+00:00")], ingested_emails=[
+        _email("e1", body, updated_at="2026-10-18T11:00:00+00:00"),
+        _email("e2", body, updated_at="2026-10-18T11:05:00+00:00"),
+        _email("e3", body, updated_at="2026-10-18T11:10:00+00:00"),
+    ]))
+    real = rfi_from_email.enqueue_for_email
+
+    def flaky(email, link, rfi_ids):
+        if email["id"] == "e2":
+            raise RuntimeError("database hiccup")
+        return real(email, link, rfi_ids)
+
+    monkeypatch.setattr(rfi_from_email, "enqueue_for_email", flaky)
+    stats = svc.scan_emails(db, _settings(), NOW)
+    assert stats["checkpoint_held"] and stats["agent_jobs_queued"] == 2
+    state = db.rows("pm_rfi_email_scan_state")[0]
+    assert _ts(state["emails_checkpoint"]) == _ts("2026-10-18T11:05:00+00:00")
+    monkeypatch.setattr(rfi_from_email, "enqueue_for_email", real)
+    stats = svc.scan_emails(db, _settings(), NOW)
+    assert stats["agent_jobs_queued"] == 1                           # e2 now; e1 and e3 deduped
+    assert sorted(j["dedupe_key"] for j in db.rows("browser_agent_jobs")) == [
+        "email:e1:rfi:27914290", "email:e2:rfi:27914290", "email:e3:rfi:27914290"]
+    assert _ts(db.rows("pm_rfi_email_scan_state")[0]["emails_checkpoint"]) == _ts("2026-10-18T11:10:00+00:00")
+
+
+def _subject_only(eid="s1", **over):
+    """A Cobblestone RFI notification whose body has no RFI link (the subject
+    names the RFI): the Const-198 email with its LINKS block removed."""
+    first, _, rest = _text("email_closed_const198.txt").partition("\n")
+    body = rest.split("LINKS:")[0]
+    row = {"id": eid, "project_id": PROJECT, "direction": "inbound", "subject": first.strip(),
+           "from_address": "Cobblestone_Construction_notifications@procoretech.com", "body_text": body,
+           "updated_at": "2026-10-18T11:00:00+00:00", "message_at": "2026-10-18T10:59:00+00:00"}
+    row.update(over)
+    return row
+
+
+def test_pass_c_queues_a_locate_job_for_a_subject_only_cobblestone_email(agent_route):
+    db = agent_route(_db(pm_external_links=[_link(backfilled_at="2026-10-01T00:00:00+00:00")],
+                         ingested_emails=[_subject_only()]))
+    stats = svc.scan_emails(db, _settings(), NOW)
+    assert stats["subject_only"] == 1 and stats["agent_jobs_queued"] == 1
+    [job] = db.rows("browser_agent_jobs")
+    assert job["dedupe_key"] == "email:s1:locate"
+    assert (job["input"]["rfi_id"], job["input"]["rfi_number_hint"], job["input"]["event_hint"]) == (
+        None, "Const-198", "closed")
+    assert _ts(job["input"]["email_message_at"]) == _ts("2026-10-18T10:59:00+00:00")
+    assert db.rows("pm_rfi_email_scan_state")[0]["subject_checkpoint"]
+    assert svc.scan_emails(db, _settings(), NOW).get("agent_jobs_queued", 0) == 0     # deduped
+
+
+@pytest.mark.parametrize("over", [
+    {"from_address": "pm@cobblestone.example.com"},                       # not Procore
+    {"from_address": "gc_notifications@us02.procoretech.com"},           # another region
+    {"subject": "Weekly meeting notes"},                                  # not an RFI notice
+    {"subject": "RFI #20 - Mechanical Controls"},                         # no lettered number
+    {"body_text": "see https://app.procore.com/1/company/planroom/bid_packages/2/bids/3"},
+    {"direction": "outbound"},
+    {"project_id": "bid"},
+])
+def test_pass_c_refuses_everything_else(agent_route, over):
+    db = agent_route(_db(pm_external_links=[_link(backfilled_at="2026-10-01T00:00:00+00:00")],
+                         ingested_emails=[_subject_only(**over)]))
+    svc.scan_emails(db, _settings(), NOW)
+    assert db.rows("browser_agent_jobs") == []
+
+
+def test_pass_c_ignores_the_boyd_bid_rfi_email(agent_route):
+    first, _, body = _text("email_boyd_rfi20.txt").partition("\n")
+    db = agent_route(_db(pm_external_links=[_link(backfilled_at="2026-10-01T00:00:00+00:00")], ingested_emails=[
+        _subject_only(subject=first.strip(), body_text=body, from_address="steve@procoretech.com")]))
+    svc.scan_emails(db, _settings(), NOW)
+    assert db.rows("browser_agent_jobs") == []
+
+
+def test_pass_c_stays_off_without_the_agent_route():
+    db = _db(pm_external_links=[_link(backfilled_at="2026-10-01T00:00:00+00:00")],
+             ingested_emails=[_subject_only()])
+    stats = svc.scan_emails(db, _settings(), NOW)
+    assert "subject_only" not in stats and "subject_checkpoint" not in db.rows("pm_rfi_email_scan_state")[0]
+
+
+def test_process_run_agent_never_touches_the_link_status():
+    from app.services.browser_agents import protocol, rfi_session
+
+    db = _db(pm_external_links=[_link(backfilled_at="2026-10-01T00:00:00+00:00", last_sync_status="ok",
+                                      last_error=None)])
+    env = {"request_path": f"/rest/v1.0/projects/{PROCORE_PROJECT}/rfis/27699412", "status": 200,
+           "captured_at": datetime.now(timezone.utc).isoformat(), "company_id": COMPANY,
+           "body": DETAILS["27699412"]}
+    shim = rfi_session.AgentCaptureSession(protocol.RfiDetailEnvelope.model_validate(env),
+                                           project_id=PROCORE_PROJECT, rfi_id="27699412", company_id=COMPANY,
+                                           settings=_settings(), download_session=FakeSession())
+    run = {"id": "ra", "project_id": PROJECT, "trigger": "agent", "status": "running", "lease_owner": svc.WORKER_ID,
+           "attempts": 1, "agent_job_id": "j1", "apply_attempt": 0, "target_external_rfi_id": "27699412"}
+    db.tables["pm_rfi_sync_runs"].append(run)
+    s = _settings(procore_login_email="", procore_login_password="")   # no credentials needed
+    assert svc.process_run(db, run, s, session_factory=lambda h, st: shim, notify=_Bells(), agent=True) == "done"
+    link = svc.get_link(db, PROJECT)
+    assert link["last_sync_status"] == "ok" and "last_synced_at" not in link
 
 
 def test_email_scan_does_not_steal_a_procore_project_linked_elsewhere():
@@ -1473,6 +1657,15 @@ def test_manual_sync_does_not_join_a_targeted_email_run():
     assert created and run["id"] != email_run["id"] and run["target_external_rfi_id"] is None
 
 
+def test_sync_now_does_not_join_an_agent_run():
+    db = _db()
+    db.tables["pm_rfi_sync_runs"].append({"id": "agent-run", "project_id": PROJECT, "trigger": "agent",
+                                          "status": "queued", "target_external_rfi_id": None,
+                                          "created_at": "2026-10-18T10:00:00+00:00"})
+    run, created = svc.enqueue_run(db, PROJECT, "manual")
+    assert created and run["id"] != "agent-run" and run["trigger"] == "manual"
+
+
 def test_rfis_the_backfill_could_not_read_are_not_announced_as_new_later():
     db = _db()
     s = _settings()
@@ -1540,6 +1733,16 @@ class _RowStore:
         self.logins.append(ok)
         self.row = {**(self.row or {}), "last_login_attempt_at": datetime.now(timezone.utc).isoformat()}
         return dict(self.row)
+
+    def reserve_login(self, min_interval, source):
+        # The procore_reserve_login RPC over this one row (tests/procore_login_fake.py).
+        from tests import procore_login_fake
+
+        rows = [dict(self.row or {}, provider="procore")]
+        out = procore_login_fake.reserve_login(rows, datetime.now(timezone.utc), "procore", min_interval, source)
+        self.row = rows[0]
+        self.reservations = getattr(self, "reservations", []) + [out["granted"]]
+        return out
 
     def touch(self):
         pass

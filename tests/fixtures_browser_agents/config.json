@@ -1,0 +1,56 @@
+{
+  "endpoint": "config",
+  "method": "GET",
+  "path": "/agent-worker/v1/config",
+  "headers": {
+    "Authorization": "Bearer bdrw_<token>",
+    "X-Agent-Boot": "b0075eed-0000-4000-8000-000000000001",
+    "If-None-Match": "11"
+  },
+  "request": null,
+  "status": 200,
+  "response": {
+    "config_version": 12,
+    "enabled": true,
+    "worker": {
+      "status": "active",
+      "max_slots": 3,
+      "draining": false,
+      "allowed_types": [
+        "rfi_from_email",
+        "canary"
+      ]
+    },
+    "types": {
+      "rfi_from_email": {
+        "enabled": true,
+        "identity": "procore",
+        "max_concurrency": 2,
+        "max_steps": 40,
+        "max_active_seconds": 1200,
+        "host_narrowing": null
+      },
+      "canary": {
+        "enabled": true,
+        "identity": null,
+        "max_concurrency": 1,
+        "max_steps": 10,
+        "max_active_seconds": 300,
+        "host_narrowing": null
+      }
+    },
+    "help_hold_seconds": 900,
+    "release": {
+      "version": "1.0.0",
+      "sha256": "3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f",
+      "min_version": "1.0.0",
+      "manifest": {
+        "version": "1.0.0",
+        "sha256": "3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f",
+        "min_version": "1.0.0",
+        "created_at": "2026-10-18T20:00:00Z"
+      },
+      "signature": "base64-ed25519-signature=="
+    }
+  }
+}

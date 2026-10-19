@@ -1,0 +1,22 @@
+{
+  "endpoint": "enroll",
+  "method": "POST",
+  "path": "/agent-worker/v1/enroll",
+  "headers": {},
+  "request": {
+    "code": "ABCDEFGHJKMNPQRS2345",
+    "hostname": "G3-AGENT-01",
+    "os_info": {
+      "system": "Windows",
+      "release": "11",
+      "build": "26100"
+    },
+    "version": "1.0.0"
+  },
+  "status": 200,
+  "response": {
+    "worker_id": "6f1c2a9e-3b7d-4c11-9a52-0d4e8b7f1a01",
+    "token": "bdrw_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "status": "pending"
+  }
+}

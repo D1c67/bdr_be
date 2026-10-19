@@ -141,11 +141,15 @@ class ProcoreTransient(ProcoreError):
 
 class ProcoreUnavailable(ProcoreError):
     """Procore cannot be used right now for a reason a retry does not fix on
-    its own: no credentials, logins locked, an interstitial page."""
+    its own: no credentials, logins locked, an interstitial page. `step` is
+    the login step that failed (challenge, login_page, email, password,
+    callback, redirect) when a login attempt caused it, else None."""
 
-    def __init__(self, message: str, *, locked_until: datetime | None = None) -> None:
+    def __init__(self, message: str, *, locked_until: datetime | None = None,
+                 step: str | None = None) -> None:
         super().__init__(message)
         self.locked_until = locked_until
+        self.step = step
 
 
 class ProcoreLoginLocked(ProcoreUnavailable):
@@ -167,6 +171,13 @@ class ProcoreSessionExpired(ProcoreError):
 
 class ProcoreForbidden(ProcoreError):
     """403 or 404 on a bid: the account cannot see it. Permanent."""
+
+
+class ProcoreStorageRefused(ProcoreForbidden):
+    """storage.procore.com (or its S3 redirect) answered 403/404 for a signed
+    file link. For the web session this is final (the link is bad); the
+    agent capture shim re-raises it as transient, since a captured link may
+    simply have expired (docs/browser_agents/SPEC.md 5.4)."""
 
 
 class ProcoreSessionRejected(ProcoreError):
@@ -440,11 +451,19 @@ def extract_company_id(body_text: str | None, project_id: str) -> str | None:
 
 class SessionStore(Protocol):
     """Where the one shared Procore session lives (rfp_harvest_sessions).
-    `load` returns None when nothing is stored."""
+    `load` returns None when nothing is stored.
+
+    `reserve_login` is the one atomic gate before any login attempt: it
+    refuses while logins are locked or another attempt (by any process, the
+    server-side sweep, the RFP harvest or a browser agent) happened less than
+    `min_interval` seconds ago, and otherwise stamps the attempt in the same
+    write. Returns {granted, reason ('locked' | 'spacing' | None),
+    locked_until, retry_at}."""
 
     def load(self) -> dict | None: ...
     def save_cookies(self, account: str, cookies: list[dict]) -> None: ...
     def record_login(self, *, ok: bool, error: str | None) -> dict: ...
+    def reserve_login(self, min_interval: int, source: str) -> dict: ...
     def touch(self) -> None: ...
 
 
@@ -487,6 +506,23 @@ class MemorySessionStore:
                     now + timedelta(seconds=self.lock_seconds)
                 ).isoformat()
         return dict(self.state)
+
+    def reserve_login(self, min_interval: int, source: str) -> dict:
+        """The procore_reserve_login RPC, in memory. A non-positive interval
+        means no spacing at all (tests run on a frozen clock)."""
+        now = self.now()
+        until = lock_state(self.state, now)
+        if until:
+            return {"granted": False, "reason": "locked", "locked_until": until.isoformat(),
+                    "retry_at": until.isoformat()}
+        last = _parse_ts(self.state.get("last_login_attempt_at"))
+        if min_interval > 0 and last and last > now - timedelta(seconds=min_interval):
+            retry = last + timedelta(seconds=min_interval)
+            return {"granted": False, "reason": "spacing", "locked_until": None,
+                    "retry_at": retry.isoformat()}
+        self.state["last_login_attempt_at"] = now.isoformat()
+        self.state["last_login_source"] = source
+        return {"granted": True, "reason": None, "locked_until": None, "retry_at": None}
 
     def touch(self) -> None:
         self.state["last_used_at"] = self.now().isoformat()
@@ -650,6 +686,7 @@ class ProcoreSession:
         now: Callable[[], datetime] = _now,
         on_lock: Callable[[datetime, str], None] | None = None,
         app_host: str = APP_HOST,
+        login_source: str = "backend",
     ) -> None:
         if app_host not in APP_HOSTS:
             raise ValueError(f"Not a Procore app host: {app_host}")
@@ -665,6 +702,9 @@ class ProcoreSession:
         self._rng = rng
         self._now = now
         self._on_lock = on_lock
+        # Who is logging in, stamped by reserve_login into
+        # rfp_harvest_sessions.last_login_source ('backend' | 'agent:<worker>').
+        self.login_source = login_source
         self._client = httpx.Client(
             transport=transport,
             timeout=httpx.Timeout(config.timeout),
@@ -994,12 +1034,20 @@ class ProcoreSession:
                 self._load_store()
                 if self._has_app_session():
                     return
-        last = _parse_ts((state or {}).get("last_login_attempt_at")) or self._last_login_attempt
-        if last and (now - last).total_seconds() < self.config.login_min_interval:
-            wait_until = last + timedelta(seconds=self.config.login_min_interval)
+        # One atomic reservation (lock and spacing checked and the attempt
+        # stamped in the same write), shared by every process and by the
+        # browser agents' login/begin, so two of them never both log in.
+        reservation = self.store.reserve_login(self.config.login_min_interval, self.login_source) or {}
+        if not reservation.get("granted"):
+            retry_at = _parse_ts(reservation.get("retry_at"))
+            if reservation.get("reason") == "locked":
+                raise ProcoreLoginLocked(
+                    "Procore logins are locked after repeated failures.",
+                    locked_until=_parse_ts(reservation.get("locked_until")) or retry_at,
+                )
             raise ProcoreUnavailable(
                 "Procore login was attempted recently; waiting before trying again.",
-                locked_until=wait_until,
+                locked_until=retry_at or now + timedelta(seconds=self.config.login_min_interval),
             )
         try:
             self._login()
@@ -1014,15 +1062,24 @@ class ProcoreSession:
                     except Exception:  # noqa: BLE001 - the bell must never mask the lock
                         logger.exception("Procore lock notification failed")
                 raise ProcoreLoginLocked(
-                    "Procore logins are locked after repeated failures.", locked_until=until
+                    "Procore logins are locked after repeated failures.", locked_until=until,
+                    step=exc.step,
                 ) from exc
             raise ProcoreUnavailable(
                 "Procore login failed; it will be retried later.",
                 locked_until=self._now() + timedelta(seconds=self.config.login_min_interval),
+                step=exc.step,
             ) from exc
         self.store.record_login(ok=True, error=None)
         self.store.save_cookies(self.config.email, self._export_cookies())
         self.logged_in_this_session = True
+
+    def probe(self) -> bool:
+        """A cheap read proving the session works: GET /rest/v1.0/companies
+        through the login-once, retry-once path (it may log in, under
+        reserve_login). True when Procore answered with the company list."""
+        data = self.get_rfi_json("/rest/v1.0/companies", company_id=None)
+        return isinstance(data, list)
 
     def _jar_is_newer(self, state: dict) -> bool:
         """Another worker logged in after we loaded our jar."""
@@ -1182,7 +1239,7 @@ class ProcoreSession:
                                 )
                             continue
                         if resp.status_code in (403, 404):
-                            raise ProcoreForbidden("Procore storage refused the document link.")
+                            raise ProcoreStorageRefused("Procore storage refused the document link.")
                         if resp.status_code == 429 or resp.status_code >= 500:
                             raise ProcoreTransient(f"Procore storage answered {resp.status_code}.")
                         if resp.status_code != 200:

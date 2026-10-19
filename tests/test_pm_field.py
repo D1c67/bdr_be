@@ -1008,7 +1008,7 @@ def test_list_rfis_enriches_names_and_attachments(monkeypatch):
     assert row["created_by_name"] == "Tom Moore"
     assert row["attachments"] == [
         {"id": "a1", "key": _DOC_A, "filename": "panel.pdf", "folder": "plans",
-         "source": "pm", "size_bytes": 10}
+         "source": "pm", "size_bytes": 10, "from_help": False}
     ]
 
 
@@ -1021,6 +1021,18 @@ def test_enriched_attachments_never_leak_storage_path(monkeypatch):
     _stub_hub(monkeypatch)
     [row] = pm_field.list_rfis("p1", USER)
     assert "storage_path" not in row["attachments"][0]
+
+
+def test_a_browser_agent_helper_file_is_flagged_from_help(monkeypatch):
+    db = _gc_db(
+        rfis=[_open_rfi()],
+        rfi_attachments=[{"id": "a1", "rfi_id": "r1", "doc_key": _DOC_A, "created_by": "u1",
+                          "external_file_id": "help:" + "ab" * 32}],
+    )
+    _install(monkeypatch, db)
+    _stub_hub(monkeypatch)
+    [row] = pm_field.list_rfis("p1", USER)
+    assert row["attachments"][0]["from_help"] is True
 
 
 def test_list_rfis_resolves_the_hub_once_for_the_whole_page(monkeypatch):

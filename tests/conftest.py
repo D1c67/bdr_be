@@ -82,6 +82,10 @@ os.environ["RFP_TESTING_ENABLED"] = "false"
 # no test that runs the app lifespan can start its scheduler loop against a
 # real database or Procore. Its tests patch settings themselves.
 os.environ["PM_RFI_SYNC_ENABLED"] = "false"
+# Browser agents (docs/browser_agents/SPEC.md) default off; pin them off so
+# no test that runs the app lifespan can start the sweeper against a real
+# database. Their tests build their own Settings and patch get_settings.
+os.environ["BROWSER_AGENTS_ENABLED"] = "false"
 # Pin LLM routing to the 3rd-party pool so a local .env experimenting with
 # self-hosted models can never redirect (or break) the suite's LLM stubs, and
 # drop any shell-exported LLM knobs (.env.example documents them as the

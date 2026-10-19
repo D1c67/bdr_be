@@ -22,8 +22,8 @@ from fastapi import APIRouter, Depends, FastAPI
 from fastapi.routing import APIRoute
 
 import app.main as app_main
-from app.core import deps
-from app.routers import llm_status, rfp_emails, rfp_testing
+from app.core import agent_auth, deps
+from app.routers import browser_agents, llm_status, rfp_emails, rfp_testing
 
 WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -33,6 +33,27 @@ PUBLIC_ROUTES = {
     # The browser's return from Autodesk OAuth: the signed state is the proof
     # (rfp_bc.py module docstring), and the feature gate still runs first.
     ("GET", "/rfp-portal/buildingconnected/callback"),
+    # Browser agent worker enrollment: the single-use, 30 minute, hashed
+    # enrollment code IT Admin minted is the proof (DB-counted 5 per IP per
+    # hour); the worker starts pending. The feature gate still runs first.
+    ("POST", "/agent-worker/v1/enroll"),
+    # The canary self-test page the worker's browser opens with no token:
+    # static HTML, no data, no script, CSP default-src 'none'.
+    ("GET", "/agent-worker/v1/canary/page"),
+    # The worker installer (SPEC.md 8): public key, launcher and a 900 s
+    # release link, nothing secret; the owner checks the key fingerprint it
+    # prints before it changes anything on the PC.
+    ("GET", "/agent-worker/v1/installer.ps1"),
+}
+
+# The browser agent worker API (/agent-worker/v1) never takes a user JWT: it
+# authenticates the PC's own hashed bdrw_ token (core/agent_auth). A route
+# guarded by one of these is authenticated, and the worker token is its role
+# class (a worker reaches only its own leases through the fenced RPCs).
+WORKER_AUTH_GATES = {
+    agent_auth.require_agent_worker,
+    agent_auth.require_agent_worker_or_pending,
+    agent_auth.require_agent_lease,
 }
 
 # Dependencies that reject a caller by role or dev flag before the handler runs.
@@ -48,6 +69,10 @@ ROLE_GATES = {
     rfp_testing.require_dev_it_admin,
     # IT Admin role OR a dev account (live AI box switch).
     llm_status.require_model_admin,
+    # Browser agents human API (HUMAN_API.md): viewers, helpers, admins.
+    browser_agents.require_agent_viewer,
+    browser_agents.require_agent_helper,
+    browser_agents.require_agent_admin,
 }
 
 # Reviewed write routes without a role-class dependency. Each one checks the
@@ -102,6 +127,8 @@ def _classify(application):
             continue
         calls = list(_calls(route.dependant))
         keys = {(m, route.path) for m in route.methods}
+        if any(c in WORKER_AUTH_GATES for c in calls):
+            continue
         if deps.get_current_user not in calls:
             unauth |= keys
             continue

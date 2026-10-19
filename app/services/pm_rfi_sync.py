@@ -64,6 +64,7 @@ from app.core.config import Settings, get_settings
 from app.core.roles import Role
 from app.core.supabase_client import get_supabase
 from app.services import procore_client as pc
+from app.services import procore_creds
 from app.services.notifications import notify_role
 from app.services.sanitize import rich_text_to_text, sanitize_rich_text
 
@@ -83,7 +84,10 @@ NOTIFY_ROLES: tuple[Role, ...] = (Role.ESTIMATING_ENGINEER_LABOR, Role.ESTIMATIN
 READ_ONLY_DETAIL = "This RFI is imported from Procore and is read-only."
 
 PLATFORMS = ("procore", "other", "none")
-TRIGGERS = ("daily", "manual", "email")
+# 'agent': a browser agent's validated capture, applied target-only through
+# rfi_session.AgentCaptureSession (docs/browser_agents/SPEC.md 5.4). Inserted
+# only by the browser_agent_submit_rfi_capture RPC, never by enqueue_run.
+TRIGGERS = ("daily", "manual", "email", "agent")
 
 # Columns a sync clears on Unlink (and moves on a manual Link).
 EXTERNAL_FIELDS: tuple[str, ...] = (
@@ -101,6 +105,10 @@ EXTERNAL_FIELDS: tuple[str, ...] = (
     "external_synced_at",
     "external_raw",
     "source_email_id",
+    # 0157: who imported the row and the helper notes added through the agents.
+    "import_method",
+    "imported_by_agent_job_id",
+    "external_supplement",
 )
 
 # Columns the sync reads from local rfis rows (never external_raw).
@@ -108,7 +116,7 @@ _RFI_COLUMNS = (
     "id, project_id, rfi_number, subject, question, answer, status, answered_at, "
     "answered_by, send_status, sent_via, sent_at, due_at, source, external_id, "
     "external_number, external_revision, external_status, external_updated_at, "
-    "external_autolink_blocked"
+    "external_synced_at, external_autolink_blocked, import_method"
 )
 
 _STATUS_RANK = {"open": 0, "answered": 1, "closed": 2}
@@ -479,6 +487,11 @@ def enqueue_run(
         .order("created_at")
         .execute()
     ).data or []
+    if trigger == "agent":
+        raise ValueError("agent runs are inserted by the capture RPC only")
+    # An agent run (one captured RFI, provisional) is never joined: Sync now
+    # and the email scan each still get their own web-session run.
+    open_runs = [r for r in open_runs if r.get("trigger") != "agent"]
     if trigger == "manual":
         for run in open_runs:
             if run.get("target_external_rfi_id"):
@@ -592,8 +605,9 @@ def claim_next(sb, settings: Settings, now: datetime, *, worker_id: str = WORKER
                     "finished_at": _iso(now),
                     "error": message,
                 }).eq("id", r["id"]).eq("status", "running").eq("lease_owner", r.get("lease_owner")).execute()
-                if abandoned.data:
+                if abandoned.data and r.get("trigger") != "agent":
                     # The worker that died never wrote the link's status; show it.
+                    # (An agent run never touches the link: the job shows it.)
                     _update_link_status(sb, r["project_id"], "failed", message)
                 logger.warning("pm rfi sync: run %s abandoned after %s attempts", r["id"], r.get("attempts"))
                 continue
@@ -753,18 +767,34 @@ class _SharedLockStore:
         host = self.host.record_login(ok=ok, error=error)
         return self._merge(host, shared) or {}
 
+    def reserve_login(self, min_interval: int, source: str) -> dict:
+        """The one account's login gate lives on the shared `procore` row."""
+        return self.shared.reserve_login(min_interval, source)
+
     def touch(self) -> None:
         self.host.touch()
+
+
+def session_store(host: str, settings: Settings | None = None):
+    """The store a session on `host` uses: the host's cookie row, with the
+    shared `procore` row's lock, failures and login spacing for a non-app
+    host. The browser agents' identity endpoints use the same stores."""
+    from app.services import rfp_harvest  # heavy module: imported on first use
+
+    s = settings or get_settings()
+    store = rfp_harvest._SessionStore(s, session_provider(host))
+    if host != pc.APP_HOST:
+        store = _SharedLockStore(store, rfp_harvest._SessionStore(s, pc.PROVIDER))
+    return store
 
 
 def open_session(host: str, settings: Settings | None = None) -> pc.ProcoreSession:
     from app.services import rfp_harvest  # heavy module: imported on first use
 
     s = settings or get_settings()
-    store = rfp_harvest._SessionStore(s, session_provider(host))
+    store = session_store(host, s)
     if host != pc.APP_HOST:
         logger.warning("pm rfi sync: opening a Procore session on %s (untested host)", host)
-        store = _SharedLockStore(store, rfp_harvest._SessionStore(s, pc.PROVIDER))
     return pc.ProcoreSession(
         rfp_harvest.procore_config(s),
         store,
@@ -1205,6 +1235,9 @@ def _load_local(sb, project_id: str) -> tuple[dict[str, dict], list[dict]]:
     return by_ext, candidates
 
 
+_MIN_TS = datetime.min.replace(tzinfo=timezone.utc)
+
+
 def _same_instant(a: Any, b: Any) -> bool:
     ta, tb = _parse_ts(a), _parse_ts(b)
     return bool(ta and tb and ta == tb)
@@ -1289,6 +1322,10 @@ def apply_detail(
     source_email_id: str | None = None,
     renew: Callable[[], None] = lambda: None,
     listed_ids: set[str] | None = None,
+    provisional: bool = False,
+    import_method: str = "web_session",
+    agent_job_id: str | None = None,
+    captured_at: datetime | None = None,
 ) -> dict | None:
     """Create, update or link one RFI from its Procore detail. Returns the
     local row after the write, or None when nothing was written.
@@ -1296,7 +1333,20 @@ def apply_detail(
     The row is written with external_updated_at null and gets Procore's
     updated_at only after its attachments landed, so a file that failed for
     now (or a run that died mid-row) leaves the row to be fetched again,
-    closed or not, instead of looking unchanged forever."""
+    closed or not, instead of looking unchanged forever.
+
+    `provisional` (a browser agent's capture, docs/browser_agents/SPEC.md
+    D8): the row is never marked complete, so external_updated_at stays null
+    and the next daily sweep re-reads it (and its files) from Procore itself.
+    `import_method` / `agent_job_id` are written on insert only. A web
+    session write over a row an agent imported verifies it: import_method
+    becomes 'web_session' and its status is Procore's own, not the
+    forward-only progress (a capture never gets to pin a status).
+
+    external_synced_at means "the local data is at least this fresh". A
+    provisional write stamps `captured_at` (when the worker read Procore),
+    not the apply time: the apply waits in the run queue, and stamping it
+    would make a newer capture or a later RFI email look already current."""
     host = link.get("host") or pc.APP_HOST
     mapped = map_detail(detail, host, str(link.get("external_project_id")))
     now_iso = _iso(_now())
@@ -1316,12 +1366,15 @@ def apply_detail(
         "ball_in_court", "external_due_date", "external_raw",
     )}
     external["external_updated_at"] = None
-    external["external_synced_at"] = now_iso
+    external["external_synced_at"] = _iso(captured_at) if provisional and captured_at is not None else now_iso
 
+    verifying = bool(local and local.get("import_method") == "agent" and not provisional)
+    if verifying:
+        external["import_method"] = "web_session"
     if local is not None and (local.get("source") or "internal") == "internal":
         # G3's own RFI: Procore's view, its answer and status; never the question.
         patch = dict(external)
-        new_status = _progress(local.get("status"), mapped["status"])
+        new_status = mapped["status"] if verifying else _progress(local.get("status"), mapped["status"])
         patch["status"] = new_status
         if mapped["answer"]:
             patch["answer"] = mapped["answer"]
@@ -1347,7 +1400,7 @@ def apply_detail(
         stats["updated"] += 1
         _record_transition(stats, local, row, backfill)
         if sync_attachments(sb, project_id, row, detail, session, settings, stats,
-                            kinds=("answer",), renew=renew):
+                            kinds=("answer",), renew=renew) and not provisional:
             row = _mark_complete(sb, project_id, row, mapped["external_updated_at"])
         return row
 
@@ -1362,7 +1415,7 @@ def apply_detail(
         **external,
     }
     if local is not None:
-        fields["status"] = _progress(local.get("status"), mapped["status"])
+        fields["status"] = mapped["status"] if verifying else _progress(local.get("status"), mapped["status"])
         updated = (
             sb.table("rfis").update(fields).eq("id", local["id"]).eq("project_id", project_id).execute()
         ).data or [{**local, **fields}]
@@ -1378,6 +1431,8 @@ def apply_detail(
             "rfi_number": None,
             "created_by": None,
             "source_email_id": source_email_id,
+            "import_method": import_method,
+            "imported_by_agent_job_id": agent_job_id,
         }
         inserted = None
         for attempt in (1, 2):
@@ -1402,12 +1457,12 @@ def apply_detail(
         skipped = {str(x) for x in link.get("backfill_skipped_ids") or []}
         # An RFI the backfill could not read existed before the link: not "new".
         _record_transition(stats, None, row, backfill or mapped["external_id"] in skipped)
-    if sync_attachments(sb, project_id, row, detail, session, settings, stats, renew=renew):
+    if sync_attachments(sb, project_id, row, detail, session, settings, stats, renew=renew) and not provisional:
         row = _mark_complete(sb, project_id, row, mapped["external_updated_at"])
     return row
 
 
-def _resolve_company(sb, link: dict, session) -> str:
+def _resolve_company(sb, link: dict, session, *, persist: bool = True) -> str:
     company = link.get("external_company_id")
     if company:
         return str(company)
@@ -1417,10 +1472,13 @@ def _resolve_company(sb, link: dict, session) -> str:
             "Could not find the Procore company for this project. Paste a Procore URL that "
             "includes the company (for example the RFIs tool page) in the link settings."
         )
-    sb.table(LINKS_TABLE).update({"external_company_id": company}).eq(
-        "project_id", link["project_id"]
-    ).execute()
-    link["external_company_id"] = company
+    if persist:
+        # An agent capture's company is not written to the link (provisional
+        # data never changes the link); the web session's answer is.
+        sb.table(LINKS_TABLE).update({"external_company_id": company}).eq(
+            "project_id", link["project_id"]
+        ).execute()
+        link["external_company_id"] = company
     return company
 
 
@@ -1434,19 +1492,69 @@ def sync_project(
     source_email_id: str | None = None,
     renew: Callable[[], None] = lambda: None,
     stats: dict | None = None,
+    target_only: bool = False,
+    provisional: bool = False,
+    agent_job_id: str | None = None,
 ) -> dict:
     """One run over one linked project. Returns the run stats (plus
     `backfill`). A target RFI id fetches just that RFI, except on the first
     run (the backfill always imports everything). `stats` lets the caller
-    keep what a run did when it fails part way (process_run)."""
+    keep what a run did when it fails part way (process_run).
+
+    `target_only` (an agent capture): the target branch is taken even while
+    the backfill is pending (the backfill is the web session's `manual` run,
+    queued beside the agent job), and a stale capture is skipped
+    (stats["agent_outcome"] = 'skipped_stale'): the local row was synced
+    after the capture was taken, or already holds a Procore updated_at at or
+    past the captured one. `provisional` is passed to apply_detail."""
     project_id = link["project_id"]
     pid = str(link["external_project_id"])
-    backfill = link.get("backfilled_at") is None
+    backfill = link.get("backfilled_at") is None and not target_only
     if stats is None:
         stats = _new_stats()
     stats["backfill"] = backfill
-    company = _resolve_company(sb, link, session)
+    company = _resolve_company(sb, link, session, persist=not target_only)
     by_ext, candidates = _load_local(sb, project_id)
+
+    if target_only:
+        if not target_external_rfi_id:
+            raise SyncError("The agent capture names no RFI.")
+        ext_id = str(target_external_rfi_id)
+        stats["targeted"] = ext_id
+        local = by_ext.get(ext_id)
+        if _finished(local):
+            stats["skipped_closed"] += 1
+            stats["agent_outcome"] = "already_current"
+            return stats
+        renew()
+        detail = session.get_rfi(pid, ext_id, company)
+        stats["details_fetched"] += 1
+        if _is_draft(detail):
+            stats["skipped_drafts"] += 1
+            stats["agent_outcome"] = "nothing_to_do"
+            return stats
+        captured_at = getattr(session, "captured_at", None)
+        if local is not None and (
+            (captured_at is not None and (_parse_ts(local.get("external_synced_at")) or _MIN_TS) >= captured_at)
+            or (
+                local.get("external_updated_at") and _parse_ts(detail.get("updated_at"))
+                and _parse_ts(local.get("external_updated_at")) >= _parse_ts(detail.get("updated_at"))
+            )
+        ):
+            stats["agent_outcome"] = "skipped_stale"
+            stats["unchanged"] += 1
+            return stats
+        row = apply_detail(
+            sb, project_id, link, detail, local, candidates, session, settings, stats,
+            backfill=False, source_email_id=source_email_id, renew=renew, listed_ids=None,
+            provisional=provisional, import_method="agent" if provisional else "web_session",
+            agent_job_id=agent_job_id, captured_at=captured_at,
+        )
+        if row is None:
+            # Only a number/revision collision gets here (see apply_detail).
+            raise SyncError("The captured RFI collides with another RFI row on this project; not applied.")
+        stats["agent_outcome"] = "applied"
+        return stats
 
     if target_external_rfi_id and not backfill:
         to_fetch = [str(target_external_rfi_id)]
@@ -1618,18 +1726,37 @@ def process_run(
     *,
     session_factory: Callable[[str, Settings], Any] | None = None,
     notify: Callable = notify_role,
+    agent: bool = False,
 ) -> str:
     """Run one claimed run to its end. Returns the run's final status
-    ('done', 'failed', 'queued' for a retry, or 'lost')."""
+    ('done', 'failed', 'queued' for a retry, or 'lost').
+
+    `agent` (trigger 'agent', docs/browser_agents/SPEC.md 5.4): the session
+    is the capture shim, so no Procore credentials are needed; the sync is
+    target-only and provisional; pending helper contributions are applied
+    before the run is done; the link's sync status is never touched (the
+    agent job shows the outcome); and the summary notice goes out only once
+    the link's backfill is done (before that, the backfill run's own
+    "linked" notice covers it). stats["agent_outcome"] tells the sweeper
+    what the job's outcome is."""
     project_id = run["project_id"]
     link = get_link(sb, project_id)
+
+    def link_failed(message: str) -> None:
+        if not agent:
+            _update_link_status(sb, project_id, "failed", message)
+
+    def partial() -> None:
+        if not agent or (link or {}).get("backfilled_at"):
+            _notify_partial(project_id, stats, notify, run["id"])
+
     if not _is_procore_link(link):
         _finish(sb, run, "failed", error="The project is not linked to a Procore project.")
         return "failed"
     if not link.get("sync_enabled") and run.get("trigger") != "manual":
         _finish(sb, run, "failed", error="Sync is turned off for this project.")
         return "failed"
-    if not settings.procore_configured:
+    if not agent and not procore_creds.configured(settings):
         message = "Procore credentials are not configured (PROCORE_LOGIN_EMAIL / PROCORE_LOGIN_PASSWORD)."
         _finish(sb, run, "failed", error=message)
         _update_link_status(sb, project_id, "failed", message)
@@ -1638,7 +1765,14 @@ def process_run(
     renew = _renewer(sb, run, settings)
     stats = _new_stats()
     _carry_forward(stats, run.get("stats"))
-    session = factory(link.get("host") or pc.APP_HOST, settings)
+    try:
+        session = factory(link.get("host") or pc.APP_HOST, settings)
+    except Exception as exc:  # noqa: BLE001 - an agent capture that cannot be loaded
+        if not agent:
+            raise
+        logger.warning("pm rfi sync: agent run %s has no usable capture: %s", run["id"], _short(exc, 200))
+        _finish(sb, run, "failed", error=_short(exc) or "The agent capture could not be loaded.")
+        return "failed"
     try:
         sync_project(
             sb, link, session, settings,
@@ -1646,6 +1780,9 @@ def process_run(
             source_email_id=run.get("source_email_id"),
             renew=renew,
             stats=stats,
+            target_only=agent,
+            provisional=agent,
+            agent_job_id=run.get("agent_job_id") if agent else None,
         )
     except _LeaseLost:
         logger.warning("pm rfi sync: lost the lease on run %s; another worker has it", run["id"])
@@ -1668,8 +1805,8 @@ def process_run(
             logger.info("pm rfi sync: run %s will retry at %s: %s", run["id"], _iso(retry_at), message)
             return "queued"
         _finish(sb, run, "failed", error=message, stats=stats)
-        _update_link_status(sb, project_id, "failed", message)
-        _notify_partial(project_id, stats, notify, run["id"])
+        link_failed(message)
+        partial()
         logger.warning("pm rfi sync: run %s failed: %s", run["id"], message)
         return "failed"
     except (pc.ProcoreForbidden, pc.ProcoreSessionRejected, SyncError) as exc:
@@ -1680,22 +1817,24 @@ def process_run(
                 "project, or the link is wrong."
             )
         _finish(sb, run, "failed", error=message, stats=stats)
-        _update_link_status(sb, project_id, "failed", message)
-        _notify_partial(project_id, stats, notify, run["id"])
+        link_failed(message)
+        partial()
         logger.warning("pm rfi sync: run %s failed: %s", run["id"], message)
         return "failed"
     except Exception as exc:  # noqa: BLE001 - one bad run must not kill the loop
         logger.exception("pm rfi sync: run %s crashed", run["id"])
         message = f"The sync stopped on an unexpected error ({type(exc).__name__})."
         _finish(sb, run, "failed", error=message, stats=stats)
-        _update_link_status(sb, project_id, "failed", message)
-        _notify_partial(project_id, stats, notify, run["id"])
+        link_failed(message)
+        partial()
         return "failed"
     finally:
         try:
             session.close()
         except Exception:  # noqa: BLE001
             pass
+    if agent:
+        return _finish_agent_run(sb, run, link, stats, notify)
     _finish(sb, run, "done", stats=stats)
     current = get_link(sb, project_id)
     if not _same_target(link, current):
@@ -1728,15 +1867,50 @@ def process_run(
     return "done"
 
 
+def _finish_agent_run(sb, run: dict, link: dict, stats: dict, notify: Callable) -> str:
+    """The success tail of an agent run: helper contributions, done, and a
+    summary only once the link is backfilled. Never the link status."""
+    project_id = run["project_id"]
+    stats.setdefault("agent_outcome", "applied")
+    try:
+        from app.services.browser_agents import contributions
+
+        stats["contributions_applied"] = contributions.apply_pending(sb, project_id)
+    except Exception:  # noqa: BLE001 - the sweeper applies them later
+        logger.exception("pm rfi sync: applying helper contributions on project %s failed", project_id)
+    _finish(sb, run, "done", stats=stats)
+    current = get_link(sb, project_id)
+    if not _same_target(link, current):
+        if _is_procore_link(link):
+            purge_imported(sb, project_id)
+        logger.info("pm rfi sync: agent run %s finished after the link changed; its import was dropped",
+                    run["id"])
+        return "done"
+    if (current or {}).get("backfilled_at"):
+        try:
+            notify_after_run(project_id, stats, notify=notify)
+        except Exception:  # noqa: BLE001
+            logger.exception("pm rfi sync: notifications for agent run %s failed", run["id"])
+    logger.info("pm rfi sync: agent run %s on project %s done (%s)", run["id"], project_id,
+                stats.get("agent_outcome"))
+    return "done"
+
+
 def run_pending(sb, settings: Settings, *, max_runs: int = 5,
                 session_factory: Callable[[str, Settings], Any] | None = None) -> int:
-    """Claim and run up to `max_runs` runs. Returns runs processed."""
+    """Claim and run up to `max_runs` runs. Returns runs processed. An
+    agent run gets the capture shim as its session (rfi_session.factory_for)."""
     done = 0
     for _ in range(max_runs):
         run = claim_next(sb, settings, _now())
         if run is None:
             break
-        process_run(sb, run, settings, session_factory=session_factory)
+        if run.get("trigger") == "agent":
+            from app.services.browser_agents import rfi_session
+
+            process_run(sb, run, settings, session_factory=rfi_session.factory_for(sb, run), agent=True)
+        else:
+            process_run(sb, run, settings, session_factory=session_factory)
         done += 1
     return done
 
@@ -1840,7 +2014,55 @@ def _trusted_for_autolink(email: dict, rfi_link: pc.ProcoreRfiLink) -> bool:
     return False
 
 
-def _email_trigger(sb, email: dict, links: list[pc.ProcoreRfiLink], stats: dict) -> None:
+class EnqueueFailed(Exception):
+    """Queueing the work for one email failed; the scan holds its checkpoint
+    at that email so the next scan reads it again (the job dedupe key and
+    the run indexes make the re-read harmless)."""
+
+
+def _agent_route_active(settings: Settings) -> bool:
+    """Email RFIs go to browser agent jobs (docs/browser_agents/SPEC.md 5.1,
+    D18): agents on, the kill switch on and the rfi_from_email type enabled
+    (read through a 30 s cache). Otherwise the legacy web-session email run."""
+    if not getattr(settings, "browser_agents_active", False):
+        return False
+    from app.services.browser_agents.types import rfi_from_email
+
+    return rfi_from_email.agent_route_active()
+
+
+def _queue_email_rfi(sb, settings: Settings, email: dict, project_id: str, link: dict,
+                     rfi_links: list[pc.ProcoreRfiLink], stats: dict) -> int:
+    """Queue the work one PM email asks for. Agent route: one
+    rfi_from_email job per RFI link (at most 5), or one locate job from the
+    subject hint when the email names no RFI id (`rfi_links` empty), plus a
+    web-session `manual` run when the link has not been backfilled yet (it
+    joins an open full run). Legacy route: the targeted `email` run.
+    Returns what was queued; raises EnqueueFailed so the scan can hold its
+    checkpoint."""
+    try:
+        if _agent_route_active(settings):
+            from app.services.browser_agents.types import rfi_from_email
+
+            created = rfi_from_email.enqueue_for_email(email, link, [lk.rfi_id for lk in rfi_links])
+            stats["agent_jobs_queued"] = stats.get("agent_jobs_queued", 0) + created
+            if not link.get("backfilled_at"):
+                _, backfill = enqueue_run(sb, project_id, "manual", requested_by=None)
+                stats["runs_queued"] += int(backfill)
+            return created
+        mine = sorted({lk.rfi_id for lk in rfi_links})
+        target = mine[0] if len(mine) == 1 else None
+        _, created_run = enqueue_run(
+            sb, project_id, "email", target_external_rfi_id=target, source_email_id=email.get("id")
+        )
+        stats["runs_queued"] += int(created_run)
+        return int(created_run)
+    except Exception as exc:
+        raise EnqueueFailed(str(exc)) from exc
+
+
+def _email_trigger(sb, email: dict, links: list[pc.ProcoreRfiLink], stats: dict,
+                   settings: Settings | None = None) -> None:
     project_id = email.get("project_id")
     link = get_link(sb, project_id)
     if link is None:
@@ -1857,18 +2079,14 @@ def _email_trigger(sb, email: dict, links: list[pc.ProcoreRfiLink], stats: dict)
         stats["auto_linked_projects"] += 1
     if link.get("platform") != "procore" or not link.get("sync_enabled"):
         return
-    mine = sorted({
-        lk.rfi_id for lk in links
+    mine = [
+        lk for lk in links
         if lk.host == link.get("host") and lk.project_id == str(link.get("external_project_id"))
-    })
+    ]
     if not mine:
         stats["other_project_links"] += 1
         return
-    target = mine[0] if len(mine) == 1 else None
-    _, created = enqueue_run(
-        sb, project_id, "email", target_external_rfi_id=target, source_email_id=email.get("id")
-    )
-    stats["runs_queued"] += int(created)
+    _queue_email_rfi(sb, settings or get_settings(), email, project_id, link, mine, stats)
 
 
 def _later(a: Any, b: Any) -> Any:
@@ -1879,6 +2097,77 @@ def _later(a: Any, b: Any) -> Any:
     if tb is None:
         return a
     return b if tb > ta else a
+
+
+def _earlier(a: Any, b: Any) -> Any:
+    ta, tb = _parse_ts(a), _parse_ts(b)
+    if ta is None:
+        return b
+    if tb is None:
+        return a
+    return b if tb < ta else a
+
+
+_PLANROOM_RE = re.compile(r"/company/planroom/", re.IGNORECASE)
+
+
+def _scan_subjects(sb, settings: Settings, state: dict, lookback: datetime, limit: int, stats: dict) -> Any:
+    """Pass C (agent route only, docs/browser_agents/SPEC.md 5.1): a Procore
+    RFI notification with no RFI link in its body (some GCs' emails carry
+    the number only, in the subject) queues a locate job. It qualifies only
+    when it is inbound, filed to a PM project linked to Procore with sync
+    on, sent from Procore's own domain in the link's region, its subject is
+    an RFI notification with a numbered hint, and its body has no RFI link
+    and no planroom (bid phase) link. Its own checkpoint
+    (subject_checkpoint) is held at an email whose enqueue failed. Returns
+    the new checkpoint."""
+    from app.services.browser_agents.pm_apps import procore as procore_app
+
+    checkpoint = state.get("subject_checkpoint") or _iso(lookback)
+    rows = (
+        sb.table("ingested_emails")
+        .select("id, project_id, direction, from_address, subject, message_at, body_text, updated_at")
+        .gte("updated_at", checkpoint)
+        .eq("direction", "inbound")
+        .ilike("subject", "*RFI*#*")
+        .order("updated_at")
+        .limit(limit)
+        .execute()
+    ).data or []
+    new_checkpoint = checkpoint
+    for email in rows:
+        new_checkpoint = _later(new_checkpoint, email.get("updated_at"))
+    rows = [r for r in rows if r.get("project_id")]
+    pm_ids = _pm_projects(sb, {r["project_id"] for r in rows})
+    held_at: Any = None
+    for email in rows:
+        if email["project_id"] not in pm_ids:
+            continue
+        subject = str(email.get("subject") or "")
+        if not procore_app.PASS_C_SUBJECT_RE.search(subject) or procore_app.subject_hints(subject)[0] is None:
+            continue
+        sender = str(email.get("from_address") or "").strip().lower()
+        if not _PROCORE_SENDER_RE.search(sender):
+            continue
+        body = email.get("body_text") or ""
+        if pc.extract_rfi_links(body) or _PLANROOM_RE.search(body):
+            continue
+        link = get_link(sb, email["project_id"])
+        if not link or link.get("platform") != "procore" or not link.get("sync_enabled"):
+            continue
+        if link.get("host") != procore_app.sender_host(sender):
+            stats["subject_other_region"] = stats.get("subject_other_region", 0) + 1
+            continue
+        stats["subject_only"] = stats.get("subject_only", 0) + 1
+        try:
+            _queue_email_rfi(sb, settings, email, email["project_id"], link, [], stats)
+        except EnqueueFailed:
+            logger.exception("pm rfi sync: queueing the locate job for email %s failed", email.get("id"))
+            held_at = email.get("updated_at") if held_at is None else _earlier(held_at, email.get("updated_at"))
+    if held_at is not None:
+        stats["subject_checkpoint_held"] = True
+        return held_at
+    return new_checkpoint
 
 
 def _missing_table(exc: BaseException) -> bool:
@@ -1898,10 +2187,12 @@ def scan_emails(sb, settings: Settings, now: datetime | None = None, *, limit: i
     if not _claim_scan(sb, state, now, max(60, settings.pm_rfi_email_scan_interval_seconds)):
         return stats
     lookback = now - timedelta(hours=settings.pm_rfi_email_scan_lookback_hours)
+    agent_route = _agent_route_active(settings)
     checkpoint = state.get("emails_checkpoint") or _iso(lookback)
+    held_at: Any = None
     rows = (
         sb.table("ingested_emails")
-        .select("id, project_id, direction, from_address, body_text, updated_at")
+        .select("id, project_id, direction, from_address, subject, message_at, body_text, updated_at")
         .gte("updated_at", checkpoint)
         .eq("direction", "inbound")
         .ilike("body_text", "*project*rfi*show*")
@@ -1924,9 +2215,21 @@ def scan_emails(sb, settings: Settings, now: datetime | None = None, *, limit: i
             continue
         stats["emails"] += 1
         try:
-            _email_trigger(sb, email, links, stats)
+            _email_trigger(sb, email, links, stats, settings)
+        except EnqueueFailed:
+            logger.exception("pm rfi sync: queueing email %s failed", email.get("id"))
+            if agent_route:
+                # Hold the checkpoint here: the next scan reads this email again.
+                held_at = email.get("updated_at") if held_at is None else _earlier(held_at, email.get("updated_at"))
         except Exception:  # noqa: BLE001 - one email must not stop the scan
             logger.exception("pm rfi sync: email %s trigger failed", email.get("id"))
+    if held_at is not None:
+        new_checkpoint = held_at
+        stats["checkpoint_held"] = True
+
+    subject_checkpoint = None
+    if agent_route:
+        subject_checkpoint = _scan_subjects(sb, settings, state, lookback, limit, stats)
 
     class_checkpoint = state.get("classifications_checkpoint") or _iso(lookback)
     new_class_checkpoint = class_checkpoint
@@ -1970,15 +2273,16 @@ def scan_emails(sb, settings: Settings, now: datetime | None = None, *, limit: i
             _, created = enqueue_run(sb, pid, "email", source_email_id=c["email_id"])
             stats["runs_queued"] += int(created)
 
-    sb.table(SCAN_TABLE).update(
-        {
-            "emails_checkpoint": new_checkpoint,
-            "classifications_checkpoint": new_class_checkpoint,
-            "lease_until": None,
-            "lease_owner": None,
-        }
-    ).eq("id", SCAN_ROW_ID).execute()
-    if stats["runs_queued"] or stats["auto_linked_projects"]:
+    patch = {
+        "emails_checkpoint": new_checkpoint,
+        "classifications_checkpoint": new_class_checkpoint,
+        "lease_until": None,
+        "lease_owner": None,
+    }
+    if subject_checkpoint is not None:
+        patch["subject_checkpoint"] = subject_checkpoint
+    sb.table(SCAN_TABLE).update(patch).eq("id", SCAN_ROW_ID).execute()
+    if stats["runs_queued"] or stats["auto_linked_projects"] or stats.get("agent_jobs_queued"):
         logger.info("pm rfi sync: email scan %s", stats)
     return stats
 
@@ -2105,7 +2409,7 @@ async def polling_loop() -> None:
     logger.info(
         "pm rfi sync: scheduler started (daily %s PT, Procore account %s, email scan %s)",
         settings.pm_rfi_sync_daily_time,
-        "configured" if settings.procore_configured else "NOT configured",
+        "configured" if procore_creds.configured(settings) else "NOT configured",
         "on" if settings.pm_rfi_email_scan_enabled else "off",
     )
     while True:

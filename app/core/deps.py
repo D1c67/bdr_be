@@ -89,6 +89,9 @@ def get_current_user(
     if not authorization.lower().startswith("bearer "):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing bearer token")
     token = authorization.split(" ", 1)[1].strip()
+    # A browser agent worker token (core/agent_auth) is never a user session.
+    if token.startswith("bdrw_"):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
     try:
         claims = decode_token(token)
     except jwt.PyJWTError:

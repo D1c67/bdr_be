@@ -304,6 +304,7 @@ def db():
         "llm_jobs": [],
         "notifications": [],
     })
+    fake.clock = lambda: NOW
     fake.unique = {**FakeDB.unique, "rfp_harvests": [("method", "external_key")]}
     fake.defaults = {
         **FakeDB.defaults,

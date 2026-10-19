@@ -33,6 +33,13 @@ dependencies = [
     # HTML parsing for the NGEM (Ionwave) supplier portal scraper
     # (services/ngem_client.py). Only imported when RFP NGEM runs.
     "beautifulsoup4>=4.12",
+    # Browser agents (services/browser_agents/llm/google_.py): the native
+    # Gemini SDK, pinned exactly (supply chain, SPEC.md D3). The API key goes
+    # only in the x-goog-api-key header.
+    "google-genai==2.31.0",
+    # AES-GCM secrets and Ed25519 release signatures (browser agents). Was
+    # only transitive through pyjwt[crypto]; now direct.
+    "cryptography>=48.0",
 ]
 
 [dependency-groups]

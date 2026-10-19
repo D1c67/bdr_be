@@ -105,3 +105,13 @@ RFP_VIEW_ROLES = RFP_REVIEW_ROLES + (Role.ACCOUNTANT,)
 # Projects page and restores.
 PROJECT_DELETE_ROLES = (Role.ESTIMATING_ADMIN, Role.EXECUTIVE, Role.IT_ADMIN)
 PROJECT_RESTORE_ROLES = (Role.IT_ADMIN,)
+
+# Browser agents (docs/browser_agents/HUMAN_API.md, SPEC_OVERRIDES.md O5).
+# Viewers read jobs, steps, help and artifacts; helpers answer help requests
+# and cancel or retry jobs (Estimating Admin by owner decision, IT Admin as
+# the fallback); admins own everything under /browser-agents/admin. A dev
+# profile is an admin too, checked at the dependency (is_dev is not a role).
+# The accountant and the estimator see nothing.
+BROWSER_AGENT_VIEW_ROLES = frozenset({Role.ESTIMATING_ADMIN, Role.IT_ADMIN, Role.EXECUTIVE})
+BROWSER_AGENT_HELPER_ROLES = frozenset({Role.ESTIMATING_ADMIN, Role.IT_ADMIN})
+BROWSER_AGENT_ADMIN_ROLES = frozenset({Role.IT_ADMIN})
