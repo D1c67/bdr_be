@@ -9,6 +9,7 @@ routes (require_internal rejects it).
 Handlers are plain `def` — the sync Supabase SDK runs in FastAPI's threadpool.
 """
 
+import logging
 import re
 import uuid
 
@@ -17,7 +18,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.core.deps import CurrentUser, require_internal, require_writer
 from app.core.supabase_client import get_supabase
 from app.models.schemas import EmailAssignIn
-from app.services import email_ingest, storage
+from app.services import email_ingest, file_access, storage
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/emails", tags=["emails"])
 
@@ -223,6 +226,28 @@ def download_attachment(
     # download= serves Content-Disposition: attachment, defusing stored
     # HTML/SVG masquerading as another type.
     url = storage.signed_url(att["storage_path"], download=att["filename"])
+    project_id = None
+    try:
+        erows = (
+            get_supabase()
+            .table("ingested_emails")
+            .select("project_id")
+            .eq("id", email_id)
+            .limit(1)
+            .execute()
+        ).data or []
+        project_id = erows[0].get("project_id") if erows else None
+    except Exception:  # noqa: BLE001 - tracking must never block the download
+        logger.exception("email project lookup failed for %s", email_id)
+    file_access.record(
+        user,
+        action="download",
+        source="email_attachment",
+        file_id=attachment_id,
+        project_id=project_id,
+        filename=att.get("filename"),
+        detail={"email_id": email_id},
+    )
     return {"url": url, "filename": att["filename"]}
 
 

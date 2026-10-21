@@ -35,7 +35,7 @@ from app.routers.files import (
     _read_capped,
     _safe_content_type,
 )
-from app.services import file_export, pm_folders, storage
+from app.services import file_access, file_export, pm_folders, storage
 from app.services.notifications import audit
 from app.services.pm import require_pm_project
 
@@ -160,6 +160,20 @@ def document_signed_url(
     # inline (defuses a stored HTML/SVG masquerade).
     url = storage.signed_url(item["storage_path"], download=item["filename"] or True)
     audit(user.id, "pm_doc.download", "project", project_id, {"key": key})
+    # A hub "bid" item IS a bidding project_files row, so its download counts
+    # toward that file's access history. PM uploads and CP files are out of
+    # scope for file access tracking.
+    if item.get("source") == "bid":
+        file_access.record(
+            user,
+            action="download",
+            source="project_file",
+            file_id=item.get("id"),
+            project_id=project_id,
+            filename=item.get("filename"),
+            category=item.get("category"),
+            detail={"via": "pm_documents"},
+        )
     return {"url": url, "filename": item["filename"]}
 
 

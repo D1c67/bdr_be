@@ -49,6 +49,7 @@ from app.core.ratelimit import estimator_rate_limit, outbound_email_rate_limit
 from app.core.roles import CHANGE_REVIEW_ROLES, Role
 from app.core.supabase_client import get_supabase
 from app.services import (
+    auto_send_hooks,
     estimator_email,
     estimator_notes,
     estimator_rounds,
@@ -100,6 +101,18 @@ def _queue_general_material(project_id: str, user_id: str, background: Backgroun
             background.add_task(general_material.run_extraction, project_id)
     except Exception:  # noqa: BLE001
         logger.exception("general-material dispatch failed for %s", project_id)
+
+
+def _auto_send_round_hook(
+    project_id: str, counts: dict[str, int], background: BackgroundTasks
+) -> None:
+    """Auto send prep on every sealed round (docs/AUTO_SEND.md 6.1): warm the
+    estimate parse, and start a system scope-lines draft when none exists.
+    Best effort like _queue_general_material: never undoes the submit."""
+    try:
+        auto_send_hooks.on_estimator_round(project_id, counts, background)
+    except Exception:  # noqa: BLE001
+        logger.exception("auto send round hook failed for %s", project_id)
 
 
 def project_has_drawing(project_id: str) -> bool:
@@ -1217,7 +1230,9 @@ def submit_deliverables(
     if not proj:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
 
-    submission, sealed = estimator_rounds.create_submission_round(project_id, user.id)
+    submission, sealed = estimator_rounds.create_submission_round(
+        project_id, user.id, impersonated_by=user.impersonated_by
+    )
     round_no = submission["round"]
     counts: dict[str, int] = submission["summary"] or {}
     summary = ", ".join(f"{n} {c}" for c, n in counts.items())
@@ -1242,6 +1257,7 @@ def submit_deliverables(
         # Pull the general-material (wiring) price from the estimate in the background.
         if counts.get("estimate"):
             _queue_general_material(project_id, user.id, background)
+        _auto_send_round_hook(project_id, counts, background)
         return {"submitted": True, "round": round_no, "counts": counts}
 
     # Round ≥ 2 - the round stands even if alerting hiccups, so notifications
@@ -1270,6 +1286,7 @@ def submit_deliverables(
     # deliberately via the stale-file badge (never yank an approved number).
     if counts.get("estimate") and _before_receive_quotes(project_id):
         _queue_general_material(project_id, user.id, background)
+    _auto_send_round_hook(project_id, counts, background)
     return {"submitted": True, "round": round_no, "counts": counts}
 
 

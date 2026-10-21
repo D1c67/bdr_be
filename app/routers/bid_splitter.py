@@ -37,6 +37,7 @@ from app.services import (
     bid_split,
     bid_split_training,
     export_names,
+    file_access,
     file_export,
     llm,
     llm_queue,
@@ -473,22 +474,62 @@ def get_job(job_id: str, _: CurrentUser = Depends(require_internal)):
 # ── Downloads ────────────────────────────────────────────────────────────
 
 
+_Intent = Literal["view", "download", "prefetch"]
+
+
+def _job_project_id(sb, job_id: str | None) -> str | None:
+    """The project a job's row links to, for file access tracking only. Unlike
+    _project_for_job this keeps an AI Estimating job's project: the question
+    is which project the file belongs to, not whether to re-file into it.
+    Best effort: a lookup failure only loses the project on the access row."""
+    if not job_id:
+        return None
+    try:
+        rows = (
+            sb.table("bid_split_jobs").select("project_id").eq("id", job_id).limit(1).execute()
+        ).data or []
+    except Exception:  # noqa: BLE001 - tracking must never block the download
+        logger.exception("bid split job project lookup failed for %s", job_id)
+        return None
+    return (rows[0].get("project_id") if rows else None) or None
+
+
 @router.get("/files/{file_id}/download")
-def download_source(file_id: str, _: CurrentUser = Depends(require_internal)):
-    rec = _file_or_404(get_supabase(), file_id)
+def download_source(
+    file_id: str,
+    intent: _Intent = "download",
+    user: CurrentUser = Depends(require_internal),
+):
+    sb = get_supabase()
+    rec = _file_or_404(sb, file_id)
     name = rec["filename"] or True
     if rec.get("classified_from") == rfp_split.CLASSIFIED_CONVERTED and isinstance(name, str):
         # The staged object is the sandbox's converted PDF, not the .docx.
         name = f"{name.rsplit('.', 1)[0] if '.' in name else name}.pdf"
-    return {"url": storage.signed_url(rec["storage_path"], download=name)}
+    url = storage.signed_url(rec["storage_path"], download=name)
+    file_access.record(
+        user,
+        action=intent,
+        source="bid_split_file",
+        file_id=file_id,
+        project_id=_job_project_id(sb, rec.get("job_id")),
+        filename=rec.get("filename"),
+        category=rec.get("file_kind"),
+        detail={"job_id": rec.get("job_id")},
+    )
+    return {"url": url}
 
 
 @router.get("/segments/{segment_id}/download")
-def download_segment(segment_id: str, _: CurrentUser = Depends(require_internal)):
+def download_segment(
+    segment_id: str,
+    intent: _Intent = "download",
+    user: CurrentUser = Depends(require_internal),
+):
+    sb = get_supabase()
     rows = (
-        get_supabase()
-        .table("bid_split_segments")
-        .select("storage_path, filename")
+        sb.table("bid_split_segments")
+        .select("storage_path, filename, file_id, category")
         .eq("id", segment_id)
         .limit(1)
         .execute()
@@ -496,7 +537,27 @@ def download_segment(segment_id: str, _: CurrentUser = Depends(require_internal)
     if not rows:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Segment not found")
     rec = rows[0]
-    return {"url": storage.signed_url(rec["storage_path"], download=rec["filename"] or True)}
+    url = storage.signed_url(rec["storage_path"], download=rec["filename"] or True)
+    job_id = None
+    if rec.get("file_id"):
+        try:
+            frows = (
+                sb.table("bid_split_files").select("job_id").eq("id", rec["file_id"]).limit(1).execute()
+            ).data or []
+            job_id = frows[0].get("job_id") if frows else None
+        except Exception:  # noqa: BLE001 - tracking must never block the download
+            logger.exception("bid split file lookup failed for segment %s", segment_id)
+    file_access.record(
+        user,
+        action=intent,
+        source="bid_split_segment",
+        file_id=segment_id,
+        project_id=_job_project_id(sb, job_id),
+        filename=rec.get("filename"),
+        category=rec.get("category"),
+        detail={"job_id": job_id, "source_file_id": rec.get("file_id")},
+    )
+    return {"url": url}
 
 
 # ── Folder export ────────────────────────────────────────────────────────

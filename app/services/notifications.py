@@ -7,6 +7,7 @@ creating flow.
 """
 
 import logging
+from collections.abc import Iterable
 from typing import Any
 
 from app.core.roles import Role
@@ -29,6 +30,7 @@ ESTIMATOR_NOTIFICATION_TYPES = [
     "files_updated",
     "drawing_changed",
     "estimator_note",
+    "note_mention",
 ]
 
 
@@ -87,6 +89,58 @@ def notify_role(
     ]
     # Queue the INSERTED rows, not `rows`: they carry the `id` each mirror email
     # writes its email_log link back onto (0091).
+    inserted = (sb.table("notifications").insert(rows).execute()).data or rows
+    if mirror_email:
+        notification_email.queue(inserted)
+
+
+def notify_roles(
+    roles: Iterable[Role],
+    project_id: str | None,
+    type_: str,
+    message: str,
+    *,
+    mirror_email: bool = False,
+    metadata: dict | None = None,
+) -> None:
+    """`notify_role` for several roles at once, in ONE insert.
+
+    The notification log groups bell rows into one event by (type, message,
+    created_at), so one call per role would show up as one entry per role.
+    The estimator is dropped from the set for the same reason notify_role
+    refuses it. Defaults to bell only (`mirror_email=False`): the callers
+    (auto send) send their own richer email for the same event."""
+    wanted = {Role(r) for r in roles}
+    if Role.ESTIMATOR in wanted:
+        logger.warning(
+            "Dropping the estimator role from a role broadcast (type=%s); "
+            "estimator notifications must be assignment-scoped.",
+            type_,
+        )
+        wanted.discard(Role.ESTIMATOR)
+    if not wanted:
+        return
+    sb = get_supabase()
+    users = (
+        sb.table("profiles")
+        .select("id")
+        .in_("role", sorted(r.value for r in wanted))
+        .eq("is_active", True)
+        .execute()
+    ).data or []
+    if not users:
+        return
+    rows = [
+        {
+            "user_id": u["id"],
+            "project_id": project_id,
+            "type": type_,
+            "message": message,
+            "rfq_id": None,
+            **({"metadata": metadata} if metadata is not None else {}),
+        }
+        for u in users
+    ]
     inserted = (sb.table("notifications").insert(rows).execute()).data or rows
     if mirror_email:
         notification_email.queue(inserted)

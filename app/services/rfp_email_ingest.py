@@ -154,7 +154,7 @@ _FEATURE_NAMES = {
 SCOPE_FEATURE = "feature"     # only this feature is unavailable (model missing, unconfigured)
 SCOPE_PROVIDER = "provider"   # the provider is unreachable: every feature it serves waits
 
-PROMPT_VERSION = "rfp_classify_v2"  # v2: vendor-vs-invitation guidance (doc 3.5)
+PROMPT_VERSION = "rfp_classify_v3"  # v3: awarded-work and billing mail is "no" (doc 3.5)
 
 _SYNC_PREFIX = "rfp-mail"
 LEASE_KEY = f"{_SYNC_PREFIX}:lease"
@@ -347,6 +347,30 @@ _CLASSIFY_SYSTEM = (
     "acknowledging OUR proposal, a payment, schedule, safety or meeting notice, "
     "a newsletter, marketing or any other message that is not asking us to bid.\n"
     "Answer \"undetermined\" when the message does not contain enough to tell.\n\n"
+    "While a project is out to bid, an addendum, a bid-date reminder, a due-date "
+    "change or an answered RFI log for a project G3 is pricing is still \"yes\": "
+    "the sender still wants G3's price. So is a request for alternates, value "
+    "engineering, a revised or best-and-final price, or answers to RFIs before "
+    "bids are due.\n\n"
+    "Never judge the trade or scope. Civil, paving, elevator, landscaping and "
+    "general building projects all carry electrical work, and whether G3 bids "
+    "is a human decision. A paving, civil or specialty company that asks for "
+    "G3's price is acting as the general contractor. A request for G3's price "
+    "on any construction project is \"yes\" whatever its scope.\n\n"
+    "Work G3 already holds is never an invitation. \"Already holds\" means "
+    "awarded or under contract: the email talks about a signed subcontract, "
+    "work underway or completed, or billing. Once a job is awarded, the "
+    "general contractor sends project-management mail that asks G3 to DO things: "
+    "attend a kickoff or preconstruction meeting, name a project manager or "
+    "foreman, visit the site, send shop drawings, submittals, RFIs or close-out "
+    "documents, follow a schedule or lookahead, sign a subcontract, or bill "
+    "(pay applications, invoices, lien waivers, a Procore \"invited you to bill\" "
+    "notice). A request to price a change order or change event on a contract "
+    "G3 already holds is the same kind of mail. Answer \"no\" to all of these, "
+    "even when they set a deadline or say \"please provide\" or \"submit\". The "
+    "test: is the sender asking for G3's price so G3 can win new work, or asking "
+    "G3 to perform, document or bill work it already has? Only the first is "
+    "\"yes\".\n\n"
     "Vendors and suppliers (electrical distributors, manufacturers and their "
     "sales or quotations reps for gear, lighting, wire, fixtures or equipment) "
     "send mail that looks like a bid invitation but is not one. G3 buys "

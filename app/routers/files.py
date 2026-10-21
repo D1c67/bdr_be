@@ -24,7 +24,9 @@ them.
 import logging
 import os
 import threading
+import uuid
 from datetime import date, datetime, timedelta, timezone
+from typing import Literal
 from urllib.parse import quote
 
 from fastapi import (
@@ -35,6 +37,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Response,
     UploadFile,
     status,
 )
@@ -45,6 +48,7 @@ from starlette.concurrency import run_in_threadpool
 from app.core.config import get_settings
 from app.core.deps import (
     CurrentUser,
+    require_internal,
     require_project_assignment,
 )
 from app.core.error_codes import ErrorCode, RateLimitScope
@@ -84,6 +88,7 @@ from app.core.supabase_client import get_supabase
 from app.models.schemas import FilesExportIn
 from app.services import (
     estimator_rounds,
+    file_access,
     file_export,
     files_needed,
     office_preview,
@@ -521,6 +526,10 @@ async def upload_file(
             # sealed (submission_round stamped) only when they press Send.
             "estimator_deliverable": user.role == Role.ESTIMATOR
             and category in ESTIMATOR_WRITE,
+            # Dev "View as": the row is the estimator's, but the dev uploaded
+            # it, so auto send never prices a GC proposal from it (0159).
+            # Written only when set, so a normal upload's insert is unchanged.
+            **({"impersonated_by": user.impersonated_by} if user.impersonated_by else {}),
         },
         path,
     )
@@ -776,18 +785,86 @@ def update_note(
     return row
 
 
+def _record_access(
+    user: CurrentUser, rec: dict, action: str, detail: dict | None = None
+) -> None:
+    """One file_access_events row for a project file (never raises)."""
+    file_access.record(
+        user,
+        action=action,
+        source="project_file",
+        file_id=rec.get("id"),
+        project_id=rec.get("project_id"),
+        filename=rec.get("filename"),
+        category=rec.get("category"),
+        detail=detail,
+    )
+
+
 @router.get("/{file_id}/download")
 def download_url(
     project_id: str,
     file_id: str,
+    intent: Literal["view", "download", "prefetch"] = "download",
     user: CurrentUser = Depends(require_project_assignment),
 ):
+    """Signed attachment URL for the original. `intent` says why it was
+    minted: the viewer opening it (`view`), a real download (`download`), or
+    the frontend's hover warm-up (`prefetch`, which writes no audit row: it
+    is not an access, and used to fabricate phony downloads)."""
     rec = _get_file_checked(project_id, file_id, user)
     # Serve as an attachment so a top-level open of the URL downloads the file
     # rather than rendering it inline (defuses a stored HTML/SVG masquerade).
     url = storage.signed_url(rec["storage_path"], download=rec["filename"] or True)
-    audit(user.id, "file.download", "project_file", file_id, None)
+    _record_access(user, rec, intent)
+    if intent != "prefetch":
+        audit(
+            user.id,
+            "file.download",
+            "project_file",
+            file_id,
+            {"project_id": project_id, "filename": rec.get("filename"), "intent": intent},
+        )
     return {"url": url, "filename": rec["filename"]}
+
+
+@router.post("/{file_id}/opened", status_code=status.HTTP_204_NO_CONTENT)
+def file_opened(
+    project_id: str,
+    file_id: str,
+    user: CurrentUser = Depends(require_project_assignment),
+):
+    """The frontend opened this file from its hover-prefetch cache without
+    minting a new URL; count it as a view. Same read gate as a download."""
+    rec = _get_file_checked(project_id, file_id, user)
+    _record_access(user, rec, "view", {"cached": True})
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{file_id}/access")
+def file_access_log(
+    project_id: str,
+    file_id: str,
+    user: CurrentUser = Depends(require_internal),
+):
+    """Who opened this file and how often (internal roles only). The file may
+    have been deleted since; its history is still served."""
+    try:
+        uuid.UUID(file_id)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found") from exc
+    rows = (
+        get_supabase()
+        .table("project_files")
+        .select("filename")
+        .eq("id", file_id)
+        .eq("project_id", project_id)
+        .limit(1)
+        .execute()
+    ).data or []
+    return file_access.file_access(
+        project_id, file_id, rows[0].get("filename") if rows else None
+    )
 
 
 @router.post("/export", dependencies=[Depends(export_rate_limit)])
@@ -817,7 +894,7 @@ async def export_files(
             # every row evaluates `None == user.id` and 100% of an estimator's
             # own deliverables silently drop from their ZIP (a 404 below).
             .select(
-                "id, category, storage_path, filename, size_bytes, "
+                "id, project_id, category, storage_path, filename, size_bytes, "
                 "sent_to_estimators_at, uploaded_by, is_source_set"
             )
             .eq("project_id", project_id)
@@ -890,6 +967,29 @@ async def export_files(
             project_id,
             {"count": ok_count, "subset": bool(body and body.file_ids is not None)},
         )
+        # One access row per file that made it into the archive, all sharing
+        # one export_id. The manifest is in file_export's archive order, one
+        # entry per row; the same sort recovers which row each entry is.
+        export_id = str(uuid.uuid4())
+        ordered = file_export.export_order(rows)
+        await run_in_threadpool(
+            file_access.record_many,
+            user,
+            [
+                {
+                    "action": "export",
+                    "source": "project_file",
+                    "file_id": r.get("id"),
+                    "project_id": project_id,
+                    "filename": r.get("filename"),
+                    "category": r.get("category"),
+                    "export_id": export_id,
+                    "detail": {"flat": flat} if flat else None,
+                }
+                for r, m in zip(ordered, manifest)
+                if m.get("status") == "ok"
+            ],
+        )
 
         filename = file_export.export_filename(proj)
 
@@ -925,17 +1025,28 @@ async def export_files(
 def preview_url(
     project_id: str,
     file_id: str,
+    intent: Literal["view", "prefetch"] = "view",
     user: CurrentUser = Depends(require_project_assignment),
 ):
     """Signed URL for a file's PDF preview derivative.
 
     200 with the URL when the derivative is ready; 202 with just the status
     otherwise (pending/failed/none) so the frontend can poll or fall back.
+    Access is recorded only when a URL is handed out; a `prefetch` intent
+    (hover warm-up) writes no audit row.
     """
     rec = _get_file_checked(project_id, file_id, user)
     if rec.get("preview_status") == "ready" and rec.get("preview_path"):
         url = storage.signed_url(rec["preview_path"])
-        audit(user.id, "file.preview", "project_file", file_id, None)
+        _record_access(user, rec, intent, {"derivative": "pdf"})
+        if intent != "prefetch":
+            audit(
+                user.id,
+                "file.preview",
+                "project_file",
+                file_id,
+                {"project_id": project_id, "filename": rec.get("filename"), "intent": intent},
+            )
         return {
             "preview_status": "ready",
             "url": url,
@@ -964,6 +1075,45 @@ def preview_file(
 
     rows = rows_for_preview(storage.download_file(rec["storage_path"]))
     return {"filename": rec["filename"], "rows": rows}
+
+
+def _auto_send_references(file_id: str) -> bool:
+    """Whether an auto send GC row that went out, may have, or is about to
+    points at this file: status sent, unknown or sending, or pending while its
+    run is still sending (the document is stored before the emails go out one
+    by one). A pending row of a finished run stays deletable: a retry renders
+    a fresh document. A database without the 0159 tables has no auto sends,
+    so a missing table answers False; every other error propagates (fail
+    closed)."""
+    from postgrest.exceptions import APIError
+
+    try:
+        sb = get_supabase()
+        rows = (
+            sb.table("auto_send_gcs")
+            .select("id, status, run_id")
+            .eq("file_id", file_id)
+            .in_("status", ["pending", "sending", "sent", "unknown"])
+            .execute()
+        ).data or []
+        if any(r.get("status") in ("sending", "sent", "unknown") for r in rows):
+            return True
+        run_ids = sorted({r["run_id"] for r in rows if r.get("run_id")})
+        if not run_ids:
+            return False
+        live = (
+            sb.table("auto_send_runs")
+            .select("id")
+            .in_("id", run_ids)
+            .eq("status", "sending")
+            .limit(1)
+            .execute()
+        ).data
+    except APIError as exc:
+        if getattr(exc, "code", None) in ("42P01", "PGRST205"):
+            return False
+        raise
+    return bool(live)
 
 
 @router.delete(
@@ -1025,6 +1175,12 @@ def delete_file(
             .execute()
         ).data
         if sent_ref:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, "Sent proposals are immutable and cannot be deleted"
+            )
+        # The same evidence rule for an auto send document (docs/AUTO_SEND.md
+        # 6.8): one that went out, or may have (a timed-out send), stays.
+        if _auto_send_references(file_id):
             raise HTTPException(
                 status.HTTP_409_CONFLICT, "Sent proposals are immutable and cannot be deleted"
             )

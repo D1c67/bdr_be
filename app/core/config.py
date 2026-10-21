@@ -578,6 +578,26 @@ class Settings(BaseSettings):
     call_in_enabled: bool = True
     call_in_poll_interval_seconds: int = 60
 
+    # Auto send poller (services/auto_send_scheduler, docs/AUTO_SEND.md section
+    # 7): the 3:00 PM preflight email, the 5:05 PM proposal send to every GC on
+    # projects whose internal bid date is today, the missed-send notices and
+    # the results digest. This flag is the env kill switch; the business on/off
+    # is the auto_send_settings DB row (IT Admin, default OFF). Multi-worker
+    # safe (the auto_send_runs and auto_send_email_log unique indexes are the
+    # claims). Also needs BIDDING_ENABLED, Supabase and Graph creds. Tests pin
+    # it off (tests/conftest.py). Times are Pacific HH:MM, validated at boot.
+    auto_send_poller_enabled: bool = True
+    auto_send_poll_interval_seconds: int = 30       # must stay well under the catch-up window
+    auto_send_preflight_time: str = "15:00"         # "what will auto send" email
+    auto_send_send_time: str = "17:05"              # the GC send
+    auto_send_digest_time: str = "17:10"            # results email (waits up to 30 min for sends)
+    auto_send_catchup_minutes: int = 120            # down at send time: send late until this, same day only
+    auto_send_missed_lookback_days: int = 7         # past bid dates checked for a missed send
+    # Outside production GC emails are refused unless this is set; when set,
+    # every auto send GC email goes ONLY to this one address (no CC). Leave it
+    # empty in production.
+    auto_send_gc_redirect: str = ""
+
     # Branded email mirror of every in-app notification (bell ↔ inbox parity).
     # Best-effort and fire-and-forget; also requires Graph creds (ms_client_id)
     # to actually send. Tests force this off (see tests/conftest.py).
@@ -1741,6 +1761,37 @@ class Settings(BaseSettings):
                 "Refusing to boot: RFP_TESTING_MAILBOX equals EMAIL_INGEST_MAILBOX; "
                 "the test mailbox must be dedicated."
             )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_auto_send(self) -> "Settings":
+        """Refuse to boot on an Auto send schedule that could only misfire at
+        run time: a time that is not one `HH:MM`, a preflight at or after the
+        send, a digest before the send, a catch-up window that would run past
+        midnight (auto send never sends on a later day), or a redirect that is
+        not one address. Always enforced (the defaults satisfy every rule)."""
+        pre_h, pre_m = _parse_hhmm(self.auto_send_preflight_time, "AUTO_SEND_PREFLIGHT_TIME")
+        send_h, send_m = _parse_hhmm(self.auto_send_send_time, "AUTO_SEND_SEND_TIME")
+        dig_h, dig_m = _parse_hhmm(self.auto_send_digest_time, "AUTO_SEND_DIGEST_TIME")
+        preflight = pre_h * 60 + pre_m
+        send = send_h * 60 + send_m
+        digest = dig_h * 60 + dig_m
+        if preflight >= send:
+            raise ValueError("AUTO_SEND_PREFLIGHT_TIME must be before AUTO_SEND_SEND_TIME.")
+        if digest < send:
+            raise ValueError("AUTO_SEND_DIGEST_TIME must not be before AUTO_SEND_SEND_TIME.")
+        if self.auto_send_catchup_minutes < 1 or send + self.auto_send_catchup_minutes > 24 * 60:
+            raise ValueError(
+                "AUTO_SEND_CATCHUP_MINUTES must be at least 1 and must end the catch-up "
+                "window by midnight (auto send never sends on a later day)."
+            )
+        if self.auto_send_poll_interval_seconds < 5:
+            raise ValueError("AUTO_SEND_POLL_INTERVAL_SECONDS must be at least 5.")
+        if not 0 <= self.auto_send_missed_lookback_days <= 31:
+            raise ValueError("AUTO_SEND_MISSED_LOOKBACK_DAYS must be between 0 and 31.")
+        redirect = (self.auto_send_gc_redirect or "").strip()
+        if redirect and not _EMAIL_ADDRESS_RE.fullmatch(redirect):
+            raise ValueError("AUTO_SEND_GC_REDIRECT must be one email address (or empty).")
         return self
 
     @model_validator(mode="after")

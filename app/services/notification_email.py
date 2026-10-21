@@ -64,6 +64,8 @@ _TYPE_META: dict[str, tuple[str, str]] = {
     "proposal_send_failed": ("A proposal send failed", "Open Send Out"),
     "security_alert": ("Security alert", "Review activity"),
     "estimator_note": ("New note on a project", "Open the conversation"),
+    # @mention in project notes (0160); sent instead of estimator_note.
+    "note_mention": ("You were mentioned in a project note", "Open the conversation"),
     "nudge": ("You've been nudged about a to-do", "Open your to-dos"),
     "due": ("Deadline approaching", "Open project"),
     # Project Management. pm_* types deep-link to the PM view (see _deep_link).
@@ -144,6 +146,15 @@ _TYPE_META: dict[str, tuple[str, str]] = {
     # Admins and Executives, bell + email. Lands on Settings, where the cap
     # is raised or reset.
     "ai_spend.cap_hit": ("AI Estimating spend cap reached", "Open Settings"),
+    # Auto send (docs/AUTO_SEND.md 6.5). sent/failed are bell rows (the 5:10 PM
+    # digest is the email); missed goes to the Estimating Admin with its email
+    # so Send now is one click away; lines_review asks the Estimating Engineer
+    # (Labor) to check a system-drafted set of scope lines. All open the
+    # project's Auto send panel (see _deep_link).
+    "auto_send.sent": ("Auto send: proposal sent", "Open Auto send"),
+    "auto_send.failed": ("Auto send: could not send", "Open Auto send"),
+    "auto_send.missed": ("Auto send did not run", "Open Auto send"),
+    "auto_send.lines_review": ("Review the scope lines", "Open scope lines"),
 }
 
 # Calling In notification type -> the call round its link opens.
@@ -167,6 +178,8 @@ _INTAKE_TYPE = "rfp_create.intake_needed"
 # came from an RFP email or a portal, a failure alert names the email's
 # subject): rendered as plain text, no URL ever linkified.
 _NO_LINKIFY_PREFIX = ("rfp_create.", "rfp_processing.")
+# Auto send notices: their box link, and a subject with no em dash.
+_AUTO_SEND_PREFIX = "auto_send."
 
 
 def linkify_for(type_: str | None) -> bool:
@@ -259,6 +272,12 @@ def _deep_link(
             # Mark submitted (0140) opens its side-menu box on arrival.
             if (type_ or "").startswith("external_submission."):
                 return f"{base}/projects/{project_id}?box=mark_submitted"
+            # Auto send opens its side-menu panel (Send now, the scope lines).
+            if (type_ or "").startswith(_AUTO_SEND_PREFIX):
+                return f"{base}/projects/{project_id}?box=auto_send"
+            # Project notes open the notes box (the thread lives there).
+            if type_ in ("estimator_note", "note_mention"):
+                return f"{base}/projects/{project_id}?box=notes"
             # A late quote (0138) lands on Receive Quotes, where it was recorded.
             if type_ == "late_quote.received":
                 return f"{base}/projects/{project_id}?step=receive_quotes"
@@ -316,6 +335,9 @@ def _subject(
         number, name = project.get("number"), project.get("name")
         tag = f"#{number} {name}" if number and name else (name or (f"#{number}" if number else ""))
         if tag:
+            if (type_ or "").startswith(_AUTO_SEND_PREFIX):
+                # New subjects carry no em dash (the older types keep theirs).
+                return f"G3 BDR · {heading} · {tag}"
             return f"G3 BDR · {heading} — {tag}"
     return f"G3 BDR · {heading}"
 

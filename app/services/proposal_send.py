@@ -289,6 +289,49 @@ def build_cover_email(project: dict) -> tuple[str, str]:
     return subject, body
 
 
+def revised_cover_subject(project: dict) -> str:
+    """The Send Out subject for a GC that already received an auto send
+    (docs/AUTO_SEND.md 6.4): the GC holds a proposal, so this one is the
+    revision. It differs from the auto send subject too, so the crash reclaim
+    can never take an auto send email as proof of a Send Out email."""
+    return f"[G3 Electrical] Revised Proposal: {project['name']} ({project['number']})"
+
+
+def auto_sent_gc_ids(project_id: str) -> set[str]:
+    """GC ids that already got an auto send email for this project. Best
+    effort: any failure (the 0159 tables not there yet, a read hiccup) answers
+    the empty set, so the normal subject goes out."""
+    try:
+        from app.services import auto_send
+
+        return {str(g) for g in auto_send.auto_sent_gc_ids(project_id)}
+    except Exception:  # noqa: BLE001 - a subject choice must never block a send
+        logger.exception("auto sent GC lookup failed for %s", project_id)
+        return set()
+
+
+def cover_subject_for(project: dict, gc_id: str | None, auto_sent: set[str]) -> str:
+    """The Send Out (and re-send) subject for one GC: the revised subject when
+    `gc_id` is in `auto_sent`, otherwise the normal cover subject unchanged.
+    It feeds send_mail; the stuck-send reclaim accepts either Send Out
+    subject (send_out_subjects), because the auto sent set a crashed request
+    saw may differ from the one the reclaiming request sees."""
+    if gc_id and str(gc_id) in auto_sent:
+        return revised_cover_subject(project)
+    return build_cover_email(project)[0]
+
+
+def send_out_subjects(project: dict) -> list[str]:
+    """Both subjects a Send Out (or re-send) email can carry: the proof set
+    for the crash reclaim. Never the auto send subject, so an auto send email
+    can never count as proof of a Send Out email."""
+    return [build_cover_email(project)[0], revised_cover_subject(project)]
+
+
+def _subject_list(subject: str | list[str] | tuple[str, ...]) -> list[str]:
+    return [subject] if isinstance(subject, str) else list(subject)
+
+
 # ── shared queries ─────────────────────────────────────────────────────────
 
 
@@ -550,6 +593,10 @@ def assert_gc_amounts_editable(current_task: str | None) -> None:
         )
 
 
+# Shared with the scope-line routes (routers/proposals._assert_not_abandoned).
+ABANDONED_MESSAGE = "This bid has been abandoned, so proposal work is closed."
+
+
 def send_window_head(project_id: str) -> str:
     """The send_out lane head, asserting proposal work is allowed at it.
 
@@ -570,7 +617,7 @@ def send_window_head(project_id: str) -> str:
         .limit(1).execute()
     ).data or []
     if rows and rows[0].get("abandoned_at"):
-        raise ProposalSendError("This bid has been abandoned, so proposal work is closed.")
+        raise ProposalSendError(ABANDONED_MESSAGE)
     return head
 
 
@@ -1979,7 +2026,7 @@ def assert_send_isolation(
     )
 
 
-def _reclaim_stuck_sending(row: dict, subject: str) -> dict:
+def _reclaim_stuck_sending(row: dict, subject: str | list[str]) -> dict:
     """A row stuck at 'sending' means we crashed mid-send. If email_log proves
     the mail went out, mark it sent; otherwise release it as failed so the PA
     can retry. Never resend on guesswork."""
@@ -1996,7 +2043,7 @@ def _reclaim_stuck_sending(row: dict, subject: str) -> dict:
         sb.table("email_log")
         .select("id, status, to_addrs, subject, created_at")
         .eq("project_id", row["project_id"])
-        .eq("subject", subject)
+        .in_("subject", _subject_list(subject))
         .eq("status", "sent")
         .order("created_at", desc=True)
         .limit(20)
@@ -2106,8 +2153,11 @@ def send_proposals(
             status_code=404,
         )
 
-    subject, default_body = build_cover_email(project)
+    _, default_body = build_cover_email(project)
     body_template = email_body or default_body
+    # Per-GC subject: a GC that already got an auto send gets the Revised
+    # Proposal subject, and its reclaim matches on that same subject.
+    auto_sent = auto_sent_gc_ids(project_id)
     # Validated/downloaded once, before any row is claimed: a bad pick fails
     # the whole request cleanly instead of stranding rows at 'sending'.
     extra_attachments = _prepare_extra_attachments(sb, project_id, extra_file_ids)
@@ -2159,8 +2209,9 @@ def send_proposals(
         if row["gc_id"] in pending_ids:
             results.append(_result(row, "skipped", PENDING_APPROVAL_MESSAGE))
             continue
+        subject = cover_subject_for(project, row["gc_id"], auto_sent)
         if row["status"] == "sending":
-            row = _reclaim_stuck_sending(row, subject)
+            row = _reclaim_stuck_sending(row, send_out_subjects(project))
             if row["status"] in ("sent", "sending"):
                 results.append(_result(row, row["status"], row.get("error")))
                 continue
@@ -2377,6 +2428,11 @@ def assert_resend_isolation(
 ) -> None:
     """Isolation gate for re-emailing a document that already went out.
 
+    An accepted auto send row (origin 'auto_send') is checked exactly as auto
+    send checked it when it went out (resend_section_kwargs): its scope lines
+    may say "Underground", so the removed-section check runs on the pricing
+    table only.
+
     Deliberately NOT assert_send_isolation. That function also enforces
     freshness — the draft must be the latest, the lines hash must match the live
     draft, the stamped figures must equal today's per-GC amounts — because a
@@ -2418,11 +2474,45 @@ def assert_resend_isolation(
         scope_lines=scope_lines,
         other_gc_names=other_gc_names,
         amounts=stamp_figures(stamped) if stamped is not None else (),
-        **section_validation_kwargs(stamped, includes_generator),
+        **resend_section_kwargs(row, stamped, includes_generator),
     )
+    if row.get("origin") == "auto_send" and stamped is not None:
+        from app.services import auto_send
+
+        auto_send.assert_pricing_table_clean(docx_bytes, stamp_figures(stamped)[-1])
 
 
-def _reclaim_stuck_event(event: dict, subject: str) -> dict:
+def resend_section_kwargs(
+    row: dict, stamped: dict[str, Decimal | None] | None, includes_generator: bool
+) -> dict:
+    """The section kwargs for re-validating a sent document. An accepted auto
+    send document never carries section rows or the generator caption, and its
+    scope lines may legitimately name a section ("Underground conduit..."), so
+    the whole-body label check is off for it; assert_resend_isolation checks
+    the pricing table instead (auto_send.assert_pricing_table_clean), the
+    same rule the auto send applied. Every other row is unchanged."""
+    if row.get("origin") == "auto_send":
+        return {"includes_generator": False, "removed_sections": ()}
+    return section_validation_kwargs(stamped, includes_generator)
+
+
+def _auto_send_run_lines(sb, rows: list[dict]) -> dict[str, list[str]]:
+    """run id -> the frozen scope lines of the auto send runs behind accepted
+    auto send rows. Their document was rendered from the run's lines, while the
+    draft row they point at stays editable until Accept."""
+    run_ids = sorted({
+        r["auto_send_run_id"] for r in rows
+        if r.get("origin") == "auto_send" and r.get("auto_send_run_id")
+    })
+    if not run_ids:
+        return {}
+    runs = (
+        sb.table("auto_send_runs").select("id, lines_json").in_("id", run_ids).execute()
+    ).data or []
+    return {r["id"]: list(r.get("lines_json") or []) for r in runs}
+
+
+def _reclaim_stuck_event(event: dict, subject: str | list[str]) -> dict:
     """A re-send event stuck at 'sending' means we crashed mid-send. It holds
     the partial-unique lock, so it must be resolved or no re-send to that GC
     could ever run again. Same proof rule as _reclaim_stuck_sending: email_log
@@ -2440,7 +2530,7 @@ def _reclaim_stuck_event(event: dict, subject: str) -> dict:
         sb.table("email_log")
         .select("id, status, to_addrs, subject, created_at")
         .eq("project_id", event["project_id"])
-        .eq("subject", subject)
+        .in_("subject", _subject_list(subject))
         .eq("status", "sent")
         .order("created_at", desc=True)
         .limit(20)
@@ -2494,8 +2584,9 @@ def resend_proposals(
             "Proposals changed since you opened the dialog — review again.", status_code=404
         )
 
-    subject, default_body = build_cover_email(project)
+    _, default_body = build_cover_email(project)
     body_template = email_body or default_body
+    auto_sent = auto_sent_gc_ids(project_id)
     # Same pre-claim validation as a first send; the extras a re-send carries
     # are today's picks, not a replay of the original send's extras.
     extra_attachments = _prepare_extra_attachments(sb, project_id, extra_file_ids)
@@ -2515,6 +2606,7 @@ def resend_proposals(
         "includes_generator"
     ]
     events = send_events_by_proposal(project_id)
+    run_lines = _auto_send_run_lines(sb, rows)
 
     results = []
     for row in rows:
@@ -2524,11 +2616,12 @@ def resend_proposals(
             )
             continue
 
+        subject = cover_subject_for(project, row["gc_id"], auto_sent)
         inflight = next(
             (e for e in events.get(row["id"], []) if e["status"] == "sending"), None
         )
         if inflight is not None:
-            inflight = _reclaim_stuck_event(inflight, subject)
+            inflight = _reclaim_stuck_event(inflight, send_out_subjects(project))
             if inflight["status"] == "sending":
                 results.append(_result(row, "skipped", "a re-send is already in progress"))
                 continue
@@ -2587,6 +2680,17 @@ def resend_proposals(
                 )
             docx_bytes = storage.download_file(file_row["storage_path"])
             draft = drafts.get(row.get("draft_id")) or {}
+            if row.get("origin") == "auto_send" and row.get("auto_send_run_id"):
+                if row["auto_send_run_id"] not in run_lines:
+                    raise ProposalSendError(
+                        "The auto send this proposal came from is no longer on file, so "
+                        "it cannot be re-sent."
+                    )
+                # The run's frozen lines: the draft may have been edited
+                # between the auto send and Accept.
+                built_from = run_lines[row["auto_send_run_id"]]
+            else:
+                built_from = draft.get("lines_json") or ()
             assert_resend_isolation(
                 row=row,
                 file_row=file_row,
@@ -2595,7 +2699,7 @@ def resend_proposals(
                 live_gc=live_gc,
                 project=project,
                 # The lines this document was built from, not today's draft.
-                scope_lines=tuple(draft.get("lines_json") or ()),
+                scope_lines=tuple(built_from),
                 other_gc_names=tuple(n for n in all_names if n != row["gc_name"]),
                 includes_generator=includes_generator,
             )
@@ -2619,7 +2723,7 @@ def resend_proposals(
                 gc_name=row["gc_name"],
                 other_gc_names=tuple(n for n in all_names if n != row["gc_name"]),
                 amounts=stamp_figures(_pdf_stamp) if _pdf_stamp is not None else (),
-                **section_validation_kwargs(_pdf_stamp, includes_generator),
+                **resend_section_kwargs(row, _pdf_stamp, includes_generator),
             )
 
             body = body_template.replace(GC_NAME_TOKEN, row["gc_name"])

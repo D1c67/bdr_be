@@ -5,6 +5,7 @@ project spent in a stage = when it left it minus when it entered). The current
 (last) stage of an in-flight project is still open and excluded from averages.
 """
 
+import uuid
 from collections import defaultdict
 from datetime import datetime
 
@@ -19,6 +20,7 @@ from app.core.supabase_client import get_supabase
 from app.services import analytics_metrics as metrics
 from app.services import bid_invitations as bi
 from app.services import calling_in as calling_in_service
+from app.services import file_access
 from app.services import labor_engineer_report as ler
 from app.services.analytics_metrics import WindowData
 from app.services.bid_invitations_excel import build_bid_invitations_workbook
@@ -34,7 +36,7 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 RangeParam = Query("month", alias="range", pattern="^(day|week|month|quarter|year|custom)$")
 # Optional lifecycle-status filter; prunes the project cohort across all sections.
 StatusParam = Query(
-    None, alias="status", pattern="^(active|sent|won|lost|no_award|declined|abandoned)$"
+    None, alias="status", pattern="^(active|sent|won|lost|no_award|declined|abandoned|failed_to_bid)$"
 )
 
 
@@ -257,6 +259,51 @@ def activity(
         )
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+
+@router.get("/file-access")
+def file_access_report(
+    range_: str = RangeParam,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    project_id: str | None = None,
+    file_id: str | None = None,
+    actor_id: str | None = None,
+    source: str | None = Query(None, pattern="^(" + "|".join(file_access.SOURCES) + ")$"),
+    action: str | None = Query(None, pattern="^(" + "|".join(file_access.ACTIONS) + ")$"),
+    include_prefetch: bool = False,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Who opened which file, and how often (file_access_events, 0161): a
+    per (project, file, user) summary plus the paginated event feed. Hover
+    prefetches are left out unless `include_prefetch` or `action=prefetch`.
+    `truncated` means the scan cap was hit: narrow the range."""
+    _gate(user)
+    # A malformed id would reach PostgREST as a uuid cast error (a raw 500).
+    for label, value in (("project_id", project_id), ("file_id", file_id), ("actor_id", actor_id)):
+        if value:
+            try:
+                uuid.UUID(value)
+            except ValueError as exc:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, f"invalid {label}") from exc
+    try:
+        df, dt = metrics.resolve_range(range_, date_from, date_to)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return file_access.access_report(
+        date_from=df,
+        date_to=dt,
+        project_id=project_id,
+        file_id=file_id,
+        actor_id=actor_id,
+        source=source,
+        action=action,
+        include_prefetch=include_prefetch,
+        limit=limit,
+        offset=offset,
+    )
 
 
 # ── Calling In (docs/CALLING_IN.md section 6) ──────────────────────────────

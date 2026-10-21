@@ -44,7 +44,8 @@ def _present_cp(project: dict, role: Role) -> dict:
     if isinstance(details, list):
         details = details[0] if details else None
     project["status"] = derive_status(
-        project.get("current_stage"), project.get("abandoned_at"), result
+        project.get("current_stage"), project.get("abandoned_at"), result,
+        project.get("failed_to_bid_at"),
     )
     project["cp_details"] = details
     return redact_for_role(project, role)
@@ -94,7 +95,7 @@ def list_eligible_projects(user: CurrentUser = Depends(require_cp_read)):
         get_supabase()
         .table("projects")
         .select(
-            "id, name, number, current_stage, cp_enrolled_at, abandoned_at,"
+            "id, name, number, current_stage, cp_enrolled_at, abandoned_at, failed_to_bid_at,"
             " bid_outcomes(result)"
         )
         .order("created_at", desc=True)
@@ -106,7 +107,8 @@ def list_eligible_projects(user: CurrentUser = Depends(require_cp_read)):
             "name": p.get("name"),
             "number": p.get("number"),
             "status": derive_status(
-                p.get("current_stage"), p.get("abandoned_at"), _outcome_result(p)
+                p.get("current_stage"), p.get("abandoned_at"), _outcome_result(p),
+                p.get("failed_to_bid_at"),
             ),
             "cp_enrolled": bool(p.get("cp_enrolled_at")),
         }

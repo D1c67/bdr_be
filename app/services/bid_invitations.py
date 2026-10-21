@@ -42,7 +42,7 @@ RANGE_NAMES = (
 )
 
 _PROJECT_COLS = (
-    "id, name, number, current_stage, abandoned_at, "
+    "id, name, number, current_stage, abandoned_at, failed_to_bid_at, "
     "internal_bid_at, actual_bid_at, invitation_at, "
     "est_start_date, est_finish_date, wage_type, labor_time, labor_note"
 )
@@ -256,11 +256,12 @@ def report(
     for anchor, p in anchored:
         pid = p["id"]
         status = derive_status(
-            p.get("current_stage"), p.get("abandoned_at"), outcomes.get(pid)
+            p.get("current_stage"), p.get("abandoned_at"), outcomes.get(pid),
+            p.get("failed_to_bid_at"),
         )
         if status in ("won", "lost", "no_award"):
             summary[status] += 1
-        elif status in ("declined", "abandoned"):
+        elif status in ("declined", "abandoned", "failed_to_bid"):
             summary["no_bid"] += 1
         elif status == "sent":
             summary["waiting"] += 1

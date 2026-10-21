@@ -23,6 +23,7 @@ from fastapi.routing import APIRoute
 
 import app.main as app_main
 from app.core import deps
+from app.core.roles import INTERNAL_ROLES, Role
 from app.routers import llm_status, rfp_emails, rfp_testing
 
 WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
@@ -64,6 +65,9 @@ INLINE_ROLE_CHECK_WRITES = {
     ("POST", "/projects/{project_id}/files"),
     ("POST", "/projects/{project_id}/files/export"),
     ("DELETE", "/projects/{project_id}/files/{file_id}"),
+    # require_project_assignment + the estimator category guard (_get_file_checked);
+    # appends only the caller's own file_access_events view row (0161).
+    ("POST", "/projects/{project_id}/files/{file_id}/opened"),
     # require_project_assignment + inline WRITER_ROLES check.
     ("PATCH", "/projects/{project_id}/files/{file_id}/note"),
     # require_project_assignment + inline WRITER_ROLES-or-estimator check.
@@ -118,6 +122,50 @@ def test_every_route_is_authenticated_except_the_public_allowlist():
 def test_every_write_route_has_a_role_gate_or_is_reviewed():
     _, weak = _classify(app_main.app)
     assert weak == INLINE_ROLE_CHECK_WRITES
+
+
+# ── Auto send routes (docs/AUTO_SEND.md 8): each one's exact role gate ──────
+
+AUTO_SEND_GATES = {
+    ("GET", "/auto-send/settings"): INTERNAL_ROLES,
+    ("PATCH", "/auto-send/settings/enabled"): frozenset({Role.IT_ADMIN}),
+    ("PATCH", "/auto-send/settings/markup"): frozenset({Role.EXECUTIVE, Role.IT_ADMIN}),
+    ("GET", "/projects/{project_id}/auto-send"): INTERNAL_ROLES,
+    ("POST", "/projects/{project_id}/auto-send/send-now"): frozenset(
+        {Role.ESTIMATING_ADMIN, Role.EXECUTIVE, Role.IT_ADMIN}
+    ),
+    ("POST", "/projects/{project_id}/auto-send/accept"): frozenset(
+        {Role.ESTIMATING_ADMIN, Role.EXECUTIVE, Role.IT_ADMIN}
+    ),
+}
+
+
+def _gate_roles(call) -> frozenset | None:
+    """The roles a gate admits: require_internal's INTERNAL_ROLES, or the
+    allowed set captured by a require_role(...) closure."""
+    if call is deps.require_internal:
+        return frozenset(INTERNAL_ROLES)
+    if getattr(call, "__qualname__", "") == "require_role.<locals>._dep":
+        for cell in call.__closure__ or ():
+            if isinstance(cell.cell_contents, set):
+                return frozenset(cell.cell_contents)
+    return None
+
+
+def test_auto_send_routes_carry_their_role_gates():
+    found = {}
+    for route in app_main.app.routes:
+        if not isinstance(route, APIRoute) or "auto-send" not in route.path:
+            continue
+        gates = [g for g in map(_gate_roles, _calls(route.dependant)) if g is not None]
+        for m in route.methods:
+            found[(m, route.path)] = gates
+    assert set(found) == set(AUTO_SEND_GATES)
+    for key, roles in AUTO_SEND_GATES.items():
+        assert frozenset(roles) in found[key], key
+        # No gate on the route admits a role outside the expected set.
+        assert all(g <= frozenset(INTERNAL_ROLES) for g in found[key]), key
+        assert Role.ESTIMATOR not in set().union(*found[key]), key
 
 
 def test_route_table_is_not_trivially_empty():

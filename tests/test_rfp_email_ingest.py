@@ -838,6 +838,17 @@ def test_build_classify_messages_scrubs_delimiters_and_caps_body():
     assert "UNTRUSTED" in ingest._CLASSIFY_SYSTEM
 
 
+def test_classify_prompt_v3_awarded_work_is_no_and_bid_updates_stay_yes():
+    system = ingest._CLASSIFY_SYSTEM
+    assert ingest.PROMPT_VERSION == "rfp_classify_v3"
+    assert "Work G3 already holds is never an invitation" in system
+    for cue in ("kickoff", "submittals", "lien waivers", "invited you to bill", "change order"):
+        assert cue in system, cue
+    assert "an addendum, a bid-date reminder, a due-date change" in system
+    assert "Never judge the trade or scope" in system
+    assert "—" not in system  # no em dashes
+
+
 # ── Status walk ────────────────────────────────────────────────────────────────
 
 
@@ -851,7 +862,7 @@ def test_full_walk_to_done_organic(db, llm_answer):
     assert row["auth_verdict"] == "pass" and row["auth_dmarc"] == "pass"
     assert row["keyword_hits"] == ["invitation", "bid", "project"]
     assert row["llm_answer"] == "yes" and row["llm_confidence"] == 0.93
-    assert row["llm_model"] == "test-model" and row["llm_prompt_version"] == "rfp_classify_v2"
+    assert row["llm_model"] == "test-model" and row["llm_prompt_version"] == "rfp_classify_v3"
     assert row["authorization_kind"] == "gc_domain" and row["authorization_rule_id"] is None
     assert row["invitation_method"] == "organic"
     # The walk now passes extract (one LLM call) and match (no project in the

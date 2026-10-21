@@ -133,6 +133,16 @@ def _render_manifest(
     return "\n".join(lines) + "\n"
 
 
+def export_order(rows: list[dict]) -> list[dict]:
+    """The order `_write_entries` writes rows in, which is also the order of
+    its manifest (one entry per row): callers zip the two to map each manifest
+    entry back to its row (file access tracking, 0161)."""
+    return sorted(
+        rows,
+        key=lambda r: (_category_rank(r.get("category")), (r.get("filename") or "").lower()),
+    )
+
+
 def _write_entries(zf: zipfile.ZipFile, rows: list[dict], *, flat: bool = False) -> list[dict]:
     """Download each row's object and write it into `zf`; returns the manifest.
 
@@ -140,10 +150,7 @@ def _write_entries(zf: zipfile.ZipFile, rows: list[dict], *, flat: bool = False)
     a time), so peak RAM is bounded by the largest single file - the archive
     itself is written straight into `zf`'s backing store (see the spooled path).
     """
-    ordered = sorted(
-        rows,
-        key=lambda r: (_category_rank(r.get("category")), (r.get("filename") or "").lower()),
-    )
+    ordered = export_order(rows)
     taken: set[str] = set()
     manifest: list[dict] = []
     for r in ordered:

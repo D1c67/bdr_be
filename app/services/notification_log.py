@@ -260,6 +260,30 @@ def _classify_emails(sb, project_id: str) -> dict[str, dict]:
             category_id=None,
         )
 
+    # Auto send proposals → GCs (docs/AUTO_SEND.md 6.7), one email per GC,
+    # grouped per run. Never in proposal_sends before an accept, so they have
+    # their own table; an accept copies the email_log_id onto proposal_sends
+    # and this later write keeps the auto send title. Best effort: before the
+    # 0159 tables exist the emails fall through to subject-titled entries.
+    try:
+        auto_sends = (
+            sb.table("auto_send_gcs")
+            .select("run_id, email_log_id")
+            .eq("project_id", project_id)
+            .execute()
+        ).data or []
+    except Exception:  # noqa: BLE001 - one classifier must never break the log
+        logger.exception("notification log: auto send lookup failed for %s", project_id)
+        auto_sends = []
+    for send in auto_sends:
+        _record(
+            send.get("email_log_id"),
+            type="auto_send",
+            title="Auto send proposal sent to the GC",
+            group_key=f"auto_send:{send.get('run_id')}",
+            category_id=None,
+        )
+
     # File packages → estimators, one email per recipient, grouped by batch.
     batches = (
         sb.table("file_send_batches")

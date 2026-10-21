@@ -39,7 +39,7 @@ from app.services import (
     proposal_scope,
     proposal_send,
 )
-from app.services.notifications import audit
+from app.services.notifications import audit, dismiss_notifications
 from app.services.proposal_send import ProposalSendError
 
 logger = logging.getLogger(__name__)
@@ -93,6 +93,7 @@ def start_lines_generation(
     user: CurrentUser = Depends(_PA_PM),
 ):
     sb = get_supabase()
+    _assert_not_abandoned(sb, project_id)
     # One paid generation at a time per project (each fires a paid OpenAI call).
     # fail_if_stale is queue-aware: it keeps rows with a live queue job (even
     # ones waiting out a retry backoff) and releases genuinely stranded ones,
@@ -114,36 +115,21 @@ def start_lines_generation(
     # Explicit or latest, the chosen BOQ must be one the estimator actually
     # sent (or an internal upload) — never an unsent draft of the open round.
     boq_file_id = estimator_rounds.resolve_boq_file_id(project_id, body.boq_file_id)
-
-    row = (
-        sb.table("proposal_drafts")
-        .insert(
-            {
-                "project_id": project_id,
-                "boq_file_id": boq_file_id,
-                "status": "pending",
-                "created_by": user.id,
-            }
-        )
-        .execute()
-    ).data[0]
-    if get_settings().llm_queue_enabled:
-        try:
-            llm_queue.enqueue(
-                llm_queue.JOB_PROPOSAL,
-                target_id=row["id"],
-                project_id=project_id,
-                payload={"draft_id": row["id"]},
-                created_by=user.id,
-            )
-        except Exception:  # noqa: BLE001 - queue outage degrades to inline dispatch
-            logger.exception("Proposal enqueue failed; falling back to BackgroundTasks")
-            background.add_task(proposal_scope.run_generation, row["id"])
-    else:
-        background.add_task(proposal_scope.run_generation, row["id"])
-    audit(user.id, "proposal.lines_generate", "proposal_draft", row["id"],
-          {"boq_file_id": boq_file_id})
+    # Insert + dispatch + audit are shared with the auto send hook's system
+    # start (services/auto_send_hooks).
+    row = proposal_scope.start_generation(project_id, boq_file_id, user.id, background)
     return _wire_shape(row)
+
+
+def _assert_not_abandoned(sb, project_id: str) -> None:
+    """Scope lines close with the bid: the same abandoned rule as
+    proposal_send.send_window_head, applied to the line routes (which have no
+    stage gate, so the Auto send panel can edit them at any head)."""
+    rows = (
+        sb.table("projects").select("abandoned_at").eq("id", project_id).limit(1).execute()
+    ).data or []
+    if rows and rows[0].get("abandoned_at"):
+        raise HTTPException(status.HTTP_409_CONFLICT, proposal_send.ABANDONED_MESSAGE)
 
 
 def _assert_lines_unlocked(sb, project_id: str) -> None:
@@ -202,6 +188,7 @@ def start_manual_lines(
     The escape hatch for a downed model instance, or a project whose scope
     the team writes itself; Generate stays available beside it."""
     sb = get_supabase()
+    _assert_not_abandoned(sb, project_id)
     _assert_lines_unlocked(sb, project_id)
     _drop_active_generation(sb, project_id)
     row = (
@@ -260,6 +247,7 @@ def save_lines(
 ):
     sb = get_supabase()
     _draft_or_404(project_id, draft_id)
+    _assert_not_abandoned(sb, project_id)
     _assert_lines_unlocked(sb, project_id)
     updated = (
         sb.table("proposal_drafts")
@@ -279,6 +267,7 @@ def approve_lines(
     from datetime import datetime, timezone
 
     draft = _draft_or_404(project_id, draft_id)
+    _assert_not_abandoned(get_supabase(), project_id)
     if draft["status"] != "done" or not draft.get("lines_json"):
         raise HTTPException(
             status.HTTP_409_CONFLICT, "Lines are not ready to approve — generate them first."
@@ -297,6 +286,11 @@ def approve_lines(
     ).data[0]
     audit(user.id, "proposal.approve", "proposal_draft", draft_id,
           {"line_count": len(draft["lines_json"])})
+    # The auto send review prompt (docs/AUTO_SEND.md 6.2) is answered.
+    try:
+        dismiss_notifications(project_id=project_id, types=[proposal_scope.LINES_REVIEW_TYPE])
+    except Exception:  # noqa: BLE001 - a bell cleanup must never fail the approval
+        logger.exception("approve_lines: lines-review dismiss failed for %s", project_id)
     return _wire_shape(updated)
 
 
@@ -529,6 +523,10 @@ def email_preview(project_id: str, user: CurrentUser = Depends(get_current_user)
     subject, body = proposal_send.build_cover_email(project)
     return {
         "subject": subject,
+        # GCs that already got an auto send are emailed under the revised
+        # subject instead (docs/AUTO_SEND.md 6.4), exactly as send picks it.
+        "revised_subject": proposal_send.revised_cover_subject(project),
+        "revised_gc_ids": sorted(proposal_send.auto_sent_gc_ids(project_id)),
         "body": body,
         "gc_name_token": proposal_send.GC_NAME_TOKEN,
         # Per-GC To lines are not known until send time; this is the standing

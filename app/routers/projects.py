@@ -30,6 +30,7 @@ from app.core.roles import (
 from app.core.supabase_client import get_supabase
 from app.models.schemas import (
     AbandonIn,
+    FailedToBidIn,
     BidsTodayProjectOut,
     ProjectCreate,
     ProjectDeleteIn,
@@ -50,6 +51,7 @@ from app.services import (
     bid_date_change_email,
     email_ingest,
     estimator_lifecycle,
+    failed_to_bid_email,
     gono,
     pm,
     project_delete,
@@ -467,6 +469,7 @@ def _present(
     rfp_counts: dict | None = None,
     portal_sources: list[dict] | None = None,
     rfp_created: dict | None = None,
+    auto_send_pending: bool | None = None,
 ) -> dict:
     """Attach the derived lifecycle `status` (from the embedded bid outcome, if
     any) plus the per-category `category_state`, and redact. Pass every returned
@@ -480,7 +483,8 @@ def _present(
     it (docs/RFP_CREATE.md section 7): it fills `rfp_created` and the
     `rfp_intake_missing` list, which is computed before redaction because the
     bid-time rule reads the actual bid date, and which drops `bid_time` for
-    a role that may not see that date."""
+    a role that may not see that date. `auto_send_pending` is the auto send
+    red pulse (docs/AUTO_SEND.md 6.3), never set for the estimator."""
     outcome = project.pop("bid_outcomes", None)
     # The projects↔bid_outcomes FK is unique, so PostgREST may embed it as a
     # single object (to-one) or a list depending on version — handle both.
@@ -491,7 +495,8 @@ def _present(
     else:
         result = None
     project["status"] = derive_status(
-        project.get("current_stage"), project.get("abandoned_at"), result
+        project.get("current_stage"), project.get("abandoned_at"), result,
+        project.get("failed_to_bid_at"),
     )
     if cat_state is not None:
         project["category_state"] = _serialize_cat_state(cat_state)
@@ -517,7 +522,24 @@ def _present(
             # it (that its time is unknown) leaves the server either.
             missing = [key for key in missing if key != "bid_time"]
         project["rfp_intake_missing"] = missing
+    if auto_send_pending is not None and role != Role.ESTIMATOR:
+        project["auto_send_pending"] = bool(auto_send_pending)
     return redact_for_role(project, role)
+
+
+def _auto_send_pending_ids(project_ids: list[str]) -> set[str]:
+    """Project ids showing the auto send red pulse. Never fails a list or a
+    project read: trouble (the 0159 tables not applied yet, a read hiccup)
+    logs and answers no pulses."""
+    if not project_ids:
+        return set()
+    try:
+        from app.services import auto_send
+
+        return {str(pid) for pid in auto_send.pending_project_ids(list(project_ids))}
+    except Exception:  # noqa: BLE001 - a highlight, never a gate on the dashboard
+        logger.exception("projects: auto send pending flags failed")
+        return set()
 
 
 def _fetch_project_with_outcome(project_id: str) -> dict:
@@ -573,6 +595,7 @@ def list_projects(
     pending = _pending_gc_pricing_counts(ids)
     rfp = _rfp_match_counts(ids, {p["id"]: p for p in rows}, states)
     created = _rfp_created_rows(ids)
+    auto_sent = _auto_send_pending_ids(ids)
     return [
         _present(
             p,
@@ -581,6 +604,7 @@ def list_projects(
             pending.get(p["id"], 0),
             rfp.get(p["id"]),
             rfp_created=created.get(p["id"]),
+            auto_send_pending=p["id"] in auto_sent,
         )
         for p in rows
     ]
@@ -650,8 +674,14 @@ def bids_today(user: CurrentUser = Depends(get_current_user)):
         if p["current_stage"] not in _SENT_STAGES or p["id"] in sent_today_ids
     ]
     states = workflow.load_category_states([p["id"] for p in keep])
+    auto_sent = _auto_send_pending_ids([p["id"] for p in keep])
     return [
-        {**_present(p, user.role, states.get(p["id"])), "sent_today": p["id"] in sent_today_ids}
+        {
+            **_present(
+                p, user.role, states.get(p["id"]), auto_send_pending=p["id"] in auto_sent
+            ),
+            "sent_today": p["id"] in sent_today_ids,
+        }
         for p in keep
     ]
 
@@ -679,7 +709,8 @@ def next_project_number(_: CurrentUser = Depends(require_writer)) -> dict:
 # actual bid date is read only so redact_for_role can decide who sees it;
 # nothing else here (window, score, order) ever looks at it.
 _SIMILAR_SELECT = (
-    "id, name, number, current_stage, abandoned_at, internal_bid_at, actual_bid_at, "
+    "id, name, number, current_stage, abandoned_at, failed_to_bid_at, "
+    "internal_bid_at, actual_bid_at, "
     "project_gcs(general_contractors(name)), bid_outcomes(result)"
 )
 
@@ -723,7 +754,8 @@ def _similar_item(row: dict, score: float, conflict, role: Role) -> dict:
         "name": row.get("name"),
         "number": row.get("number"),
         "status": derive_status(
-            row.get("current_stage"), row.get("abandoned_at"), _outcome_result(row.get("bid_outcomes"))
+            row.get("current_stage"), row.get("abandoned_at"),
+            _outcome_result(row.get("bid_outcomes")), row.get("failed_to_bid_at"),
         ),
         "current_stage": row.get("current_stage"),
         "internal_bid_at": row.get("internal_bid_at"),
@@ -1125,6 +1157,7 @@ def get_project(project_id: str, user: CurrentUser = Depends(get_current_user)):
         rfp.get(project_id),
         portal.get(project_id, []),
         rfp_created=row,
+        auto_send_pending=project_id in _auto_send_pending_ids([project_id]),
     )
 
 
@@ -1381,19 +1414,24 @@ def _sweep_estimator_notifications(project_id: str) -> None:
         logger.exception("Estimator notification sweep failed on abandon of %s", project_id)
 
 
-@router.post("/{project_id}/abandon", response_model=ProjectOut, dependencies=_BIDDING_ONLY)
-def abandon_project(
+def _abandon(
     project_id: str,
-    body: AbandonIn | None = None,
-    user: CurrentUser = Depends(require_writer),
-):
-    """Abandon a bid at its current stage. `current_stage` is preserved; the
-    derived status becomes `abandoned`. Reversible via /reactivate."""
+    user: CurrentUser,
+    *,
+    extra: dict | None = None,
+    audit_action: str,
+    audit_meta: dict,
+    estimator_note: str | None,
+) -> tuple[dict, dict]:
+    """Set the abandon marker (plus any `extra` columns) and run the shared
+    side effects: audit, estimator sweep + withdrawn notice, dead-bid bell
+    cleanup. Returns (status row before, updated row). Shared by /abandon and
+    /failed-to-bid, which is an abandon that records a missed bid."""
     existing = _project_status_row(project_id)
     if existing.get("abandoned_at"):
         raise HTTPException(status.HTTP_409_CONFLICT, "Project is already abandoned")
     # Abandon is a BID lifecycle marker. A project that entered Project
-    # Management (won, or created there directly) is no longer just a bid —
+    # Management (won, or created there directly) is no longer just a bid -
     # abandoning it would rewrite a won job's history to "abandoned". cp_only
     # rows (legacy Certified Payroll imports) were never bids at all.
     if existing.get("pm_stage") or existing.get("current_stage") in ("pm_only", "cp_only"):
@@ -1405,27 +1443,76 @@ def abandon_project(
     updated = (
         get_supabase()
         .table("projects")
-        .update({"abandoned_at": now, "abandoned_by": user.id})
+        .update({"abandoned_at": now, "abandoned_by": user.id, **(extra or {})})
         .eq("id", project_id)
         .execute()
     ).data
     if not updated:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
-    note = body.note if body else None
-    audit(user.id, "project.abandon", "project", project_id,
-          {"stage": existing["current_stage"], "note": note})
+    audit(user.id, audit_action, "project", project_id,
+          {"stage": existing["current_stage"], **audit_meta})
     _sweep_estimator_notifications(project_id)
     # A dead bid is not an Executive task: any late-GC pricing request still
     # open drops out of the bell (the project_gcs row keeps its state).
     dismiss_notifications(project_id=project_id, types=["gc_pricing.approval_requested"])
     # AFTER the sweep: the withdrawn notice is the one estimator-facing row that
-    # must survive it — it's what explains where the rest of their bells went.
+    # must survive it - it's what explains where the rest of their bells went.
+    estimator_lifecycle.notify_withdrawn(existing, note=estimator_note, actor_id=user.id)
+    return existing, updated[0]
+
+
+@router.post("/{project_id}/abandon", response_model=ProjectOut, dependencies=_BIDDING_ONLY)
+def abandon_project(
+    project_id: str,
+    body: AbandonIn | None = None,
+    user: CurrentUser = Depends(require_writer),
+):
+    """Abandon a bid at its current stage. `current_stage` is preserved; the
+    derived status becomes `abandoned`. Reversible via /reactivate."""
+    note = body.note if body else None
     # The reason note is written in the modal as estimator-facing text, so it
     # rides along into their email (see estimator_lifecycle).
-    estimator_lifecycle.notify_withdrawn(existing, note=note, actor_id=user.id)
+    existing, updated = _abandon(
+        project_id, user, audit_action="project.abandon",
+        audit_meta={"note": note}, estimator_note=note,
+    )
     notify_role(Role.EXECUTIVE, project_id, "project_abandoned",
                 f"Project abandoned: {existing['name']}")
-    return _present(updated[0], user.role)
+    return _present(updated, user.role)
+
+
+@router.post(
+    "/{project_id}/failed-to-bid", response_model=ProjectOut, dependencies=_BIDDING_ONLY
+)
+def fail_to_bid_project(
+    project_id: str,
+    body: FailedToBidIn,
+    user: CurrentUser = Depends(require_writer),
+):
+    """Record that we missed this bid. Freezes the project exactly like
+    /abandon (derived status `abandoned`, reversible via /reactivate) and also
+    stores the required reason + explanation (0162), then emails every active
+    internal user (failed_to_bid_email)."""
+    now = datetime.now(timezone.utc).isoformat()
+    # The explanation is internal (it names our own miss), so the external
+    # estimator gets the plain withdrawn notice without it.
+    existing, updated = _abandon(
+        project_id, user,
+        extra={
+            "failed_to_bid_at": now,
+            "failed_to_bid_by": user.id,
+            "failed_to_bid_reason": body.reason,
+            "failed_to_bid_note": body.note,
+        },
+        audit_action="project.failed_to_bid",
+        audit_meta={"reason": body.reason, "note": body.note},
+        estimator_note=None,
+    )
+    stage = existing.get("current_stage") or ""
+    failed_to_bid_email.queue_failed_to_bid(
+        project_id, stage.replace("_", " ").title() or None, body.reason, body.note, user.id
+    )
+    return _present(updated, user.role)
 
 
 @router.post("/{project_id}/reactivate", response_model=ProjectOut, dependencies=_BIDDING_ONLY)
@@ -1440,7 +1527,14 @@ def reactivate_project(
     updated = (
         get_supabase()
         .table("projects")
-        .update({"abandoned_at": None, "abandoned_by": None})
+        .update({
+            "abandoned_at": None,
+            "abandoned_by": None,
+            "failed_to_bid_at": None,
+            "failed_to_bid_by": None,
+            "failed_to_bid_reason": None,
+            "failed_to_bid_note": None,
+        })
         .eq("id", project_id)
         .execute()
     ).data
