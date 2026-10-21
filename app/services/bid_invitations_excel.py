@@ -34,6 +34,7 @@ _STATUS_LABELS = {
     "no_award": "No Award",
     "declined": "No Bid",
     "abandoned": "No Bid (abandoned)",
+    "failed_to_bid": "No Bid (failed to bid)",
     "sent": "Waiting on results",
     "active": "In progress",
 }

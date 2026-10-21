@@ -115,3 +115,14 @@ PROJECT_RESTORE_ROLES = (Role.IT_ADMIN,)
 BROWSER_AGENT_VIEW_ROLES = frozenset({Role.ESTIMATING_ADMIN, Role.IT_ADMIN, Role.EXECUTIVE})
 BROWSER_AGENT_HELPER_ROLES = frozenset({Role.ESTIMATING_ADMIN, Role.IT_ADMIN})
 BROWSER_AGENT_ADMIN_ROLES = frozenset({Role.IT_ADMIN})
+
+# Auto send (docs/AUTO_SEND.md section 6.12). Who hears about it: the 3 PM
+# preflight, the ~5:10 PM digest and the per-project bell rows (the engineers
+# are left out on purpose). Who may change the markup %: the Executive and the
+# IT Admin override. Who may push Send now and Accept as submitted. The on/off
+# switch itself is IT Admin only (require_role(Role.IT_ADMIN) on its route).
+AUTO_SEND_NOTIFY_ROLES = frozenset(
+    {Role.ESTIMATING_ADMIN, Role.ACCOUNTANT, Role.EXECUTIVE, Role.IT_ADMIN}
+)
+AUTO_SEND_PCT_ROLES = frozenset({Role.EXECUTIVE, Role.IT_ADMIN})
+AUTO_SEND_ACTION_ROLES = frozenset({Role.ESTIMATING_ADMIN, Role.EXECUTIVE, Role.IT_ADMIN})

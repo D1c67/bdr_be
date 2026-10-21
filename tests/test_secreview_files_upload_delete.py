@@ -330,3 +330,23 @@ async def test_delete_limiter_is_the_default_scope_and_429s_past_the_budget(monk
     assert ei.value.status_code == 429
     assert ei.value.detail == ErrorCode.RATE_LIMITED
     assert ei.value.headers["X-RateLimit-Scope"] == RateLimitScope.DEFAULT
+
+
+# ── dev "View as" uploads are stamped (auto send, docs/AUTO_SEND.md) ────────
+
+
+async def test_impersonated_estimator_upload_is_stamped_with_the_dev(monkeypatch):
+    """The row is the estimator's (uploaded_by), but auto send must know the
+    dev made it so it never prices a GC proposal from it."""
+    sb = _upload_env(monkeypatch)
+    user = CurrentUser(id="est", email="e@x.test", role=Role.ESTIMATOR, is_active=True,
+                       impersonated_by="u-dev")
+    await _do_upload(category="estimate", user=user)
+    assert sb.inserted["uploaded_by"] == "est"
+    assert sb.inserted["impersonated_by"] == "u-dev"
+
+
+async def test_normal_upload_insert_has_no_impersonation_column(monkeypatch):
+    sb = _upload_env(monkeypatch)
+    await _do_upload(category="estimate", user=_user(Role.ESTIMATOR, "est"))
+    assert "impersonated_by" not in sb.inserted

@@ -19,6 +19,12 @@ os.environ["DUE_DIGEST_ENABLED"] = "false"
 # The Calling In poller defaults on; pin it off so no test that runs the app
 # lifespan can claim list entries or notify against a real database.
 os.environ["CALL_IN_ENABLED"] = "false"
+# The Auto send poller defaults on; pin it off so no test that runs the app
+# lifespan can ever start the 5:05 PM GC sender against real Graph creds, and
+# blank the test redirect so a local .env that sets one never changes what the
+# suite asserts. Tests that exercise them patch get_settings themselves.
+os.environ["AUTO_SEND_POLLER_ENABLED"] = "false"
+os.environ["AUTO_SEND_GC_REDIRECT"] = ""
 # Pin the security-critical flags the tests assert on, so the suite is
 # independent of whatever the local dev `.env` happens to set. The dev `.env`
 # ships MFA_REQUIRED=false (a break-glass convenience); without this pin the 2FA

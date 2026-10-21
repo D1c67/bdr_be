@@ -696,6 +696,12 @@ class ProjectOut(BaseModel):
     # degrade gracefully before migration 0039 is applied.
     abandoned_at: datetime | None = None
     abandoned_by: str | None = None
+    # Failed to bid (0162): an abandon that was a missed bid, with its reason.
+    # Only ever set alongside abandoned_at; cleared together by /reactivate.
+    failed_to_bid_at: datetime | None = None
+    failed_to_bid_by: str | None = None
+    failed_to_bid_reason: str | None = None
+    failed_to_bid_note: str | None = None
     # Set when a post-verify pricing edit bounced the project back to `verify`;
     # holds the stage it will resume at after the Executive re-commits. NULL =
     # not currently in re-verification (see migration 0043 / workflow.reopen_verify).
@@ -744,6 +750,11 @@ class ProjectOut(BaseModel):
     # possibly empty list). Derived by the list and detail routes only.
     rfp_created: RfpCreatedSummary | None = None
     rfp_intake_missing: list[str] | None = None
+    # Auto send (docs/AUTO_SEND.md 6.3): the project was auto sent and the
+    # real proposal has not gone out (nor was the auto send accepted), which
+    # drives the red pulse. Derived by the list, Bids Today and detail routes
+    # only; every other route leaves the default, as the counts above do.
+    auto_send_pending: bool = False
     created_by: str | None
     created_at: datetime
     updated_at: datetime
@@ -823,6 +834,35 @@ class TransitionIn(BaseModel):
     # thresholds decide, 'review' holds the project for a manual decision, and
     # 'go'/'no_go' push the outcome regardless of the score.
     gono_action: Literal["score", "review", "go", "no_go"] = "score"
+
+
+FailedToBidReason = Literal[
+    "missed_deadline",
+    "late_plans",
+    "missing_quotes",
+    "estimate_not_finished",
+    "capacity",
+    "submission_problem",
+    "other",
+]
+
+
+class FailedToBidIn(BaseModel):
+    """Why a bid was missed. Both fields are required: the coded reason feeds
+    reporting and the note is the explanation every internal user is emailed."""
+
+    reason: FailedToBidReason
+    note: str
+
+    @field_validator("note")
+    @classmethod
+    def _note_sane(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Explain why the bid was missed")
+        if len(v) > 2000:
+            raise ValueError("Note must be 2,000 characters or fewer")
+        return v
 
 
 class AbandonIn(BaseModel):

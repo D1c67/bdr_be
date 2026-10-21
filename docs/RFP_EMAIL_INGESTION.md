@@ -397,6 +397,22 @@ no stored row carries both kinds of link.
   or sales signature), and says that anything quoted from a g3electrical.com
   address is OUR request and never an invitation. Known vendors never reach
   this step at all (section 3.1).
+- Prompt `rfp_classify_v3` (2026-10-20) adds two paragraphs after the
+  yes/no/undetermined rules. In prod, a GC's post-award kickoff email
+  ("RE: Prosperity Park Playground Safety Surfacing": name a point of
+  contact, visit the site, send drawings and submittals by Friday) was
+  classified `yes` at 0.95 and created a project, because it asks G3 to
+  deliver something by a deadline. v3 says work G3 already holds is never an
+  invitation: kickoff and preconstruction meetings, PM or foreman requests,
+  site visits, shop drawings, submittals, RFIs, close-out, schedules and
+  lookaheads, subcontract signing, billing (pay applications, invoices, lien
+  waivers, Procore "invited you to bill") and change-order or change-event
+  pricing on a held contract are all `no`, deadline or not. The test is
+  whether the sender wants G3's price to win new work. The same change keeps
+  bid-phase updates as `yes`: an addendum, a bid-date reminder, a due-date
+  change or an answered RFI log for a project out to bid. An update can be
+  the first time the system sees a project, so it still flows to matching
+  and may create one (user decision 2026-10-20). Titles are never edited.
 - Stored: `llm_answer`, `llm_confidence` (clamped to 0..1), `llm_reasoning`
   (truncated to 20 words), `llm_model`, `llm_prompt_version`.
 - Routing on the answer, threshold `T` from env:

@@ -19,13 +19,16 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.core.config import get_settings
+from app.core.roles import Role
 from app.core.supabase_client import get_supabase
 from app.services import llm, llm_errors, storage
 from app.services.boq_extraction import worksheets_to_text
+from app.services.notifications import audit, notify_role
 
 logger = logging.getLogger(__name__)
 
@@ -298,6 +301,114 @@ def execute(draft_id: str) -> None:
         note = "Possible quantities slipped into: " + " | ".join(suspects[:10])
         result["notes"] = f"{result.get('notes') or ''}\n{note}".strip()
     _mark(draft_id, status="done", result_json=result, lines_json=lines)
+    if draft.get("created_by") is None:
+        _notify_lines_review(draft)
+
+
+# Auto send (docs/AUTO_SEND.md 6.2): a system-started draft (created_by NULL,
+# started when an estimator round sealed a BOQ) asks the Estimating Engineer
+# (Labor) to review it. The lines go out at 5:05 PM on the internal bid date
+# whether or not anyone approves them, so this only prompts. While the IT Admin
+# switch is off nothing goes out automatically, so the prompt (which says it
+# will) is not sent at all.
+LINES_REVIEW_TYPE = "auto_send.lines_review"
+
+
+def _auto_send_on() -> bool:
+    """The auto send switch, best effort: any failure reads as off (the notice
+    then stays quiet rather than promising an email that may never go)."""
+    try:
+        from app.services import auto_send
+
+        return bool(auto_send.get_settings_row().get("enabled"))
+    except Exception:  # noqa: BLE001 - see docstring
+        logger.exception("auto send switch read failed; lines-review notice skipped")
+        return False
+
+
+def _notify_lines_review(draft: dict[str, Any]) -> None:
+    """Best effort: a bell or email hiccup must never fail a finished draft
+    (the queue would otherwise retry a generation that already succeeded)."""
+    project_id = draft.get("project_id")
+    try:
+        if not _auto_send_on():
+            return
+        rows = (
+            get_supabase()
+            .table("projects")
+            .select("name, number")
+            .eq("id", project_id)
+            .limit(1)
+            .execute()
+        ).data or []
+        proj = rows[0] if rows else {}
+        label = f"{proj.get('name') or 'this project'}"
+        if proj.get("number"):
+            label += f" ({proj['number']})"
+        msg = (
+            f"Scope lines were drafted for {label}. Review and approve them in the "
+            "Auto send panel. They go out at 5:05 PM on the internal bid date even "
+            "if not approved."
+        )
+        notify_role(Role.ESTIMATING_ENGINEER_LABOR, project_id, LINES_REVIEW_TYPE, msg)
+    except Exception:  # noqa: BLE001
+        logger.exception("lines-review notice failed for draft %s", draft.get("id"))
+
+
+def start_generation(
+    project_id: str,
+    boq_file_id: str,
+    created_by: str | None,
+    background: Any = None,
+) -> dict[str, Any]:
+    """Insert a pending draft for `boq_file_id` and dispatch its generation:
+    durably through the LLM queue when it is on, else (or when the enqueue
+    fails) through `background` (FastAPI BackgroundTasks), else a daemon
+    thread. `created_by=None` is a system start (the auto send hook); its
+    audit row says so with `source: "auto"`. The caller owns the checks
+    (one active generation per project, a sent or internal BOQ). Returns the
+    inserted row."""
+    row = (
+        get_supabase()
+        .table("proposal_drafts")
+        .insert(
+            {
+                "project_id": project_id,
+                "boq_file_id": boq_file_id,
+                "status": "pending",
+                "created_by": created_by,
+            }
+        )
+        .execute()
+    ).data[0]
+    if get_settings().llm_queue_enabled:
+        from app.services import llm_queue
+
+        try:
+            llm_queue.enqueue(
+                llm_queue.JOB_PROPOSAL,
+                target_id=row["id"],
+                project_id=project_id,
+                payload={"draft_id": row["id"]},
+                created_by=created_by,
+            )
+        except Exception:  # noqa: BLE001 - queue outage degrades to inline dispatch
+            logger.exception("Proposal enqueue failed; falling back to BackgroundTasks")
+            _dispatch_inline(row["id"], background)
+    else:
+        _dispatch_inline(row["id"], background)
+    payload: dict[str, Any] = {"boq_file_id": boq_file_id}
+    if created_by is None:
+        payload["source"] = "auto"
+    audit(created_by, "proposal.lines_generate", "proposal_draft", row["id"], payload)
+    return row
+
+
+def _dispatch_inline(draft_id: str, background: Any) -> None:
+    if background is not None:
+        background.add_task(run_generation, draft_id)
+    else:
+        threading.Thread(target=run_generation, args=(draft_id,), daemon=True).start()
 
 
 def run_generation(draft_id: str) -> None:

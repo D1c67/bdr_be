@@ -45,7 +45,8 @@ def _present_pm(project: dict, role: Role) -> dict:
     if isinstance(details, list):
         details = details[0] if details else None
     project["status"] = derive_status(
-        project.get("current_stage"), project.get("abandoned_at"), result
+        project.get("current_stage"), project.get("abandoned_at"), result,
+        project.get("failed_to_bid_at"),
     )
     project["pm_details"] = details
     return redact_for_role(project, role)

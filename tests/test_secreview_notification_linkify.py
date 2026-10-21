@@ -35,7 +35,17 @@ def test_estimator_note_url_is_not_linkified(monkeypatch):
     )
     assert '<a href="https://g3-electrical-files.example/login"' not in html
     assert "https://g3-electrical-files.example/login" in html  # still readable as text
-    assert f'href="{FRONTEND}/projects/p1"' in html  # the app button stays a link
+    assert f'href="{FRONTEND}/projects/p1?box=notes"' in html  # the app button stays a link
+
+
+def test_note_mention_url_is_not_linkified(monkeypatch):
+    """Same as above for the @mention notice (0160): its preview is note text too."""
+    html = _send(
+        monkeypatch, "note_mention",
+        "Ana mentioned you on Tower: see https://g3-electrical-files.example/login",
+    )
+    assert '<a href="https://g3-electrical-files.example/login"' not in html
+    assert f'href="{FRONTEND}/projects/p1?box=notes"' in html
 
 
 def test_rfp_derived_project_name_in_house_type_is_not_linkified(monkeypatch):

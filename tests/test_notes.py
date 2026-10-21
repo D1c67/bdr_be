@@ -12,6 +12,7 @@ from app.routers.notes import (
     advance_read_mark,
     note_preview,
     recipient_ids,
+    resolve_mentions,
 )
 
 
@@ -97,3 +98,35 @@ def test_read_in_accepts_aware_iso():
 def test_read_in_rejects_naive_datetimes():
     with pytest.raises(ValidationError):
         ReadIn(up_to="2026-06-12T10:00:00")
+
+
+# ── resolve_mentions ───────────────────────────────────────────────────────
+
+_PEOPLE = [
+    {"id": "11111111-1111-1111-1111-111111111111", "full_name": "Ana Ruiz"},
+    {"id": "22222222-2222-2222-2222-222222222222", "full_name": "Bo Chen"},
+]
+_ANA, _BO = _PEOPLE[0]["id"], _PEOPLE[1]["id"]
+
+
+def test_mentions_kept_when_name_in_body():
+    assert resolve_mentions("@Ana Ruiz and @Bo Chen please look", [_ANA, _BO], _PEOPLE) == [_ANA, _BO]
+
+
+def test_mention_dropped_when_name_deleted_from_body():
+    assert resolve_mentions("@Ana Ruiz please look", [_ANA, _BO], _PEOPLE) == [_ANA]
+
+
+def test_mention_dropped_when_not_mentionable():
+    stranger = "33333333-3333-3333-3333-333333333333"
+    assert resolve_mentions("@Ana Ruiz", [stranger, _ANA], _PEOPLE) == [_ANA]
+
+
+def test_mentions_ignore_case_and_dedupe():
+    assert resolve_mentions("@ana ruiz hi", [_ANA, _ANA], _PEOPLE) == [_ANA]
+
+
+def test_note_in_accepts_mention_ids():
+    assert [str(u) for u in NoteIn(body="hi", mention_ids=[_ANA]).mention_ids] == [_ANA]
+    with pytest.raises(ValidationError):
+        NoteIn(body="hi", mention_ids=["not-a-uuid"])

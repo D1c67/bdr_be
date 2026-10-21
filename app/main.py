@@ -75,6 +75,22 @@ async def lifespan(_: FastAPI):
         from app.services import due_digest
 
         digest_task = asyncio.create_task(due_digest.polling_loop())
+    # Auto send (docs/AUTO_SEND.md 7): the 3:00 PM preflight, the 5:05 PM GC
+    # sends, missed-run detection and the 5:10 PM digest. Multi-worker safe:
+    # the (project_id, bid_date) run row is the claim before any GC email, and
+    # the auto_send_email_log unique index claims each internal email. The DB
+    # switch (auto_send_settings.enabled, default off) gates every send;
+    # AUTO_SEND_POLLER_ENABLED=false stops the loop outright. Bidding-only.
+    auto_send_task: asyncio.Task | None = None
+    if (
+        settings.bidding_enabled
+        and settings.auto_send_poller_enabled
+        and settings.supabase_url
+        and settings.ms_client_id
+    ):
+        from app.services import auto_send_scheduler
+
+        auto_send_task = asyncio.create_task(auto_send_scheduler.polling_loop())
     # Calling In (docs/CALLING_IN.md section 5): claims a call_in_entries row
     # when a project lands on a call list and notifies Executive + Estimating
     # Engineer Labor once, then closes the row when the project leaves.
@@ -269,7 +285,7 @@ async def lifespan(_: FastAPI):
     for task in (
         poll_task, reminder_task, digest_task, email_task, rfp_email_task,
         rfp_portal_task, llm_health_task, llm_queue_task, call_in_task, llm_target_task,
-        pm_rfi_sync_task, browser_agents_task,
+        pm_rfi_sync_task, browser_agents_task, auto_send_task,
     ):
         if task:
             task.cancel()
@@ -571,6 +587,7 @@ from app.routers import (  # noqa: E402
     agent_worker_turns,
     ai_spend,
     analytics,
+    auto_send,
     bid_drafts,
     bid_splitter,
     boq_analysis,
@@ -736,6 +753,7 @@ app.include_router(boq_analysis.router, dependencies=_BIDDING)
 app.include_router(general_material.router, dependencies=_BIDDING)
 app.include_router(pricing.router, dependencies=_BIDDING)
 app.include_router(proposals.router, dependencies=_BIDDING)
+app.include_router(auto_send.router, dependencies=_BIDDING)
 app.include_router(outcome.router, dependencies=_BIDDING)
 # Mark submitted from the project side menu (0140): a proposal sent outside the app.
 app.include_router(external_submission.router, dependencies=_BIDDING)

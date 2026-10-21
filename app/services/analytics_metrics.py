@@ -60,7 +60,7 @@ def _group_label(labels: dict[str, str], key: str) -> str:
     return labels.get(key, key)
 
 _PROJECT_COLS = (
-    "id, name, number, current_stage, abandoned_at, created_at, "
+    "id, name, number, current_stage, abandoned_at, failed_to_bid_at, created_at, "
     "internal_bid_at, actual_bid_at, due_from_estimator_at, due_from_vendors_at, "
     "wage_type, labor_time, est_value_band"
 )
@@ -283,7 +283,10 @@ def load_window(
         projects = {
             pid: p
             for pid, p in projects.items()
-            if derive_status(p.get("current_stage"), p.get("abandoned_at"), results.get(pid))
+            if derive_status(
+                p.get("current_stage"), p.get("abandoned_at"), results.get(pid),
+                p.get("failed_to_bid_at"),
+            )
             == status
         }
 

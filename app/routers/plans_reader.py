@@ -50,7 +50,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from starlette.concurrency import run_in_threadpool
@@ -70,7 +70,7 @@ from app.models.schemas import (
     AiEstimatingThreadIn,
 )
 from app.routers.files import _read_capped
-from app.services import ai_spend, llm, llm_queue, storage
+from app.services import ai_spend, file_access, llm, llm_queue, storage
 from app.services.notifications import audit
 from app.services.plans_reader_schemas import CATEGORIES, DELIVERABLE_KINDS
 
@@ -690,15 +690,63 @@ def get_output(run_id: str, category: str, _: CurrentUser = Depends(require_inte
     return rows[0]
 
 
+_Intent = Literal["view", "download", "prefetch"]
+_PreviewIntent = Literal["view", "prefetch"]
+
+
 @router.get("/runs/{run_id}/documents/{doc_id}/download")
-def download_document(run_id: str, doc_id: str, _: CurrentUser = Depends(require_internal)) -> dict:
+def download_document(
+    run_id: str,
+    doc_id: str,
+    intent: _Intent = "download",
+    user: CurrentUser = Depends(require_internal),
+) -> dict:
     sb = get_supabase()
-    _run_or_404(sb, run_id)
+    run = _run_or_404(sb, run_id)
     _uuid_or_404(doc_id, "Document")
     doc = _first(sb, "plans_reader_documents", id=doc_id, run_id=run_id)
     if not doc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found")
-    return {"url": storage.signed_url(doc["storage_path"], download=_pdf_name(doc.get("name")))}
+    name = _pdf_name(doc.get("name"))
+    url = storage.signed_url(doc["storage_path"], download=name)
+    file_access.record(
+        user,
+        action=intent,
+        source="ai_estimating_document",
+        file_id=doc_id,
+        project_id=run.get("project_id"),
+        filename=name,
+        category=doc.get("category"),
+        detail={"run_id": run_id},
+    )
+    return {"url": url}
+
+
+def _record_deliverable(
+    user: CurrentUser,
+    run: dict,
+    row: dict,
+    action: str,
+    file_format: str | None,
+    filename: str | None,
+) -> None:
+    """A deliverable has no file id of its own in the access log: kind and
+    version (plus the run) name it, in `detail`."""
+    file_access.record(
+        user,
+        action=action,
+        source="ai_estimating_deliverable",
+        file_id=None,
+        project_id=run.get("project_id"),
+        filename=filename or row.get("filename"),
+        category=row.get("kind"),
+        detail={
+            "run_id": run.get("id"),
+            "kind": row.get("kind"),
+            "version": row.get("version"),
+            "format": file_format or "original",
+        },
+    )
 
 
 def _deliverable_kind_or_404(kind: str) -> str:
@@ -726,7 +774,8 @@ def download_deliverable(
     kind: str,
     version: int,
     file_format: str | None = Query(default=None, alias="format", pattern="^pdf$"),
-    _: CurrentUser = Depends(require_internal),
+    intent: _Intent = "download",
+    user: CurrentUser = Depends(require_internal),
 ) -> dict:
     """A signed link to one deliverable version. `?format=pdf` on an office
     kind (the BOQ and estimate xlsx, the brief docx: plans_reader_runs
@@ -748,9 +797,13 @@ def download_deliverable(
         if not storage.object_exists(path):
             raise HTTPException(status.HTTP_404_NOT_FOUND, MSG_NO_BRIEF_PDF)
         name = runs.pdf_copy_filename(kind, runs._project_name(run), version)
-        return {"url": storage.signed_url(path, download=name)}
+        url = storage.signed_url(path, download=name)
+        _record_deliverable(user, run, row, intent, "pdf", name)
+        return {"url": url}
     name = _display_name(row.get("filename"), f"{kind}-v{version}")
-    return {"url": storage.signed_url(row["storage_path"], download=name)}
+    url = storage.signed_url(row["storage_path"], download=name)
+    _record_deliverable(user, run, row, intent, None, name)
+    return {"url": url}
 
 
 @router.get("/runs/{run_id}/deliverables/{kind}/{version}/preview-url")
@@ -758,7 +811,8 @@ def deliverable_preview_url(
     run_id: str,
     kind: str,
     version: int,
-    _: CurrentUser = Depends(require_internal),
+    intent: _PreviewIntent = "view",
+    user: CurrentUser = Depends(require_internal),
 ) -> dict:
     """What the in-app viewer can show for one deliverable version, in the
     shape the frontend's preview strategies poll: `preview_status` ready
@@ -775,7 +829,11 @@ def deliverable_preview_url(
     row = _first(sb, "plans_reader_deliverables", run_id=run_id, kind=kind, version=version)
     if not row:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Deliverable not found")
-    return _runs().pdf_copy_status(run, row)
+    out = _runs().pdf_copy_status(run, row)
+    # Recorded only when a URL is handed out (pending/failed polls are not opens).
+    if isinstance(out, dict) and out.get("preview_status") == "ready":
+        _record_deliverable(user, run, row, intent, "preview", out.get("filename"))
+    return out
 
 
 @router.post(

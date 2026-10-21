@@ -114,7 +114,7 @@ def open_drafts(project_id: str) -> list[dict[str, Any]]:
 
 
 def create_submission_round(
-    project_id: str, estimator_id: str
+    project_id: str, estimator_id: str, impersonated_by: str | None = None
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Seal the open drafts into the next round. Returns (submission, sealed).
 
@@ -130,6 +130,10 @@ def create_submission_round(
     them under B's round and freeze them to A (files.py delete/read scoping).
     `open_drafts` and `freshness.open_draft_count` stay project-wide on purpose —
     they feed the internal team view, which wants the project total.
+
+    `impersonated_by` is the dev account behind a "View as" submit: the round
+    is stamped with it (0159) so auto send never emails GCs a price the dev
+    sealed. Written only when set.
     """
     sb = get_supabase()
     latest = latest_submission(project_id)
@@ -148,6 +152,7 @@ def create_submission_round(
                     "project_id": project_id,
                     "estimator_id": estimator_id,
                     "round": round_no,
+                    **({"impersonated_by": impersonated_by} if impersonated_by else {}),
                 }
             )
             .execute()

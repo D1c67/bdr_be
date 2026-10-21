@@ -34,7 +34,7 @@ from app.models.schemas import (
     SubmittalIn,
     SubmittalUpdate,
 )
-from app.services import openai_text, storage
+from app.services import file_access, openai_text, storage
 from app.services.notifications import audit
 
 logger = logging.getLogger(__name__)
@@ -431,13 +431,28 @@ def delete_submittal_file(file_id: str, user: CurrentUser = Depends(require_writ
 
 
 @router.get("/files/{file_id}/preview-url")
-def submittal_file_preview_url(file_id: str, _: CurrentUser = Depends(require_internal)):
+def submittal_file_preview_url(file_id: str, user: CurrentUser = Depends(require_internal)):
     frow = (
-        get_supabase().table("submittal_files").select("file_path").eq("id", file_id).limit(1).execute()
+        get_supabase()
+        .table("submittal_files")
+        .select("file_path, file_name")
+        .eq("id", file_id)
+        .limit(1)
+        .execute()
     ).data
     if not frow:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found")
-    return {"url": storage.signed_url(frow[0]["file_path"])}
+    url = storage.signed_url(frow[0]["file_path"])
+    # The bank is company-global (no project), so the access row has none.
+    file_access.record(
+        user,
+        action="view",
+        source="submittal_file",
+        file_id=file_id,
+        project_id=None,
+        filename=frow[0].get("file_name"),
+    )
+    return {"url": url}
 
 
 # ── Materials: update / delete / aliases / linking ───────────────────────────
