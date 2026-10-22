@@ -1702,9 +1702,11 @@ def update_project_gc(
     body: ProjectGCUpdate,
     user: CurrentUser = Depends(require_writer),
 ):
-    """Edit the link's mutable fields: the per-GC needs-by date and/or the
-    project's preferred bid contacts at that GC. Each field only moves when its
-    key is present in the PATCH body (membership itself is add/remove)."""
+    """Edit the link's mutable fields: the per-GC needs-by date, the
+    project's preferred bid contacts at that GC, and/or the invitation method
+    a person set for it (0173; null clears it back to the derived methods or
+    "By hand"). Each field only moves when its key is present in the PATCH
+    body (membership itself is add/remove)."""
     sb = get_supabase()
     _project_or_404(project_id)
     rows = (
@@ -1726,6 +1728,11 @@ def update_project_gc(
     if "contact_ids" in body.model_fields_set:
         _replace_gc_contact_selection(sb, rows[0]["id"], gc_id, body.contact_ids or [])
         changes["contact_ids"] = body.contact_ids or []
+    if "invitation_method" in body.model_fields_set:
+        sb.table("project_gcs").update({"invitation_method": body.invitation_method}).eq(
+            "id", rows[0]["id"]
+        ).execute()
+        changes["invitation_method"] = body.invitation_method
     if changes:
         audit(user.id, "project.gc_update", "project", project_id,
               {"gc_id": gc_id, **changes})

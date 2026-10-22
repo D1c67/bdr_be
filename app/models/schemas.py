@@ -17,6 +17,7 @@ from pydantic import (
 
 from app.core.roles import Role
 from app.services.due_reminder_prefs import NotificationPrefsDoc
+from app.services.project_gc_methods import normalize_user_method
 from app.services.project_status import ProjectStatus
 
 # ── Profiles / users ──────────────────────────────────────────────────────
@@ -323,8 +324,17 @@ class ProjectGCUpdate(BaseModel):
     # Omitted = leave the selection alone; [] = clear it. The handler tells the
     # two apart via model_fields_set, so this None default never clears.
     contact_ids: list[str] | None = Field(default=None, max_length=50)
+    # How this GC invited us, set by hand on the GCs box (0173). Omitted =
+    # leave it; null, "" or "by_hand" = clear it back to the default. Any
+    # other value must be one of project_gc_methods.USER_SETTABLE_METHODS.
+    invitation_method: str | None = Field(default=None, max_length=40)
 
     _needs_by_bounds = field_validator("needs_by")(_check_needs_by)
+
+    @field_validator("invitation_method")
+    @classmethod
+    def _known_method(cls, v: str | None) -> str | None:
+        return normalize_user_method(v)
 
     @field_validator("contact_ids")
     @classmethod
@@ -1562,6 +1572,10 @@ class ProposalManualIn(BaseModel):
     same length/character rules as ProposalLinesIn apply to what is kept."""
 
     lines: list[str] = Field(default_factory=list, max_length=200)
+    # A queued or running model generation blocks a manual start unless the
+    # caller confirmed dropping it (the editor's "a generation is still
+    # queued" prompt). A `done` draft always blocks: edit it instead.
+    replace_generation: bool = False
 
     @field_validator("lines")
     @classmethod

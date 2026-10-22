@@ -35,7 +35,7 @@ from postgrest.exceptions import APIError
 from app.core.config import get_settings
 from app.core.roles import VERIFY_ROLES, Role
 from app.core.supabase_client import get_supabase
-from app.services import email_branding, graph_email, office_preview, storage
+from app.services import email_branding, graph_email, office_preview, project_gc_methods, storage
 from app.services.notifications import audit, dismiss_notifications, notify_role, notify_user
 from app.services.proposal_docx import (
     DOCX_MIME,
@@ -911,9 +911,9 @@ def project_gc_rows(project_id: str) -> list[dict]:
         .select(
             "needs_by, pricing_approval_status, pricing_requested_by,"
             " pricing_requested_at, pricing_request_note, pricing_decided_by,"
-            " pricing_decided_at, pricing_decision_note,"
+            " pricing_decided_at, pricing_decision_note, invitation_method,"
             " project_gc_contacts(gc_contact_id),"
-            " general_contractors(id, name, gc_contacts(id, name, email, phone))"
+            " general_contractors(id, name, created_at, gc_contacts(id, name, email, phone))"
         )
         .eq("project_id", project_id)
         .execute()
@@ -947,17 +947,36 @@ def project_gc_rows(project_id: str) -> list[dict]:
     # the panel shows the "Merged by System" chip with the provenance and
     # swaps Remove for Unmerge. One read, skipped while the RFP feature is off
     # (the table may not exist on that deployment).
+    settings = get_settings()
     system_added: dict[str, dict] = {}
-    if get_settings().rfp_ingest_enabled:
+    merges: list[dict] = []
+    if settings.rfp_ingest_enabled:
         merges = (
             sb.table("rfp_project_matches")
-            .select("id, gc_id, gc_match_kind, sender_address, invitation_method")
+            .select("id, gc_id, gc_match_kind, sender_address, invitation_method, decided_at")
             .eq("project_id", project_id)
             .eq("kind", "merged")
             .is_("unmerged_at", "null")
             .execute()
         ).data or []
         system_added = {m["gc_id"]: m for m in merges if m.get("gc_id")}
+    # Every GC's invitation method(s) (0173): the header pills and the GCs
+    # box both read this list, so it is computed once, here.
+    methods = project_gc_methods.methods_for_project(
+        sb,
+        project_id,
+        [
+            {
+                "id": r["general_contractors"]["id"],
+                "created_at": r["general_contractors"].get("created_at"),
+                "invitation_method": r.get("invitation_method"),
+            }
+            for r in rows
+            if r.get("general_contractors")
+        ],
+        merges,
+        settings,
+    )
     out = []
     for r in rows:
         gc = r.get("general_contractors")
@@ -1001,6 +1020,11 @@ def project_gc_rows(project_id: str) -> list[dict]:
                     if merge
                     else None
                 ),
+                # The method a person set on the GCs box (null = not set),
+                # and the full list to show: derived RFP methods plus that
+                # one, or `by_hand` when there are none.
+                "invitation_method": r.get("invitation_method"),
+                "methods": methods.get(gc["id"]) or [],
             }
         )
     return sorted(out, key=lambda g: g["name"].lower())

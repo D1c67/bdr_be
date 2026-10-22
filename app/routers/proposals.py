@@ -186,10 +186,42 @@ def start_manual_lines(
     draft with model='manual' and whatever lines the caller seeded (usually
     none). The team types, saves and approves exactly as after a generation.
     The escape hatch for a downed model instance, or a project whose scope
-    the team writes itself; Generate stays available beside it."""
+    the team writes itself; Generate stays available beside it.
+
+    Never starts over existing lines: a latest draft that is `done` is a 409
+    (the caller edits it instead), and a queued or running generation is a
+    409 unless body.replace_generation confirms dropping it. The check is
+    best effort (no unique constraint), enough for a double click or a stale
+    tab."""
     sb = get_supabase()
     _assert_not_abandoned(sb, project_id)
     _assert_lines_unlocked(sb, project_id)
+    latest = (
+        sb.table("proposal_drafts")
+        .select("*")
+        .eq("project_id", project_id)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    ).data or []
+    # fail_if_stale releases a row stranded by a restart, so a dead job can
+    # never block manual entry.
+    current = proposal_scope.fail_if_stale(latest[0]) if latest else None
+    if current and current.get("status") == "done":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This project already has scope lines. Edit them instead of starting over.",
+        )
+    if (
+        current
+        and current.get("status") in ("pending", "running")
+        and not body.replace_generation
+    ):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Proposal-line generation is in progress for this project. "
+            "Confirm dropping it to enter the lines by hand.",
+        )
     _drop_active_generation(sb, project_id)
     row = (
         sb.table("proposal_drafts")
