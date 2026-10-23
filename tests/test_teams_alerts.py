@@ -84,7 +84,7 @@ class _FakeSupabase:
 @pytest.fixture
 def wired(monkeypatch):
     """Configured sender with every Microsoft call faked; returns the log."""
-    log = {"posted": [], "resolved": 0}
+    log = {"posted": [], "resolved": 0, "installs": []}
     store = {
         "profiles": [
             {"id": "u1", "full_name": "Pat Lee", "email": "pat@g3.com",
@@ -105,7 +105,8 @@ def wired(monkeypatch):
     monkeypatch.setattr(ta.graph_email, "_active_test_session", lambda sb=None: None)
     monkeypatch.setattr(ta, "_lookup_user", lambda email: f"aad-{email}")
     monkeypatch.setattr(ta, "_catalog_id", lambda: "cat")
-    monkeypatch.setattr(ta, "_install", lambda aad, cat: None)
+    monkeypatch.setattr(ta, "_install", lambda aad, cat: log["installs"].append(aad))
+    monkeypatch.setattr(ta, "_installation_id", lambda aad, cat: None)
 
     def _chat(aad, cat):
         log["resolved"] += 1
@@ -351,3 +352,16 @@ def test_test_endpoint_surfaces_the_failure(monkeypatch):
         users.send_teams_test_alert(_user())
     assert exc.value.status_code == 502
     assert "catalog" in exc.value.detail
+
+
+def test_existing_install_is_used_without_installing(wired, monkeypatch):
+    # An admin installed BDR Alerts for everyone (Teams setup policy).
+    monkeypatch.setattr(ta, "_installation_id", lambda aad, cat: "inst-1")
+    ta.queue([{"user_id": "u1", "project_id": None, "type": "nudge", "message": "m"}])
+    assert wired["installs"] == []
+    assert len(wired["posted"]) == 1
+
+
+def test_missing_install_is_installed(wired):
+    ta.queue([{"user_id": "u1", "project_id": None, "type": "nudge", "message": "m"}])
+    assert wired["installs"] == ["aad-pat@g3.com"]

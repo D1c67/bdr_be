@@ -274,10 +274,15 @@ def _deliver(user_id: str, email: str, card: dict, summary: str, state: dict) ->
 
 
 def _resolve(user_id: str, email: str, state: dict) -> dict:
-    """Entra object id -> app installed -> the bot's 1:1 chat id; cached."""
+    """Entra object id -> app installed -> the bot's 1:1 chat id; cached.
+
+    An existing install is used as is (an admin may install BDR Alerts for
+    everyone through a Teams setup policy); BDR installs it only when the
+    person does not have it yet."""
     aad_id = state.get("aad_object_id") or _lookup_user(email)
     catalog_id = _catalog_id()
-    _install(aad_id, catalog_id)
+    if not _installation_id(aad_id, catalog_id):
+        _install(aad_id, catalog_id)
     chat_id = _chat_id(aad_id, catalog_id)
     fields = {"aad_object_id": aad_id, "conversation_id": chat_id}
     _save_state(user_id, fields)
@@ -364,11 +369,14 @@ def _install(aad_id: str, catalog_id: str) -> None:
             "POST", f"/users/{aad_id}/teamwork/installedApps", step="Install BDR Alerts",
             json={"teamsApp@odata.bind": f"{_GRAPH_BASE}/appCatalogs/teamsApps/{catalog_id}"},
             ok=(409,),  # already installed
-            # The "Self" install permission covers only a Teams app whose
-            # manifest names this registration in webApplicationInfo.
+            # Refused when the manifest does not name this registration in
+            # webApplicationInfo (the "Self" permission), or when Teams policy
+            # keeps the app from this person. An admin install for everyone
+            # (setup policy) works around both once it reaches the person.
             forbidden=(
-                "Teams will not let BDR install this app package (upload the package "
-                "from scripts/build_teams_alerts_app.py, which names the app registration)"
+                "BDR Alerts is not installed for you yet and Teams will not let BDR "
+                "install it. If an admin installed it for everyone, it can take a few "
+                "hours to arrive (signing out of Teams and back in can speed it up)"
             ),
         )
     except TeamsAlertError:
@@ -376,17 +384,23 @@ def _install(aad_id: str, catalog_id: str) -> None:
         raise
 
 
+def _installation_id(aad_id: str, catalog_id: str) -> str | None:
+    """The person's BDR Alerts installation, or None when it is not installed."""
+    resp = _graph(
+        "GET", f"/users/{aad_id}/teamwork/installedApps", step="Find BDR Alerts in Teams",
+        params={"$expand": "teamsApp", "$filter": f"teamsApp/id eq '{catalog_id}'"},
+    )
+    installs = (resp.json().get("value") or []) if resp is not None else []
+    return installs[0]["id"] if installs else None
+
+
 def _chat_id(aad_id: str, catalog_id: str) -> str:
     for attempt in range(_CHAT_LOOKUP_ATTEMPTS):
-        resp = _graph(
-            "GET", f"/users/{aad_id}/teamwork/installedApps", step="Open the BDR Alerts chat",
-            params={"$expand": "teamsApp", "$filter": f"teamsApp/id eq '{catalog_id}'"},
-        )
-        installs = (resp.json().get("value") or []) if resp is not None else []
-        if installs:
+        install_id = _installation_id(aad_id, catalog_id)
+        if install_id:
             chat = _graph(
                 "GET",
-                f"/users/{aad_id}/teamwork/installedApps/{installs[0]['id']}/chat",
+                f"/users/{aad_id}/teamwork/installedApps/{install_id}/chat",
                 step="Open the BDR Alerts chat",
                 ok=(404,),
             )

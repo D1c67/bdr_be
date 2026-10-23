@@ -31,8 +31,14 @@ All app-only (no user sign-in), using the existing Graph app registration:
 1. Graph `GET /users/{email}` (then `mail eq` as a fallback) for their
    Entra object id.
 2. Graph finds the BDR Alerts app in the org catalog by its manifest id
-   (`TEAMS_APP_MANIFEST_ID`) and installs it for the person
+   (`TEAMS_APP_MANIFEST_ID`) and uses the person's existing install of it.
+   Only when they have none does BDR install it
    (`POST /users/{id}/teamwork/installedApps`; 409 = already installed).
+   In the G3 tenant that install is refused ("Caller is not authorized")
+   even with the Self permission and webApplicationInfo in place, so the
+   app is installed for everyone by a Teams admin (setup policy, 10-23).
+   A policy install reaches each person when they next open Teams and can
+   take hours; until then their alerts fail with "not installed for you yet".
 3. Graph returns the bot's 1:1 chat with them (`.../installedApps/{id}/chat`).
 4. The card is posted to that chat through the Bot Connector
    (`TEAMS_BOT_SERVICE_URL/v3/conversations/{chat}/activities`), signed in as
