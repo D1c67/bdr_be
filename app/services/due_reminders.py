@@ -27,7 +27,7 @@ from app.core.config import get_settings
 from app.core.roles import INTERNAL_ROLES, Role
 from app.core.supabase_client import get_supabase
 from app.services.datetime_format import _parse_ts, format_bid_datetime
-from app.services import notification_email
+from app.services import notifications
 from app.services.due_reminder_prefs import NotificationPrefsDoc, effective_prefs
 from app.services import workflow
 
@@ -521,7 +521,7 @@ def poll_once() -> None:
                 ).execute()
                 raise
             # Only mirror to email once the bell rows are safely persisted.
-            notification_email.queue(notif_rows)
+            notifications.deliver(notif_rows)
         except Exception:  # noqa: BLE001
             logger.exception(
                 "Due-reminder event failed (project=%s kind=%s offset=%s)",

@@ -77,7 +77,7 @@ from app.services import (
     rfp_test,
     workflow,
 )
-from app.services.notifications import audit, dismiss_notifications, notify_role
+from app.services.notifications import audit, dismiss_notifications, notify_role, notify_roles
 from app.services.rfp_email_auth import (
     METHOD_NONORGANIC,
     METHOD_SMARTBID,
@@ -1541,8 +1541,9 @@ def _notify(
         meta["files_note"] = files_note
     notes = [n for n in (split_note, files_note) if n]
     tail = f". {' '.join(notes)}" if notes else ""
-    notify_role(
-        Role.EXECUTIVE, project["id"], NOTIFY_CREATED,
+    # The IT Admin hears it too (bell + Teams, no email by default; 2026-10-23).
+    notify_roles(
+        (Role.EXECUTIVE, Role.IT_ADMIN), project["id"], NOTIFY_CREATED,
         f"Project {label} was created from an RFP invitation and is waiting in Go/No-Go{tail}",
         mirror_email=True, metadata=meta,
     )

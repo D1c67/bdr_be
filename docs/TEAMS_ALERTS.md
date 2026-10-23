@@ -6,12 +6,16 @@ the `/users/me/teams-alerts` routes in `app/routers/users.py`,
 
 ## What it does
 
-Every notification that BDR mirrors to email (everything passed to
-`notification_email.queue`) is also sent to the same person in Microsoft
-Teams as a 1:1 message from the **BDR Alerts** bot. The message is an Adaptive
-Card with the email's heading, the project, the message, and a button to the
-same deep link the email uses. Bell-only notices (RFP match sweeps, NGEM and
-BuildingConnected scan notices) stay out of Teams, as they stay out of email.
+Notifications go to Microsoft Teams as a 1:1 message from the **BDR Alerts**
+bot, but only the ones each role is routed to (see "Who gets what" below,
+migration 0177). The message is a short Adaptive Card: the project number and
+name in bold, the message, and a button to the same deep link the email
+uses. The daily reports (Bids due today, Auto send preview and results) get a
+short Teams copy too: one line per project, no amounts.
+
+Teams is routed on its own, so a bell-only notification (Auto sent, an NGEM
+scan failure) can still reach Teams. Every notification still lands in the
+bell.
 
 - Internal users only. The external estimator never gets a Teams copy.
 - Each person has an on/off switch under Settings > Microsoft Teams alerts
@@ -23,6 +27,41 @@ BuildingConnected scan notices) stay out of Teams, as they stay out of email.
   breaks the flow that created the notification.
 - An active RFP test session holds every Teams send (fail closed).
 - `notifications.teams_sent_at` records when each Teams copy was delivered.
+
+## Who gets what (0177)
+
+Code: `app/services/notification_routing.py` (the event catalog and the
+defaults), `app/routers/notification_routing.py`
+(`GET /notification-routing`, `PUT /notification-routing/cell`,
+`POST /notification-routing/reset`, Executive + IT Admin), frontend
+`components/NotificationRoutingSettings.tsx` (Settings > Notification
+routing). Overrides live in `notification_channel_prefs` (one row per role
+and event; absent row or NULL column = the code default). Changes reach both
+workers within 30 seconds.
+
+Each notification type belongs to one event (`stage_handoff` splits by
+`metadata.stage`: Go/No-Go and Verify are their own events). For each role
+that receives an event there is an Email switch and a Teams switch. A switch
+only filters people who already receive the event; it never adds a role.
+Email is a filter on the email a notification already sends.
+
+Teams defaults (decided with G3 on 2026-10-23):
+
+| Role | Teams by default |
+| --- | --- |
+| Executive | Bids due today, Go/No-Go, Verify, Calling In, approval requests, revisions, personal |
+| Estimating Admin | Bids due today, Auto send results, intake needed, RFP emails to review, send to estimator, stage handoffs, numbers verified, auto sent, auto send problems, proposal send failed, estimator revisions, personal |
+| Estimating Engineer (Labor) | Bids due today, estimate delivered, vendor quotes, late quotes, numbers verified, revisions, personal |
+| Estimating Engineer (Materials) | Estimate delivered, revisions, personal |
+| IT Admin | Bids due today, Go/No-Go, Verify, tech problems, security alerts, personal |
+| Accountant | Auto send results, personal |
+
+"Revisions" = estimator revision rounds, drawings changed, re-verify
+required. "Personal" = @mentions in notes, nudges, approval decisions.
+Email defaults keep everything that emailed before. The audiences added on
+2026-10-23 get the bell and Teams but no email: the Labor engineer for vendor
+quotes / RFQ replies and numbers verified, the IT Admin for Go/No-Go and
+Verify.
 
 ## How a message gets to a person
 

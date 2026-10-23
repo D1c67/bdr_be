@@ -38,7 +38,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from app.core.config import _parse_hhmm, get_settings
 from app.core.roles import Role
 from app.core.supabase_client import get_supabase
-from app.services import auto_send, auto_send_emails, graph_email
+from app.services import auto_send, auto_send_emails, graph_email, notification_routing, teams_alerts
 from app.services.datetime_format import _parse_ts
 from app.services.due_reminders import _page_all
 from app.services.email_branding import LOGO_CONTENT_ID, LOGO_FILENAME, logo_bytes
@@ -134,11 +134,30 @@ def _unclaimed(sb, day: date, kind: str, recipients: list[dict]) -> list[dict]:
 # ── Internal email claim + send ───────────────────────────────────────────
 
 
+# Email ledger kind -> its routing event (services/notification_routing).
+ROUTING_EVENTS = {"preflight": "digest.auto_send_preview", "digest": "digest.auto_send"}
+
+
+def _routed(recipients: list[dict], kind: str) -> list[dict]:
+    """The recipients whose role gets this email or its Teams copy
+    (Settings > Notification routing, 0177)."""
+    event = ROUTING_EVENTS[kind]
+    return [
+        p for p in recipients
+        if notification_routing.wants(p.get("role"), event, "email")
+        or notification_routing.wants(p.get("role"), event, "teams")
+    ]
+
+
 def _claim_and_send(sb, *, day: date, kind: str, recipients: list[dict], subject: str,
-                    render) -> int:
+                    render, teams_card: dict | None = None) -> int:
     """Claim (day, kind, user) per recipient and email only the rows that were
     genuinely inserted. A failed send deletes its claim so the next tick
-    retries. Returns how many emails went out."""
+    retries. Returns how many emails went out.
+
+    `teams_card` goes to Teams (0177) for every claimed recipient whose
+    email went out or who gets no email, so a failed email retries both."""
+    event = ROUTING_EVENTS[kind]
     ledger_rows = [
         {"send_date": day.isoformat(), "kind": kind, "user_id": p["id"]} for p in recipients
     ]
@@ -151,9 +170,13 @@ def _claim_and_send(sb, *, day: date, kind: str, recipients: list[dict], subject
     ).data or []
     by_id = {p["id"]: p for p in recipients}
     sent = 0
+    teams_recipients: list[dict] = []
     for row in inserted:
         profile = by_id.get(row.get("user_id"))
         if not profile:
+            continue
+        if not notification_routing.wants(profile.get("role"), event, "email"):
+            teams_recipients.append(profile)
             continue
         try:
             graph_email.send_mail(
@@ -164,6 +187,7 @@ def _claim_and_send(sb, *, day: date, kind: str, recipients: list[dict], subject
                 importance="high",
             )
             sent += 1
+            teams_recipients.append(profile)
         except Exception:  # noqa: BLE001 - one bad recipient never stops the rest
             logger.exception(
                 "Auto send %s email failed (user=%s date=%s)", kind, profile["id"], day
@@ -179,6 +203,10 @@ def _claim_and_send(sb, *, day: date, kind: str, recipients: list[dict], subject
                     profile["id"],
                     day,
                 )
+    if teams_card and teams_recipients:
+        teams_alerts.queue_report(
+            event, teams_recipients, teams_card, subject.removeprefix("G3 BDR · ")
+        )
     return sent
 
 
@@ -186,7 +214,7 @@ def _claim_and_send(sb, *, day: date, kind: str, recipients: list[dict], subject
 
 
 def _preflight(sb, settings, today: date, send_label: str) -> None:
-    recipients = auto_send_emails.notify_recipients(sb)
+    recipients = _routed(auto_send_emails.notify_recipients(sb), "preflight")
     if not recipients:
         return
     pending = _unclaimed(sb, today, "preflight", recipients)
@@ -220,6 +248,14 @@ def _preflight(sb, settings, today: date, send_label: str) -> None:
             send_label=send_label,
             items=items,
             base_url=base_url,
+        ),
+        teams_card=teams_alerts.build_card(
+            heading=f"Auto send at {send_label} today",
+            message=f"{date_label}: what auto send will do.",
+            project_label=None,
+            cta_label="Open Bids Today",
+            cta_url=f"{base_url}/bids-today",
+            lines=auto_send_emails.preflight_teams_lines(items),
         ),
     )
 
@@ -368,7 +404,7 @@ def _digest(sb, settings, now: datetime, today: date, slots: dict) -> None:
         return
     if any(r.get("status") == "sending" for r in runs) and now < digest_at + DIGEST_HARD_DEADLINE:
         return  # let in-flight sends settle before reporting
-    recipients = auto_send_emails.notify_recipients(sb)
+    recipients = _routed(auto_send_emails.notify_recipients(sb), "digest")
     if not recipients:
         return
     pending = _unclaimed(sb, today, "digest", recipients)
@@ -423,6 +459,14 @@ def _digest(sb, settings, now: datetime, today: date, slots: dict) -> None:
             date_label=date_label,
             items=items,
             base_url=base_url,
+        ),
+        teams_card=teams_alerts.build_card(
+            heading=f"Auto send results: {date_label}",
+            message="What auto send did today.",
+            project_label=None,
+            cta_label="Open Bids Today",
+            cta_url=f"{base_url}/bids-today",
+            lines=auto_send_emails.digest_teams_lines(items),
         ),
     )
 

@@ -36,11 +36,16 @@ from app.services import (
     storage,
     workflow,
 )
-from app.services.notifications import audit, notify_role
+from app.services.notifications import audit, notify_roles
 from app.services.openai_text import extract_quote_from_pdf
 from app.services.rfp_email_auth import address_domain, is_public_mailbox_domain
 
 logger = logging.getLogger(__name__)
+
+# Vendor quote news: the Materials engineer works the quotes; the Labor
+# engineer hears them too (bell + Teams, no email by default; 2026-10-23,
+# services/notification_routing).
+QUOTE_NEWS_ROLES = (Role.ESTIMATING_ENGINEER_MATERIALS, Role.ESTIMATING_ENGINEER_LABOR)
 
 _LEASE_KEY = "inbox"  # row id prefix in graph_sync_state
 _RENEW_EVERY = 20     # messages between lease renewals during a batch
@@ -488,13 +493,14 @@ def _ingest_message(
     )
 
     rfq = send["rfqs"]
-    notify_role(
-        Role.ESTIMATING_ENGINEER_MATERIALS,
+    notify_roles(
+        QUOTE_NEWS_ROLES,
         rfq["project_id"],
         "rfq.reply_received",
         f"{_sender_name(contact, from_addr)} replied on the "
         f"{rfq['material_categories']['name']} RFQ for {rfq['projects']['name']}",
         rfq_id=rfq["id"],
+        mirror_email=True,
     )
     return status
 
@@ -910,14 +916,15 @@ def _run_extraction(
             {"quote_received_at": _now().isoformat(), "polling_active": False}
         ).eq("id", send["id"]).execute()
         extraction_status = "done"
-        notify_role(
-            Role.ESTIMATING_ENGINEER_MATERIALS,
+        notify_roles(
+            QUOTE_NEWS_ROLES,
             rfq["project_id"],
             "quote.received",
             f"Quote received from {_sender_name(contact, message_row.get('from_addr'))} "
             f"for {rfq['material_categories']['name']} on {project['name']}: "
             f"${result['total_amount']}",
             rfq_id=rfq["id"],
+            mirror_email=True,
         )
         break  # one quote per reply; remaining PDFs are still saved as files
 

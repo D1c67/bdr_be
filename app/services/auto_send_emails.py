@@ -60,6 +60,40 @@ def project_url(base_url: str, project_id: str) -> str:
     return f"{base_url.rstrip('/')}/projects/{project_id}?box=auto_send"
 
 
+# ── Teams copies (0177) ───────────────────────────────────────────────────
+
+_PREFLIGHT_WORDS = {"ready": "will auto send", "blocked": "will not auto send",
+                    "skipped": "not auto sent by rule"}
+_DIGEST_WORDS = {"sent": "sent", "partial": "partly sent", "failed": "could not send",
+                 "missed": "did not run", "sending": "still sending",
+                 "skipped": "not auto sent by rule"}
+
+
+def _short_label(project: dict) -> str:
+    number = f"#{project['number']} " if project.get("number") else ""
+    return f"{number}{project.get('name') or 'Untitled project'}"
+
+
+def preflight_teams_lines(items: list[dict]) -> list[str]:
+    """One short line per project for the Teams preview: number, name and
+    whether it will auto send. No amounts: Teams stays brief."""
+    return [
+        f"{_short_label(i['project'])} · "
+        f"{_PREFLIGHT_WORDS.get((i.get('evaluation') or {}).get('outcome'), 'check it')}"
+        for i in items
+    ]
+
+
+def digest_teams_lines(items: list[dict]) -> list[str]:
+    """One short line per project for the Teams results: number, name and
+    what happened. No amounts: Teams stays brief."""
+    return [
+        f"{_short_label(i['project'])} · "
+        f"{_DIGEST_WORDS.get(i['run'].get('status'), i['run'].get('status') or 'unknown')}"
+        for i in items
+    ]
+
+
 # ── Recipients ────────────────────────────────────────────────────────────
 
 

@@ -29,7 +29,7 @@ from app.core.deps import CurrentUser, require_project_assignment
 from app.core.ratelimit import estimator_rate_limit
 from app.core.roles import INTERNAL_ROLES, WRITER_ROLES, Role
 from app.core.supabase_client import get_supabase
-from app.services import notification_email
+from app.services import notifications
 from app.services.estimator_notes import NOTE_MAX_CHARS
 from app.services.notifications import audit, dismiss_notifications
 
@@ -376,5 +376,5 @@ def create_note(
     if notif_rows:
         # The inserted rows carry the ids the mirror emails link back to (0091).
         inserted = (sb.table("notifications").insert(notif_rows).execute()).data or notif_rows
-        notification_email.queue(inserted)
+        notifications.deliver(inserted)
     return row

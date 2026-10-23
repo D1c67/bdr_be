@@ -28,7 +28,7 @@ from app.core.config import get_settings
 from app.core.features import SubApp, home_path, is_enabled, notification_sub_app
 from app.core.roles import Role
 from app.core.supabase_client import get_supabase
-from app.services import graph_email
+from app.services import graph_email, notification_routing
 from app.services.email_branding import (
     LOGO_CONTENT_ID,
     LOGO_FILENAME,
@@ -355,17 +355,13 @@ def queue(rows: list[dict]) -> None:
     collapse a bell row and its mirror email into one entry. Rows without an
     `id` still send — they just leave the link NULL.
 
-    The same rows also go to Teams (services/teams_alerts, 0175): everything
-    mirrored to email gets a Teams copy, gated on its own flag, so turning
-    the emails off leaves Teams alerts as they are.
+    Each recipient is emailed only when their role is routed to email for
+    the row's event (services/notification_routing, 0177). Teams is not sent
+    from here: notifications.deliver hands the same rows to teams_alerts.
     """
     rows = [r for r in (rows or []) if r.get("user_id")]
     if not rows:
         return
-    # Imported here: teams_alerts reuses this module's headings and links.
-    from app.services import teams_alerts
-
-    teams_alerts.queue(rows)
     settings = get_settings()
     if not settings.notification_emails_enabled or not settings.ms_client_id:
         return
@@ -413,6 +409,8 @@ def _run(rows: list[dict]) -> None:
 def _send_one(row: dict, profile: dict | None, project: dict | None) -> None:
     if not profile or not profile.get("is_active") or not profile.get("email"):
         return  # no active recipient / no address — nothing to send
+    if not notification_routing.wants_row(profile.get("role"), row, "email"):
+        return  # this role's email is switched off for the event (0177)
     type_ = row.get("type") or ""
     heading, cta_label = _meta(type_)
     html = render_notification_email(

@@ -3,7 +3,9 @@
 Every notification we create is also mirrored to the recipient's inbox as a
 branded email with a deep-link button (services/notification_email) — the email
 send is fire-and-forget and best-effort, so it never blocks or breaks the
-creating flow.
+creating flow. Rows also go to Microsoft Teams (services/teams_alerts). Both
+channels are filtered per role and event by services/notification_routing
+(0177); the bell row is always created.
 """
 
 import logging
@@ -12,7 +14,7 @@ from typing import Any
 
 from app.core.roles import Role
 from app.core.supabase_client import get_supabase
-from app.services import notification_email
+from app.services import notification_email, teams_alerts
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,19 @@ ESTIMATOR_NOTIFICATION_TYPES = [
     "estimator_note",
     "note_mention",
 ]
+
+
+def deliver(rows: list[dict], *, email: bool = True) -> None:
+    """Hand freshly inserted notification rows to Teams and, unless the
+    caller sends its own email for the event (`email=False`), to the email
+    mirror. Pass the rows RETURNED BY the insert: they carry the `id` each
+    channel stamps its delivery onto. Never raises."""
+    try:
+        teams_alerts.queue(rows)
+    except Exception:  # noqa: BLE001 - Teams must never break the creating flow
+        logger.exception("Teams alert queue failed")
+    if email:
+        notification_email.queue(rows)
 
 
 def notify_role(
@@ -54,7 +69,8 @@ def notify_role(
     `rfq_id` ties the notification to a specific RFQ so it can be auto-dismissed
     when that category is priced (see `dismiss_notifications`). Pass
     `mirror_email=False` when the caller sends its own richer email for the
-    same event: bell row only, no generic mirror duplicating it. `metadata`
+    same event: no generic mirror email duplicating it (Teams still follows
+    the routing). `metadata`
     is optional per-type detail (0118): the gc_pricing.* types carry
     {"gc_id": ...} so the bell, the mirror email and a later dismissal can all
     address one GC.
@@ -90,8 +106,7 @@ def notify_role(
     # Queue the INSERTED rows, not `rows`: they carry the `id` each mirror email
     # writes its email_log link back onto (0091).
     inserted = (sb.table("notifications").insert(rows).execute()).data or rows
-    if mirror_email:
-        notification_email.queue(inserted)
+    deliver(inserted, email=mirror_email)
 
 
 def notify_roles(
@@ -102,6 +117,7 @@ def notify_roles(
     *,
     mirror_email: bool = False,
     metadata: dict | None = None,
+    rfq_id: str | None = None,
 ) -> None:
     """`notify_role` for several roles at once, in ONE insert.
 
@@ -136,14 +152,13 @@ def notify_roles(
             "project_id": project_id,
             "type": type_,
             "message": message,
-            "rfq_id": None,
+            "rfq_id": rfq_id,
             **({"metadata": metadata} if metadata is not None else {}),
         }
         for u in users
     ]
     inserted = (sb.table("notifications").insert(rows).execute()).data or rows
-    if mirror_email:
-        notification_email.queue(inserted)
+    deliver(inserted, email=mirror_email)
 
 
 def notify_user(
@@ -164,8 +179,7 @@ def notify_user(
         **({"metadata": metadata} if metadata is not None else {}),
     }
     inserted = (get_supabase().table("notifications").insert(row).execute()).data or [row]
-    if mirror_email:
-        notification_email.queue(inserted)
+    deliver(inserted, email=mirror_email)
 
 
 def dismiss_notifications(

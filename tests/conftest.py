@@ -101,3 +101,17 @@ for _var in list(os.environ):
 from app.core.config import get_settings  # noqa: E402
 
 get_settings.cache_clear()
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _routing_defaults(monkeypatch):
+    """Notification routing (services/notification_routing, 0177) reads its
+    overrides from Supabase. Every test runs on the code defaults instead,
+    so no send path in the suite reaches a real database; routing tests
+    patch `_overrides` themselves."""
+    from app.services import notification_routing
+
+    monkeypatch.setattr(notification_routing, "_overrides", lambda: {})

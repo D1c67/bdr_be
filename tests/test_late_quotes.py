@@ -445,7 +445,7 @@ def _ingest(monkeypatch, head):
     monkeypatch.setattr(rfq_inbox, "extract_quote_from_pdf",
                         lambda *a, **k: {"total_amount": 777, "confidence": 0.99})
     monkeypatch.setattr(rfq_inbox, "_valid_extracted_amount", lambda r: True)
-    monkeypatch.setattr(rfq_inbox, "notify_role", lambda *a, **k: None)
+    monkeypatch.setattr(rfq_inbox, "notify_roles", lambda *a, **k: None)
     send = {
         "id": "s1",
         "rfqs": {"id": "r-fix", "project_id": PID, "material_categories": {"name": "Fixtures"},

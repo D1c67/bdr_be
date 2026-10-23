@@ -33,7 +33,7 @@ from app.core.roles import ACTUAL_BID_VIEWER_ROLES, Role
 from app.core.supabase_client import get_supabase
 from app.services import project_intake, workflow
 from app.services.notification_email import intake_missing_phrase
-from app.services.notifications import audit, dismiss_notifications, notify_role
+from app.services.notifications import audit, dismiss_notifications, notify_role, notify_roles
 
 logger = logging.getLogger(__name__)
 
@@ -423,9 +423,10 @@ def undo(project_id: str, actor_id: str | None) -> dict:
         dismiss_notifications(project_id=project_id, types=["gono_go", "stage_handoff"])
         owner = workflow.internal_owner_role_for("go_no_go")
         if owner:
-            notify_role(
-                owner, project_id, "stage_handoff",
+            notify_roles(
+                {owner, Role.IT_ADMIN}, project_id, "stage_handoff",
                 f"Project back in {workflow.STAGES['go_no_go'].label} — decision undone",
+                mirror_email=True, metadata={"stage": "go_no_go"},
             )
     except Exception:  # noqa: BLE001
         logger.exception("Notification cleanup failed after gono undo on %s", project_id)

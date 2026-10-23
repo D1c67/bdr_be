@@ -43,7 +43,7 @@ from zoneinfo import ZoneInfo
 from app.core.config import get_settings
 from app.core.roles import INTERNAL_ROLES, Role
 from app.core.supabase_client import get_supabase
-from app.services import graph_email
+from app.services import graph_email, notification_routing, teams_alerts
 from app.services.datetime_format import _parse_ts
 from app.services.due_reminders import _page_all, _pg_ts
 from app.services.email_branding import (
@@ -162,6 +162,31 @@ def _due_time_str(internal_bid_at) -> str:
     if dt is None:
         return ""
     return dt.astimezone(DIGEST_TZ).strftime("%I:%M %p").lstrip("0")
+
+
+# The routing event (services/notification_routing) of this digest.
+ROUTING_EVENT = "digest.bids_due_today"
+
+
+def teams_lines(rows: list[dict]) -> list[str]:
+    """One short line per project for the Teams copy: number and name, the
+    due time, and what is still missing."""
+    lines = []
+    for row in rows:
+        project, checks = row["project"], row["checks"]
+        missing = [
+            word
+            for key, word in (("has_quotes", "quotes"), ("has_labor", "labor"), ("has_markups", "markups"))
+            if not checks.get(key)
+        ]
+        number = f"#{project['number']} " if project.get("number") else ""
+        parts = [f"{number}{project.get('name') or 'Untitled project'}"]
+        due = _due_time_str(project.get("internal_bid_at"))
+        if due:
+            parts.append(due)
+        parts.append(f"missing {', '.join(missing)}" if missing else "ready")
+        lines.append(" · ".join(parts))
+    return lines
 
 
 def render_digest_email(
@@ -320,9 +345,17 @@ def poll_once() -> None:
         .order("id")
         .range(lo, hi)
     )
+    # Settings > Notification routing (0177) narrows it per role and
+    # channel: a role with both channels off gets nothing (and no claim).
     digest_role_values = {r.value for r in INTERNAL_ROLES if r is not Role.ACCOUNTANT}
+
+    def _wants(p: dict, channel: str) -> bool:
+        return notification_routing.wants(p["role"], ROUTING_EVENT, channel)
+
     recipients = [
-        p for p in profiles if p["role"] in digest_role_values and p.get("email")
+        p for p in profiles
+        if p["role"] in digest_role_values and p.get("email")
+        and (_wants(p, "email") or _wants(p, "teams"))
     ]
     if not recipients:
         return
@@ -344,9 +377,13 @@ def poll_once() -> None:
     date_label = f"{local.strftime('%A, %B')} {local.day}"
     subject = f"G3 BDR · [HIGH IMPORTANCE] Bids due today: {date_label}"
     base_url = settings.frontend_url.rstrip("/")
+    teams_recipients: list[dict] = []
     for row in inserted:
         profile = by_id.get(row["user_id"])
         if not profile:
+            continue
+        if not _wants(profile, "email"):
+            teams_recipients.append(profile)
             continue
         try:
             graph_email.send_mail(
@@ -363,6 +400,7 @@ def poll_once() -> None:
                 ],
                 importance="high",
             )
+            teams_recipients.append(profile)
         except Exception:  # noqa: BLE001 - one bad recipient never stops the rest
             logger.exception(
                 "Due digest send failed (user=%s date=%s)", profile["id"], digest_date
@@ -377,6 +415,24 @@ def poll_once() -> None:
                     profile["id"],
                     digest_date,
                 )
+
+    # The Teams copy (0177): to everyone claimed above whose email went out
+    # or who gets no email, so a failed email retries both next tick.
+    if teams_recipients:
+        count = len(digest_rows)
+        teams_alerts.queue_report(
+            ROUTING_EVENT,
+            teams_recipients,
+            teams_alerts.build_card(
+                heading=f"Bids due today: {date_label}",
+                message=f"{count} project{'s' if count != 1 else ''} bidding today.",
+                project_label=None,
+                cta_label="Open Bids Today",
+                cta_url=f"{base_url}/bids-today",
+                lines=teams_lines(digest_rows),
+            ),
+            f"Bids due today: {date_label}",
+        )
 
 
 async def polling_loop() -> None:

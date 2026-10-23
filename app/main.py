@@ -566,6 +566,7 @@ from app.routers import (  # noqa: E402
     llm_status,
     notes,
     notification_log,
+    notification_routing,
     notifications,
     outcome,
     payroll_cpr,
@@ -631,6 +632,7 @@ _CP = [Depends(require_feature(SubApp.CERTIFIED_PAYROLL))]
 # happens to be reached from the Bidding nav today.
 app.include_router(users.router)
 app.include_router(notifications.router)
+app.include_router(notification_routing.router)  # Settings > Notification routing: email/Teams per role (0177)
 app.include_router(teams_bot.router)  # BDR Alerts bot endpoint: install events only, no auth (0175)
 app.include_router(reference.router)
 app.include_router(vendors.router)

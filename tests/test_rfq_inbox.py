@@ -92,7 +92,7 @@ def sender_env(monkeypatch):
     )
     audits, notes = [], []
     monkeypatch.setattr(rfq_inbox, "audit", lambda *a, **k: audits.append(a))
-    monkeypatch.setattr(rfq_inbox, "notify_role", lambda *a, **k: notes.append(a))
+    monkeypatch.setattr(rfq_inbox, "notify_roles", lambda *a, **k: notes.append(a))
     return db, audits, notes
 
 
@@ -338,7 +338,7 @@ def link_env(monkeypatch, db):
     monkeypatch.setattr(rfq_inbox.office_preview, "is_convertible", lambda *a: False)
     audits = []
     monkeypatch.setattr(rfq_inbox, "audit", lambda *a, **k: audits.append(a))
-    monkeypatch.setattr(rfq_inbox, "notify_role", lambda *a, **k: None)
+    monkeypatch.setattr(rfq_inbox, "notify_roles", lambda *a, **k: None)
     monkeypatch.setattr(
         rfq_inbox, "extract_quote_from_pdf",
         lambda content, filename, ctx: {"total_amount": 1234.5, "confidence": 0.9},
@@ -418,7 +418,7 @@ def refetch_env(monkeypatch, db):
     monkeypatch.setattr(rfq_inbox.storage, "upload_file", lambda *a, **k: None)
     monkeypatch.setattr(rfq_inbox.office_preview, "is_convertible", lambda *a: False)
     monkeypatch.setattr(rfq_inbox, "audit", lambda *a, **k: None)
-    monkeypatch.setattr(rfq_inbox, "notify_role", lambda *a, **k: None)
+    monkeypatch.setattr(rfq_inbox, "notify_roles", lambda *a, **k: None)
     monkeypatch.setattr(
         rfq_inbox, "extract_quote_from_pdf",
         lambda content, filename, ctx: {"total_amount": 999, "confidence": 0.9},
@@ -859,7 +859,7 @@ def check_env(monkeypatch, check_db):
         graph_inbox, "get_message", lambda mid, **k: {"body": {"content": "<p>quote coming</p>"}}
     )
     monkeypatch.setattr(rfq_inbox, "audit", lambda *a, **k: None)
-    monkeypatch.setattr(rfq_inbox, "notify_role", lambda *a, **k: None)
+    monkeypatch.setattr(rfq_inbox, "notify_roles", lambda *a, **k: None)
     delta_calls = []
     monkeypatch.setattr(
         graph_inbox, "delta_inbox",

@@ -179,6 +179,13 @@ def _env(monkeypatch, db, rec):
             {"role": role, "project_id": pid, "type": type_, "message": message, "metadata": k.get("metadata")}),
     )
     monkeypatch.setattr(
+        rc, "notify_roles",
+        lambda roles, pid, type_, message, **k: rec["bells"].extend(
+            {"role": role, "project_id": pid, "type": type_, "message": message,
+             "metadata": k.get("metadata")}
+            for role in roles),
+    )
+    monkeypatch.setattr(
         rc, "audit",
         lambda actor, action, entity, entity_id, payload=None: rec["audits"].append(
             {"actor_id": actor, "action": action, "entity": entity, "entity_id": entity_id, "payload": payload}),

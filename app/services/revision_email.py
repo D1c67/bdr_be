@@ -20,7 +20,7 @@ import threading
 from app.core.config import get_settings
 from app.core.roles import CHANGE_REVIEW_ROLES
 from app.core.supabase_client import get_supabase
-from app.services import graph_email
+from app.services import graph_email, notification_routing
 from app.services.email_branding import (
     LOGO_CONTENT_ID,
     LOGO_FILENAME,
@@ -136,7 +136,7 @@ def _run(project_id: str, round_no: int, files: list[dict]) -> None:
         ).data or {}
         recipients = (
             sb.table("profiles")
-            .select("id, full_name, email")
+            .select("id, full_name, email, role")
             .in_("role", [r.value for r in CHANGE_REVIEW_ROLES])
             .eq("is_active", True)
             .execute()
@@ -153,6 +153,10 @@ def _run(project_id: str, round_no: int, files: list[dict]) -> None:
 
     for r in recipients:
         if not r.get("email"):
+            continue
+        # Settings > Notification routing (0177): the Teams copy rides on the
+        # estimate_revised bell rows; this email follows the role's email switch.
+        if not notification_routing.wants(r.get("role"), "revision_round", "email"):
             continue
         try:
             html_body = render_revision_alert(
