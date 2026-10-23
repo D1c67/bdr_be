@@ -754,7 +754,7 @@ def test_ingest_still_stores_a_real_vendor_reply(monkeypatch):
         graph_inbox, "get_message", lambda mid, **k: {"body": {"content": "<p>on it</p>"}}
     )
     monkeypatch.setattr(rfq_inbox, "audit", lambda *a, **k: None)
-    monkeypatch.setattr(rfq_inbox, "notify_role", lambda *a, **k: None)
+    monkeypatch.setattr(rfq_inbox, "notify_roles", lambda *a, **k: None)
     rfq_inbox._ingest_message(db, _inbound("<real-reply@vendor>"), {"conv-1": NUDGE_SEND})
     [message] = db.tables["rfq_messages"]
     assert message["graph_message_id"] == "msg-1"

@@ -694,6 +694,7 @@ def test_creation_note_and_the_bells(monkeypatch):
     assert rfp_split.creation_note(db, _harvest(split_status="skipped")) is None
     sent = []
     monkeypatch.setattr(rfp_create, "notify_role", lambda role, pid, kind, text, **kw: sent.append((kind, text, kw)))
+    monkeypatch.setattr(rfp_create, "notify_roles", lambda roles, pid, kind, text, **kw: sent.append((kind, text, kw)))
     rfp_create._notify(db, {"id": P1, "number": "26.9.7300", "name": "AHU"}, [], "rfp_email",
                        "The Bid File Splitter failed on it (x); every document was added whole.")
     assert all(t.endswith(". The Bid File Splitter failed on it (x); every document was added whole.") for _k, t, _kw in sent)

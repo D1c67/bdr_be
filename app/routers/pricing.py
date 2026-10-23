@@ -10,9 +10,14 @@ from app.core.roles import INTERNAL_ROLES, VERIFY_ROLES, Role
 from app.core.supabase_client import get_supabase
 from app.models.schemas import LaborReviewIn, MarkupIn, VerifyOverrideIn
 from app.services import vendor_selection, workflow
-from app.services.notifications import audit, notify_role
+from app.services.notifications import audit, notify_role, notify_roles
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["pricing"])
+
+# "Numbers verified": the Estimating Admin sends the bid out; the Labor
+# engineer hears it too (bell + Teams, no email by default; 2026-10-23,
+# services/notification_routing).
+VERIFIED_ROLES = (Role.ESTIMATING_ADMIN, Role.ESTIMATING_ENGINEER_LABOR)
 
 
 def _internal(user: CurrentUser) -> None:
@@ -666,10 +671,12 @@ def commit_verify(
         return_stage = proj.get("reverify_return_stage") if proj else None
         if return_stage:
             workflow.return_from_reverify(project_id, return_stage, user.id)
-            notify_role(Role.ESTIMATING_ADMIN, project_id, "verified", "Pricing re-committed by Executive")
+            notify_roles(VERIFIED_ROLES, project_id, "verified", "Pricing re-committed by Executive",
+                         mirror_email=True)
         else:
             workflow.advance_category(project_id, "send_out", user.id, "Pricing committed")
-            notify_role(Role.ESTIMATING_ADMIN, project_id, "verified", "Pricing committed by Executive — ready to send out")
+            notify_roles(VERIFIED_ROLES, project_id, "verified",
+                         "Pricing committed by Executive — ready to send out", mirror_email=True)
 
     # Never-sent proposal documents generated before this commit now carry
     # stale figures; re-render them so a preview can never show numbers the

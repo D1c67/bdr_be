@@ -246,6 +246,13 @@ def _env(monkeypatch, db, rec):
              "mirror_email": k.get("mirror_email"), "metadata": k.get("metadata")}),
     )
     monkeypatch.setattr(
+        rc, "notify_roles",
+        lambda roles, pid, type_, message, **k: rec["bells"].extend(
+            {"role": role, "project_id": pid, "type": type_, "message": message,
+             "mirror_email": k.get("mirror_email"), "metadata": k.get("metadata")}
+            for role in roles),
+    )
+    monkeypatch.setattr(
         rc, "audit",
         lambda actor, action, entity, entity_id, payload=None: rec["audits"].append(
             {"actor_id": actor, "action": action, "entity": entity, "entity_id": entity_id,
@@ -484,7 +491,9 @@ def test_create_from_email_builds_the_project_and_everything_around_it(db, rec):
     # Step 8: no harvest, no files job.
     assert db.tables["llm_jobs"] == []
     # Step 9: the two bells with the missing list, and the audit row.
-    exec_bell, admin_bell = rec["bells"]
+    # The IT Admin gets the Go/No-Go notice too (0177).
+    exec_bell, it_bell, admin_bell = rec["bells"]
+    assert it_bell["role"] == Role.IT_ADMIN and it_bell["type"] == "rfp_create.created"
     assert exec_bell["role"] == Role.EXECUTIVE and exec_bell["type"] == "rfp_create.created"
     assert exec_bell["message"] == (
         "Project 26.9.7204 Warehouse HVAC was created from an RFP invitation and is waiting in Go/No-Go"
@@ -695,7 +704,7 @@ def test_best_effort_steps_never_delete_the_project(db, rec, monkeypatch):
     assert made.project_id == project["id"] and made.files_job is False
     (crec,) = _created(db)
     assert crec["files_status"] == "none" and "Document promotion could not be queued" in crec["last_error"]
-    assert _email_row(db)["status"] == "created" and len(rec["bells"]) == 2
+    assert _email_row(db)["status"] == "created" and len(rec["bells"]) == 3
     assert rec["audits"][-1]["action"] == "rfp_create.create"
 
 

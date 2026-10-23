@@ -16,12 +16,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.deps import CurrentUser, get_current_user
 from app.core.file_categories import DRAWING_CATEGORIES
-from app.core.roles import INTERNAL_ROLES, WRITER_ROLES
+from app.core.roles import INTERNAL_ROLES, WRITER_ROLES, Role
 from app.core.supabase_client import get_supabase
 from app.models.schemas import TransitionIn
 from app.routers.projects import redact_for_role
 from app.services import gono, vendor_selection, workflow
-from app.services.notifications import notify_role
+from app.services.notification_routing import IT_ADMIN_HANDOFF_STAGES
+from app.services.notifications import notify_roles
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["workflow"])
 
@@ -178,8 +179,13 @@ def advance(
     for h in dict.fromkeys(handoff_heads):  # de-dupe, preserve order
         new_owner = workflow.internal_owner_role_for(h)
         if new_owner:
-            notify_role(
-                new_owner, project_id, "stage_handoff",
+            # metadata.stage routes the handoff (notification_routing): Go/No-Go
+            # and Verify are their own events, and the IT Admin hears both
+            # (bell + Teams, no email by default; 2026-10-23).
+            notify_roles(
+                {new_owner, *({Role.IT_ADMIN} if h in IT_ADMIN_HANDOFF_STAGES else ())},
+                project_id, "stage_handoff",
                 f"Project advanced to {workflow.STAGES[h].label}",
+                mirror_email=True, metadata={"stage": h},
             )
     return redact_for_role(updated, user.role)

@@ -1,10 +1,12 @@
-"""Teams copy of every mirrored notification: the "BDR Alerts" bot (0175).
+"""Teams alerts: the "BDR Alerts" bot (0175), routed by role (0177).
 
-Whatever goes to a person's inbox through the notification email mirror
-(services/notification_email.queue) is also sent to them in Microsoft Teams as
-a 1:1 message from the BDR Alerts bot: an Adaptive Card with the same heading,
-project and message, and a button to the same deep link the email uses. Setup
-and the Azure side live in docs/TEAMS_ALERTS.md.
+A notification row (services/notifications.deliver) and the daily reports
+(due_digest, auto_send_scheduler) reach a person in Microsoft Teams as a
+1:1 message from the BDR Alerts bot when their role is routed to Teams for
+that event (services/notification_routing): a short Adaptive Card with the
+project number and name, the message, and a button to the same deep link
+the email uses. Teams is routed on its own, so a bell-only notification can
+still go to Teams. Setup and the Azure side live in docs/TEAMS_ALERTS.md.
 
 How a message reaches a person (all app-only, no user sign-in):
 1. Their Entra object id, from Graph by their profile email.
@@ -47,7 +49,7 @@ import msal
 from app.core.config import get_settings
 from app.core.roles import Role
 from app.core.supabase_client import get_supabase
-from app.services import graph_email, notification_email
+from app.services import graph_email, notification_email, notification_routing
 
 logger = logging.getLogger(__name__)
 
@@ -89,13 +91,14 @@ def is_configured() -> bool:
     )
 
 
-# ── Delivery from the notification mirror ────────────────────────────────────
+# ── Delivery of notification rows ───────────────────────────────────────────
 
 
 def queue(rows: list[dict]) -> None:
-    """Schedule Teams alerts for freshly created notification rows (the same
-    rows, with their `id`, handed to the email mirror). No-op, never raises,
-    when the feature is off or not configured."""
+    """Schedule Teams alerts for freshly created notification rows (the
+    inserted rows, with their `id`). Each row goes only to people whose role
+    is routed to Teams for its event. No-op, never raises, when the feature
+    is off or not configured."""
     rows = [r for r in (rows or []) if r.get("user_id")]
     if not rows or not is_configured():
         return
@@ -153,6 +156,8 @@ def _send_row(
     state = state_by_user.get(user_id) or {}
     if state.get("enabled") is False:
         return
+    if not notification_routing.wants_row(profile.get("role"), row, "teams"):
+        return
     type_ = row.get("type") or ""
     heading, cta_label = notification_email._meta(type_)
     card = build_card(
@@ -205,33 +210,26 @@ def _plain(text: str, **run) -> dict:
 
 
 def build_card(
-    *, heading: str, message: str, project_label: str | None, cta_label: str, cta_url: str
+    *,
+    heading: str,
+    message: str,
+    project_label: str | None,
+    cta_label: str,
+    cta_url: str,
+    lines: list[str] | None = None,
 ) -> dict:
-    body: list[dict] = [
-        {
-            "type": "TextBlock",
-            "text": "G3 BDR",
-            "size": "Small",
-            "weight": "Bolder",
-            "color": "Accent",
-            "spacing": "None",
-        },
-        {
-            "type": "TextBlock",
-            "text": heading,
-            "size": "Medium",
-            "weight": "Bolder",
-            "wrap": True,
-            "spacing": "Small",
-        },
-    ]
-    if project_label:
-        body.append({**_plain(project_label, isSubtle=True), "spacing": "None"})
+    """A short card: the project (number and name) in bold, then the
+    message. Without a project the heading takes the bold line. `lines`
+    are extra plain-text rows (a daily report's projects)."""
+    title = project_label or heading
+    body: list[dict] = [{**_plain(title, weight="Bolder"), "spacing": "None"}]
     text = message.strip()
     if len(text) > _MESSAGE_MAX_CHARS:
         text = text[: _MESSAGE_MAX_CHARS - 1].rstrip() + "…"
     if text:
-        body.append({**_plain(text), "spacing": "Medium"})
+        body.append({**_plain(text), "spacing": "Small"})
+    for line in lines or []:
+        body.append({**_plain(line), "spacing": "None"})
     return {
         "type": "AdaptiveCard",
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -239,6 +237,47 @@ def build_card(
         "body": body,
         "actions": [{"type": "Action.OpenUrl", "title": cta_label, "url": cta_url}],
     }
+
+
+# ── Delivery of a daily report ──────────────────────────────────────────────
+
+
+def queue_report(event_key: str, recipients: list[dict], card: dict, summary: str) -> None:
+    """Send one daily report card (built once) to each recipient whose role
+    is routed to Teams for `event_key`. Recipients are profile dicts with
+    id, email and role. Fire-and-forget like `queue`."""
+    wanted = [
+        p for p in recipients or []
+        if _eligible({**p, "is_active": True})
+        and notification_routing.wants(p.get("role"), event_key, "teams")
+    ]
+    if not wanted or not is_configured():
+        return
+    threading.Thread(target=_run_report, args=(wanted, card, summary), daemon=True).start()
+
+
+def _run_report(recipients: list[dict], card: dict, summary: str) -> None:
+    try:
+        sb = get_supabase()
+        if graph_email._active_test_session(sb):
+            logger.info("Teams report held: an RFP test session is active")
+            return
+        ids = sorted({p["id"] for p in recipients})
+        states = (sb.table(TABLE).select("*").in_("user_id", ids).execute()).data or []
+        state_by_user = {s["user_id"]: s for s in states}
+    except Exception:  # noqa: BLE001 - background work must never crash the worker
+        logger.exception("Teams report setup failed")
+        return
+    for p in recipients:
+        state = state_by_user.get(p["id"]) or {}
+        if state.get("enabled") is False:
+            continue
+        try:
+            _deliver(p["id"], p["email"], card, summary, state)
+        except TeamsAlertError as exc:
+            logger.warning("Teams report not delivered to user %s: %s", p["id"], exc)
+        except Exception:  # noqa: BLE001
+            logger.exception("Teams report failed (user=%s)", p["id"])
 
 
 # ── Delivery ─────────────────────────────────────────────────────────────────
@@ -510,8 +549,8 @@ def send_test(user_id: str, email: str, full_name: str | None) -> None:
     card = build_card(
         heading="Teams alerts are working",
         message=(
-            f"Hi {name}, this is a test from BDR Alerts. Notifications that reach "
-            "your inbox will show up here too."
+            f"Hi {name}, this is a test from BDR Alerts. The notifications your "
+            "role is set up to get in Teams will show up here."
         ),
         project_label=None,
         cta_label="Open Settings",

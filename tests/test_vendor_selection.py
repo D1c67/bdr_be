@@ -540,7 +540,7 @@ def advance_env(monkeypatch, db):
     monkeypatch.setattr(wf_router, "get_supabase", lambda: db)
     monkeypatch.setattr(workflow, "get_supabase", lambda: db)
     monkeypatch.setattr(workflow.notifications, "dismiss_notifications", lambda **k: None)
-    monkeypatch.setattr(wf_router, "notify_role", lambda *a, **k: None)
+    monkeypatch.setattr(wf_router, "notify_roles", lambda *a, **k: None)
     return db
 
 

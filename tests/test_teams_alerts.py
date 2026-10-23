@@ -1,5 +1,5 @@
-"""Teams alerts (services/teams_alerts, 0175): the Teams copy of every
-notification mirrored to email. Graph, the Bot Connector and Supabase are
+"""Teams alerts (services/teams_alerts, 0175): the Teams copy of the
+notifications each role is routed to (0177). Graph, the Bot Connector and Supabase are
 faked; the thread hand-off is replaced with a synchronous shim."""
 
 from types import SimpleNamespace
@@ -88,7 +88,7 @@ def wired(monkeypatch):
     store = {
         "profiles": [
             {"id": "u1", "full_name": "Pat Lee", "email": "pat@g3.com",
-             "role": "estimating_admin", "is_active": True},
+             "role": "estimating_engineer_labor", "is_active": True},
             {"id": "est", "full_name": "Est", "email": "est@x.com",
              "role": "estimator", "is_active": True},
             {"id": "off", "full_name": "Off", "email": "off@g3.com",
@@ -252,12 +252,65 @@ def test_card_truncates_long_messages():
     assert len(card["body"][-1]["inlines"][0]["text"]) == ta._MESSAGE_MAX_CHARS
 
 
-def test_email_mirror_hands_rows_to_teams(monkeypatch):
+def test_deliver_hands_rows_to_teams_even_without_email(monkeypatch):
+    from app.services import notifications
+
+    teams, emails = [], []
+    monkeypatch.setattr(notifications.teams_alerts, "queue", lambda rows: teams.append(rows))
+    monkeypatch.setattr(notifications.notification_email, "queue", lambda rows: emails.append(rows))
+    rows = [{"id": "n1", "user_id": "u1", "type": "auto_send.sent", "message": "x"}]
+    notifications.deliver(rows, email=False)
+    assert teams == [rows] and emails == []
+    notifications.deliver(rows)
+    assert len(teams) == 2 and emails == [rows]
+
+
+def test_email_mirror_no_longer_sends_teams(monkeypatch):
     seen = []
     monkeypatch.setattr(ta, "queue", lambda rows: seen.append(rows))
     monkeypatch.setattr(ne, "get_settings", lambda: _settings())
-    ne.queue([{"user_id": "u1", "type": "assigned", "message": "x"}, {"user_id": None}])
-    assert seen == [[{"user_id": "u1", "type": "assigned", "message": "x"}]]
+    ne.queue([{"user_id": "u1", "type": "assigned", "message": "x"}])
+    assert seen == []
+
+
+def test_role_not_routed_to_teams_gets_nothing(wired):
+    # The Labor engineer is not routed to Teams for submitted bids.
+    ta.queue([{"user_id": "u1", "project_id": "p1", "type": "submitted", "message": "m"}])
+    assert wired["posted"] == []
+
+
+def test_card_is_brief(wired):
+    ta.queue([
+        {"id": "n1", "user_id": "u1", "project_id": "p1", "type": "quote.received",
+         "message": "Quote in from Acme"},
+    ])
+    card = wired["posted"][0][1]
+    texts = [b["inlines"][0]["text"] for b in card["body"]]
+    assert texts == ["#42 · Tower", "Quote in from Acme"]
+    assert card["body"][0]["inlines"][0]["weight"] == "Bolder"
+
+
+def test_report_goes_to_routed_roles_only(wired):
+    card = ta.build_card(
+        heading="Bids due today", message="2 projects", project_label=None,
+        cta_label="Open Bids Today", cta_url=f"{FRONTEND}/bids-today", lines=["#1 A · ready"],
+    )
+    ta.queue_report(
+        "digest.auto_send",
+        [
+            {"id": "u1", "email": "pat@g3.com", "role": "estimating_engineer_labor"},
+            {"id": "a1", "email": "acc@g3.com", "role": "accountant"},
+            {"id": "x1", "email": "x@g3.com", "role": "executive"},
+        ],
+        card,
+        "Auto send results",
+    )
+    # Accountant is routed to Teams for the auto send results; the Labor
+    # engineer is outside its audience; the Executive is routed off.
+    assert [p[0] for p in wired["posted"]] == ["chat-aad-acc@g3.com-1"]
+    assert [b["inlines"][0]["text"] for b in wired["posted"][0][1]["body"]] == [
+        "Bids due today", "2 projects", "#1 A · ready",
+    ]
 
 
 def test_graph_permission_error_reads_plainly(monkeypatch):

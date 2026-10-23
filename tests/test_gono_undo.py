@@ -73,6 +73,7 @@ def _install(monkeypatch, db):
     monkeypatch.setattr(gono, "audit", lambda *a, **k: audits.append(a))
     monkeypatch.setattr(gono, "dismiss_notifications", lambda **kw: None)
     monkeypatch.setattr(gono, "notify_role", lambda *a, **k: None)
+    monkeypatch.setattr(gono, "notify_roles", lambda *a, **k: None)
     monkeypatch.setattr(workflow.notifications, "dismiss_notifications", lambda **kw: None)
     return audits
 
@@ -129,14 +130,18 @@ def test_undo_notifies_the_executive_that_the_gate_is_open_again(monkeypatch):
         gono, "dismiss_notifications", lambda **kw: order.append(("dismiss", kw["types"]))
     )
     monkeypatch.setattr(
-        gono, "notify_role", lambda role, pid, type_, msg: order.append(("notify", role, pid, type_))
+        gono, "notify_roles",
+        lambda roles, pid, type_, msg, **k: order.append(
+            ("notify", set(roles), pid, type_, k.get("metadata"))
+        ),
     )
 
     gono.undo("p1", "u2")
 
+    # The IT Admin hears the Go/No-Go handoff too (0177); metadata.stage routes it.
     assert order == [
         ("dismiss", ["gono_go", "stage_handoff"]),
-        ("notify", Role.EXECUTIVE, "p1", "stage_handoff"),
+        ("notify", {Role.EXECUTIVE, Role.IT_ADMIN}, "p1", "stage_handoff", {"stage": "go_no_go"}),
     ]
 
 

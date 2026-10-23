@@ -567,6 +567,7 @@ def _patch_commit(monkeypatch, db):
     monkeypatch.setattr(pricing, "audit", lambda *a, **k: None)
     monkeypatch.setattr(pricing, "_deltas", lambda body, pid: {})
     monkeypatch.setattr(pricing, "notify_role", lambda *a, **k: calls.append(("notify", *a)))
+    monkeypatch.setattr(pricing, "notify_roles", lambda *a, **k: calls.append(("notify", *a)))
     monkeypatch.setattr(
         pricing.workflow, "return_from_reverify",
         lambda pid, rs, uid: calls.append(("return", pid, rs)),
