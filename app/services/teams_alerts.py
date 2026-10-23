@@ -284,22 +284,38 @@ def _resolve(user_id: str, email: str, state: dict) -> dict:
     return {**state, **fields}
 
 
-def _graph(method: str, path: str, *, step: str, ok: tuple[int, ...] = (), **kw) -> httpx.Response | None:
+def _graph(
+    method: str,
+    path: str,
+    *,
+    step: str,
+    ok: tuple[int, ...] = (),
+    forbidden: str = "the app registration is missing a Graph permission",
+    **kw,
+) -> httpx.Response | None:
     """graph_email.graph_request with each failure turned into a readable
-    TeamsAlertError. A status in `ok` returns None instead of raising."""
+    TeamsAlertError carrying Microsoft's own message. A status in `ok`
+    returns None instead of raising; `forbidden` is the hint for a 401/403."""
     try:
         return graph_email.graph_request(method, path, **kw)
     except httpx.HTTPStatusError as exc:
         code = exc.response.status_code
         if code in ok:
             return None
-        if code in (401, 403):
-            raise TeamsAlertError(
-                f"{step}: the app registration is missing a Graph permission (HTTP {code})"
-            ) from None
-        raise TeamsAlertError(f"{step}: Microsoft Graph returned HTTP {code}") from None
+        detail = _graph_message(exc.response)
+        hint = forbidden if code in (401, 403) else "Microsoft Graph refused the call"
+        raise TeamsAlertError(
+            f"{step}: {hint} (HTTP {code}{': ' + detail if detail else ''})"
+        ) from None
     except (httpx.HTTPError, RuntimeError) as exc:
         raise TeamsAlertError(f"{step}: could not reach Microsoft Graph ({exc.__class__.__name__})") from None
+
+
+def _graph_message(resp: httpx.Response) -> str:
+    try:
+        return str((resp.json().get("error") or {}).get("message") or "")[:200]
+    except ValueError:
+        return ""
 
 
 def _lookup_user(email: str) -> str:
@@ -348,6 +364,12 @@ def _install(aad_id: str, catalog_id: str) -> None:
             "POST", f"/users/{aad_id}/teamwork/installedApps", step="Install BDR Alerts",
             json={"teamsApp@odata.bind": f"{_GRAPH_BASE}/appCatalogs/teamsApps/{catalog_id}"},
             ok=(409,),  # already installed
+            # The "Self" install permission covers only a Teams app whose
+            # manifest names this registration in webApplicationInfo.
+            forbidden=(
+                "Teams will not let BDR install this app package (upload the package "
+                "from scripts/build_teams_alerts_app.py, which names the app registration)"
+            ),
         )
     except TeamsAlertError:
         _catalog_app_id = None  # the app may have been re-uploaded under a new id
