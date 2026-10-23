@@ -196,6 +196,28 @@ class NotificationPrefsOut(BaseModel):
     is_customized: bool
 
 
+class TeamsAlertsOut(BaseModel):
+    """The Settings card for Teams alerts (0175, services/teams_alerts).
+
+    `available` = this server sends Teams alerts at all (flag + credentials);
+    `enabled` = the caller's own switch (no stored row = on); `connected` =
+    the BDR Alerts chat has been opened for them at least once.
+    """
+
+    available: bool
+    enabled: bool
+    connected: bool
+    last_sent_at: datetime | None = None
+    last_error: str | None = None
+    last_error_at: datetime | None = None
+
+
+class TeamsAlertsIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+
+
 # ── General contractors ─────────────────────────────────────────────────--
 
 

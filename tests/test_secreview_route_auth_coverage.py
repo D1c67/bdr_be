@@ -34,6 +34,9 @@ PUBLIC_ROUTES = {
     # The browser's return from Autodesk OAuth: the signed state is the proof
     # (rfp_bc.py module docstring), and the feature gate still runs first.
     ("GET", "/rfp-portal/buildingconnected/callback"),
+    # The BDR Alerts bot's messaging endpoint (0175): Teams posts install
+    # events there; it reads nothing and answers 200 (teams_bot.py).
+    ("POST", "/teams/messages"),
 }
 
 # Dependencies that reject a caller by role or dev flag before the handler runs.

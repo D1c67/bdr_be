@@ -10,6 +10,8 @@ so no test spawns a sender thread or touches the network.
 import os
 
 os.environ["NOTIFICATION_EMAILS_ENABLED"] = "false"
+# Same for the Teams copy of each notification (services/teams_alerts).
+os.environ["TEAMS_ALERTS_ENABLED"] = "false"
 # Email ingestion defaults off, but pin it so a local .env that enables it can
 # never make the test session poll a real mailbox.
 os.environ["EMAIL_INGEST_ENABLED"] = "false"

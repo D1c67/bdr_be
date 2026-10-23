@@ -354,10 +354,18 @@ def queue(rows: list[dict]) -> None:
     notification (0091), which is what lets the per-project notification log
     collapse a bell row and its mirror email into one entry. Rows without an
     `id` still send — they just leave the link NULL.
+
+    The same rows also go to Teams (services/teams_alerts, 0175): everything
+    mirrored to email gets a Teams copy, gated on its own flag, so turning
+    the emails off leaves Teams alerts as they are.
     """
     rows = [r for r in (rows or []) if r.get("user_id")]
     if not rows:
         return
+    # Imported here: teams_alerts reuses this module's headings and links.
+    from app.services import teams_alerts
+
+    teams_alerts.queue(rows)
     settings = get_settings()
     if not settings.notification_emails_enabled or not settings.ms_client_id:
         return

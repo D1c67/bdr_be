@@ -603,6 +603,22 @@ class Settings(BaseSettings):
     # to actually send. Tests force this off (see tests/conftest.py).
     notification_emails_enabled: bool = True
 
+    # Teams alerts (docs/TEAMS_ALERTS.md): every notification mirrored to
+    # email also goes to the recipient in Teams from the "BDR Alerts" bot.
+    # Off until the Azure Bot and the Teams app are set up. The bot signs in
+    # with its own app registration when these are set, else with ms_client_id
+    # / ms_client_secret (an Azure Bot can reuse that registration). Tests
+    # force the flag off (see tests/conftest.py).
+    teams_alerts_enabled: bool = False
+    teams_bot_app_id: str = ""
+    teams_bot_app_secret: str = ""
+    # The Teams app manifest id (scripts/build_teams_alerts_app.py writes it
+    # into manifest.json). The sender finds the uploaded app in the org
+    # catalog by this id to install it for each user.
+    teams_app_manifest_id: str = "6c1f3e2a-9b7d-4f0e-8a51-2d4b7c9e1f30"
+    # Bot Connector base for proactive messages (the global Teams endpoint).
+    teams_bot_service_url: str = "https://smba.trafficmanager.net/teams/"
+
     # In-app file preview (office → PDF derivative)
     preview_engine: str = "gotenberg"        # gotenberg | graph | off
     gotenberg_url: str = "http://localhost:3500"

@@ -29,7 +29,7 @@ from app.core.deps import CurrentUser, get_current_user, require_internal, requi
 from app.core.ratelimit import outbound_email_rate_limit
 from app.core.roles import INTERNAL_ROLES, Role
 from app.core.supabase_client import get_supabase
-from app.services import graph_email, invite_email
+from app.services import graph_email, invite_email, teams_alerts
 from app.services.email_branding import (
     LOGO_CONTENT_ID,
     LOGO_FILENAME,
@@ -43,6 +43,8 @@ from app.models.schemas import (
     ProfileOut,
     RoleSwitchIn,
     TeammateOut,
+    TeamsAlertsIn,
+    TeamsAlertsOut,
     UpdateMeIn,
 )
 from app.services.due_reminder_prefs import (
@@ -302,6 +304,50 @@ def reset_notification_prefs(user: CurrentUser = Depends(require_internal)):
     ).execute()
     audit(user.id, "user.notification_prefs.reset", "profile", user.id, {})
     return NotificationPrefsOut(prefs=default_prefs(user.role), is_customized=False)
+
+
+@router.get("/me/teams-alerts", response_model=TeamsAlertsOut)
+def get_teams_alerts(user: CurrentUser = Depends(require_internal)):
+    """The caller's Teams alerts switch and last delivery (0175). Internal
+    users only: the external estimator never gets a Teams copy."""
+    return teams_alerts.status(user.id)
+
+
+@router.put("/me/teams-alerts", response_model=TeamsAlertsOut)
+def update_teams_alerts(body: TeamsAlertsIn, user: CurrentUser = Depends(require_internal)):
+    """Turn the caller's Teams alerts on or off. Emails and the bell are
+    unaffected either way."""
+    teams_alerts.set_enabled(user.id, body.enabled)
+    audit(user.id, "user.teams_alerts.update", "profile", user.id, {"enabled": body.enabled})
+    return teams_alerts.status(user.id)
+
+
+@router.post(
+    "/me/teams-alerts/test",
+    response_model=TeamsAlertsOut,
+    dependencies=[Depends(outbound_email_rate_limit)],
+)
+def send_teams_test_alert(user: CurrentUser = Depends(require_internal)):
+    """Send the caller a test alert in Teams now. The first one also installs
+    BDR Alerts for them, so it can take a few seconds."""
+    if not teams_alerts.is_configured():
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Teams alerts are not set up on this server yet."
+        )
+    if not teams_alerts.status(user.id)["enabled"]:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Turn Teams alerts on first.")
+    profile = (
+        get_supabase().table("profiles").select("email, full_name").eq("id", user.id)
+        .limit(1).execute()
+    ).data or []
+    email = (profile[0].get("email") if profile else None) or user.email
+    if not email:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Your account has no email address.")
+    try:
+        teams_alerts.send_test(user.id, email, profile[0].get("full_name") if profile else None)
+    except teams_alerts.TeamsAlertError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from None
+    return teams_alerts.status(user.id)
 
 
 @router.get("", response_model=list[ProfileOut])
