@@ -61,7 +61,9 @@ def outline_icon() -> bytes:
     return buf.getvalue()
 
 
-def manifest(bot_id: str, manifest_id: str, version: str, frontend_url: str) -> dict:
+def manifest(
+    bot_id: str, graph_app_id: str, manifest_id: str, version: str, frontend_url: str
+) -> dict:
     site = frontend_url.rstrip("/")
     host = urlsplit(site).hostname or ""
     return {
@@ -94,6 +96,11 @@ def manifest(bot_id: str, manifest_id: str, version: str, frontend_url: str) -> 
                 "supportsFiles": False,
             }
         ],
+        # Ties the Teams app to the Graph app registration: Graph's "Self"
+        # install permission (TeamsAppInstallation.ReadWriteSelfForUser.All)
+        # only covers a Teams app that names the caller here, so without it
+        # every proactive install is refused with "Caller is not authorized".
+        "webApplicationInfo": {"id": graph_app_id},
         "validDomains": [host] if host else [],
     }
 
@@ -110,8 +117,8 @@ def main() -> None:
 
     s = get_settings()
     bot_id = s.teams_bot_app_id or s.ms_client_id
-    if not bot_id:
-        sys.exit("Set TEAMS_BOT_APP_ID (or MS_CLIENT_ID) first: it is the bot id.")
+    if not bot_id or not s.ms_client_id:
+        sys.exit("Set MS_CLIENT_ID (and TEAMS_BOT_APP_ID if the bot has its own) first.")
     frontend_url = args.frontend_url or s.frontend_url
     if not frontend_url.startswith("https://"):
         sys.exit(f"The manifest needs an https site; pass --frontend-url (got {frontend_url}).")
@@ -120,7 +127,10 @@ def main() -> None:
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr(
             "manifest.json",
-            json.dumps(manifest(bot_id, s.teams_app_manifest_id, args.version, frontend_url), indent=2),
+            json.dumps(
+                manifest(bot_id, s.ms_client_id, s.teams_app_manifest_id, args.version, frontend_url),
+                indent=2,
+            ),
         )
         z.writestr("color.png", color_icon())
         z.writestr("outline.png", outline_icon())

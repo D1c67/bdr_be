@@ -58,16 +58,20 @@ stop alerts, people use the switch in BDR, not Teams.
      `https://bdr-api-production.up.railway.app/teams/messages`.
    - Channels > **Microsoft Teams** > accept the terms > Apply.
    (A separate app registration for the bot also works: set
-   `TEAMS_BOT_APP_ID` / `TEAMS_BOT_APP_SECRET`, and grant
-   `TeamsAppInstallation.ReadWriteForUser.All` instead of the "Self" one,
-   because Graph then installs an app that is not its own.)
+   `TEAMS_BOT_APP_ID` / `TEAMS_BOT_APP_SECRET`. The package still names
+   `MS_CLIENT_ID` in `webApplicationInfo`, so Graph's "Self" install
+   permission keeps covering it.)
 3. **Teams app package.** From `bdr_be/`:
    ```
    uv run python scripts/build_teams_alerts_app.py \
      --frontend-url https://<the production BDR site> \
      --out ../bdr-alerts-teams-app.zip
    ```
-   Then Teams admin center > Teams apps > Manage apps > **Upload new app**
+   The manifest's `webApplicationInfo.id` must be `MS_CLIENT_ID`: Graph's
+   "Self" install permission only covers a Teams app that names the calling
+   registration there (without it every install is refused with "Caller is
+   not authorized"). Then Teams admin center > Teams apps > Manage apps >
+   **Upload new app**
    and pick the zip. Make sure the org's app permission policy allows it
    (Manage apps > the app > Allowed). Re-uploading a changed package needs
    `--version` bumped.
@@ -87,6 +91,9 @@ stop alerts, people use the switch in BDR, not Teams.
 ## Errors on the Settings status line
 
 - *missing a Graph permission*: step 1 (or admin consent) is not done.
+- *Teams will not let BDR install this app package*: the uploaded package
+  predates `webApplicationInfo` (or names another registration); rebuild
+  with a bumped `--version` and upload it over the existing app.
 - *not in the Teams app catalog yet*: step 3 upload is not done, or the
   package was built with a different `TEAMS_APP_MANIFEST_ID`.
 - *bot could not sign in* / *Teams rejected the bot's sign-in*: the Azure
