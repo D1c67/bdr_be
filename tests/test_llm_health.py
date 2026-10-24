@@ -94,13 +94,19 @@ def _by_key(snapshot):
 
 def test_server_up_and_serving_the_configured_model_is_green(monkeypatch):
     _stub_client(monkeypatch, serves=["qwen-3.5-4b"])
-    snap = llm_health.check(_sh())
+    s = _sh()
+    snap = llm_health.check(s)
 
     assert snap.status == "ok"
     assert snap.mode == "self_hosted"
     assert {f.state for f in snap.features} == {"ok"}
-    # AI Estimating is off by its own flag here, so it is left out.
-    assert len(snap.features) == sum(1 for spec in llm._FEATURES.values() if not spec.openai_only)
+    # AI Estimating is off by its own flag here, so it is left out, and so is
+    # any feature whose own switch is off (EMAIL_CLASSIFY_ENABLED is pinned
+    # off for the suite).
+    assert len(snap.features) == sum(
+        1 for key, spec in llm._FEATURES.items()
+        if not spec.openai_only and llm.unavailable_reason(key, s) is None
+    )
     (provider,) = snap.providers
     assert provider.state == "ok"
     assert provider.model_count == 1

@@ -155,8 +155,13 @@ function New-ServicePassword {
 
 function Set-FolderAcl([string]$Path, [string]$AgentRights) {
     # Owner-proof ACL: Administrators and SYSTEM full control, bdr-agent as given.
+    # Reset the tree to inherited ACEs first, then protect only the folder itself; Windows pushes the
+    # new ACEs down. Stripping inheritance per file (/T with /inheritance:r) left files the Python MSI
+    # created (not owned by Administrators) with an empty DACL nobody could fix.
     $agent = "$env:COMPUTERNAME\$ServiceUser"
-    & icacls.exe $Path /inheritance:r /grant:r "*${SidAdministrators}:(OI)(CI)F" "*${SidSystem}:(OI)(CI)F" "${agent}:(OI)(CI)$AgentRights" /T /C /Q | Out-Null
+    & icacls.exe $Path /reset /T /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) { Stop-Install "Could not reset permissions under $Path (icacls exit $LASTEXITCODE)." }
+    & icacls.exe $Path /inheritance:r /grant:r "*${SidAdministrators}:(OI)(CI)F" "*${SidSystem}:(OI)(CI)F" "${agent}:(OI)(CI)$AgentRights" /C /Q | Out-Null
     if ($LASTEXITCODE -ne 0) { Stop-Install "Could not set permissions on $Path (icacls exit $LASTEXITCODE)." }
 }
 
@@ -325,7 +330,7 @@ if ($UseExistingPython) {
     }
     $script:Python = $found
 } elseif (Test-Path -LiteralPath $script:Python) {
-    $ver = & $script:Python -I -c 'import sys; print("%d.%d" % sys.version_info[:2])'
+    $ver = & $script:Python -I -c 'import sys; print(*sys.version_info[:2], sep=chr(46))'
     if ($ver -ne '3.12') { Stop-Install "$script:Python is Python $ver, expected 3.12. Run $InstallRoot\service\uninstall.ps1 first (copy it to another folder, then run it)." }
     Write-Host "Using the existing runtime at $PythonDir"
 } else {
@@ -363,7 +368,7 @@ if ($user) {
     Write-Host 'Existing user: password reset.'
 } else {
     New-LocalUser -Name $ServiceUser -Password $SecurePassword -PasswordNeverExpires -UserMayNotChangePassword `
-        -AccountNeverExpires -FullName 'BDR Agent' -Description 'Runs the BDR Agent service. Do not sign in with it.' | Out-Null
+        -AccountNeverExpires -FullName 'BDR Agent' -Description 'Runs the BDR Agent service. Do not sign in.' | Out-Null
     Write-Host 'User created.'
 }
 $usersGroup = Get-LocalGroup -SID $SidUsers

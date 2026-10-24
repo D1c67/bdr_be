@@ -286,6 +286,11 @@ def activate_pm_for_win(
         project_id,
         {"origin": "bid", "materials_seeded": seeded},
     )
+    # Emails already filed to the bid are now PM mail: queue their AI
+    # classification (best-effort, never raises; docs/EMAIL_CLASSIFICATION.md).
+    from app.services import email_classification
+
+    email_classification.enqueue_for_project(project_id, created_by=actor_id)
     # The activation ITSELF runs whether or not PM_ENABLED is on: pm_details, the
     # stage flip and the BOQ-seeded materials are just rows, and recording them
     # as the win happens is what lets the module be switched on later with its

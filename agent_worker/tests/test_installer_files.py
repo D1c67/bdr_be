@@ -158,3 +158,29 @@ def test_installer_places_its_own_uninstaller_on_the_pc():
     readme = (INSTALL.parent / "README_WINDOWS.md").read_text(encoding="utf-8")
     assert "C:\\path\\to\\uninstall.ps1" not in readme
     assert "C:\\ProgramData\\BDRAgent\\service\\uninstall.ps1" in readme
+
+
+def test_local_user_description_fits_windows_limit():
+    # New-LocalUser rejects a -Description over 48 characters (found on the first real PC install).
+    text = (INSTALL / "install.ps1").read_text(encoding="utf-8")
+    descriptions = re.findall(r"-Description '([^']*)'", text)
+    assert descriptions
+    for d in descriptions:
+        assert len(d) <= 48, d
+
+
+def test_python_dash_c_has_no_double_quotes():
+    # Windows PowerShell 5.1 strips embedded double quotes from native command arguments,
+    # so `python -c '...print("x")...'` arrives as print(x) (found on the first real PC install).
+    for f in (INSTALL / "install.ps1", INSTALL / "uninstall.ps1"):
+        for code in re.findall(r"-c '([^']*)'", f.read_text(encoding="utf-8")):
+            assert '"' not in code, (f.name, code)
+
+
+def test_icacls_never_strips_inheritance_recursively():
+    # /inheritance:r with /T empties the DACL of files not owned by Administrators (the Python MSI's)
+    # before the grant lands, locking out everyone (found on the first real PC install).
+    for f in (INSTALL / "install.ps1", INSTALL / "uninstall.ps1"):
+        for line in f.read_text(encoding="utf-8").splitlines():
+            if "icacls" in line and "/inheritance:r" in line:
+                assert "/T" not in line.split(), (f.name, line)

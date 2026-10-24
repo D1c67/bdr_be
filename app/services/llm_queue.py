@@ -107,6 +107,14 @@ JOB_PLANS_MODIFY = "plans_reader_modify"
 PLANS_BATCH_JOB_TYPES = (JOB_PLANS_AGENT, JOB_PLANS_MAIN)
 PLANS_INTERACTIVE_JOB_TYPES = (JOB_PLANS_CHAT, JOB_PLANS_MODIFY)
 PLANS_JOB_TYPES = PLANS_BATCH_JOB_TYPES + PLANS_INTERACTIVE_JOB_TYPES
+# PM email classification (docs/EMAIL_CLASSIFICATION.md): one job per email
+# (target = ingested email id), self-hosted box only, claimed in its own pass
+# with its own small capacity (EMAIL_CLASSIFY_CONCURRENCY) so a backlog of
+# mail never holds a bidding pipeline slot. Accepted by the CHECK since 0154
+# and, like the assistant type, kept out of ALL_JOB_TYPES (a test pins that
+# tuple to the 0152 + 0165 lists).
+JOB_EMAIL_CLASSIFY = "email_classify"
+EMAIL_CLASSIFY_JOB_TYPES = (JOB_EMAIL_CLASSIFY,)
 # Long-form aliases (the services written in parallel may use either name).
 JOB_PLANS_READER_AGENT = JOB_PLANS_AGENT
 JOB_PLANS_READER_MAIN = JOB_PLANS_MAIN
@@ -154,6 +162,7 @@ _FEATURE_BY_TYPE = {
     JOB_PLANS_MAIN: "plans_main",
     JOB_PLANS_CHAT: "plans_chat",
     JOB_PLANS_MODIFY: "plans_modify",
+    JOB_EMAIL_CLASSIFY: "email_classify",
 }
 
 # The job whose spec.run is executing on this thread (None outside _execute,
@@ -405,6 +414,19 @@ def _spec(job_type: str) -> _JobSpec:
             _run_plans_modify,
             _mark_plans_group,
             _plans_group_status,
+        )
+    if job_type == JOB_EMAIL_CLASSIFY:
+        from app.services import email_classification as m
+
+        return _JobSpec(
+            "email_classify",
+            # One job per EMAIL; the service owns the running/done marks and
+            # the classification row (target = email id).
+            lambda p: m.execute(p["email_id"], force=bool(p.get("force"))),
+            lambda target, fields: m.mark_from_queue(
+                target, fields.get("status"), fields.get("error")
+            ),
+            lambda target: m.current_status(target),
         )
     raise KeyError(f"Unknown llm job type: {job_type}")
 
@@ -812,6 +834,20 @@ def _plans_concurrency(s: Settings) -> int:
     return max(1, value)
 
 
+def _claim_email_classify(s: Settings, types: list[str]) -> list[dict]:
+    """The PM email classification pass: skipped while EMAIL_CLASSIFY_ENABLED
+    is off (queued jobs wait for the flag or a cancel); capacity
+    EMAIL_CLASSIFY_CONCURRENCY per process, independent of every other pass."""
+    if not getattr(s, "email_classify_enabled", False):
+        return []
+    free = max(0, int(getattr(s, "email_classify_concurrency", 1))) - sum(
+        1 for jt in types if jt in EMAIL_CLASSIFY_JOB_TYPES
+    )
+    if free <= 0:
+        return []
+    return _claim_filtered(s, free, list(EMAIL_CLASSIFY_JOB_TYPES))
+
+
 def _claim_plans(s: Settings, types: list[str]) -> list[dict]:
     """The AI Estimating pass (module docstring): skipped while
     PLANS_READER_ENABLED is off (queued jobs wait for the flag or an
@@ -997,6 +1033,30 @@ def _claim(s: Settings, max_jobs: int, job_types: list[str] | None = None) -> li
     return resp.data or []
 
 
+def claim_types_allowed(s: Settings) -> tuple[str, ...]:
+    """LLM_QUEUE_CLAIM_TYPES as a tuple; empty = this worker claims every
+    type (the default). The eval sweep backend restricts itself to the
+    plans reader, splitter and pricing types so it never claims bidding
+    jobs and a normal backend's types never run under the ledger (spec
+    0.2, WS0)."""
+    parsed = getattr(s, "llm_queue_claim_job_types", None)
+    if isinstance(parsed, tuple):
+        return parsed
+    raw = getattr(s, "llm_queue_claim_types", "") or ""
+    return tuple(p.strip().lower() for p in str(raw).split(",") if p.strip())
+
+
+def _claim_filtered(s: Settings, max_jobs: int, job_types: list[str]) -> list[dict]:
+    """_claim narrowed to the types this worker may claim. A pass whose
+    types are all excluded makes no claim call at all."""
+    allowed = claim_types_allowed(s)
+    if allowed:
+        job_types = [jt for jt in job_types if jt in allowed]
+        if not job_types:
+            return []
+    return _claim(s, max_jobs, job_types)
+
+
 def _claim_tick(s: Settings, running_types: Iterable[str]) -> list[dict]:
     """One tick's claims, in passes with independent capacities: the LLM
     job types against llm_queue_worker_concurrency, then the sandbox type
@@ -1040,6 +1100,7 @@ def _claim_tick(s: Settings, running_types: Iterable[str]) -> list[dict]:
         if harvest_capacity > 0:
             claimed.extend(_claim(s, harvest_capacity, harvest_types))
     claimed.extend(_claim_plans(s, types))
+    claimed.extend(_claim_email_classify(s, types))
     return claimed
 
 

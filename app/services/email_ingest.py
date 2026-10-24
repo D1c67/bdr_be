@@ -40,6 +40,11 @@ assignment retro-assigns the rest of the conversation, and project creation
 triggers `rescan_unknown_for_project` (bid invites often arrive before the
 project exists in BDR).
 
+PM classification: every assignment above (and the body fetch of an email
+filed before its content arrived) queues services/email_classification for
+the emails it touched. Best-effort, and the service ignores anything not on
+a PM project (docs/EMAIL_CLASSIFICATION.md).
+
 Multi-worker safety: a `graph_sync_state` lease row (`pm-mail:{mailbox}:lease`)
 with a per-process holder token serializes the delta ingest and the sweep.
 The holder renews the lease between folders and every few sweep rows, and
@@ -109,6 +114,23 @@ _SWEEP_SELECT = (
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _classify_soon(sb, email_ids: list[str]) -> None:
+    """Queue PM email classification (services/email_classification) for
+    emails that just got a project or just had their body fetched. The
+    service skips anything not on a PM project. Best-effort: a failure here
+    is logged and never touches the filing itself."""
+    if not email_ids:
+        return
+    try:
+        if not get_settings().email_classify_enabled:
+            return
+        from app.services import email_classification
+
+        email_classification.enqueue_for_emails(email_ids, sb=sb)
+    except Exception:  # noqa: BLE001 - classification must never break ingestion
+        logger.exception("Email classification enqueue failed")
 
 
 def _pipeline_tick() -> bool:
@@ -551,6 +573,11 @@ def _step_received(sb, email: dict) -> str | None:
             detail={"attachments": atts, "body_truncated": truncated,
                     "body_preview": body[:rfp_test.PREVIEW_MAX_CHARS]},
         )
+    if ok:
+        # An email filed while its body was still missing (a manual assign of
+        # a never-fetched email, a revived retro sibling) is classified now
+        # that the content is here.
+        _classify_soon(sb, [email["id"]])
     return "id_r1" if ok else None
 
 
@@ -956,6 +983,7 @@ def _assign(
                 detail={"project_id": project_id, "matched_by": matched_by, "confidence": confidence,
                         "model": model, "round": fields["pipeline_round"]},
             )
+        _classify_soon(sb, [email["id"]])
         return True
     return _finalize_if_assigned(sb, email["id"], expected_status)
 
@@ -1054,6 +1082,7 @@ def assign_manual(sb, email: dict, project_id: str, user_id: str) -> tuple[dict,
     ).data[0]
 
     retro_count = 0
+    retro_ids: list[str] = []
     if email.get("conversation_id"):
         _upsert_conversation_map(
             sb,
@@ -1063,7 +1092,8 @@ def assign_manual(sb, email: dict, project_id: str, user_id: str) -> tuple[dict,
             source="manual",
             created_by=user_id,
         )
-        retro_count = _retro_assign_conversation(sb, email, project_id, now_iso)
+        retro_count = _retro_assign_conversation(sb, email, project_id, now_iso, collect=retro_ids)
+    _classify_soon(sb, [email["id"], *retro_ids])
 
     audit(
         user_id,
@@ -1083,7 +1113,9 @@ def assign_manual(sb, email: dict, project_id: str, user_id: str) -> tuple[dict,
     return updated, retro_count
 
 
-def _retro_assign_conversation(sb, email: dict, project_id: str, now_iso: str) -> int:
+def _retro_assign_conversation(
+    sb, email: dict, project_id: str, now_iso: str, *, collect: list[str] | None = None
+) -> int:
     """File every UNASSIGNED sibling of the conversation to the project —
     never stealing an email already filed elsewhere. Three cases:
     - terminal siblings with fetched content → processed;
@@ -1129,6 +1161,10 @@ def _retro_assign_conversation(sb, email: dict, project_id: str, now_iso: str) -
     pending = scoped(
         sb.table("ingested_emails").update(assign_fields)
     ).in_("status", ["id_r1", "id_r2", "id_r3"]).execute().data or []
+    if collect is not None:
+        # The ids the caller queues for PM classification (revived siblings
+        # are skipped there until their body fetch lands).
+        collect.extend(r["id"] for r in (*done, *revived, *pending) if r.get("id"))
     return len(done) + len(revived) + len(pending)
 
 
@@ -1350,6 +1386,8 @@ def _rescan_assign(
             sb, email["mailbox"], email["conversation_id"], project_id,
             source=matched_by if matched_by in ("subject", "llm", "manual") else "llm",
         )
+    if resp.data:
+        _classify_soon(sb, [email["id"]])
 
 
 # ── Notifications ─────────────────────────────────────────────────────────────

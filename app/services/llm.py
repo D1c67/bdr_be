@@ -208,6 +208,10 @@ class _Feature:
     # box's own model, even while FULL_SELF_HOSTED_LLMS_ENABLED=false. The
     # per-feature env model is not used, except "off" to disable it.
     self_hosted_only: bool = False
+    # self_hosted_only features only: True = a SELF_HOSTED_<FEATURE>_MODEL
+    # value other than "off" pins the model on the env default box (the live
+    # box override drops pins, services/llm_target). Empty = the box's model.
+    self_hosted_pin: bool = False
     # The feature's own on/off switch, when it has one. Off = the feature is
     # unavailable by design (unavailable_reason) whatever the providers say,
     # so the health snapshot leaves it out instead of grading it forever.
@@ -255,6 +259,19 @@ _FEATURES: dict[str, _Feature] = {
         lambda s: s.openai_email_match_model,
         lambda s: s.self_hosted_email_match_model,
         self_hosted_only=True,
+    ),
+    # PM email classification (services/email_classification): labels every
+    # email filed to a PM project. Owner decision: self-hosted box ONLY, never
+    # a 3rd-party model, whatever FULL_SELF_HOSTED_LLMS_ENABLED says. A box
+    # outage is a transient queue failure, never a fallback. Behind its own
+    # EMAIL_CLASSIFY_ENABLED switch.
+    "email_classify": _Feature(
+        "openai",
+        lambda s: "",
+        lambda s: s.self_hosted_email_classify_model,
+        self_hosted_only=True,
+        self_hosted_pin=True,
+        switch=lambda s: bool(getattr(s, "email_classify_enabled", True)),
     ),
     # Bid File Splitter page classification. The vendor is env-selectable
     # (BID_SPLIT_LLM_PROVIDER: anthropic | openai | self_hosted) rather than
@@ -332,7 +349,9 @@ def resolve(feature: str, settings: Settings | None = None) -> Route:
         # Pinned: the self-hosted switch does not move AI Estimating.
         return Route(provider="openai", model=spec.tp_model(s), api_key=s.openai_api_key)
     if spec.self_hosted_only:
-        off = (spec.sh_model(s) or "").strip().lower() == SELF_HOSTED_MODEL_OFF
+        explicit = (spec.sh_model(s) or "").strip()
+        off = explicit.lower() == SELF_HOSTED_MODEL_OFF
+        model = "" if off else (explicit if spec.self_hosted_pin and explicit else s.self_hosted_llm_target_model)
         base_url = s.self_hosted_llm_base_url
         if (
             base_url.startswith("http://") and s.is_production and not s.self_hosted_llm_allow_http
@@ -342,7 +361,7 @@ def resolve(feature: str, settings: Settings | None = None) -> Route:
             base_url = ""
         return Route(
             provider="self_hosted",
-            model="" if off else s.self_hosted_llm_target_model,
+            model=model,
             api_key=s.self_hosted_llm_api_key,
             base_url=base_url,
         )

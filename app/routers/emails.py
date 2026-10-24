@@ -6,6 +6,11 @@ rather than under /pm. Reads are all internal roles (accountant read-only);
 assign/unassign are writer roles. The external estimator never reaches these
 routes (require_internal rejects it).
 
+PM email classification (docs/EMAIL_CLASSIFICATION.md): the project list
+and the detail carry each email's `classification` (one extra query per
+page, never per row), and PM writers can correct the labels (PUT), drop a
+correction (DELETE .../override) or queue a fresh AI run (POST .../rerun).
+
 Handlers are plain `def` — the sync Supabase SDK runs in FastAPI's threadpool.
 """
 
@@ -15,10 +20,11 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.core.deps import CurrentUser, require_internal, require_writer
+from app.core.deps import CurrentUser, require_internal, require_pm_write, require_writer
 from app.core.supabase_client import get_supabase
-from app.models.schemas import EmailAssignIn
-from app.services import email_ingest, file_access, storage
+from app.models.schemas import EmailAssignIn, EmailClassificationIn
+from app.services import email_classification, email_ingest, file_access, storage
+from app.services.notifications import audit
 
 logger = logging.getLogger(__name__)
 
@@ -101,8 +107,10 @@ def list_project_emails(
         .range(offset, offset + limit - 1)
         .execute()
     )
+    rows = resp.data or []
+    email_classification.attach(get_supabase(), rows)
     return {
-        "rows": resp.data or [],
+        "rows": rows,
         "total": resp.count or 0,
         "offset": offset,
         "limit": limit,
@@ -197,6 +205,7 @@ def get_email(email_id: str, user: CurrentUser = Depends(require_internal)):
         }
         for a in attachments
     ]
+    email_classification.attach(get_supabase(), [email])
     return email
 
 
@@ -281,3 +290,72 @@ def unassign_email(
     email = _fetch_email(email_id)
     updated = email_ingest.unassign(sb, email, user.id)
     return {"email": updated}
+
+
+# ── PM email classification (docs/EMAIL_CLASSIFICATION.md) ───────────────────
+
+
+def _classified_email(email_id: str, user: CurrentUser) -> dict:
+    """The email for a classification write: visible to the caller and filed
+    to a PM project (409 otherwise: labels belong to PM mail)."""
+    email = _fetch_email(email_id)
+    if not email_classification.is_pm_project(get_supabase(), email.get("project_id")):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "This email is not filed to a Project Management project."
+        )
+    return email
+
+
+def _classification_out(email_id: str) -> dict:
+    email = {"id": email_id}
+    email_classification.attach(get_supabase(), [email])
+    return {"email_id": email_id, "classification": email["classification"]}
+
+
+@router.put("/{email_id}/classification")
+def set_email_classification(
+    email_id: str,
+    body: EmailClassificationIn,
+    user: CurrentUser = Depends(require_pm_write),
+):
+    """Replace the email's labels with a writer's correction. The AI labels
+    are kept beside it and the change is logged (email_label_corrections)."""
+    _classified_email(email_id, user)
+    try:
+        labels = email_classification.normalize_user_labels(
+            [lab.model_dump() for lab in body.labels]
+        )
+    except email_classification.InvalidLabels as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
+    email_classification.set_user_labels(get_supabase(), email_id, labels, user.id)
+    audit(user.id, "email.classification_override", "ingested_email", email_id,
+          {"labels": [lab["category"] for lab in labels]})
+    return _classification_out(email_id)
+
+
+@router.delete("/{email_id}/classification/override")
+def reset_email_classification(
+    email_id: str,
+    user: CurrentUser = Depends(require_pm_write),
+):
+    """Drop the writer's correction so the AI labels show again (logged)."""
+    _classified_email(email_id, user)
+    email_classification.reset_to_ai(get_supabase(), email_id, user.id)
+    return _classification_out(email_id)
+
+
+@router.post("/{email_id}/classification/rerun")
+def rerun_email_classification(
+    email_id: str,
+    user: CurrentUser = Depends(require_pm_write),
+):
+    """Queue a fresh AI classification, even for an email that already has
+    labels. A correction stays in force over the new AI labels."""
+    _classified_email(email_id, user)
+    if not email_classification.llm.is_configured(email_classification.FEATURE):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Email classification is switched off or the AI model server is not set up.",
+        )
+    email_classification.rerun(get_supabase(), email_id, user.id)
+    return _classification_out(email_id)

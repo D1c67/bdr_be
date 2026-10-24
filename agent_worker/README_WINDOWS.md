@@ -62,6 +62,13 @@ The PC must start by itself when the power returns.
 Test it once: with Windows running, pull the power cord, wait 10 seconds and
 plug it back in. The PC should start by itself.
 
+**No such setting?** Some consumer models (many Lenovo IdeaCentre, Legion and
+laptop models, for example) do not have one. That is fine for a dev or test
+PC: skip A2 and press the power button yourself after a power cut. Nothing is
+lost while it is off. Jobs wait in BDR, the worker shows Offline, and the
+service picks the jobs up again once Windows starts (no sign-in needed). For
+the permanent agent PC, buy hardware that has this setting.
+
 ### A3. Never sleep, never hibernate, Fast Startup off
 
 Open **PowerShell as Administrator** (Start, type `powershell`, right-click
@@ -125,6 +132,20 @@ Only during the first install:
 No AI provider addresses are needed: BDR makes every AI call itself.
 
 Also leave Windows Update and time sync (`time.windows.com`) reachable.
+
+### A5b. Smart App Control off
+
+Windows 11 **Smart App Control** blocks DLLs without a publisher signature,
+which includes parts of the worker's Python libraries and Chromium. The install
+then stops at "Enrolling this PC with BDR" with **"An Application Control
+policy has blocked this file"**.
+
+Check it: **Windows Security > App & browser control > Smart App control
+settings**. If it says **On** or **Evaluation**, set it to **Off**. On some
+Windows builds it cannot be turned back on without resetting Windows, so do
+this only on the agent PC. If the setting is greyed out or already Off and the
+block still happens, a company app-control policy (WDAC/AppLocker) is the
+cause: ask whoever manages the PC to allow `C:\ProgramData\BDRAgent`.
 
 ### A6. Optional: antivirus exclusion
 
@@ -232,6 +253,7 @@ or moving the PC.
 
 1. **Is the PC on?** If it stayed off after a power cut, the BIOS setting (A2)
    is wrong or was reset. A BIOS update often resets it, so check A2 again.
+   If the PC has no such setting (see A2), press the power button.
 2. **Is it Online in BDR?** Allow about 3 minutes after Windows starts (the
    service starts "delayed" so the network is up first). You do not need to
    sign in.

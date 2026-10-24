@@ -2418,6 +2418,22 @@ class EmailAssignIn(BaseModel):
     project_id: str = Field(min_length=1, max_length=100)
 
 
+class EmailLabelIn(BaseModel):
+    """One corrected PM email label (services/email_classification CATEGORIES
+    is the authority; the service re-validates subcategory against category)."""
+
+    category: Literal["materials_submittals", "rfis", "financials", "change_management", "other"]
+    subcategory: str | None = Field(default=None, max_length=40)
+    # Required for `other` (the service enforces it), ignored otherwise.
+    title: str | None = Field(default=None, max_length=60)
+
+
+class EmailClassificationIn(BaseModel):
+    """PUT /emails/{id}/classification: the full replacement label set."""
+
+    labels: list[EmailLabelIn] = Field(min_length=1, max_length=5)
+
+
 # ── Certified Payroll ────────────────────────────────────────────────────────
 
 # Mirror the cp_* PG enums (0063/0064) - keep all three in sync with

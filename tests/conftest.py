@@ -86,6 +86,11 @@ os.environ["RFP_BC_REDIRECT_URL"] = ""
 # consult the session table. Tests that exercise it patch
 # rfp_test.get_settings (and the router's) themselves.
 os.environ["RFP_TESTING_ENABLED"] = "false"
+# PM email classification defaults ON; pin it off so no assignment in the
+# suite can queue a job against the real llm_jobs table (the hooks call the
+# queue's own Supabase client). tests/test_email_classification.py turns it on
+# with its own fakes.
+os.environ["EMAIL_CLASSIFY_ENABLED"] = "false"
 # The PM RFI sync (docs/PM_RFI_SYNC.md) is on in the dev .env; pin it off so
 # no test that runs the app lifespan can start its scheduler loop against a
 # real database or Procore. Its tests patch settings themselves.

@@ -40,9 +40,13 @@ create table if not exists email_classifications (
   updated_at       timestamptz not null default now()
 );
 
-drop trigger if exists email_classifications_updated_at on email_classifications;
-create trigger email_classifications_updated_at before update on email_classifications
-  for each row execute function set_updated_at();
+do $$
+begin
+  if not exists (select 1 from pg_trigger where tgname = 'email_classifications_updated_at') then
+    create trigger email_classifications_updated_at before update on email_classifications
+      for each row execute function set_updated_at();
+  end if;
+end $$;
 
 create index if not exists email_classifications_project_idx
   on email_classifications (project_id, status);

@@ -76,6 +76,7 @@ FEATURE_LABELS: dict[str, str] = {
     "proposal": "Proposal scope lines",
     "email_vary": "RFQ email wording",
     "email_match": "Email → project matching",
+    "email_classify": "PM email classification",
     "aliases": "Submittal alternate names",
     "translate": "Interface translation",
     "bid_split": "Bid file splitting",

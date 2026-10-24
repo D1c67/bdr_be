@@ -222,6 +222,10 @@ class Settings(BaseSettings):
     # the classify model, so no new env is required to run them.
     self_hosted_rfp_extract_model: str = ""
     self_hosted_rfp_match_model: str = ""
+    # PM email classification (services/email_classification). self_hosted_only:
+    # empty = the live box's own model; a value pins the model on the env
+    # default box; "off" disables the feature. Never a 3rd-party model.
+    self_hosted_email_classify_model: str = ""
 
     # ── Bid File Splitter (experimental; routers/bid_splitter.py) ─────────────
     # Standalone AI tool that classifies every page of an uploaded bid-set PDF
@@ -761,6 +765,20 @@ class Settings(BaseSettings):
     # New-project rescan of the Unknown pool (learn-back on project creation).
     email_rescan_llm_days: int = 14             # only LLM-confirm unknowns this recent
     email_rescan_llm_max: int = 50              # LLM call cap per project creation
+
+    # ── PM email classification (services/email_classification) ──────────────
+    # Labels every email filed to a PM project (materials/submittals, RFIs,
+    # financials, change management, other) on the self-hosted box ONLY
+    # (llm feature email_classify, self_hosted_only). Off = nothing enqueues;
+    # existing labels stay readable. Docs: docs/EMAIL_CLASSIFICATION.md.
+    email_classify_enabled: bool = True
+    email_classify_concurrency: int = 1          # classify jobs per worker process (own claim pass)
+    email_classify_queue_priority: int = 180     # behind the bidding jobs (100) and harvests
+    email_classify_body_max_chars: int = 8000    # new content of the current message
+    email_classify_quoted_max_chars: int = 3000  # quoted earlier thread text in the current body
+    email_classify_context_max_chars: int = 12000  # previous thread messages, newest first
+    email_classify_previous_max_chars: int = 2500  # cap per previous message
+    email_classify_max_tokens: int = 1500        # answer budget (labels + two summaries)
 
     # ── RFP Ingestion: email intake (services/rfp_email_ingest) ──────────────
     # Watches ONLY the mailboxes listed here (Inbox folder), authenticates and
