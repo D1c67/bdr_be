@@ -36,6 +36,7 @@ from app.services import (
     estimator_rounds,
     llm_queue,
     office_preview,
+    proposal_revisions,
     proposal_scope,
     proposal_send,
 )
@@ -134,7 +135,16 @@ def _assert_not_abandoned(sb, project_id: str) -> None:
 
 def _assert_lines_unlocked(sb, project_id: str) -> None:
     """Any send at all freezes the scope lines: the documents the GCs hold
-    were built from them."""
+    were built from them. An open revised proposal (docs/PROPOSAL_REVISIONS.md)
+    reopens them; only a send in flight still refuses then, and save_lines
+    forks a draft a sent document was built from instead of editing it."""
+    if proposal_revisions.revision_open(project_id, sb):
+        if proposal_revisions._any_sending(sb, project_id):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "A proposal send is in progress: lines are locked until it finishes.",
+            )
+        return
     blocked = (
         sb.table("proposal_sends")
         .select("id")
@@ -278,9 +288,31 @@ def save_lines(
     user: CurrentUser = Depends(_PA_PM),
 ):
     sb = get_supabase()
-    _draft_or_404(project_id, draft_id)
+    draft = _draft_or_404(project_id, draft_id)
     _assert_not_abandoned(sb, project_id)
     _assert_lines_unlocked(sb, project_id)
+    if _draft_backs_a_sent_document(sb, project_id, draft_id):
+        # Only reachable during an open revision: a document a GC holds was
+        # built from this draft (a re-send re-validates against its lines),
+        # so the edit lands on a new draft, which becomes the latest.
+        forked = (
+            sb.table("proposal_drafts")
+            .insert(
+                {
+                    "project_id": project_id,
+                    "boq_file_id": draft.get("boq_file_id"),
+                    "status": "done",
+                    "model": draft.get("model"),
+                    "result_json": draft.get("result_json"),
+                    "lines_json": body.lines,
+                    "created_by": user.id,
+                }
+            )
+            .execute()
+        ).data[0]
+        audit(user.id, "proposal.lines_save", "proposal_draft", forked["id"],
+              {"line_count": len(body.lines), "forked_from": draft_id})
+        return _wire_shape(forked)
     updated = (
         sb.table("proposal_drafts")
         .update({"lines_json": body.lines, "approved_at": None, "approved_by": None})
@@ -290,6 +322,19 @@ def save_lines(
     audit(user.id, "proposal.lines_save", "proposal_draft", draft_id,
           {"line_count": len(body.lines)})
     return _wire_shape(updated)
+
+
+def _draft_backs_a_sent_document(sb, project_id: str, draft_id: str) -> bool:
+    """A sent proposal (or a sent revised proposal) was rendered from this
+    draft, so editing it in place would rewrite the record of what a GC
+    holds."""
+    for table in ("proposal_sends", "proposal_revision_sends"):
+        if (
+            sb.table(table).select("id").eq("project_id", project_id)
+            .eq("draft_id", draft_id).eq("status", "sent").limit(1).execute()
+        ).data:
+            return True
+    return False
 
 
 @router.post("/proposal-lines/{draft_id}/approve")

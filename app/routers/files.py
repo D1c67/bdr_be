@@ -1116,6 +1116,25 @@ def _auto_send_references(file_id: str) -> bool:
     return bool(live)
 
 
+def _is_proposal_history(file_id: str) -> bool:
+    """A proposal document that went out but is no longer the one a GC holds
+    (a revised proposal replaced it, 0178), or a revised document being sent
+    or already sent: still evidence of what we bid, so never deletable."""
+    sb = get_supabase()
+    if (
+        sb.table("proposal_send_events").select("id").eq("file_id", file_id)
+        .eq("status", "sent").limit(1).execute()
+    ).data:
+        return True
+    for col in ("file_id", "prior_file_id"):
+        query = sb.table("proposal_revision_sends").select("id").eq(col, file_id)
+        if col == "file_id":
+            query = query.in_("status", ["sending", "sent"])
+        if (query.limit(1).execute()).data:
+            return True
+    return False
+
+
 @router.delete(
     "/{file_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -1174,7 +1193,7 @@ def delete_file(
             .limit(1)
             .execute()
         ).data
-        if sent_ref:
+        if sent_ref or _is_proposal_history(file_id):
             raise HTTPException(
                 status.HTTP_409_CONFLICT, "Sent proposals are immutable and cannot be deleted"
             )

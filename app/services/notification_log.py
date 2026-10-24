@@ -260,6 +260,25 @@ def _classify_emails(sb, project_id: str) -> dict[str, dict]:
             category_id=None,
         )
 
+    # Revised proposals → GCs (0178, docs/PROPOSAL_REVISIONS.md). The live
+    # proposal_sends row keeps the ORIGINAL email_log_id (the submission
+    # record never moves), so each revision email is classified from its
+    # 'revision' transmission event instead.
+    for event in (
+        sb.table("proposal_send_events")
+        .select("email_log_id, kind, proposal_revision_id")
+        .eq("project_id", project_id)
+        .eq("kind", "revision")
+        .execute()
+    ).data or []:
+        _record(
+            event.get("email_log_id"),
+            type="proposal_send",
+            title="Revised proposal sent to the GC",
+            group_key=f"proposal_revision:{event.get('proposal_revision_id')}",
+            category_id=None,
+        )
+
     # Auto send proposals → GCs (docs/AUTO_SEND.md 6.7), one email per GC,
     # grouped per run. Never in proposal_sends before an accept, so they have
     # their own table; an accept copies the email_log_id onto proposal_sends

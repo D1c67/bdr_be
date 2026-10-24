@@ -585,6 +585,7 @@ from app.routers import (  # noqa: E402
     pm_submittals,
     pricing,
     projects,
+    proposal_revisions,
     proposals,
     reference,
     rfp_bc,
@@ -702,6 +703,8 @@ app.include_router(general_material.router, dependencies=_BIDDING)
 app.include_router(pricing.router, dependencies=_BIDDING)
 app.include_router(proposals.router, dependencies=_BIDDING)
 app.include_router(auto_send.router, dependencies=_BIDDING)
+# Revise proposal after submission (0178, docs/PROPOSAL_REVISIONS.md).
+app.include_router(proposal_revisions.router, dependencies=_BIDDING)
 app.include_router(outcome.router, dependencies=_BIDDING)
 # Mark submitted from the project side menu (0140): a proposal sent outside the app.
 app.include_router(external_submission.router, dependencies=_BIDDING)

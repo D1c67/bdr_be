@@ -1018,7 +1018,7 @@ def select_quote(
         raise HTTPException(status.HTTP_409_CONFLICT, _SELECTION_LOCKED)
     target = (
         sb.table("quotes")
-        .select("id, is_approved")
+        .select("id, is_approved, received_after_submission")
         .eq("id", quote_id)
         .eq("rfq_id", rfq_id)
         .execute()
@@ -1033,8 +1033,14 @@ def select_quote(
     # Clear first: quotes_one_selected_per_rfq is a partial unique index, so the
     # new winner would collide with the old one.
     sb.table("quotes").update({"is_selected": False}).eq("rfq_id", rfq_id).execute()
+    winner: dict = {"is_selected": True}
+    if target[0].get("received_after_submission"):
+        # Only reachable while a revised proposal is open (0178): a quote that
+        # came in after the original submission now prices the revised bid,
+        # so it stops being a record-only late quote (analytics count it).
+        winner["received_after_submission"] = False
     updated = (
-        sb.table("quotes").update({"is_selected": True}).eq("id", quote_id).execute()
+        sb.table("quotes").update(winner).eq("id", quote_id).execute()
     ).data
     audit(user.id, "quote.select", "quote", quote_id, {"rfq_id": rfq_id})
     dismiss_notifications(rfq_id=rfq_id, types=_QUOTE_NOTIF_TYPES)
