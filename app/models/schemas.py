@@ -787,6 +787,11 @@ class ProjectOut(BaseModel):
     # drives the red pulse. Derived by the list, Bids Today and detail routes
     # only; every other route leaves the default, as the counts above do.
     auto_send_pending: bool = False
+    # Revised proposal (docs/PROPOSAL_REVISIONS.md): a revision is open on this
+    # bid and its number, for the "Rev N open" badge. Derived by the list and
+    # detail routes only; every other route leaves the defaults.
+    proposal_revision_open: bool = False
+    proposal_revision_number: int | None = None
     created_by: str | None
     created_at: datetime
     updated_at: datetime
@@ -1699,6 +1704,56 @@ class ProposalResendIn(ProposalDispatchIn):
     # outcome is unknown, and a re-send leaves proposal_sends at 'sent' whatever
     # happens, so there is no ambiguous state for it to unlock.
     pass
+
+
+class ProposalRevisionStartIn(BaseModel):
+    # "What changed" (required, short) and optional new bid dates. The dates
+    # go through the normal project PATCH, so the bid date change email and
+    # the actual-bid-date editor rule still apply.
+    reason: str = Field(..., min_length=1, max_length=500)
+    internal_bid_at: datetime | None = None
+    actual_bid_at: datetime | None = None
+
+    @field_validator("reason")
+    @classmethod
+    def _reason(cls, v: str) -> str:
+        v = " ".join(v.split())
+        if not v:
+            raise ValueError("Say what changed")
+        return v
+
+
+class ProposalRevisionGcsIn(BaseModel):
+    # The GCs (general_contractors ids) checked to get this revision; the
+    # rest keep the proposal they hold.
+    gc_ids: list[str] = Field(default_factory=list, max_length=100)
+
+
+class ProposalRevisionGenerateIn(BaseModel):
+    # None = every checked GC whose revised document has not gone out.
+    gc_ids: list[str] | None = Field(default=None, max_length=100)
+
+
+class ProposalRevisionSendIn(ProposalDispatchIn):
+    # proposal_ids here are proposal_revision_sends ids. The subject is
+    # editable for a revision (None = the default Revised Proposal subject).
+    subject: str | None = Field(default=None, max_length=300)
+    force: bool = False  # required to retry an outcome-unknown failure
+
+    @field_validator("subject")
+    @classmethod
+    def _subject(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = " ".join(v.split())
+        if not v:
+            raise ValueError("The email subject cannot be blank")
+        return v
+
+
+class ProposalRevisionMarkIn(BaseModel):
+    # proposal_revision_sends ids recorded as submitted outside the app.
+    proposal_ids: list[str] = Field(..., min_length=1, max_length=100)
 
 
 class ProposalMarkSubmittedIn(BaseModel):

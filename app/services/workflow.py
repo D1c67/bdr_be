@@ -552,6 +552,10 @@ _PAST_VERIFY_HEADS = ("send_out", "submitted", "bid_outcome")
 # has parked the send_out head at `verify` with reverify_return_stage set to a
 # post-submission head: the bid still went out, so the lock must not lapse
 # (same rule as proposal_send.gone_out_rule for 0118).
+#
+# An open revised proposal (0178, docs/PROPOSAL_REVISIONS.md) closes the window:
+# while it is open quote edits and selection behave like any pre-Verify edit
+# and bounce to Verify, which is how a revision changes its material numbers.
 POST_SUBMISSION_HEADS = ("submitted", "bid_outcome")
 
 
@@ -572,7 +576,7 @@ def in_post_submission_window(project_id: str, sb=None) -> bool:
         return False
     head = rows[0].get("current_task")
     if head in POST_SUBMISSION_HEADS:
-        return True
+        return not _revision_open(project_id, client)
     if head != "verify":
         return False
     proj = (
@@ -582,7 +586,15 @@ def in_post_submission_window(project_id: str, sb=None) -> bool:
         .limit(1)
         .execute()
     ).data or []
-    return bool(proj) and proj[0].get("reverify_return_stage") in POST_SUBMISSION_HEADS
+    if not (bool(proj) and proj[0].get("reverify_return_stage") in POST_SUBMISSION_HEADS):
+        return False
+    return not _revision_open(project_id, client)
+
+
+def _revision_open(project_id: str, client) -> bool:
+    from app.services import proposal_revisions
+
+    return proposal_revisions.revision_open(project_id, client)
 
 _SECTION_SNAPSHOT_COLUMNS = (
     "gear_amount",
@@ -779,7 +791,15 @@ def maybe_reopen_verify_after_edit(
                 f"A pricing-affecting edit was made after Verify — re-commit required ({reason})."
             )
             # submitted/bid_outcome means the bid already left the door.
-            if head in ("submitted", "bid_outcome"):
+            if head in ("submitted", "bid_outcome") and _revision_open(
+                project_id, get_supabase()
+            ):
+                # A revised proposal is the reason for the edit (0178).
+                message += (
+                    " A revised proposal is open: re-commit pricing so the revised "
+                    "proposals can be generated and sent."
+                )
+            elif head in ("submitted", "bid_outcome"):
                 message += (
                     " The bid already sent to GCs is unchanged; this updates the "
                     "internal pricing record only."

@@ -499,6 +499,7 @@ _GC_REFERENCES = (
     ("rfp_project_matches", "gc_id"),
     ("proposal_sends", "gc_id"),
     ("proposal_send_events", "gc_id"),
+    ("proposal_revision_sends", "gc_id"),
     ("bid_gc_outcomes", "gc_id"),
 )
 

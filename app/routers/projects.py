@@ -57,6 +57,7 @@ from app.services import (
     project_delete,
     project_merge,
     project_numbers,
+    proposal_revisions,
     proposal_send,
     storage,
     workflow,
@@ -470,6 +471,7 @@ def _present(
     portal_sources: list[dict] | None = None,
     rfp_created: dict | None = None,
     auto_send_pending: bool | None = None,
+    revision_number: int | None = None,
 ) -> dict:
     """Attach the derived lifecycle `status` (from the embedded bid outcome, if
     any) plus the per-category `category_state`, and redact. Pass every returned
@@ -524,6 +526,9 @@ def _present(
         project["rfp_intake_missing"] = missing
     if auto_send_pending is not None and role != Role.ESTIMATOR:
         project["auto_send_pending"] = bool(auto_send_pending)
+    if revision_number is not None and role != Role.ESTIMATOR:
+        project["proposal_revision_open"] = True
+        project["proposal_revision_number"] = revision_number
     return redact_for_role(project, role)
 
 
@@ -596,6 +601,7 @@ def list_projects(
     rfp = _rfp_match_counts(ids, {p["id"]: p for p in rows}, states)
     created = _rfp_created_rows(ids)
     auto_sent = _auto_send_pending_ids(ids)
+    revising = proposal_revisions.open_revision_numbers(ids, get_supabase())
     return [
         _present(
             p,
@@ -605,6 +611,7 @@ def list_projects(
             rfp.get(p["id"]),
             rfp_created=created.get(p["id"]),
             auto_send_pending=p["id"] in auto_sent,
+            revision_number=revising.get(p["id"]),
         )
         for p in rows
     ]
@@ -1158,6 +1165,9 @@ def get_project(project_id: str, user: CurrentUser = Depends(get_current_user)):
         portal.get(project_id, []),
         rfp_created=row,
         auto_send_pending=project_id in _auto_send_pending_ids([project_id]),
+        revision_number=proposal_revisions.open_revision_numbers(
+            [project_id], get_supabase()
+        ).get(project_id),
     )
 
 

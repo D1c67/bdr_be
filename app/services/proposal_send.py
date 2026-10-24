@@ -44,6 +44,7 @@ from app.services.proposal_docx import (
     build_filename,
     load_template_bytes,
     render_proposal,
+    revision_label,
     validate_output,
     validate_pdf_isolation,
 )
@@ -297,6 +298,24 @@ def revised_cover_subject(project: dict) -> str:
     return f"[G3 Electrical] Revised Proposal: {project['name']} ({project['number']})"
 
 
+def build_revised_cover_email(project: dict, revision_number: int) -> tuple[str, str]:
+    """Default subject + plain-text body for a revised proposal
+    (docs/PROPOSAL_REVISIONS.md). Same tone and signature rule as
+    build_cover_email; the body says this is Revision N and that it
+    supersedes the proposal sent earlier. The sender may edit both."""
+    subject = revised_cover_subject(project)
+    body = (
+        f"Dear {GC_NAME_TOKEN},\n\n"
+        f"G3 Electrical is pleased to submit our revised proposal for "
+        f"{project['name']} ({project['number']}). Please find Revision "
+        f"{revision_number} of our proposal attached. It supersedes the proposal we "
+        f"sent earlier for this project.\n\n"
+        f"We appreciate the opportunity to bid and look forward to working with you.\n\n"
+        f"Thank you,"
+    )
+    return subject, body
+
+
 def auto_sent_gc_ids(project_id: str) -> set[str]:
     """GC ids that already got an auto send email for this project. Best
     effort: any failure (the 0159 tables not there yet, a read hiccup) answers
@@ -526,6 +545,11 @@ def amounts_overview(project_id: str) -> dict:
         ).data
         or []
     }
+    # An open revised proposal reopens the GCs it will re-bid
+    # (docs/PROPOSAL_REVISIONS.md); a live row mid-send stays locked.
+    from app.services import proposal_revisions
+
+    locked -= proposal_revisions.unlocked_gc_ids(project_id, sb=get_supabase())
 
     def _s(v: Decimal | None) -> str | None:
         return str(v) if v is not None else None
@@ -1080,12 +1104,20 @@ def set_gc_amounts(
     head = workflow.load_category_state(project_id).get("send_out", {}).get("current_task")
     assert_gc_amounts_editable(head)
     link = _gc_link(sb, project_id, gc_id)
-    _assert_gc_not_sent(sb, project_id, gc_id)
+    # While a revised proposal is open (docs/PROPOSAL_REVISIONS.md) a writer
+    # re-prices directly, exactly as at Send Out: a GC in the revision (its
+    # revised document not sent yet) and a GC added during it. Every other
+    # rule below still holds; the GCs left out of the revision stay locked.
+    from app.services import proposal_revisions
+
+    revision = proposal_revisions.open_revision(project_id, sb)
+    if not (revision and gc_id in proposal_revisions.unlocked_gc_ids(project_id, revision, sb)):
+        _assert_gc_not_sent(sb, project_id, gc_id)
     # Pending = locked at EVERY head: a re-verify bounce parks the head at
     # 'verify' but must not reopen a change an Executive has yet to decide.
     if link.get("pricing_approval_status") == "pending":
         raise ProposalSendError(PENDING_APPROVAL_MESSAGE)
-    if bid_has_gone_out(sb, project_id, head) and role not in VERIFY_ROLES:
+    if revision is None and bid_has_gone_out(sb, project_id, head) and role not in VERIFY_ROLES:
         raise ProposalSendError(
             "Pricing for a GC added after the bid went out needs executive approval. "
             "Use Send proposal in the GC list."
@@ -1685,46 +1717,13 @@ def generate_documents(
     base_ctx = build_base_context(
         project, draft, omit_zero_sections(amounts), includes_generator
     )
-    template = load_template_bytes()
     digest = lines_hash(list(draft["lines_json"]))
     all_names = _all_project_gc_names(project_id)
 
     # Render + validate EVERYTHING before touching storage or the DB.
-    rendered: list[tuple[dict, str, bytes, dict[str, Decimal | None]]] = []
-    for gc in targets:
-        # A per-GC override can re-add a defaulted-away section or zero one
-        # out, so the zero-omission runs on the RESOLVED figures.
-        gc_amounts = omit_zero_sections(resolve_gc_amounts(amounts, gc))
-        ctx = replace(
-            base_ctx,
-            gc_name=gc["name"],
-            material_amount=format_money(gc_amounts["material"]),
-            gear_amount=_fmt_optional(gc_amounts["gear"]),
-            underground_amount=_fmt_optional(gc_amounts["underground"]),
-            low_voltage_amount=_fmt_optional(gc_amounts["low_voltage"]),
-            labor_amount=format_money(gc_amounts["labor"]),
-            total_amount=format_money(gc_amounts["total"]),
-            # The caption only exists while this GC's gear row is rendered.
-            includes_generator=includes_generator and gc_amounts["gear"] is not None,
-        )
-        try:
-            docx = render_proposal(template, ctx)
-            validate_output(
-                docx,
-                gc_name=gc["name"],
-                scope_lines=ctx.scope_lines,
-                other_gc_names=tuple(n for n in all_names if n != gc["name"]),
-                amounts=stamp_figures(gc_amounts),
-                # Freshly rendered bytes must carry the caption iff the context
-                # did, and no trace of the section rows that were removed.
-                includes_generator=ctx.includes_generator,
-                removed_sections=tuple(
-                    key for key in _SECTION_AMOUNT_KEYS if gc_amounts[key] is None
-                ),
-            )
-        except ProposalRenderError as exc:
-            raise ProposalSendError(f"Generation failed for {gc['name']}: {exc}", 422) from exc
-        rendered.append((gc, build_filename(project["number"], gc["name"]), docx, gc_amounts))
+    rendered = render_gc_documents(
+        project, targets, base_ctx, amounts, includes_generator, all_names
+    )
 
     created: list[dict] = []
     for gc, filename, docx, gc_amounts in rendered:
@@ -1839,6 +1838,70 @@ def generate_documents(
     return created
 
 
+def render_gc_documents(
+    project: dict,
+    targets: list[dict],
+    base_ctx: ProposalContext,
+    amounts: dict[str, Decimal | None],
+    includes_generator: bool,
+    all_names: list[str],
+    revision_number: int | None = None,
+) -> list[tuple[dict, str, bytes, dict[str, Decimal | None]]]:
+    """Render and validate one document per target GC, nothing stored yet:
+    (gc, filename, docx bytes, the figures stamped into it). Shared by Send
+    Out generation and revised-proposal generation (`revision_number` set:
+    the document is retitled, carries "(Revision N)" on its date line and
+    "Rev N" in its filename, and validation demands both markers)."""
+    template = load_template_bytes()
+    rendered: list[tuple[dict, str, bytes, dict[str, Decimal | None]]] = []
+    for gc in targets:
+        # A per-GC override can re-add a defaulted-away section or zero one
+        # out, so the zero-omission runs on the RESOLVED figures.
+        gc_amounts = omit_zero_sections(resolve_gc_amounts(amounts, gc))
+        overrides = {
+            "gc_name": gc["name"],
+            "material_amount": format_money(gc_amounts["material"]),
+            "gear_amount": _fmt_optional(gc_amounts["gear"]),
+            "underground_amount": _fmt_optional(gc_amounts["underground"]),
+            "low_voltage_amount": _fmt_optional(gc_amounts["low_voltage"]),
+            "labor_amount": format_money(gc_amounts["labor"]),
+            "total_amount": format_money(gc_amounts["total"]),
+            # The caption only exists while this GC's gear row is rendered.
+            "includes_generator": includes_generator and gc_amounts["gear"] is not None,
+        }
+        revision_kwargs: dict = {}
+        if revision_number:
+            overrides["revision_number"] = revision_number
+            overrides["date_str"] = f"{base_ctx.date_str} ({revision_label(revision_number)})"
+            revision_kwargs["revision_number"] = revision_number
+        ctx = replace(base_ctx, **overrides)
+        try:
+            docx = render_proposal(template, ctx)
+            validate_output(
+                docx,
+                gc_name=gc["name"],
+                scope_lines=ctx.scope_lines,
+                other_gc_names=tuple(n for n in all_names if n != gc["name"]),
+                amounts=stamp_figures(gc_amounts),
+                # Freshly rendered bytes must carry the caption iff the context
+                # did, and no trace of the section rows that were removed.
+                includes_generator=ctx.includes_generator,
+                removed_sections=tuple(
+                    key for key in _SECTION_AMOUNT_KEYS if gc_amounts[key] is None
+                ),
+                **revision_kwargs,
+            )
+            filename = (
+                build_filename(project["number"], gc["name"], revision_number)
+                if revision_number
+                else build_filename(project["number"], gc["name"])
+            )
+        except ProposalRenderError as exc:
+            raise ProposalSendError(f"Generation failed for {gc['name']}: {exc}", 422) from exc
+        rendered.append((gc, filename, docx, gc_amounts))
+    return rendered
+
+
 def regenerate_after_commit(project_id: str, user_id: str) -> list[dict]:
     """Re-render the never-sent proposal documents after a pricing (re)commit,
     so a generated preview can never keep showing figures the commit just
@@ -1902,6 +1965,7 @@ def record_send_event(
     user_id: str,
     event_id: str | None = None,
     cc_snapshot: list[dict] | None = None,
+    revision_id: str | None = None,
 ) -> dict | None:
     """Append (or complete) one transmission of this GC's bid.
 
@@ -1925,6 +1989,10 @@ def record_send_event(
         "sent_at": datetime.now(timezone.utc).isoformat(),
         "sent_by": user_id,
     }
+    # A GC added and bid while a revised proposal was open: its initial
+    # transmission is listed under that revision's history (0178).
+    if revision_id:
+        fields["proposal_revision_id"] = revision_id
     try:
         if event_id:
             return (
@@ -1981,13 +2049,18 @@ def assert_send_isolation(
     other_gc_names: tuple[str, ...],
     expected_amounts: dict[str, Decimal] | None = None,
     includes_generator: bool = False,
+    revision_number: int | None = None,
 ) -> None:
     """Defense-in-depth before the ONE network call that can leak a document.
     Pure: raises ProposalSendError with the reason; callers pass live rows
     (`row` is the freshly claimed proposal_sends row, so its gc_email is the
     recipient list this very send wrote). `includes_generator` is the live
     project-level flag; the gear stamp gates whether the caption row can exist
-    in these bytes at all (section_validation_kwargs)."""
+    in these bytes at all (section_validation_kwargs).
+
+    A revised proposal (docs/PROPOSAL_REVISIONS.md) passes its claimed
+    proposal_revision_sends row (same columns) and `revision_number`: the
+    filename must then carry "Rev N" and the bytes the revision markers."""
     gc_id = row["gc_id"]
     if not live_gc or live_gc.get("id") != gc_id:
         raise ProposalSendError("GC is no longer on this project — regenerate.")
@@ -2013,7 +2086,11 @@ def assert_send_isolation(
             "ISOLATION: recipient list does not match the claimed send row — retry."
         )
 
-    expected = build_filename(project["number"], row["gc_name"])
+    expected = (
+        build_filename(project["number"], row["gc_name"], revision_number)
+        if revision_number
+        else build_filename(project["number"], row["gc_name"])
+    )
     if file_row.get("filename") != expected:
         raise ProposalSendError("ISOLATION: filename does not match this GC — regenerate.")
 
@@ -2047,6 +2124,7 @@ def assert_send_isolation(
         other_gc_names=other_gc_names,
         amounts=stamp_figures(stamped) if stamped is not None else (),
         **section_validation_kwargs(stamped, includes_generator),
+        **({"revision_number": revision_number} if revision_number else {}),
     )
 
 
@@ -2166,6 +2244,7 @@ def send_proposals(
         raise ProposalSendError("Project not found", status_code=404)
 
     head = send_window_head(project_id)
+    revision_id = _revision_guard(project_id, head)
 
     rows = (
         sb.table("proposal_sends").select("*").eq("project_id", project_id)
@@ -2288,6 +2367,10 @@ def send_proposals(
         try:
             if resolve_error is not None:
                 raise resolve_error
+            if revision_id:
+                # Re-checked per GC while a revision is open: a cost edit made
+                # while earlier GCs were being emailed parks the bid at Verify.
+                _revision_guard(project_id, send_window_head(project_id))
             file_row = None
             if row.get("file_id"):
                 file_row = (
@@ -2395,6 +2478,7 @@ def send_proposals(
             record_send_event(
                 row, kind="initial", via="email", recipients=recipients,
                 email_log_id=log["id"], user_id=user_id, cc_snapshot=cc_snapshot,
+                revision_id=revision_id,
             )
             # email_log.to_addrs is To-only by contract, so the audit trail is
             # where the CC is recorded per send.
@@ -2432,6 +2516,8 @@ def send_proposals(
           {"sent": sum(1 for r in results if r["status"] == "sent"),
            "failed": sum(1 for r in results if r["status"] == "failed"),
            "head": head})
+    if revision_id and any(r["status"] == "sent" for r in results):
+        _revision_maybe_complete(project_id, user_id)
     return {"results": results, "stage": project["current_stage"]}
 
 
@@ -2487,7 +2573,14 @@ def assert_resend_isolation(
             f"{row['gc_name']}'s recipients are no longer on file — reopen the dialog."
         )
 
-    expected = build_filename(project["number"], row["gc_name"])
+    # A GC holding a revised proposal (revision_number > 0) is re-sent that
+    # revised document: its filename carries "Rev N" and its bytes the markers.
+    revision = row.get("revision_number") or None
+    expected = (
+        build_filename(project["number"], row["gc_name"], revision)
+        if revision
+        else build_filename(project["number"], row["gc_name"])
+    )
     if file_row.get("filename") != expected:
         raise ProposalSendError("ISOLATION: filename does not match this GC.")
 
@@ -2499,6 +2592,7 @@ def assert_resend_isolation(
         other_gc_names=other_gc_names,
         amounts=stamp_figures(stamped) if stamped is not None else (),
         **resend_section_kwargs(row, stamped, includes_generator),
+        **({"revision_number": revision} if revision else {}),
     )
     if row.get("origin") == "auto_send" and stamped is not None:
         from app.services import auto_send
@@ -2631,6 +2725,7 @@ def resend_proposals(
     ]
     events = send_events_by_proposal(project_id)
     run_lines = _auto_send_run_lines(sb, rows)
+    revising = _revision_pending_gc_ids(project_id)
 
     results = []
     for row in rows:
@@ -2639,13 +2734,29 @@ def resend_proposals(
                 _result(row, "skipped", "This proposal has not been sent yet — send it first.")
             )
             continue
+        if row["gc_id"] in revising:
+            # The GC is about to get (or may just have got) the revised
+            # document: re-sending the one it holds now could land after it.
+            from app.services import proposal_revisions
 
-        subject = cover_subject_for(project, row["gc_id"], auto_sent)
+            results.append(_result(row, "skipped", proposal_revisions.RESEND_BLOCKED_MESSAGE))
+            continue
+
+        # A revised document (docs/PROPOSAL_REVISIONS.md) goes out again under
+        # the exact subject it was sent with; proposal_sends.subject is null
+        # for every document sent before 0178, which keeps the derived subject.
+        subject = row.get("subject") or cover_subject_for(project, row["gc_id"], auto_sent)
+        row_template = body_template
+        if email_body is None and row.get("revision_number"):
+            row_template = build_revised_cover_email(project, row["revision_number"])[1]
         inflight = next(
             (e for e in events.get(row["id"], []) if e["status"] == "sending"), None
         )
         if inflight is not None:
-            inflight = _reclaim_stuck_event(inflight, send_out_subjects(project))
+            proof_subjects = send_out_subjects(project)
+            if row.get("subject") and row["subject"] not in proof_subjects:
+                proof_subjects.append(row["subject"])
+            inflight = _reclaim_stuck_event(inflight, proof_subjects)
             if inflight["status"] == "sending":
                 results.append(_result(row, "skipped", "a re-send is already in progress"))
                 continue
@@ -2750,7 +2861,7 @@ def resend_proposals(
                 **resend_section_kwargs(row, _pdf_stamp, includes_generator),
             )
 
-            body = body_template.replace(GC_NAME_TOKEN, row["gc_name"])
+            body = row_template.replace(GC_NAME_TOKEN, row["gc_name"])
             cc_addrs = [*gc_cc_addrs, *cc_recipients([*recipients, *gc_cc_addrs])]
             try:
                 log = graph_email.send_mail(
@@ -2863,6 +2974,7 @@ def mark_submitted(project_id: str, user_id: str, proposal_ids: list[str]) -> di
         raise ProposalSendError("Project not found", status_code=404)
 
     head = send_window_head(project_id)
+    revision_id = _revision_guard(project_id, head)
 
     rows = (
         sb.table("proposal_sends").select("*").eq("project_id", project_id)
@@ -2963,7 +3075,7 @@ def mark_submitted(project_id: str, user_id: str, proposal_ids: list[str]) -> di
             continue
         record_send_event(
             row, kind="initial", via="external", recipients=None,
-            email_log_id=None, user_id=user_id,
+            email_log_id=None, user_id=user_id, revision_id=revision_id,
         )
         audit(user_id, "proposal.mark_submitted", "proposal_send", row["id"],
               {"gc_id": row["gc_id"], "file_id": row["file_id"]})
@@ -2977,7 +3089,52 @@ def mark_submitted(project_id: str, user_id: str, proposal_ids: list[str]) -> di
           {"marked": sum(1 for r in results if r["status"] == "marked"),
            "failed": sum(1 for r in results if r["status"] == "failed"),
            "head": head})
+    if revision_id and any(r["status"] == "marked" for r in results):
+        _revision_maybe_complete(project_id, user_id)
     return {"results": results, "stage": project["current_stage"]}
+
+
+def _revision_pending_gc_ids(project_id: str) -> set[str]:
+    """GCs checked in the open revision whose revised document has not been
+    recorded as sent (pending, generated, sending, failed): a re-send to them
+    is refused until the revision resolves for that GC (0178)."""
+    from app.services import proposal_revisions
+
+    sb = get_supabase()
+    revision = proposal_revisions.open_revision(project_id, sb)
+    if revision is None:
+        return set()
+    return {
+        r["gc_id"]
+        for r in proposal_revisions._rows(sb, revision["id"])
+        if r.get("included") and r.get("status") != "sent"
+    }
+
+
+def _revision_guard(project_id: str, head: str) -> str | None:
+    """The open revised proposal's id (None when there is none), refusing the
+    send while its cost changes wait on the Executive's re-verify: nothing in
+    a revision, a GC added during it included, goes out at figures nobody has
+    verified (docs/PROPOSAL_REVISIONS.md)."""
+    from app.services import proposal_revisions
+
+    revision = proposal_revisions.open_revision(project_id, get_supabase())
+    if revision is None:
+        return None
+    if head == "verify":
+        raise ProposalSendError(proposal_revisions.WAITING_ON_VERIFY_MESSAGE)
+    return revision["id"]
+
+
+def _revision_maybe_complete(project_id: str, user_id: str) -> None:
+    """Best effort: an initial send to the last GC a revision waited on
+    closes it. Never fails the send that already happened."""
+    try:
+        from app.services import proposal_revisions
+
+        proposal_revisions.maybe_auto_complete(project_id, user_id)
+    except Exception:  # noqa: BLE001 - the send is done; completion is bookkeeping
+        logger.exception("revision auto-complete failed for %s", project_id)
 
 
 def _result(row: dict, status: str, error: str | None) -> dict:

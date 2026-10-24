@@ -75,6 +75,9 @@ class ProposalContext:
     underground_amount: str | None = None
     low_voltage_amount: str | None = None
     includes_generator: bool = False  # renders the caption in the gear row
+    # Set on a revised proposal (docs/PROPOSAL_REVISIONS.md): the title reads
+    # REVISED_TITLE and the date line carries "(Revision N)".
+    revision_number: int | None = None
 
 
 # Section breakout rows in the pricing box, keyed by the backend section keys.
@@ -158,8 +161,47 @@ def sanitize_component(name: str) -> str:
     return cleaned
 
 
-def build_filename(project_number: str, gc_name: str) -> str:
-    return f"Proposal {last4(project_number)} - {sanitize_component(gc_name)}.docx"
+def build_filename(
+    project_number: str, gc_name: str, revision_number: int | None = None
+) -> str:
+    """A revised proposal carries "Rev N" so the GC (and the Files list)
+    can tell it from the original it supersedes."""
+    rev = f" Rev {revision_number}" if revision_number else ""
+    return f"Proposal {last4(project_number)} - {sanitize_component(gc_name)}{rev}.docx"
+
+
+# ── revision marking ──────────────────────────────────────────────────────
+
+ORIGINAL_TITLE = "Bid Proposal"
+REVISED_TITLE = "Revised Bid Proposal"
+
+
+def revision_label(revision_number: int) -> str:
+    return f"Revision {revision_number}"
+
+
+def mark_revision(doc, revision_number: int) -> None:
+    """Retitle the document "Revised Bid Proposal". The title is its own
+    paragraph ("Bid Proposal"); only its first run's text changes, so the
+    title keeps the template's formatting. The "(Revision N)" marker rides on
+    the date line (ProposalContext.date_str). A template without the title
+    paragraph is drift and fails loudly."""
+    for p in iter_paragraph_elements(doc):
+        runs = [r for r in p.iter(qn("w:r")) if r.getparent() is not None]
+        text = " ".join("".join(_run_text(r) for r in runs).split())
+        if text != ORIGINAL_TITLE:
+            continue
+        first = next((r for r in runs if _run_text(r).strip()), None)
+        if first is None:  # pragma: no cover - text above came from these runs
+            break
+        _set_run_text(first, REVISED_TITLE)
+        for r in runs:
+            if r is not first:
+                _set_run_text(r, "")
+        return
+    raise ProposalRenderError(
+        f"Title paragraph {ORIGINAL_TITLE!r} not found: the template asset has drifted."
+    )
 
 
 # ── template loading ───────────────────────────────────────────────────────
@@ -395,6 +437,8 @@ def remove_absent_section_rows(doc, ctx: ProposalContext) -> None:
 def render_proposal(template_bytes: bytes, ctx: ProposalContext) -> bytes:
     doc = Document(io.BytesIO(template_bytes))
     remove_absent_section_rows(doc, ctx)
+    if ctx.revision_number:
+        mark_revision(doc, ctx.revision_number)
     # placeholder_map excludes tokens for absent sections (their rows were
     # just removed), so this missing check is the DYNAMIC expected set.
     counts = replace_placeholders(doc, placeholder_map(ctx))
@@ -454,6 +498,7 @@ def validate_output(
     amounts: tuple[str, ...] | list[str] = (),
     includes_generator: bool = False,
     removed_sections: tuple[str, ...] | list[str] = (),
+    revision_number: int | None = None,
 ) -> None:
     """Prove the rendered bytes are complete and belong to exactly one GC.
 
@@ -526,6 +571,16 @@ def validate_output(
                 f"Removed section label {label!r} still appears in the "
                 "document: stale or wrong render."
             )
+
+    # A revised document must say so: the title and its revision number are
+    # part of its identity, exactly like the figures.
+    if revision_number:
+        for marker in (REVISED_TITLE, revision_label(revision_number)):
+            if marker not in body:
+                raise ProposalRenderError(
+                    f"Revision marker {marker!r} is missing from the document: "
+                    "stale or wrong render."
+                )
 
     pos = 0
     for line in scope_lines:

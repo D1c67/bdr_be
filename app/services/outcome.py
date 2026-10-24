@@ -176,6 +176,12 @@ def record_outcome(project_id: str, user_id: str, body: BidOutcomeIn) -> dict:
         raise OutcomeError(
             "Project is not awaiting an outcome — the bid must be Submitted first."
         )
+    # A revised proposal in progress (docs/PROPOSAL_REVISIONS.md) means the bid
+    # the GCs hold is about to change: finish or cancel it first.
+    from app.services import proposal_revisions
+
+    if proposal_revisions.revision_open(project_id, sb):
+        raise OutcomeError(proposal_revisions.OUTCOME_BLOCKED_MESSAGE)
 
     # PM seam: a recorded WON activated Project Management. Correcting it away
     # from won is fine while the PM record is an untouched Precon shell (it is

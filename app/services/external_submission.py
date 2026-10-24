@@ -102,6 +102,8 @@ REASON_MESSAGES = {
     "not_submitted_head": "The bid is not on Submitted right now (for example it was bounced "
     "back to Verify). Commit Verify first, then undo.",
     "project_not_found": "Project not found.",
+    "revised": "A revised proposal is open or already went out for this bid, so the "
+    "marked submission can no longer be undone.",
 }
 
 
@@ -835,9 +837,27 @@ def overview(project_id: str, user_id: str, role: Role | str) -> dict:
                 out["undo_blocked_reason"] = "outcome_recorded"
             elif head != "submitted":
                 out["undo_blocked_reason"] = "not_submitted_head"
+            elif _revised_since(sb, project_id, active):
+                out["undo_blocked_reason"] = "revised"
             else:
                 out["can_undo"] = True
     return out
+
+
+def _revised_since(sb, project_id: str, active: dict) -> bool:
+    """A revision (0178) is open, or a revised proposal went out after this
+    submission: the undo would restore proposal_sends rows the revision has
+    since replaced, so it is refused."""
+    from app.services import proposal_revisions
+
+    if proposal_revisions.revision_open(project_id, sb):
+        return True
+    rows = (
+        sb.table("proposal_revision_sends").select("sent_at").eq("project_id", project_id)
+        .eq("status", "sent").execute()
+    ).data or []
+    since = active.get("submitted_at") or ""
+    return any((r.get("sent_at") or "") >= since for r in rows)
 
 
 def _reason_for(sb, project_id: str) -> str | None:
@@ -1403,6 +1423,8 @@ def undo(project_id: str, user_id: str, role, reason: str | None) -> dict:
             409,
             "outcome_recorded",
         )
+    if _revised_since(sb, project_id, active):
+        raise ExternalSubmissionError(REASON_MESSAGES["revised"], 409, "revised")
     text = (reason or "").strip() or None
     try:
         sb.rpc(
