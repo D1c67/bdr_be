@@ -13,8 +13,15 @@ import jwt
 from fastapi import Depends, Header, HTTPException, Request, status
 
 from app.core.config import get_settings
-from app.core.features import SubApp, ai_estimating_allowed, feature_404, is_enabled
+from app.core.features import (
+    SubApp,
+    ai_estimating_allowed,
+    ai_pricing_allowed,
+    feature_404,
+    is_enabled,
+)
 from app.core.roles import (
+    AI_PRICING_WRITE_ROLES,
     CP_READ_ROLES,
     CP_WRITE_ROLES,
     INTERNAL_ROLES,
@@ -435,4 +442,39 @@ def require_project_assignment(
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "This project is no longer available"
         )
+    return user
+
+
+def _ai_pricing_served() -> None:
+    """The AI pricing 404: a deployment with AI_PRICING_ENABLED off answers
+    every pricing route with the bare "Not Found" body, like a path that was
+    never implemented. getattr: fails closed on a settings stand-in."""
+    if not getattr(get_settings(), "ai_pricing_enabled", False):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+
+
+async def require_pricing_view(
+    user: CurrentUser = Depends(get_current_user),
+) -> CurrentUser:
+    """Allow only callers who may see AI prices (core/features
+    ai_pricing_allowed: AI Estimating open to the role, AI_PRICING_ENABLED on
+    and AI_PRICING_STATE admitting the role; never the accountant or the
+    estimator). 404 while AI_PRICING_ENABLED is off, 403 for any other
+    refusal (docs/AI_ESTIMATING_BUILD_SPEC.md 5.5)."""
+    _ai_pricing_served()
+    if not ai_pricing_allowed(user.role):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
+    return user
+
+
+async def require_pricing_write(
+    user: CurrentUser = Depends(get_current_user),
+) -> CurrentUser:
+    """Allow only callers who may run or edit AI pricing: everything
+    require_pricing_view demands plus a role in AI_PRICING_WRITE_ROLES (the
+    Executive, the IT Admin and the Estimating Admin; the engineers read
+    only). 404 while AI_PRICING_ENABLED is off, 403 otherwise."""
+    _ai_pricing_served()
+    if not ai_pricing_allowed(user.role) or user.role not in AI_PRICING_WRITE_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Read-only or insufficient role")
     return user

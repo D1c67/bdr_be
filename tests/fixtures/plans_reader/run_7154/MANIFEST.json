@@ -1,0 +1,52 @@
+{
+ "what": "Trimmed JSON of AI Estimating run ff8fad25 (project 7154), owner Q27: no drawings, no prices.",
+ "source_root": "EVAL_ROOT/bundles/7154/ff8fad25",
+ "built": "2026-10-21",
+ "rules": [
+  "run.json, files.json, documents.json, groups.json and deliverables.json keep only the listed metadata columns (no cost, token or storage path columns)",
+  "group outputs equal to a category or main output are not duplicated: rollup_electrical_drawings_0_p1 and the single rfp and specifications subs equal outputs/category_<cat>_v1.json without escalation_patches, unresolved_flags and source; main_none_0_p1 equals outputs/main_none_v1.json",
+  "estimate_v2 is identical to estimate_v1 and is not copied",
+  "keys named like price, cost, usd, amount or dollars are dropped and dollar figures in strings are replaced (none were present in outputs)",
+  "JSON is written with ensure_ascii, so non-ASCII text (including dashes) is kept as escapes"
+ ],
+ "removed": {
+  "keys": 0,
+  "strings": 0
+ },
+ "row_counts": {
+  "category_electrical_drawings": {
+   "counts": 54,
+   "runs": 0,
+   "schedules": 14,
+   "specs": 29,
+   "scope": 50,
+   "details": 4,
+   "questions": 36,
+   "pages": 18,
+   "escalation_patches": 3
+  },
+  "escalation_patch_counts": 4,
+  "sub_count_rows": 54
+ },
+ "sources_sha256": {
+  "run.json": "eff77cecd6847161e75e5f115629c1e648f7bb6585157c781d5a5639e05c79f3",
+  "files.json": "53bf0f0c72da2b03a6f04ff06e11796b89c766be52388e74b0b3268f6bf7dbb3",
+  "documents.json": "59afa4578d6c88a84aee40700ca809a2fb8bf45ebe7589bd0fbbaaf2375ead40",
+  "groups.json": "f959aee56b121c70598ae15ea3f2bc21d5206e538a6283bddd573b6241aa49e3",
+  "groups/sub_electrical_drawings_0_p1.json": "2094f7d4567c1b81f86c0f81baa9052f77c22361c85d4e7afca5987c5913e95f",
+  "groups/sub_electrical_drawings_1_p1.json": "ac459451ff16b283856a7f334c9823eaf8c455a7857ce24d254eeeb78d1c75c0",
+  "groups/sub_electrical_drawings_2_p1.json": "1c01e1c04952d1a1ca102c1577ee13b989243f9430abaeecb07fde27b9bccf71",
+  "groups/escalation_electrical_drawings_0_p2.json": "1fcda099e72dfc42362cf440e3997778ab21d902d0910f3311e5a6169b15f0e8",
+  "groups/escalation_electrical_drawings_1_p2.json": "591c8f6d59b0cf472c61897933665d85bc13379c6e9e593cd98b53e69c4402ab",
+  "groups/escalation_electrical_drawings_2_p2.json": "d28cfcd0a617dc480d06ea714abf2fa56e0a4081ab7c49bb6fb9f9cc4862edd1",
+  "outputs/category_electrical_drawings_v1.json": "d32a0090db88fb50df81c260e9592d136e3e22210d88c2166a69acb4f38f0ea1",
+  "outputs/category_rfp_v1.json": "29bd0472f46655fc425763050fa7a68f307cc5f49ff1cc1aa4cb027bdfb99f8e",
+  "outputs/category_specifications_v1.json": "5c5121c97b6da1447d810959d9a692ae1c8f8a1f587ec92916a710306122c9a1",
+  "outputs/main_none_v1.json": "48f612861dc402cfa38f6dab74691a9ca1439b531d89797bad0d9de06988bb53",
+  "deliverables/boq_v1.json": "ff7657a31a746a4ac6a103e06cec9f25ffcf6889f8e7f5afb3b765baafbddd0f",
+  "deliverables/brief_v1.json": "e02ee14f6c4658bc448f3bbe450c218ad3e52a3b7e59aef1fcb87c738c6a6152",
+  "deliverables/estimate_v1.json": "13f85ff59c038a0560ec8b0fffd26d511be57724250ebd30b1baf8841e616ea6",
+  "deliverables/marked_plans_v1.json": "4b43100e0870904b6d66b551d775306e352b7728d14ff2cdd64da79f68b5961c",
+  "deliverables.json": "4c60874358ef658d8ac09a42d6efed878f124b4f57b2dac9aed96692468717d5"
+ }
+}

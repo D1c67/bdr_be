@@ -50,10 +50,35 @@ Responses transport with mixed content parts (text, images with a detail
 level, PDF files), reasoning effort, tools and tool-call continuation. Its
 features (plans_*) are openai_only: plan sets are never sent to a small
 self-hosted model, so FULL_SELF_HOSTED_LLMS_ENABLED does not move them; they
-keep running on OpenAI with the 3rd-party key (owner decision 2026-10-18,
-reversing the earlier "off in self-hosted mode" rule). The only thing that
-switches them off by design is their own PLANS_READER_ENABLED flag
-(unavailable_reason).
+keep running on the 3rd-party key (owner decision 2026-10-18, reversing the
+earlier "off in self-hosted mode" rule). The only thing that switches them
+off by design is their own PLANS_READER_ENABLED flag (unavailable_reason).
+
+Routes (docs/AI_ESTIMATING_BUILD_SPEC.md 4.2, WS2): each plans feature maps
+to a pipeline step (services/plans_reader_model_routes) whose route names
+the provider (openai or anthropic), model and effort. With no route set for
+the step the feature runs exactly as before: OpenAI on OPENAI_PLANS_MODEL.
+complete_turn(feature, ModelRequest) is the provider-neutral entry of the
+tool loop: it dispatches to the OpenAI Responses transport here or to the
+Anthropic Messages transport in services/llm_anthropic by the resolved
+route, inside the same _guarded gate (logging, caps, ledger guards) and
+with the queue lease renewed before every send. complete_parts stays a thin
+OpenAI-only wrapper whose request kwargs are byte-identical to before
+(tests/test_llm_complete_turn.py snapshots them).
+
+Eval harness hooks (docs/AI_ESTIMATING_BUILD_SPEC.md 0.4, WS0): every
+public operation hands _guarded the request it is about to send
+(`request=`). _guarded makes exactly two extra calls: (1)
+llm_cassette.begin opens the call's tape (LLM_CASSETTE_MODE; off by
+default, a no-op); a recorded answer returns at once with cost 0 and a
+CassetteUsage, no gate slot, no ledger reservation and no llm_call_log row,
+and a live answer is recorded on the way out; (2) eval_ledger.admit
+reserves the call's maximum cost under the open eval sweep when
+AI_EVAL_LEDGER_ENFORCE is on (EvalBudgetRefused otherwise; a no-op when
+off), and the ticket is released after the llm_call_log row is written
+(llm_gate.log_call stamps eval_sweep_id). Both transports of complete_turn
+(OpenAI Responses and Anthropic Messages) and every legacy operation pass
+through the same two hooks.
 """
 
 from __future__ import annotations
@@ -66,15 +91,19 @@ import ssl
 import time
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Any, Callable
+from typing import Any, Callable, ClassVar
 
 import httpx
 import openai
 
 from app.core.config import Settings, get_settings
+from app.services import eval_ledger
+from app.services import llm_cassette
 from app.services import llm_target
 from app.services import llm_gate
+from app.services import llm_parts
 from app.services import llm_pricing
+from app.services import plans_reader_model_routes as model_routes
 
 logger = logging.getLogger(__name__)
 
@@ -132,12 +161,20 @@ class LlmUsage:
 
     input_tokens INCLUDES cached_tokens and output_tokens INCLUDES
     reasoning_tokens (OpenAI's convention; the Anthropic and self-hosted
-    readers normalize to it)."""
+    readers normalize to it). input_tokens also includes the Anthropic
+    prompt-cache WRITE tokens (cache_write_5m_tokens, cache_write_1h_tokens),
+    which llm_pricing bills at 1.25x and 2x the input price; OpenAI reports
+    none, so they stay 0 there."""
 
     input_tokens: int = 0
     cached_tokens: int = 0
     output_tokens: int = 0
     reasoning_tokens: int = 0
+    cache_write_5m_tokens: int = 0
+    cache_write_1h_tokens: int = 0
+    # Where the numbers came from: "provider" for a live call, "cassette"
+    # for a replayed one (CassetteUsage). A class attribute, not a field.
+    source: ClassVar[str] = "provider"
 
     # Read-only aliases with the field names docs/PLANS_READER.md section 6
     # uses (LlmUsage(input, cached, output, reasoning)), so modules written to
@@ -161,6 +198,24 @@ class LlmUsage:
     def reasoning(self) -> int:
         """Alias of reasoning_tokens."""
         return self.reasoning_tokens
+
+    @property
+    def cache_write_tokens(self) -> int:
+        """Both cache-write counts together (part of input_tokens)."""
+        return self.cache_write_5m_tokens + self.cache_write_1h_tokens
+
+    @property
+    def cache_ratio(self) -> float:
+        """cached / input, 0 when nothing was reported."""
+        return (self.cached_tokens / self.input_tokens) if self.input_tokens > 0 else 0.0
+
+
+@dataclass(frozen=True)
+class CassetteUsage(LlmUsage):
+    """The recorded usage of a call served from a cassette
+    (services/llm_cassette): same numbers, billed $0."""
+
+    source: ClassVar[str] = "cassette"
 
 
 @dataclass(frozen=True)
@@ -216,17 +271,24 @@ class _Feature:
     # unavailable by design (unavailable_reason) whatever the providers say,
     # so the health snapshot leaves it out instead of grading it forever.
     switch: Callable[[Settings], bool] | None = None
+    # AI Estimating only: the pipeline step whose route (provider, model,
+    # effort; services/plans_reader_model_routes) this feature follows. None
+    # = no route (plans_modify): OpenAI on OPENAI_PLANS_MODEL as before.
+    route_step: str | None = None
 
 
-def _plans_feature() -> _Feature:
-    """AI Estimating features: OpenAI only, one model for all four, behind
-    the page's own PLANS_READER_ENABLED switch."""
+def _plans_feature(step: str | None = None) -> _Feature:
+    """AI Estimating features: never self-hosted (the pin keeps them on the
+    3rd-party key in both modes), routed per step when a route names the
+    step, else OpenAI on OPENAI_PLANS_MODEL; all behind the page's own
+    PLANS_READER_ENABLED switch."""
     return _Feature(
         "openai",
         lambda s: s.openai_plans_model,
         lambda s: SELF_HOSTED_MODEL_OFF,
         openai_only=True,
         switch=lambda s: bool(getattr(s, "plans_reader_enabled", False)),
+        route_step=step,
     )
 
 
@@ -310,12 +372,26 @@ _FEATURES: dict[str, _Feature] = {
     ),
     # AI Estimating (docs/PLANS_READER.md): sub agent group calls, the main
     # consolidation, deliverable modifications and the chat. GPT-6 Astra by
-    # default (OPENAI_PLANS_MODEL) in both modes (openai_only).
-    "plans_sub": _plans_feature(),
-    "plans_main": _plans_feature(),
-    "plans_modify": _plans_feature(),
-    "plans_chat": _plans_feature(),
+    # default (OPENAI_PLANS_MODEL) in both modes (openai_only); each follows
+    # its step's route (docs/AI_ESTIMATING_BUILD_SPEC.md 4.2) when one is set.
+    "plans_sub": _plans_feature("sub"),
+    "plans_main": _plans_feature("main"),
+    "plans_modify": _plans_feature(None),
+    "plans_chat": _plans_feature("chat"),
+    # AI Estimating autonomous build (spec 4.2): the recount tool loop, the
+    # independent review and its revise turn, the derive-stage measure
+    # assist, the scope attribution fallback and the quote-parsing fallback.
+    "plans_recount": _plans_feature("recount"),
+    "plans_review": _plans_feature("review"),
+    "plans_revise": _plans_feature("revise"),
+    "plans_derive": _plans_feature("derive"),
+    "plans_scope_attrib": _plans_feature("scope_attrib"),
+    "pricing_quote": _plans_feature("quote"),
 }
+
+PLANS_FEATURES: tuple[str, ...] = tuple(
+    key for key, spec in _FEATURES.items() if spec.openai_only
+)
 
 
 @dataclass(frozen=True)
@@ -324,6 +400,29 @@ class Route:
     model: str
     api_key: str
     base_url: str = ""
+    # AI Estimating routes only: the step the route came from and its
+    # effort (None for every other feature).
+    step: str | None = None
+    effort: str | None = None
+
+
+def _plans_route(spec: _Feature, s: Settings, *, step: str | None = None, snapshot: dict | None = None) -> Route:
+    """The pinned 3rd-party route of a plans feature: the step's route
+    (provider, model, effort) when the step has one, else OpenAI on
+    OPENAI_PLANS_MODEL. Never self-hosted."""
+    chosen = step or spec.route_step
+    if chosen is None:
+        return Route(provider="openai", model=spec.tp_model(s), api_key=s.openai_api_key)
+    sr = model_routes.resolve_step(chosen, s, snapshot=snapshot)
+    if sr.provider == "anthropic":
+        return Route(
+            provider="anthropic", model=sr.model, api_key=s.anthropic_api_key,
+            step=sr.step, effort=sr.effort,
+        )
+    return Route(
+        provider="openai", model=sr.model, api_key=s.openai_api_key,
+        step=sr.step, effort=sr.effort,
+    )
 
 
 def _self_hosted_model(spec: _Feature, s: Settings) -> str:
@@ -346,8 +445,9 @@ def resolve(feature: str, settings: Settings | None = None) -> Route:
     s = llm_target.apply(settings or get_settings())
     spec = _FEATURES[feature]
     if spec.openai_only:
-        # Pinned: the self-hosted switch does not move AI Estimating.
-        return Route(provider="openai", model=spec.tp_model(s), api_key=s.openai_api_key)
+        # Pinned: the self-hosted switch does not move AI Estimating; the
+        # step's route (when set) decides between OpenAI and Anthropic.
+        return _plans_route(spec, s)
     if spec.self_hosted_only:
         explicit = (spec.sh_model(s) or "").strip()
         off = explicit.lower() == SELF_HOSTED_MODEL_OFF
@@ -601,6 +701,12 @@ def last_cost_usd() -> Decimal | None:
     return _last_cost.get()
 
 
+def last_call_replayed() -> bool:
+    """True when the most recent call in this context was served from a
+    cassette (no provider call, cost 0)."""
+    return getattr(_last_usage.get(), "source", None) == "cassette"
+
+
 def _reset_last() -> None:
     """Clear last_usage() / last_cost_usd() at the start of every public
     complete_* call, before anything can raise. Otherwise a call that fails
@@ -657,18 +763,30 @@ def _openai_usage(resp: Any) -> LlmUsage | None:
 def _anthropic_usage(resp: Any) -> LlmUsage | None:
     """Messages API usage. Anthropic's input_tokens EXCLUDES cache reads and
     cache writes, so they are added back to match the OpenAI convention
-    (input includes cached). Never raises."""
+    (input includes cached). Cache writes are split by TTL from
+    usage.cache_creation (5m and 1h); without that detail the whole
+    cache_creation_input_tokens count reads as a 5-minute write. Thinking
+    bills inside output_tokens, so reasoning_tokens stays 0. Never raises."""
     try:
         u = _get(resp, "usage")
         if u is None:
             return None
         cache_read = _int(_get(u, "cache_read_input_tokens"))
         cache_write = _int(_get(u, "cache_creation_input_tokens"))
+        creation = _get(u, "cache_creation")
+        write_5m = _int(_get(creation, "ephemeral_5m_input_tokens"))
+        write_1h = _int(_get(creation, "ephemeral_1h_input_tokens"))
+        if write_5m + write_1h == 0:
+            write_5m = cache_write
+        elif write_5m + write_1h > cache_write:
+            cache_write = write_5m + write_1h
         return LlmUsage(
             input_tokens=_int(_get(u, "input_tokens")) + cache_read + cache_write,
             cached_tokens=cache_read,
             output_tokens=_int(_get(u, "output_tokens")),
             reasoning_tokens=0,
+            cache_write_5m_tokens=write_5m,
+            cache_write_1h_tokens=write_1h,
         )
     except Exception:  # noqa: BLE001
         return None
@@ -818,27 +936,48 @@ def _self_hosted_call(
 # ── Public operations ────────────────────────────────────────────────────────
 
 
-def _guarded(feature: str, route: Route, s: Settings, fn: Callable[[], Any]) -> Any:
+def _guarded(
+    feature: str, route: Route, s: Settings, fn: Callable[[], Any], *, request: Any = None
+) -> Any:
     """Run one provider call inside the concurrency gate and account for it.
 
     The gate caps in-flight calls per provider (LlmBusy on admission
     timeout); every outcome lands in llm_call_log for the AI monitor, with
     the token usage the transport reported and its cost. The same numbers
-    are exposed through last_usage() / last_cost_usd()."""
+    are exposed through last_usage() / last_cost_usd().
+
+    `request` is what the transport is about to send (the cassette
+    fingerprint and the ledger's reserve estimate). Two hooks, see the
+    module docstring: the cassette tape (a hit returns here, $0) and the
+    eval ledger ticket (released after the log row is written)."""
+    tape = llm_cassette.begin(feature, route, s, request)
+    if tape.hit:
+        return _cassette_replay(tape)
     tier = llm_gate.current_tier()
     started = time.monotonic()
     box = _UsageBox()
     box_token = _usage_box.set(box)
+    ticket = eval_ledger.NO_TICKET
     try:
+        ticket = eval_ledger.admit(feature, route, s, request)
         with llm_gate.slot(route.provider, tier, s):
             result = fn()
     except Exception as exc:
-        _log(feature, route, tier, started, box.usage, exc)
+        ticket.release(_log(feature, route, tier, started, box.usage, exc), exc)
         raise
     finally:
         _usage_box.reset(box_token)
-    _log(feature, route, tier, started, box.usage, None)
+    ticket.release(_log(feature, route, tier, started, box.usage, None))
+    tape.record(result, box.usage)
     return result
+
+
+def _cassette_replay(tape: llm_cassette.Tape) -> Any:
+    """A cassette hit: publish the recorded usage (CassetteUsage) with cost
+    0 and return the recorded result. No gate, no ledger, no log row."""
+    _last_usage.set(tape.usage)
+    _last_cost.set(Decimal("0"))
+    return tape.result
 
 
 def _log(
@@ -848,9 +987,10 @@ def _log(
     started: float,
     usage: LlmUsage | None,
     error: Exception | None,
-) -> None:
+) -> Decimal | None:
     """Publish the call's usage and cost to last_usage() / last_cost_usd()
-    and write its llm_call_log row (log_call never raises)."""
+    and write its llm_call_log row (log_call never raises). Returns the
+    cost (the eval ledger commits it)."""
     cost = llm_pricing.cost_for(route.model, usage) if usage is not None else None
     _last_usage.set(usage)
     _last_cost.set(cost)
@@ -868,6 +1008,7 @@ def _log(
         reasoning_tokens=usage.reasoning_tokens if usage else None,
         cost_usd=cost,
     )
+    return cost
 
 
 def complete_text(
@@ -896,7 +1037,8 @@ def complete_text(
             client, route.model, system, messages, max_tokens, None, "response", False
         )
 
-    return _guarded(feature, route, s, call)
+    request = {"op": "text", "system": system, "messages": messages, "max_tokens": max_tokens}
+    return _guarded(feature, route, s, call, request=request)
 
 
 def complete_json(
@@ -942,7 +1084,11 @@ def complete_json(
             )
         return parse_json_loose(text)
 
-    return _guarded(feature, route, s, call)
+    request = {
+        "op": "json", "system": system, "messages": messages, "schema": schema,
+        "schema_name": schema_name, "max_tokens": max_tokens,
+    }
+    return _guarded(feature, route, s, call, request=request)
 
 
 def complete_pdf_json(
@@ -1024,7 +1170,11 @@ def complete_pdf_json(
             )
         return parse_json_loose(text)
 
-    return _guarded(feature, route, s, call)
+    request = {
+        "op": "pdf_json", "prompt": prompt, "pdf": pdf_bytes, "filename": filename,
+        "schema": schema, "schema_name": schema_name, "max_tokens": max_tokens,
+    }
+    return _guarded(feature, route, s, call, request=request)
 
 
 def complete_images_json(
@@ -1127,7 +1277,12 @@ def complete_images_json(
             )
         return parse_json_loose(text)
 
-    return _guarded(feature, route, s, call)
+    request = {
+        "op": "images_json", "system": system, "prompt": prompt, "images": images,
+        "media_type": media_type, "schema": schema, "schema_name": schema_name,
+        "max_tokens": max_tokens,
+    }
+    return _guarded(feature, route, s, call, request=request)
 
 
 def _tool_output_item(out: dict) -> dict:
@@ -1262,9 +1417,11 @@ def complete_parts(
     raise LlmBadOutputPermanent instead (bad_input, not retried), because
     resending the same large request would fail the same way at full cost.
 
-    reasoning_effort defaults to PLANS_READER_REASONING_EFFORT for the
-    plans_* features, so every AI Estimating call carries the owner's
-    effort without each caller remembering to pass it.
+    reasoning_effort defaults to the step route's effort for the plans_*
+    features (PLANS_READER_ROUTES, a null route effort inheriting
+    PLANS_READER_REASONING_EFFORT; a feature without a step, plans_modify,
+    uses PLANS_READER_REASONING_EFFORT), so every AI Estimating call
+    carries the configured effort without each caller passing it.
 
     Inside a queue job the lease is renewed right before the request (after
     gate admission), so render time spent before the call and the gate wait
@@ -1272,7 +1429,10 @@ def complete_parts(
     attempt is stale and another worker may own the job) refuses to send.
 
     OpenAI provider only: an anthropic or self-hosted route raises
-    LlmNotConfigured. The client timeout defaults to
+    LlmNotConfigured (and the settings validator refuses to boot with an
+    anthropic route on sub, escalation, chat, or main while
+    PLANS_READER_CONSOLIDATOR_MODE is legacy, the steps this transport
+    serves). The client timeout defaults to
     PLANS_READER_CALL_TIMEOUT_SECONDS (a 240k-token group can take minutes)
     and the SDK's own retries are off: the job queue retries transient
     failures, and one attempt has to fit inside the queue lease.
@@ -1301,7 +1461,9 @@ def complete_parts(
     if previous_response_id:
         kwargs["previous_response_id"] = previous_response_id
     if reasoning_effort is None and _FEATURES[feature].openai_only:
-        reasoning_effort = s.plans_reader_reasoning_effort
+        # The step's route effort (spec 4.2), else the run-wide default
+        # (plans_modify has no route step).
+        reasoning_effort = route.effort or s.plans_reader_reasoning_effort
     if reasoning_effort:
         kwargs["reasoning"] = {"effort": reasoning_effort}
     if tools:
@@ -1324,16 +1486,7 @@ def complete_parts(
     client = _client_for(route, s).with_options(timeout=effective_timeout, max_retries=0)
 
     def call() -> LlmResult:
-        # Late import keeps the queue (and its Supabase client) out of this
-        # module's import graph; renew_lease is a no-op outside a queue job.
-        from app.services import llm_queue
-
-        if not llm_queue.renew_lease():
-            raise LlmLeaseLost(
-                "This AI Estimating attempt lost its queue lease (another worker "
-                "may own the job now), so the request was not sent."
-            )
-        resp = client.responses.create(**kwargs)
+        resp = _send_responses(client, kwargs)
         _raise_if_unusable_parts(resp)
         usage = _openai_usage(resp)
         text = getattr(resp, "output_text", None) or ""
@@ -1351,7 +1504,244 @@ def complete_parts(
             cost_usd=llm_pricing.cost_for(route.model, usage) if usage is not None else None,
         )
 
-    return _guarded(feature, route, s, call)
+    return _guarded(feature, route, s, call, request={"op": "parts", **kwargs})
+
+
+# ── complete_turn: the provider-neutral tool-loop transport (WS2) ───────────
+
+
+def renew_lease_or_raise() -> None:
+    """Renew the queue lease of the job running on this thread right before
+    a request goes out (a no-op outside a queue job). A lost lease refuses
+    to send: the attempt is stale and another worker may own the job."""
+    # Late import keeps the queue (and its Supabase client) out of this
+    # module's import graph.
+    from app.services import llm_queue
+
+    if not llm_queue.renew_lease():
+        raise LlmLeaseLost(
+            "This AI Estimating attempt lost its queue lease (another worker "
+            "may own the job now), so the request was not sent."
+        )
+
+
+def _send_responses(client: Any, kwargs: dict) -> Any:
+    """One Responses API request with the lease renewed first (shared by
+    complete_parts and the OpenAI side of complete_turn)."""
+    renew_lease_or_raise()
+    return client.responses.create(**kwargs)
+
+
+def _responses_tools(req: llm_parts.ModelRequest) -> list[dict]:
+    return [
+        {
+            "type": "function",
+            "name": t.name,
+            "description": t.description,
+            "parameters": t.schema,
+            "strict": True,
+        }
+        for t in req.tools_offered
+    ]
+
+
+def _responses_input(req: llm_parts.ModelRequest) -> list[dict]:
+    """The Responses `input` for a neutral transcript. With a
+    previous_response_id only the turns after the last AssistantTurn go
+    out (tool outputs, then a user message with any images the tools
+    delivered and the extra parts). Without one the whole transcript is
+    replayed: user messages, function_call items for every tool call and
+    their outputs (reasoning items are not replayed), which costs a full
+    uncached resend and is the resume path when the server no longer holds
+    the previous response."""
+    turns: list[llm_parts.Turn] = list(req.messages)
+    if req.previous_response_id:
+        last_assistant = max(
+            (i for i, t in enumerate(turns) if isinstance(t, llm_parts.AssistantTurn)), default=-1
+        )
+        turns = turns[last_assistant + 1 :]
+    items: list[dict] = []
+    for turn in turns:
+        if isinstance(turn, llm_parts.UserTurn):
+            items.append({"role": "user", "content": llm_parts.to_responses_parts(turn.parts)})
+        elif isinstance(turn, llm_parts.AssistantTurn):
+            for call in turn.tool_calls:
+                items.append(
+                    {
+                        "type": "function_call",
+                        "call_id": call.call_id,
+                        "name": call.name,
+                        "arguments": json.dumps(call.args, default=str),
+                    }
+                )
+            if turn.text and not turn.tool_calls:
+                items.append(
+                    {"role": "assistant", "content": [{"type": "output_text", "text": turn.text}]}
+                )
+        elif isinstance(turn, llm_parts.ToolResultsTurn):
+            follow: list[llm_parts.Part] = []
+            for result in turn.results:
+                items.append(_tool_output_item({"call_id": result.call_id, "output": result.text}))
+                if result.images:
+                    follow.append(llm_parts.TextPart(text=f"Images for call {result.call_id}:"))
+                    follow.extend(result.images)
+            follow.extend(turn.extra_parts)
+            if follow:
+                items.append({"role": "user", "content": llm_parts.to_responses_parts(follow)})
+    if not items:
+        raise ValueError("An AI request needs at least one content part.")
+    return items
+
+
+def _responses_kwargs(req: llm_parts.ModelRequest, *, model: str, effort: str | None) -> dict:
+    """The Responses request of a ModelRequest (pure; snapshot-tested)."""
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "instructions": req.system,
+        "input": _responses_input(req),
+    }
+    if req.previous_response_id:
+        kwargs["previous_response_id"] = req.previous_response_id
+    if effort:
+        kwargs["reasoning"] = {"effort": effort}
+    tools = _responses_tools(req)
+    if tools:
+        kwargs["tools"] = tools
+    kwargs["max_output_tokens"] = req.max_tokens
+    if req.response_schema is not None:
+        kwargs["text"] = {
+            "format": {
+                "type": "json_schema",
+                "name": req.schema_name,
+                "schema": req.response_schema,
+                "strict": True,
+            }
+        }
+    if req.cache_key:
+        kwargs["prompt_cache_key"] = req.cache_key
+    return kwargs
+
+
+def _openai_turn(client: Any, kwargs: dict, req: llm_parts.ModelRequest, route: Route) -> llm_parts.ModelTurn:
+    """Send one Responses request and read it as a ModelTurn. A cut-off at
+    the output limit is reported as stop_reason max_tokens (the loop turns
+    it into a forced final round); a content filter stop or a refusal is
+    LlmBadOutputPermanent; any other incomplete reason is retryable."""
+    resp = _send_responses(client, kwargs)
+    usage = _openai_usage(resp)
+    _record_usage(usage)
+    stop = "final"
+    if getattr(resp, "status", None) == "incomplete":
+        reason = getattr(getattr(resp, "incomplete_details", None), "reason", None) or "unknown"
+        if reason == "max_output_tokens":
+            stop = "max_tokens"
+        elif reason in _PERMANENT_INCOMPLETE_REASONS:
+            raise LlmBadOutputPermanent(
+                f"Model response was stopped ({reason}). Retrying the same request "
+                "will not help; change the request and run it again."
+            )
+        else:
+            raise LlmBadOutput(f"Model response was cut off ({reason}). Retry the generation.")
+    if _refusal_text(resp) is not None:
+        raise LlmBadOutputPermanent(
+            "The AI model declined to answer this request. Retrying the same "
+            "request will not help; change the request and run it again."
+        )
+    text = getattr(resp, "output_text", None) or ""
+    tool_calls = llm_parts.tool_call_dicts(_parse_tool_calls(resp))
+    if tool_calls and stop == "final":
+        stop = "tool_use"
+    parsed: Any = None
+    if req.response_schema is not None and stop == "final":
+        parsed = parse_json_loose(text)
+    return llm_parts.ModelTurn(
+        text=text,
+        parsed=parsed,
+        tool_calls=tool_calls,
+        usage=usage or LlmUsage(),
+        cost_usd=llm_pricing.cost_for(route.model, usage) if usage is not None else None,
+        response_id=str(getattr(resp, "id", None) or ""),
+        stop_reason=stop,
+        provider="openai",
+        model=route.model,
+        raw_assistant=(),
+    )
+
+
+def complete_turn(
+    feature: str,
+    req: llm_parts.ModelRequest,
+    *,
+    settings: Settings | None = None,
+) -> llm_parts.ModelTurn:
+    """One model turn of the AI Estimating tool loop on the provider the
+    feature's step routes to (docs/AI_ESTIMATING_BUILD_SPEC.md 4.3).
+
+    The route comes from `req.route` (a run's snapshotted step route) when
+    given, else from the feature's step (`req.step` overrides the feature's
+    default step, e.g. escalation on plans_sub), else today's OpenAI route.
+    Effort: `req.effort`, else the route's, else PLANS_READER_REASONING_EFFORT.
+    The request is checked against the provider's image and payload limits
+    before anything is sent (LlmBadOutputPermanent: the planner must make
+    that unreachable). Both transports run inside _guarded (gate, logging,
+    caps, ledger guards) and renew the queue lease right before sending.
+    A self-hosted route refuses (plan sets never go to the box)."""
+    _reset_last()
+    base = llm_target.apply(settings or get_settings())
+    spec = _FEATURES[feature]
+    if spec.openai_only:
+        snapshot = None
+        if req.route is not None:
+            if not req.step and spec.route_step is None:
+                raise ValueError("A snapshotted route needs the step it belongs to (ModelRequest.step).")
+            snapshot = {req.step or spec.route_step: req.route}
+        route = _plans_route(spec, base, step=req.step, snapshot=snapshot)
+    else:
+        route = resolve(feature, base)
+    if route.provider == "self_hosted":
+        raise LlmNotConfigured(
+            f"The '{feature}' feature needs a 3rd-party provider for tool-loop "
+            "calls; it is routed to the self-hosted pool."
+        )
+    s = base
+    if not route.api_key:
+        var = "ANTHROPIC_API_KEY" if route.provider == "anthropic" else "OPENAI_API_KEY"
+        raise LlmNotConfigured(f"{var} is not configured on the server.")
+    if not route.model:
+        raise LlmNotConfigured(f"No model is configured for the '{feature}' feature.")
+    limits = llm_parts.check_limits(req.messages, route.provider)
+    if not limits.ok:
+        raise LlmBadOutputPermanent(
+            f"This request is too large for the {route.provider} route: {limits.problem()}"
+        )
+    effort = req.effort or route.effort or s.plans_reader_reasoning_effort
+    effective_timeout = float(
+        req.timeout if req.timeout is not None else s.plans_reader_call_timeout_seconds
+    )
+    client = _client_for(route, s).with_options(timeout=effective_timeout, max_retries=0)
+
+    if route.provider == "openai":
+        kwargs = _responses_kwargs(req, model=route.model, effort=effort)
+
+        def call() -> llm_parts.ModelTurn:
+            return _openai_turn(client, kwargs, req, route)
+
+    else:
+        # Late import: llm_anthropic imports this module for the usage and
+        # error types, so the transport is loaded on first use.
+        from app.services import llm_anthropic
+
+        def call() -> llm_parts.ModelTurn:
+            return llm_anthropic.anthropic_turn(
+                client,
+                req,
+                model=route.model,
+                effort=effort,
+                refusal_fallback=bool(s.anthropic_plans_refusal_fallback),
+            )
+
+    request = {"op": "turn", "req": req, "effort": effort}
+    return _guarded(feature, route, s, call, request=request)
 
 
 class _ExtractBudgetReached(Exception):

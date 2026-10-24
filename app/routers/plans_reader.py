@@ -58,7 +58,7 @@ from starlette.concurrency import run_in_threadpool
 from app.core.config import get_settings
 from app.core.deps import CurrentUser, require_ai_estimating, require_internal, require_writer
 from app.core.error_codes import ErrorCode
-from app.core.features import require_plans_reader
+from app.core.features import ai_pricing_allowed, require_plans_reader
 from app.core.ratelimit import ai_rate_limit, report_rate_limit, upload_rate_limit
 from app.core.supabase_client import get_supabase
 from app.models.schemas import (
@@ -70,7 +70,8 @@ from app.models.schemas import (
     AiEstimatingThreadIn,
 )
 from app.routers.files import _read_capped
-from app.services import ai_spend, file_access, llm, llm_queue, storage
+from app.services import ai_spend, eval_ledger, file_access, llm, llm_queue, storage
+from app.services import plans_reader_loop_store, plans_reader_toolloop
 from app.services.notifications import audit
 from app.services.plans_reader_schemas import CATEGORIES, DELIVERABLE_KINDS
 
@@ -380,9 +381,13 @@ class _StatusOut(AiEstimatingStatusOut):
     """GET /status as the page reads it. `promax_max_pages_per_message` is
     the name the setting carries (PLANS_READER_PROMAX_MAX_PAGES_PER_MESSAGE);
     `promax_max_pages` stays for older callers. `spend` is ai_spend.status
-    (the GET /ai-spend payload, `blocked` included)."""
+    (the GET /ai-spend payload, `blocked` included). `eval_ledger` is the
+    WS0 live spend ledger (eval_ledger.status_block): enforced, the open
+    sweep id, global spent and remaining, and the sweep's own; with the
+    ledger off only `enforced: false` and nulls (no table is read)."""
 
     promax_max_pages_per_message: int
+    eval_ledger: dict | None = None
 
 
 @router.get("/status", response_model=_StatusOut)
@@ -409,6 +414,7 @@ def ai_estimating_status(_: CurrentUser = Depends(require_internal)) -> dict:
         "promax_max_pages_per_message": s.plans_reader_promax_max_pages_per_message,
         "upload_max_mb": s.upload_max_bytes // (1024 * 1024),
         "spend": ai_spend.status(get_supabase()),
+        "eval_ledger": eval_ledger.status_block(s),
     }
 
 
@@ -421,6 +427,12 @@ def create_run(body: AiEstimatingRunIn, user: CurrentUser = Depends(require_writ
     one copy request (project files), and nothing spends until start."""
     project_id = _uuid_or_404(body.project_id, "Project") if body.project_id else None
     sb = get_supabase()
+    s = get_settings()
+    eval_case_id = None
+    if body.eval_case_id and getattr(s, "ai_eval_ledger_enforce", False) and not getattr(s, "is_production", False):
+        # The eval runner's leave-one-project-out marker (WS0); ignored on
+        # any server that does not enforce the eval ledger.
+        eval_case_id = str(body.eval_case_id).strip()[:32] or None
     run = _service(
         _runs().create_run,
         sb,
@@ -429,6 +441,7 @@ def create_run(body: AiEstimatingRunIn, user: CurrentUser = Depends(require_writ
         project_id=project_id,
         render_mode=body.render_mode or RENDER_MODES[0],
         user=user,
+        eval_case_id=eval_case_id,
         conflict=False,
     )
     _audit(
@@ -694,6 +707,30 @@ _Intent = Literal["view", "download", "prefetch"]
 _PreviewIntent = Literal["view", "prefetch"]
 
 
+@router.get("/runs/{run_id}/groups/{group_id}/loop")
+def get_group_loop(run_id: str, group_id: str, user: CurrentUser = Depends(require_internal)) -> dict:
+    """The tool loop of one group, read-only (spec section 6 WS2): its
+    durable rounds (plans_reader_loop_rounds) and tool calls
+    (plans_reader_tool_calls), timestamps in America/Los_Angeles. Pricing
+    tool calls and the assistant text from the round that first saw a
+    price are redacted for callers who fail ai_pricing_allowed (the
+    accountant, every role while AI pricing is off or in test state)."""
+    sb = get_supabase()
+    _run_or_404(sb, run_id)
+    _uuid_or_404(group_id, "Group")
+    group = _first(sb, "plans_reader_groups", id=group_id, run_id=run_id)
+    if not group:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Group not found")
+    store = plans_reader_loop_store.SupabaseLoopStore(sb, run_id=run_id)
+    key = plans_reader_loop_store.loop_key(group_id=group_id)
+    return plans_reader_toolloop.loop_view(
+        group,
+        store.rounds(key),
+        store.tool_calls(key),
+        include_pricing=ai_pricing_allowed(user.role),
+    )
+
+
 @router.get("/runs/{run_id}/documents/{doc_id}/download")
 def download_document(
     run_id: str,
@@ -891,6 +928,12 @@ def modify_deliverable(
     (base_version); the job refuses when another version landed first. The
     daily cap is checked before anything is queued."""
     _deliverable_kind_or_404(kind)
+    if kind == "marked_plans" and getattr(get_settings(), "plans_reader_marked_plans_mode", "model") == "code":
+        # WS8: in code mode the marked plans are drawn from the stored
+        # evidence; a model never rewrites them (re-render instead).
+        from app.services import plans_reader_agents as _agents
+
+        raise _conflict(_agents.MSG_MARKED_PLANS_FROM_EVIDENCE)
     sb = get_supabase()
     run = _run_or_404(sb, run_id)
     if run.get("status") not in _HAS_DELIVERABLES:
@@ -943,10 +986,12 @@ def _thread_or_404(sb, run_id: str, thread_id: str) -> dict:
 
 
 @router.get("/runs/{run_id}/chat/threads")
-def list_threads(run_id: str, _: CurrentUser = Depends(require_internal)) -> Any:
+def list_threads(run_id: str, user: CurrentUser = Depends(require_internal)) -> Any:
+    """The run's threads; restricted threads are redacted unless the
+    caller may see AI pricing (spec 5.5, plans_reader_chat.redact_threads)."""
     sb = get_supabase()
     _run_or_404(sb, run_id)
-    return _service(_chat().list_threads, sb, run_id, conflict=False)
+    return _service(_chat().list_threads, sb, run_id, viewer_role=user.role, conflict=False)
 
 
 @router.post("/runs/{run_id}/chat/threads", status_code=status.HTTP_201_CREATED)
@@ -959,11 +1004,14 @@ def create_thread(
 
 
 @router.get("/runs/{run_id}/chat/threads/{thread_id}")
-def get_thread(run_id: str, thread_id: str, _: CurrentUser = Depends(require_internal)) -> dict:
+def get_thread(run_id: str, thread_id: str, user: CurrentUser = Depends(require_internal)) -> dict:
+    """`{thread, messages}`; a pricing viewer (ai_pricing_allowed) reads
+    the pricing answers in full, everyone else gets them redacted
+    (PRICING_REDACTED_MESSAGE, spec 5.5)."""
     sb = get_supabase()
     _run_or_404(sb, run_id)
     _thread_or_404(sb, run_id, thread_id)
-    payload = _service(_chat().get_thread, sb, thread_id, conflict=False)
+    payload = _service(_chat().get_thread, sb, thread_id, viewer_role=user.role, conflict=False)
     if not payload:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Thread not found")
     return payload

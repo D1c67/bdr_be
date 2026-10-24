@@ -1,0 +1,203 @@
+{
+ "category": "general_drawings",
+ "counts": [
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 1,
+   "coverage": "schedule",
+   "description": "Powered restroom mirror - provide electrical power",
+   "doc_index": 1,
+   "document_id": "3107f9ac-a983-47a5-9087-d18355a9e33e",
+   "family_tags": [],
+   "fingerprint": "3761ed8e77a9",
+   "flags": [],
+   "item_key": "other:5_powered_restroom_mirror_provide_electrical_pow|desc=5_powered_restroom_mirror_provide_electrical_pow",
+   "material_category_hint": "General Material",
+   "notes": "LAMPS PLUS; note 'PROVIDE POWER'. Quantity is mirrors requiring power, not a specified receptacle type. Mirror furnishing responsibility and connection requirements need confirmation.",
+   "origin": {
+    "group_id": "6131a96f-39b1-4d6f-bf75-84d91c5cca4c",
+    "group_kind": "sub",
+    "local_id": "c1",
+    "pass": 1
+   },
+   "page": 6,
+   "quantity": 4,
+   "row_id": "C1",
+   "sheet": {
+    "document_id": "3107f9ac-a983-47a5-9087-d18355a9e33e",
+    "page": 6,
+    "sheet_key": "D1P6",
+    "sheet_number": "TI-4"
+   },
+   "sheet_number": "TI-4",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "5",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 1,
+   "coverage": "schedule",
+   "description": "Water heater requiring electrical coordination",
+   "doc_index": 1,
+   "document_id": "3107f9ac-a983-47a5-9087-d18355a9e33e",
+   "family_tags": [],
+   "fingerprint": "71d8502fa47e",
+   "flags": [],
+   "item_key": "other:h_water_heater_requiring_electrical_coordination|desc=h_water_heater_requiring_electrical_coordination",
+   "material_category_hint": "General Material",
+   "notes": "'PER PLUMBING PLANS'; fuel type, voltage, phase, load and connection not specified here. Not counted as electrically heated equipment without confirmation.",
+   "origin": {
+    "group_id": "6131a96f-39b1-4d6f-bf75-84d91c5cca4c",
+    "group_kind": "sub",
+    "local_id": "c2",
+    "pass": 1
+   },
+   "page": 6,
+   "quantity": 1,
+   "row_id": "C2",
+   "sheet": {
+    "document_id": "3107f9ac-a983-47a5-9087-d18355a9e33e",
+    "page": 6,
+    "sheet_key": "D1P6",
+    "sheet_number": "TI-4"
+   },
+   "sheet_number": "TI-4",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "H",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 1,
+   "coverage": "schedule",
+   "description": "Refrigerated bi-level drinking fountain - equipment power coordination",
+   "doc_index": 1,
+   "document_id": "3107f9ac-a983-47a5-9087-d18355a9e33e",
+   "family_tags": [],
+   "fingerprint": "1b21db9597e8",
+   "flags": [],
+   "item_key": "other:j_refrigerated_bi_level_drinking_fountain_equipm|desc=j_refrigerated_bi_level_drinking_fountain_equipm",
+   "material_category_hint": "General Material",
+   "notes": "ELKAY LNTEM8K; one assembly. Electrical rating not stated.",
+   "origin": {
+    "group_id": "6131a96f-39b1-4d6f-bf75-84d91c5cca4c",
+    "group_kind": "sub",
+    "local_id": "c3",
+    "pass": 1
+   },
+   "page": 6,
+   "quantity": 1,
+   "row_id": "C3",
+   "sheet": {
+    "document_id": "3107f9ac-a983-47a5-9087-d18355a9e33e",
+    "page": 6,
+    "sheet_key": "D1P6",
+    "sheet_number": "TI-4"
+   },
+   "sheet_number": "TI-4",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "J",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "inferred",
+   "confidence": 0.95,
+   "coverage": "derived",
+   "description": "Garbage disposal associated with sink D - power and control coordination",
+   "doc_index": 1,
+   "document_id": "3107f9ac-a983-47a5-9087-d18355a9e33e",
+   "family_tags": [],
+   "fingerprint": "d699de6f2851",
+   "flags": [],
+   "item_key": "other:d_garbage_disposal_associated_with_sink_d_power|desc=d_garbage_disposal_associated_with_sink_d_power",
+   "material_category_hint": "General Material",
+   "notes": "Derived from one sink scheduled 'WITH GARBAGE DISPOSAL'. No disposal model, electrical rating or control arrangement stated.",
+   "origin": {
+    "group_id": "6131a96f-39b1-4d6f-bf75-84d91c5cca4c",
+    "group_kind": "sub",
+    "local_id": "c4",
+    "pass": 1
+   },
+   "page": 6,
+   "quantity": 1,
+   "row_id": "C4",
+   "sheet": {
+    "document_id": "3107f9ac-a983-47a5-9087-d18355a9e33e",
+    "page": 6,
+    "sheet_key": "D1P6",
+    "sheet_number": "TI-4"
+   },
+   "sheet_number": "TI-4",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "D",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 1,
+   "coverage": "schedule",
+   "description": "Key-fob-controlled door openings - access control coordination",
+   "doc_index": 1,
+   "document_id": "3107f9ac-a983-47a5-9087-d18355a9e33e",
+   "family_tags": [],
+   "fingerprint": "386bf9ea415e",
+   "flags": [],
+   "item_key": "other:1_24_key_fob_controlled_door_openings_access_con|desc=1_24_key_fob_controlled_door_openings_access_con",
+   "material_category_hint": "Low Voltage",
+   "notes": "Two scheduled openings, not a count of readers or electrified locks. Door 1 is a double-leaf opening; door 24 is single-leaf. Confirm complete access-control hardware, cabling and trade responsibility.",
+   "origin": {
+    "group_id": "6131a96f-39b1-4d6f-bf75-84d91c5cca4c",
+    "group_kind": "sub",
+    "local_id": "c5",
+    "pass": 1
+   },
+   "page": 6,
+   "quantity": 2,
+   "row_id": "C5",
+   "sheet": {
+    "document_id": "3107f9ac-a983-47a5-9087-d18355a9e33e",
+    "page": 6,
+    "sheet_key": "D1P6",
+    "sheet_number": "TI-4"
+   },
+   "sheet_number": "TI-4",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "1, 24",
+   "unit": "EA"
+  }
+ ],
+ "details": [],
+ "floors": [],
+ "questions": [],
+ "row_seq": {
+  "C": 5,
+  "O": 11,
+  "P": 4,
+  "Q": 6,
+  "S": 1
+ },
+ "rows_version": 2,
+ "runs": [],
+ "schedules": [],
+ "scope": [],
+ "source": {
+  "failed_groups": 0,
+  "group_ids": [
+   "6131a96f-39b1-4d6f-bf75-84d91c5cca4c"
+  ],
+  "groups": 1,
+  "rolled_up": false
+ },
+ "specs": []
+}

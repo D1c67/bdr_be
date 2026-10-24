@@ -1,0 +1,1854 @@
+[
+ {
+  "id": "e1005be0-7276-4233-9a19-90395c15664a",
+  "kind": "escalation",
+  "category": "electrical_drawings",
+  "group_index": 0,
+  "pass": 2,
+  "pages": [
+   {
+    "ppi": 260,
+    "h_in": 30.0,
+    "kind": "image",
+    "page": 5,
+    "w_in": 42.0,
+    "tiles": [
+     [
+      0.780037,
+      0.045,
+      0.819963,
+      0.06
+     ]
+    ],
+    "detail": "original",
+    "reasons": [
+     "L4 CONTROL METHOD cell appears malformed; cannot reliably establish the exact printed control text."
+    ],
+    "regions": [
+     "0.78,0.045,0.82,0.06"
+    ],
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+    "source_group_id": "b3cc8575-53ff-4276-86f4-e3598413ac0b"
+   }
+  ],
+  "status": "done",
+  "est_input_tokens": 4768,
+  "attempts": 1,
+  "error": null,
+  "output_len": 1427,
+  "created_at": "2026-10-18T18:51:14.976346+00:00",
+  "started_at": "2026-10-18T18:52:59.363105+00:00",
+  "finished_at": "2026-10-18T18:53:11.20907+00:00"
+ },
+ {
+  "id": "e84a6f85-05a4-4479-b4bc-83a7ee9997a2",
+  "kind": "escalation",
+  "category": "electrical_drawings",
+  "group_index": 1,
+  "pass": 2,
+  "pages": [
+   {
+    "ppi": 260,
+    "h_in": 30.0,
+    "kind": "image",
+    "page": 7,
+    "w_in": 42.0,
+    "tiles": [
+     [
+      0.159982,
+      0.37,
+      0.630037,
+      0.59
+     ]
+    ],
+    "detail": "original",
+    "reasons": [
+     "Confirm small demolition receptacle graphics, particularly filled versus multiple-outlet symbols and the seven square floor-device symbols, against a higher-resolution image."
+    ],
+    "regions": [
+     "0.16,0.37,0.63,0.59"
+    ],
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+    "source_group_id": "988acfd4-b5d7-4522-b7af-92d291d12fba"
+   }
+  ],
+  "status": "done",
+  "est_input_tokens": 15133,
+  "attempts": 1,
+  "error": null,
+  "output_len": 3380,
+  "created_at": "2026-10-18T18:51:14.976346+00:00",
+  "started_at": "2026-10-18T18:53:13.842748+00:00",
+  "finished_at": "2026-10-18T18:53:47.476025+00:00"
+ },
+ {
+  "id": "c0b41554-97fe-4428-bdf8-f8336e92874f",
+  "kind": "escalation",
+  "category": "electrical_drawings",
+  "group_index": 2,
+  "pass": 2,
+  "pages": [
+   {
+    "ppi": 260,
+    "h_in": 30.0,
+    "kind": "image",
+    "page": 8,
+    "w_in": 42.0,
+    "tiles": [
+     [
+      0.169963,
+      0.38,
+      0.409982,
+      0.57
+     ],
+     [
+      0.45,
+      0.4,
+      0.619963,
+      0.55
+     ]
+    ],
+    "detail": "original",
+    "reasons": [
+     "Resolve rectangular fixture boundaries, especially upper narrow paired rectangles, for a complete demolition fixture count; identify two small entry fixture graphics.",
+     "Confirm track/paired-head symbol interpretation and whether each graphic represents one or two separately removable heads."
+    ],
+    "regions": [
+     "0.17,0.38,0.41,0.57",
+     "0.45,0.40,0.62,0.55"
+    ],
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+    "source_group_id": "988acfd4-b5d7-4522-b7af-92d291d12fba"
+   }
+  ],
+  "status": "done",
+  "est_input_tokens": 11901,
+  "attempts": 1,
+  "error": null,
+  "output_len": 5708,
+  "created_at": "2026-10-18T18:51:14.976346+00:00",
+  "started_at": "2026-10-18T18:53:49.653519+00:00",
+  "finished_at": "2026-10-18T18:54:26.018741+00:00"
+ },
+ {
+  "id": "421dfc27-7fcc-4473-8eb4-7730e2081aed",
+  "kind": "main",
+  "category": null,
+  "group_index": 0,
+  "pass": 1,
+  "pages": [],
+  "status": "done",
+  "est_input_tokens": 101509,
+  "attempts": 1,
+  "error": null,
+  "output_len": 88194,
+  "created_at": "2026-10-18T19:01:10.097546+00:00",
+  "started_at": "2026-10-18T19:01:12.345714+00:00",
+  "finished_at": "2026-10-18T19:07:34.608989+00:00"
+ },
+ {
+  "id": "5b32eae5-5f12-43af-9c57-444decf48dd3",
+  "kind": "modify",
+  "category": null,
+  "group_index": 0,
+  "pass": 1,
+  "pages": [],
+  "status": "done",
+  "est_input_tokens": null,
+  "attempts": 1,
+  "error": null,
+  "output_len": 110,
+  "created_at": "2026-10-18T23:22:33.970921+00:00",
+  "started_at": "2026-10-18T23:22:35.738003+00:00",
+  "finished_at": "2026-10-18T23:22:37.297665+00:00"
+ },
+ {
+  "id": "40ee806a-2ddc-4b52-b723-3cba85be5272",
+  "kind": "rollup",
+  "category": "electrical_drawings",
+  "group_index": 0,
+  "pass": 1,
+  "pages": [],
+  "status": "done",
+  "est_input_tokens": 51053,
+  "attempts": 1,
+  "error": null,
+  "output_len": 136395,
+  "created_at": "2026-10-18T18:51:14.976346+00:00",
+  "started_at": "2026-10-18T18:54:24.146973+00:00",
+  "finished_at": "2026-10-18T19:01:07.828457+00:00"
+ },
+ {
+  "id": "b3cc8575-53ff-4276-86f4-e3598413ac0b",
+  "kind": "sub",
+  "category": "electrical_drawings",
+  "group_index": 0,
+  "pass": 1,
+  "pages": [
+   {
+    "ppi": 155,
+    "h_in": 30.0,
+    "kind": "image",
+    "page": 1,
+    "w_in": 42.0,
+    "tiles": null,
+    "detail": "original",
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20"
+   },
+   {
+    "ppi": 155,
+    "h_in": 30.0,
+    "kind": "image",
+    "page": 2,
+    "w_in": 42.0,
+    "tiles": null,
+    "detail": "original",
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20"
+   },
+   {
+    "ppi": 155,
+    "h_in": 30.0,
+    "kind": "image",
+    "page": 3,
+    "w_in": 42.0,
+    "tiles": null,
+    "detail": "original",
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20"
+   },
+   {
+    "ppi": 155,
+    "h_in": 30.0,
+    "kind": "image",
+    "page": 4,
+    "w_in": 42.0,
+    "tiles": null,
+    "detail": "original",
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20"
+   },
+   {
+    "ppi": 155,
+    "h_in": 30.0,
+    "kind": "image",
+    "page": 5,
+    "w_in": 42.0,
+    "tiles": null,
+    "detail": "original",
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20"
+   },
+   {
+    "ppi": 155,
+    "h_in": 30.0,
+    "kind": "image",
+    "page": 6,
+    "w_in": 42.0,
+    "tiles": null,
+    "detail": "original",
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20"
+   }
+  ],
+  "status": "done",
+  "est_input_tokens": 220094,
+  "attempts": 1,
+  "error": null,
+  "output_len": 68105,
+  "created_at": "2026-10-18T18:44:08.118763+00:00",
+  "started_at": "2026-10-18T18:44:09.508359+00:00",
+  "finished_at": "2026-10-18T18:48:41.240983+00:00"
+ },
+ {
+  "id": "988acfd4-b5d7-4522-b7af-92d291d12fba",
+  "kind": "sub",
+  "category": "electrical_drawings",
+  "group_index": 1,
+  "pass": 1,
+  "pages": [
+   {
+    "ppi": 155,
+    "h_in": 30.0,
+    "kind": "image",
+    "page": 7,
+    "w_in": 42.0,
+    "tiles": null,
+    "detail": "original",
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20"
+   },
+   {
+    "ppi": 155,
+    "h_in": 30.0,
+    "kind": "image",
+    "page": 8,
+    "w_in": 42.0,
+    "tiles": null,
+    "detail": "original",
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20"
+   },
+   {
+    "ppi": 155,
+    "h_in": 30.0,
+    "kind": "image",
+    "page": 9,
+    "w_in": 42.0,
+    "tiles": null,
+    "detail": "original",
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20"
+   },
+   {
+    "ppi": 155,
+    "h_in": 30.0,
+    "kind": "image",
+    "page": 10,
+    "w_in": 42.0,
+    "tiles": null,
+    "detail": "original",
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20"
+   },
+   {
+    "ppi": 155,
+    "h_in": 30.0,
+    "kind": "image",
+    "page": 1,
+    "w_in": 42.0,
+    "tiles": null,
+    "detail": "original",
+    "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1"
+   },
+   {
+    "ppi": 155,
+    "h_in": 30.0,
+    "kind": "image",
+    "page": 2,
+    "w_in": 42.0,
+    "tiles": null,
+    "detail": "original",
+    "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1"
+   }
+  ],
+  "status": "done",
+  "est_input_tokens": 220094,
+  "attempts": 1,
+  "error": null,
+  "output_len": 53701,
+  "created_at": "2026-10-18T18:44:08.118763+00:00",
+  "started_at": "2026-10-18T18:44:10.716104+00:00",
+  "finished_at": "2026-10-18T18:48:53.574193+00:00"
+ },
+ {
+  "id": "7679f3b7-af93-499a-b863-688fec94d0f4",
+  "kind": "sub",
+  "category": "electrical_drawings",
+  "group_index": 2,
+  "pass": 1,
+  "pages": [
+   {
+    "ppi": 155,
+    "h_in": 30.0,
+    "kind": "image",
+    "page": 3,
+    "w_in": 42.0,
+    "tiles": null,
+    "detail": "original",
+    "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1"
+   },
+   {
+    "ppi": 155,
+    "h_in": 30.0,
+    "kind": "image",
+    "page": 4,
+    "w_in": 42.0,
+    "tiles": null,
+    "detail": "original",
+    "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1"
+   },
+   {
+    "ppi": 155,
+    "h_in": 30.0,
+    "kind": "image",
+    "page": 5,
+    "w_in": 42.0,
+    "tiles": null,
+    "detail": "original",
+    "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1"
+   },
+   {
+    "ppi": 155,
+    "h_in": 30.0,
+    "kind": "image",
+    "page": 6,
+    "w_in": 42.0,
+    "tiles": null,
+    "detail": "original",
+    "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1"
+   },
+   {
+    "ppi": 155,
+    "h_in": 30.0,
+    "kind": "image",
+    "page": 7,
+    "w_in": 42.0,
+    "tiles": null,
+    "detail": "original",
+    "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1"
+   },
+   {
+    "ppi": 155,
+    "h_in": 30.0,
+    "kind": "image",
+    "page": 8,
+    "w_in": 42.0,
+    "tiles": null,
+    "detail": "original",
+    "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1"
+   }
+  ],
+  "status": "done",
+  "est_input_tokens": 220094,
+  "attempts": 1,
+  "error": null,
+  "output_len": 29644,
+  "created_at": "2026-10-18T18:44:08.118763+00:00",
+  "started_at": "2026-10-18T18:48:45.0659+00:00",
+  "finished_at": "2026-10-18T18:51:14.225927+00:00"
+ },
+ {
+  "id": "9f58f24b-c023-4dbd-8795-34e1cffd9504",
+  "kind": "sub",
+  "category": "rfp",
+  "group_index": 0,
+  "pass": 1,
+  "pages": [
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 1,
+    "tiles": null,
+    "detail": null,
+    "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 2,
+    "tiles": null,
+    "detail": null,
+    "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 3,
+    "tiles": null,
+    "detail": null,
+    "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 4,
+    "tiles": null,
+    "detail": null,
+    "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 5,
+    "tiles": null,
+    "detail": null,
+    "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 6,
+    "tiles": null,
+    "detail": null,
+    "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0"
+   }
+  ],
+  "status": "done",
+  "est_input_tokens": 12248,
+  "attempts": 1,
+  "error": null,
+  "output_len": 29783,
+  "created_at": "2026-10-18T18:44:08.118763+00:00",
+  "started_at": "2026-10-18T18:51:19.300465+00:00",
+  "finished_at": "2026-10-18T18:52:55.903003+00:00"
+ },
+ {
+  "id": "00817239-6f3e-4a17-aa4a-7c5a01f019bc",
+  "kind": "sub",
+  "category": "specifications",
+  "group_index": 0,
+  "pass": 1,
+  "pages": [
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 1,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 2,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 3,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 4,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 5,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 6,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 7,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 8,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 9,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 10,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 11,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 12,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 13,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 14,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 15,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 16,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 17,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 18,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 19,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 20,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 21,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 22,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 23,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 24,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 25,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 26,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 27,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 28,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 29,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 30,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 31,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 32,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 33,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 34,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 35,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 36,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 37,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 38,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 39,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 40,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 41,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 42,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 43,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 44,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 45,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 46,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 47,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 48,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 49,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 50,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 51,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 52,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 53,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 54,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 55,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 56,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 57,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 58,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 59,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 60,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 61,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 62,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 63,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 64,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 65,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 66,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 67,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 68,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 69,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 70,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 71,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 72,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 73,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 74,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 75,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 76,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 77,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 78,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 79,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 80,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 81,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 82,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 83,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 84,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 85,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 86,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 87,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 88,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 89,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 90,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 91,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 92,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 93,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 94,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 95,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 96,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 97,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 98,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 99,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 100,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 101,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 102,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 103,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 104,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 105,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 106,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 107,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 108,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 109,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 110,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 111,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 112,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 113,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 114,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 115,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 116,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 117,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 118,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 119,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 120,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 121,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 122,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 123,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 124,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 125,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 126,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 127,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 128,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 129,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 130,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 131,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 132,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 133,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 134,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 135,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 136,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 137,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 138,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 139,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 140,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 141,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 142,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 143,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 144,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 145,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 146,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 147,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 148,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 149,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 150,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 151,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 152,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 153,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 154,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 155,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 156,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 157,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 158,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 159,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 160,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 161,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 162,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 163,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 164,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 165,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 166,
+    "tiles": null,
+    "detail": null,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 1,
+    "tiles": null,
+    "detail": null,
+    "document_id": "49386a84-a15d-4fb1-a568-9dece878d298"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 2,
+    "tiles": null,
+    "detail": null,
+    "document_id": "49386a84-a15d-4fb1-a568-9dece878d298"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 1,
+    "tiles": null,
+    "detail": null,
+    "document_id": "43ca786f-4982-44ba-b31c-42054c359858"
+   },
+   {
+    "ppi": null,
+    "kind": "file",
+    "page": 2,
+    "tiles": null,
+    "detail": null,
+    "document_id": "43ca786f-4982-44ba-b31c-42054c359858"
+   }
+  ],
+  "status": "done",
+  "est_input_tokens": 192648,
+  "attempts": 1,
+  "error": null,
+  "output_len": 122186,
+  "created_at": "2026-10-18T18:44:08.118763+00:00",
+  "started_at": "2026-10-18T18:48:57.145773+00:00",
+  "finished_at": "2026-10-18T18:54:19.572207+00:00"
+ }
+]

@@ -1,0 +1,30 @@
+[
+ {
+  "category": "electrical_drawings",
+  "id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+  "name": "26-141 Five Star Tax Resolution Elec_permit.pdf",
+  "page_count": 7,
+  "status": "done"
+ },
+ {
+  "category": "general_drawings",
+  "id": "8f69d0e5-0594-4052-8ed7-06eecb9dee57",
+  "name": "Project Information and Site Plan",
+  "page_count": 1,
+  "status": "done"
+ },
+ {
+  "category": "general_drawings",
+  "id": "3107f9ac-a983-47a5-9087-d18355a9e33e",
+  "name": "Architectural Drawings",
+  "page_count": 7,
+  "status": "done"
+ },
+ {
+  "category": "mechanical_drawings",
+  "id": "32c19c76-1bea-4c7b-99df-3cf1e65f0654",
+  "name": "Mechanical Drawings and Specifications",
+  "page_count": 11,
+  "status": "done"
+ }
+]

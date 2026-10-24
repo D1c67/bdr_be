@@ -70,6 +70,12 @@ logger = logging.getLogger(__name__)
 # label and falls back to these, so a feature added there still reads sensibly
 # before the catalog catches up.
 FEATURE_LABELS: dict[str, str] = {
+    "plans_recount": "AI Estimating: recount",
+    "plans_review": "AI Estimating: review",
+    "plans_revise": "AI Estimating: revise",
+    "plans_derive": "AI Estimating: measure assist",
+    "plans_scope_attrib": "AI Estimating: scope attribution",
+    "pricing_quote": "AI Estimating: quote parsing",
     "boq": "BOQ extraction",
     "estimate": "Estimate recap extraction",
     "quote_pdf": "Vendor quote reading",
@@ -83,6 +89,7 @@ FEATURE_LABELS: dict[str, str] = {
     "rfp_classify": "RFP email classification",
     "rfp_extract": "RFP field extraction",
     "rfp_match": "RFP project matching",
+    "plans_facts": "AI Estimating: page facts",
     "plans_sub": "AI Estimating: sub agents",
     "plans_main": "AI Estimating: main agent",
     "plans_modify": "AI Estimating: deliverable changes",

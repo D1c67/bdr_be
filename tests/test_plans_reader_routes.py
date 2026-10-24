@@ -346,6 +346,7 @@ def test_the_full_route_list_matches_the_contract():
         ("GET", f"{p}/runs/{{run_id}}"),
         ("DELETE", f"{p}/runs/{{run_id}}"),
         ("GET", f"{p}/runs/{{run_id}}/outputs/{{category}}"),
+        ("GET", f"{p}/runs/{{run_id}}/groups/{{group_id}}/loop"),
         ("GET", f"{p}/runs/{{run_id}}/documents/{{doc_id}}/download"),
         ("GET", f"{p}/runs/{{run_id}}/deliverables/{{kind}}/{{version}}/download"),
         ("GET", f"{p}/runs/{{run_id}}/deliverables/{{kind}}/{{version}}/preview-url"),
@@ -1000,14 +1001,61 @@ def test_chat_threads_create_list_and_get(api):
     assert api.calls["create_thread"][0][1]["user"].id == "user-1"
     assert api.client.post(f"/ai-estimating/runs/{RUN_ID}/chat/threads", json={}).status_code == 201
 
-    api.fake(api.svc.chat, "list_threads", result=lambda sb, rid: [{"id": THREAD_ID, "run_id": rid}])
+    api.fake(api.svc.chat, "list_threads", result=lambda sb, rid, **k: [{"id": THREAD_ID, "run_id": rid}])
     assert api.client.get(f"/ai-estimating/runs/{RUN_ID}/chat/threads").json()[0]["run_id"] == RUN_ID
+    assert api.calls["list_threads"][-1][1]["viewer_role"] == api.role
 
-    api.fake(api.svc.chat, "get_thread", result=lambda sb, tid: {"thread": {"id": tid}, "messages": []})
+    api.fake(api.svc.chat, "get_thread", result=lambda sb, tid, **k: {"thread": {"id": tid}, "messages": []})
     assert api.client.get(f"/ai-estimating/runs/{RUN_ID}/chat/threads/{THREAD_ID}").json()["thread"]["id"] == THREAD_ID
+    assert api.calls["get_thread"][-1][1]["viewer_role"] == api.role
     # A thread of another run is not found through this run.
     assert api.client.get(f"/ai-estimating/runs/{OTHER_RUN}/chat/threads/{THREAD_ID}").status_code == 404
     assert api.client.get(f"/ai-estimating/runs/{RUN_ID}/chat/threads/nope").status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("role", "sees_pricing"),
+    [(Role.EXECUTIVE, True), (Role.IT_ADMIN, True), (Role.ACCOUNTANT, False)],
+)
+def test_chat_thread_reads_redact_pricing_answers_by_viewer_role(api, role, sees_pricing):
+    """Spec 5.5: a pricing viewer (ai_pricing_allowed) reads their own
+    pricing answers through GET thread; every other internal role gets the
+    restricted answer replaced by PRICING_REDACTED_MESSAGE. The real
+    plans_reader_chat functions run over the fake tables."""
+    from app.services import plans_reader_chat
+
+    api.settings = _settings(ai_estimating_state="test", ai_pricing_enabled=True, ai_pricing_state="test")
+    if role == Role.ACCOUNTANT:
+        # The accountant only reaches the routes in `live`; pricing stays off for it in every state.
+        api.settings = _settings(ai_estimating_state="live", ai_pricing_enabled=True, ai_pricing_state="live")
+    api.role = role
+    api.seed("plans_reader_runs", _run("done"))
+    api.seed("plans_reader_chat_threads", {"id": THREAD_ID, "run_id": RUN_ID, "title": "Pricing", "updated_at": "2026-10-20T10:00:00", "summary": "total"})
+    api.seed(
+        "plans_reader_chat_messages",
+        {"id": "m1", "thread_id": THREAD_ID, "role": "user", "content": "What is the panel price?", "created_at": "2026-10-20T10:00:00"},
+        {
+            "id": "m2", "thread_id": THREAD_ID, "role": "assistant", "content": "The priced line is 1,234.00.",
+            "pricing_restricted": True, "created_at": "2026-10-20T10:00:01",
+            "tool_calls": [{"name": "price_lookup", "pricing_restricted": True, "result_summary": "median 12.00"}],
+        },
+    )
+    got = api.client.get(f"/ai-estimating/runs/{RUN_ID}/chat/threads/{THREAD_ID}")
+    assert got.status_code == 200
+    messages = got.json()["messages"]
+    assert messages[0]["content"] == "What is the panel price?"
+    answer = messages[1]
+    if sees_pricing:
+        assert answer["content"] == "The priced line is 1,234.00."
+        assert answer["tool_calls"][0]["result_summary"] == "median 12.00"
+    else:
+        assert answer["content"] == plans_reader_chat.PRICING_REDACTED_MESSAGE
+        assert answer["tool_calls"][0]["result_summary"] == "redacted"
+    listed = api.client.get(f"/ai-estimating/runs/{RUN_ID}/chat/threads")
+    assert listed.status_code == 200
+    row = listed.json()[0]
+    assert row["pricing_restricted"] is True
+    assert ("summary" in row) is sees_pricing
 
 
 def test_chat_send_passes_content_and_pro_max(api):
@@ -1118,6 +1166,9 @@ PLANS_TYPES = {
     "plans_reader_main": "plans_main",
     "plans_reader_chat": "plans_chat",
     "plans_reader_modify": "plans_modify",
+    # The page facts job (migration 0165, MC; docs/AI_ESTIMATING_BUILD_SPEC.md
+    # 4.1): non-LLM, claimed in the interactive tier of the plans pass.
+    "plans_reader_facts": "plans_facts",
 }
 
 
@@ -1129,19 +1180,44 @@ def test_plans_job_types_are_registered_outside_the_pipeline_llm_pass():
         assert llm_queue._FEATURE_BY_TYPE[job_type] == feature
         assert llm_queue._spec(job_type).feature == feature
     assert set(llm_queue.PLANS_JOB_TYPES) == set(PLANS_TYPES)
-    assert set(llm_queue.PLANS_INTERACTIVE_JOB_TYPES) == {"plans_reader_chat", "plans_reader_modify"}
+    assert set(llm_queue.PLANS_INTERACTIVE_JOB_TYPES) == {"plans_reader_chat", "plans_reader_modify", "plans_reader_facts"}
     assert llm_queue.JOB_PLANS_READER_CHAT == llm_queue.JOB_PLANS_CHAT == "plans_reader_chat"
 
 
-def test_the_0152_job_type_check_is_exactly_every_job_type():
+def _job_type_check_values(migration: str) -> set[str]:
     import re
     from pathlib import Path
 
-    sql = (Path(__file__).resolve().parents[1] / "supabase/migrations/0152_plans_reader.sql").read_text()
+    sql = (Path(__file__).resolve().parents[1] / "supabase/migrations" / migration).read_text()
     block = re.search(r"llm_jobs_job_type_check\s+check \(job_type in \(([^)]*)\)\)", sql)
-    assert block, "0152 must redefine the llm_jobs job_type CHECK"
-    values = set(re.findall(r"'([a-z_]+)'", block.group(1)))
-    assert values == set(llm_queue.ALL_JOB_TYPES)
+    assert block, f"{migration} must redefine the llm_jobs job_type CHECK"
+    return set(re.findall(r"'([a-z_]+)'", block.group(1)))
+
+
+def _job_type_check_additions(migration: str) -> set[str]:
+    """The types an additive migration appends to the live CHECK (the
+    `v_add` array of its read-and-append do block)."""
+    import re
+    from pathlib import Path
+
+    sql = (Path(__file__).resolve().parents[1] / "supabase/migrations" / migration).read_text()
+    block = re.search(r"v_add\s+constant text\[\] := array\[([^\]]*)\]", sql)
+    assert block, f"{migration} must append to the llm_jobs job_type CHECK"
+    return set(re.findall(r"'([a-z_]+)'", block.group(1)))
+
+
+def test_the_live_job_type_check_is_exactly_every_job_type():
+    """The live CHECK is the last full re-list (0154: the 0152 list plus the
+    email classifier's type) plus what 0165 (MC) appends additively: the
+    page facts job and the ai_pricing job (WS6), nothing else.
+    0152 stays the pre-MC baseline. 0165 appends instead of re-listing so
+    the apply order against other additive migrations (0170) is free."""
+    values = _job_type_check_values("0154_pm_email_classification.sql") | _job_type_check_additions(
+        "0165_plans_reader_autonomy_core.sql"
+    )
+    assert values == set(llm_queue.ALL_JOB_TYPES) | set(llm_queue.PENDING_MC_JOB_TYPES) | {"email_classify"}
+    baseline = _job_type_check_values("0152_plans_reader.sql")
+    assert baseline == set(llm_queue.ALL_JOB_TYPES) - {llm_queue.JOB_PLANS_FACTS, llm_queue.JOB_AI_PRICING}
 
 
 class _ClaimRecorder:
@@ -1537,9 +1613,9 @@ def test_every_service_call_matches_the_real_signature(services):
         (services.runs.rerender_deliverable, (sb, run, "boq"), dict(user=user)),
         (services.runs.claim_change_slot, (sb, RUN_ID), {}),
         (services.runs.advance, (sb, RUN_ID), {}),
-        (services.chat.list_threads, (sb, RUN_ID), {}),
+        (services.chat.list_threads, (sb, RUN_ID), dict(viewer_role=Role.EXECUTIVE)),
         (services.chat.create_thread, (sb, run), dict(title=None, user=user)),
-        (services.chat.get_thread, (sb, THREAD_ID), {}),
+        (services.chat.get_thread, (sb, THREAD_ID), dict(viewer_role=Role.EXECUTIVE)),
         (services.chat.send_message, (sb, run, {"id": THREAD_ID}), dict(content="x", pro_max=False, user=user)),
         (services.chat.run_message, (sb, "m1"), {}),
         (services.agents.run_group, (sb, "g1"), {}),

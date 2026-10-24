@@ -150,6 +150,7 @@ def test_all_sub_apps_enabled_by_default():
         "rfp_buildingconnected": False,
         "rfp_testing": False,
         "ai_estimating": True,
+        "ai_pricing": False,
         "pm_rfi_sync": False,
         "browser_agents": False,
     }

@@ -2862,6 +2862,10 @@ class AiEstimatingRunIn(BaseModel):
     source: AiEstimatingSource = "upload"
     project_id: str | None = Field(default=None, max_length=64)
     render_mode: AiEstimatingRenderMode | None = None
+    # WS0 eval runs only (spec 5.7): the golden case id marks a
+    # leave-one-project-out run; honoured by the route only when the eval
+    # ledger is enforced on the server (never in production).
+    eval_case_id: str | None = Field(default=None, max_length=32)
 
     @field_validator("name")
     @classmethod

@@ -42,7 +42,7 @@ def test_exact_ids_and_dated_snapshots_match(model):
     [
         "gpt-6-astra-mini",       # a sibling model, not a snapshot
         "gpt-6",                  # shorter than the row
-        "gpt-5.4-mini",           # no official price recorded in the repo
+        "gpt-5.3-mini",           # no official price recorded in the repo
         "claude-sonnet-5",
         "self-hosted:qwen-3.5-4b",
         "",

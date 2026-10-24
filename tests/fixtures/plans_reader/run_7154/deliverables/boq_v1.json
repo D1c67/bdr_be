@@ -1,0 +1,651 @@
+{
+ "areas": [
+  {
+   "area": "UMC Outpatient Pharmacy Remodel",
+   "notes": [
+    "Device-count baseline only: branch conductors and conduits must be measured before bid completion; no defensible FT quantities were supplied.",
+    "Existing distribution equipment is not new procurement. Only four GFCI breakers are explicitly designated new.",
+    "Demolition quantities include partial enlarged-tile subtotals and provisional classifications; obtain full-plan confirmation.",
+    "Reconcile field receptacle furnishing with project-selected Uniweb/furniture assemblies before release."
+   ],
+   "sections": [
+    {
+     "note": "Maintain normal/essential power, FA and through-circuit continuity; offer removed electrical equipment to Owner.",
+     "groups": [
+      {
+       "name": "DEMOLITION",
+       "note": null,
+       "subgroups": [
+        {
+         "name": "",
+         "note": null,
+         "items": [
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM DETAILS)",
+           "quantity": 10,
+           "sheet_refs": [
+            "ED2.01"
+           ],
+           "description": "REMOVE DUPLEX RECEPTACLE",
+           "is_accessory": false,
+           "material_note": "Open-symbol count; include indicated box and circuit removal to source.",
+           "wastage_applies": false,
+           "material_category": "Demolition"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM DETAILS)",
+           "quantity": 9,
+           "sheet_refs": [
+            "ED2.01"
+           ],
+           "description": "REMOVE HATCHED RECEPTACLE ASSEMBLY",
+           "is_accessory": false,
+           "material_note": "Patch supersedes filled-duplex classification; differing bar configurations, quantity retained provisionally.",
+           "wastage_applies": false,
+           "material_category": "Demolition"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM DETAILS)",
+           "quantity": 8,
+           "sheet_refs": [
+            "ED2.01"
+           ],
+           "description": "REMOVE MULTIPLE-RECEPTACLE ASSEMBLY",
+           "is_accessory": false,
+           "material_note": "Assembly count, not individual duplex inserts; verify quad interpretation.",
+           "wastage_applies": false,
+           "material_category": "Demolition"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM DETAILS)",
+           "quantity": 7,
+           "sheet_refs": [
+            "ED2.01"
+           ],
+           "description": "REMOVE FLOOR OUTLET ASSEMBLY",
+           "is_accessory": false,
+           "material_note": "Power/data contents, floor-box construction and restoration unresolved.",
+           "wastage_applies": false,
+           "material_category": "Demolition"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM DETAILS)",
+           "quantity": 13,
+           "sheet_refs": [
+            "ED3.01"
+           ],
+           "description": "REMOVE RECESSED DOWNLIGHT",
+           "is_accessory": false,
+           "material_note": "Excludes unidentified entry graphics; resolve circuit retention versus removal.",
+           "wastage_applies": false,
+           "material_category": "Demolition"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM DETAILS)",
+           "quantity": 5,
+           "sheet_refs": [
+            "ED3.01"
+           ],
+           "description": "REMOVE RECTANGULAR LIGHT FIXTURE",
+           "is_accessory": false,
+           "material_note": "Five complete symbols in enlarged tile only; clipped/additional fixtures not included.",
+           "wastage_applies": false,
+           "material_category": "Demolition"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM DETAILS)",
+           "quantity": 2,
+           "sheet_refs": [
+            "ED3.01"
+           ],
+           "description": "REMOVE NARROW LINEAR LIGHT FIXTURE",
+           "is_accessory": false,
+           "material_note": "Two complete outlines in enlarged tile; lengths not established.",
+           "wastage_applies": false,
+           "material_category": "Demolition"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM DETAILS)",
+           "quantity": 3,
+           "sheet_refs": [
+            "ED3.01"
+           ],
+           "description": "REMOVE LIGHTING TRACK ROW",
+           "is_accessory": false,
+           "material_note": "Continuous rows, lengths unknown; heads separately counted.",
+           "wastage_applies": false,
+           "material_category": "Demolition"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM DETAILS)",
+           "quantity": 12,
+           "sheet_refs": [
+            "ED3.01"
+           ],
+           "description": "REMOVE TRACK-LIGHT HEAD ASSEMBLY",
+           "is_accessory": false,
+           "material_note": "Patch retains provisional first-pass total; visible heads are single directional shapes. Do not double to 24.",
+           "wastage_applies": false,
+           "material_category": "Demolition"
+          },
+          {
+           "unit": "EA",
+           "caveat": null,
+           "quantity": 2,
+           "sheet_refs": [
+            "ED3.01"
+           ],
+           "description": "REMOVE LIGHT SWITCH",
+           "is_accessory": false,
+           "material_note": "Keynote 2 includes control wiring removal to source.",
+           "wastage_applies": false,
+           "material_category": "Demolition"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM SCOPE OF WORK)",
+           "quantity": 1,
+           "sheet_refs": [
+            "MD2.01"
+           ],
+           "description": "MAKE SAFE DAMPER ELECTRICAL CONNECTION",
+           "is_accessory": false,
+           "material_note": "Keynote 8 mechanical damper removal; electrical/FA isolation only, module disposition unresolved.",
+           "wastage_applies": false,
+           "material_category": "Demolition"
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "heading": "DEMOLITION"
+    },
+    {
+     "note": "Unmeasured wiring/raceways and unquantified vendor-designed work remain required scope; see estimate notes and allowances.",
+     "groups": [
+      {
+       "name": "SWITCHGEAR",
+       "note": "No new panelboards. Non-GFCI branch rows are provisional replacement quantities for scheduled pharmacy circuits only; confirm reuse before procurement.",
+       "subgroups": [
+        {
+         "name": "CIRCUIT BREAKERS",
+         "note": null,
+         "items": [
+          {
+           "unit": "EA",
+           "caveat": null,
+           "quantity": 4,
+           "sheet_refs": [
+            "E0.03"
+           ],
+           "description": "20A/1P GFCI CIRCUIT BREAKER",
+           "is_accessory": false,
+           "material_note": "1EELC circuits 1, 3, 5, 7; explicitly new. Match existing manufacturer, mounting and AIC; field verify catalog family.",
+           "wastage_applies": false,
+           "material_category": "Switchgear"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM SCOPE OF WORK)",
+           "quantity": 1,
+           "sheet_refs": [
+            "E0.03"
+           ],
+           "description": "20A/1P CIRCUIT BREAKER",
+           "is_accessory": false,
+           "material_note": "1HD circuit 21, 277V lighting; scheduled position, new-versus-reuse unresolved. Match existing 65kA panel requirements.",
+           "wastage_applies": false,
+           "material_category": "Switchgear"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM SCOPE OF WORK)",
+           "quantity": 7,
+           "sheet_refs": [
+            "E0.03"
+           ],
+           "description": "20A/1P CIRCUIT BREAKER",
+           "is_accessory": false,
+           "material_note": "1EELC circuits 9, 11, 13, 18, 20, 22, 24; scheduled positions, new-versus-reuse unresolved. Match manufacturer/AIC.",
+           "wastage_applies": false,
+           "material_category": "Switchgear"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM SCOPE OF WORK)",
+           "quantity": 6,
+           "sheet_refs": [
+            "E0.03"
+           ],
+           "description": "20A/1P CIRCUIT BREAKER",
+           "is_accessory": false,
+           "material_note": "1LH circuits 4, 6, 8, 10, 11, 12; scheduled positions, new-versus-reuse unresolved. Match existing manufacturer and 10kA requirements.",
+           "wastage_applies": false,
+           "material_category": "Switchgear"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM SCOPE OF WORK)",
+           "quantity": 8,
+           "sheet_refs": [
+            "E0.03"
+           ],
+           "description": "20A/1P CIRCUIT BREAKER",
+           "is_accessory": false,
+           "material_note": "1LI circuits 2, 4, 6, 8, 10, 12, 14, 16; scheduled positions, new-versus-reuse unresolved. Match existing manufacturer and 10kA requirements.",
+           "wastage_applies": false,
+           "material_category": "Switchgear"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "name": "OTHER ITEMS",
+       "note": null,
+       "subgroups": [
+        {
+         "name": "RECEPTACLES (RECEPTACLES INCLUDES 4\"S DEEP COMB BOX AND COVER PLATE)",
+         "note": "74 assemblies total. Minimum 20A specification grade; hospital grade where patient-care requirements apply and tamper resistant in offices/corridors. Final colors and factory-furnished devices require coordination.",
+         "items": [
+          {
+           "unit": "EA",
+           "caveat": null,
+           "quantity": 26,
+           "sheet_refs": [
+            "E2.01"
+           ],
+           "description": "DUPLEX RECEPTACLE",
+           "is_accessory": false,
+           "material_note": "Open symbols without G/O prefix; includes A above-counter locations.",
+           "wastage_applies": false,
+           "material_category": "General Material"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM DETAILS)",
+           "quantity": 4,
+           "sheet_refs": [
+            "E2.01"
+           ],
+           "description": "DUPLEX RECEPTACLE, OCCUPANCY CONTROLLED",
+           "is_accessory": false,
+           "material_note": "Office/lounge O devices; controlled marking and relay architecture unresolved.",
+           "wastage_applies": false,
+           "material_category": "General Material"
+          },
+          {
+           "unit": "EA",
+           "caveat": null,
+           "quantity": 8,
+           "sheet_refs": [
+            "E2.01",
+            "E0.03"
+           ],
+           "description": "DUPLEX RECEPTACLE, GFCI",
+           "is_accessory": false,
+           "material_note": "Nine non-O GFCI symbols less one microwave dedicated outlet identified by reader and 1LH-4 schedule.",
+           "wastage_applies": false,
+           "material_category": "General Material"
+          },
+          {
+           "unit": "EA",
+           "caveat": null,
+           "quantity": 1,
+           "sheet_refs": [
+            "E2.01",
+            "E0.03"
+           ],
+           "description": "DUPLEX RECEPTACLE, GFCI, DEDICATED",
+           "is_accessory": false,
+           "material_note": "Lounge microwave, 1LH-4; split from nine non-O GFCI count, not additional.",
+           "wastage_applies": false,
+           "material_category": "General Material"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM DETAILS)",
+           "quantity": 1,
+           "sheet_refs": [
+            "E2.01"
+           ],
+           "description": "DUPLEX RECEPTACLE, GFCI, OCCUPANCY CONTROLLED",
+           "is_accessory": false,
+           "material_note": "Lounge G/O, 1LH-8; coordinate controlled GFCI implementation.",
+           "wastage_applies": false,
+           "material_category": "General Material"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM DETAILS)",
+           "quantity": 1,
+           "sheet_refs": [
+            "E2.01"
+           ],
+           "description": "QUADPLEX RECEPTACLE, OCCUPANCY CONTROLLED",
+           "is_accessory": false,
+           "material_note": "Office 1LH-10; one quad assembly.",
+           "wastage_applies": false,
+           "material_category": "General Material"
+          },
+          {
+           "unit": "EA",
+           "caveat": null,
+           "quantity": 1,
+           "sheet_refs": [
+            "E2.01"
+           ],
+           "description": "QUADPLEX RECEPTACLE",
+           "is_accessory": false,
+           "material_note": "TV location, +60 inches, 1LH-12; adjacent duplex counted separately.",
+           "wastage_applies": false,
+           "material_category": "General Material"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM DETAILS)",
+           "quantity": 28,
+           "sheet_refs": [
+            "E2.01"
+           ],
+           "description": "DUPLEX RECEPTACLE, EMERGENCY",
+           "is_accessory": false,
+           "material_note": "Filled 1EELC workstation symbols; 31 total less three dedicated medical refrigerators. Confirm essential branch and color.",
+           "wastage_applies": false,
+           "material_category": "General Material"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM DETAILS)",
+           "quantity": 3,
+           "sheet_refs": [
+            "E2.01",
+            "E0.03"
+           ],
+           "description": "DUPLEX RECEPTACLE, EMERGENCY, DEDICATED",
+           "is_accessory": false,
+           "material_note": "Medical refrigerators, 1EELC-1/3/5; GFCI protection at scheduled breakers. Split from 31 filled duplexes.",
+           "wastage_applies": false,
+           "material_category": "General Material"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM DETAILS)",
+           "quantity": 1,
+           "sheet_refs": [
+            "E2.01",
+            "E0.03"
+           ],
+           "description": "DUPLEX RECEPTACLE, GFCI, EMERGENCY, DEDICATED",
+           "is_accessory": false,
+           "material_note": "Lounge refrigerator 1EELC-7; GFCI device and GFCI breaker both indicated. Confirm coordinated arrangement.",
+           "wastage_applies": false,
+           "material_category": "General Material"
+          }
+         ]
+        },
+        {
+         "name": "MISCELLANEOUS",
+         "note": "Connection counts do not include unmeasured branch raceway/conductor footage or unscheduled disconnects.",
+         "items": [
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM DETAILS)",
+           "quantity": 6,
+           "sheet_refs": [
+            "E2.01",
+            "M2.01",
+            "M0.02"
+           ],
+           "description": "FIRE/SMOKE DAMPER POWER CONNECTION",
+           "is_accessory": false,
+           "material_note": "Reconnect intercepted existing circuits; damper assemblies by mechanical. Verify actuator load and emergency source; FA devices separate.",
+           "wastage_applies": false,
+           "material_category": "General Material"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM DETAILS)",
+           "quantity": 1,
+           "sheet_refs": [
+            "E2.01",
+            "M0.02"
+           ],
+           "description": "VAV POWER CONNECTION",
+           "is_accessory": false,
+           "material_note": "VV-2-N only; hydronic reheat, not electric heat. Voltage/load/disconnect unresolved. VV-1-N requires RFI.",
+           "wastage_applies": false,
+           "material_category": "General Material"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "name": "LIGHTING FIXTURES",
+       "note": "COMcheck quantities are corroboration only, not additional fixtures. Shaded arrangements are separated pending essential-circuit confirmation.",
+       "subgroups": [
+        {
+         "name": "FIXTURES",
+         "note": null,
+         "items": [
+          {
+           "unit": "EA",
+           "caveat": null,
+           "quantity": 16,
+           "sheet_refs": [
+            "E3.01",
+            "E0.04"
+           ],
+           "description": "L1, 2X4 RECESSED LED TROFFER",
+           "is_accessory": false,
+           "material_note": "METALUX 24GR-LD5-42-UNV-L835-CD1-U; 277V, 40W, 3071 lm, 0\u201310V. Unshaded group.",
+           "wastage_applies": false,
+           "material_category": "Lighting"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM DETAILS)",
+           "quantity": 5,
+           "sheet_refs": [
+            "E3.01",
+            "E0.04"
+           ],
+           "description": "L1, 2X4 RECESSED LED TROFFER, LIFE SAFETY",
+           "is_accessory": false,
+           "material_note": "METALUX 24GR-LD5-42-UNV-L835-CD1-U; shaded group. Confirm source/bypass before selecting emergency accessories.",
+           "wastage_applies": false,
+           "material_category": "Lighting"
+          },
+          {
+           "unit": "EA",
+           "caveat": null,
+           "quantity": 1,
+           "sheet_refs": [
+            "E3.01",
+            "E0.04"
+           ],
+           "description": "L2, 2X2 RECESSED LED TROFFER",
+           "is_accessory": false,
+           "material_note": "METALUX 22GR-LD5-32-UNV-L835-CD1-U; 277V, 30W, 3032 lm, 0\u201310V.",
+           "wastage_applies": false,
+           "material_category": "Lighting"
+          },
+          {
+           "unit": "EA",
+           "caveat": null,
+           "quantity": 13,
+           "sheet_refs": [
+            "E3.01",
+            "E0.04"
+           ],
+           "description": "L3, 6-INCH RECESSED LED DOWNLIGHT",
+           "is_accessory": false,
+           "material_note": "HALO HC620D010 \u2013 HM60525835; 277V, scheduled 21W, 2000 lm, 0\u201310V. Unshaded group.",
+           "wastage_applies": false,
+           "material_category": "Lighting"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM DETAILS)",
+           "quantity": 3,
+           "sheet_refs": [
+            "E3.01",
+            "E0.04"
+           ],
+           "description": "L3, 6-INCH RECESSED LED DOWNLIGHT, SHADED",
+           "is_accessory": false,
+           "material_note": "HALO HC620D010 \u2013 HM60525835; shaded symbols retain 1HD-21 labels. Confirm essential source/control arrangement.",
+           "wastage_applies": false,
+           "material_category": "Lighting"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM DETAILS)",
+           "quantity": 3,
+           "sheet_refs": [
+            "E3.01",
+            "E0.04"
+           ],
+           "description": "L4, WALL-MOUNTED LED TASK LIGHT",
+           "is_accessory": false,
+           "material_note": "WAC LIGHTING BL-29903; 120V, 9W. Control cell unresolved.",
+           "wastage_applies": false,
+           "material_category": "Lighting"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM DETAILS)",
+           "quantity": 7,
+           "sheet_refs": [
+            "E3.01",
+            "E0.04"
+           ],
+           "description": "L5, UNDERCABINET LED LIGHTING RUN",
+           "is_accessory": false,
+           "material_note": "WAC LIGHTING LS-LED14P-30-P; seven variable-length runs, not seven modules. Obtain lengths and complete configurations.",
+           "wastage_applies": false,
+           "material_category": "Lighting"
+          },
+          {
+           "unit": "EA",
+           "caveat": null,
+           "quantity": 2,
+           "sheet_refs": [
+            "E3.01",
+            "E0.04"
+           ],
+           "description": "X1, LED EDGE-LIT EXIT SIGN",
+           "is_accessory": false,
+           "material_note": "SURE-LITES EUS70R; ceiling mount, 277V, 5W; faces/chevrons per plan.",
+           "wastage_applies": false,
+           "material_category": "Lighting"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "name": "LIGHTING CONTROLS",
+       "note": "Complete control-system accessories require coordinated vendor design; no power-pack, relay or bypass device quantities are inferred.",
+       "subgroups": [
+        {
+         "name": "CONTROLS",
+         "note": null,
+         "items": [
+          {
+           "unit": "EA",
+           "caveat": null,
+           "quantity": 3,
+           "sheet_refs": [
+            "E3.01"
+           ],
+           "description": "CEILING OCCUPANCY SENSOR",
+           "is_accessory": false,
+           "material_note": "Dual technology: motion and microphonic. Coordinate zones and dimmer overrides.",
+           "wastage_applies": false,
+           "material_category": "Lighting"
+          },
+          {
+           "unit": "EA",
+           "caveat": null,
+           "quantity": 10,
+           "sheet_refs": [
+            "E3.01"
+           ],
+           "description": "WALL DIMMER",
+           "is_accessory": false,
+           "material_note": "Coordinate 0\u201310V drivers and sensor override operation; excludes integral occupancy and lockable-cover units.",
+           "wastage_applies": false,
+           "material_category": "Lighting"
+          },
+          {
+           "unit": "EA",
+           "caveat": null,
+           "quantity": 1,
+           "sheet_refs": [
+            "E3.01"
+           ],
+           "description": "WALL DIMMER WITH LOCKABLE COVER",
+           "is_accessory": false,
+           "material_note": "Keynotes 2 and 5; ceiling-sensor override.",
+           "wastage_applies": false,
+           "material_category": "Lighting"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM DETAILS)",
+           "quantity": 2,
+           "sheet_refs": [
+            "E3.01"
+           ],
+           "description": "WALL OCCUPANCY-SENSOR DIMMER",
+           "is_accessory": false,
+           "material_note": "Office/lounge; dual-technology requirement, integral-device interpretation and compatibility to be confirmed.",
+           "wastage_applies": false,
+           "material_category": "Lighting"
+          },
+          {
+           "unit": "EA",
+           "caveat": "(NEED TO CONFIRM DETAILS)",
+           "quantity": 1,
+           "sheet_refs": [
+            "E3.01"
+           ],
+           "description": "WALL OCCUPANCY-SENSOR SWITCH",
+           "is_accessory": false,
+           "material_note": "Restroom; motion and microphonic dual technology. Confirm symbol/product implementation.",
+           "wastage_applies": false,
+           "material_category": "Lighting"
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "heading": "NEW WORK"
+    }
+   ]
+  }
+ ],
+ "title": "UMC Outpatient Pharmacy Remodel",
+ "subtitle": "1800 W. Charleston Blvd., Las Vegas, NV 89102",
+ "closing_notes": [
+  "This BOQ is not a complete bid takeoff. Measure branch conductors and conduits by size from calibrated plans and verified source locations; do not substitute a lump sum for missing footage.",
+  "Four new GFCI breakers are explicit; 22 other pharmacy branch breakers are provisional pending reuse confirmation. Existing panels, transformers, ATS and feeders are not procurement items.",
+  "Complete demolition lighting quantities, L5 run lengths, FA/Honeywell scope, communications rough-ins, furniture interfaces and existing technology-device relocations remain open.",
+  "Coordinate operational-hospital phasing, temporary services, electrical restoration, rated/acoustical penetrations, testing and owner training.",
+  "Mechanical control sensors and generic catalog/hardware examples are not additional electrical purchases.",
+  "We recommend thoroughly reviewing the entire project to identify any necessary adjustments to scope of work if required."
+ ]
+}

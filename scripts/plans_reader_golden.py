@@ -23,15 +23,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import io
 import json
 import os
-import re
 import sys
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
 from difflib import SequenceMatcher
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -39,68 +36,60 @@ _BE_ROOT = Path(__file__).resolve().parents[1]
 if str(_BE_ROOT) not in sys.path:
     sys.path.insert(0, str(_BE_ROOT))
 
-import openpyxl  # noqa: E402
-
-from app.services.plans_reader_schemas import (  # noqa: E402
+# Item identity, normalization and row similarity live in
+# app/services/electrical_items.py (AI_ESTIMATING_BUILD_SPEC.md 5.1); the
+# script re-exports every moved name so callers and tests are unchanged.
+from app.services.electrical_items import *  # noqa: E402, F403
+from app.services.electrical_items import (  # noqa: E402, F401
     BOQ_GROUPS,
     BOQ_LEVEL0,
     BOQ_SUBGROUPS,
+    EXACT_TOLERANCE,
+    MATCH_THRESHOLD,
     UNITS,
+    WASTAGE_FACTOR,
+    BoqRow,
+    _ACCESSORY_WORDS,
+    _CAVEAT_WORDS,
+    _CONFLICT_PENALTY,
+    _DASHES,
+    _EXTRA_SUBGROUPS,
+    _FRACTIONS,
+    _KEY_PATTERNS,
+    _KNOWN_SUBGROUPS,
+    _MODIFIERS,
+    _POLE_WORDS,
+    _QUOTES,
+    _SUBGROUP_PARENT,
+    _SYNONYMS,
+    _TAG_RE,
+    _UNIT_ALIASES,
+    _VOLTAGE_RE,
+    _canonical,
+    _clean_text,
+    _heading_name,
+    _normalize,
+    _ratio_text,
+    _strip_caveats,
+    key_tokens,
+    normalize_description,
+    normalize_unit,
+    similarity,
 )
 
-MATCH_THRESHOLD = 0.72
-EXACT_TOLERANCE = 0.02
-WASTAGE_FACTOR = 1.1
-DEFAULT_BACKUP_DIR = _BE_ROOT.parent / "backups" / "BDR_Prod_2026-10-01"
-
-_BLANK_SHEETS = {"SHEET1", "CHART1"}
-_ACCESSORY_SUBGROUP = "OTHER CONDUIT ACCESSORIES"
-# Subheads seen in the sent BOQs that are not in the schema vocabulary.
-_EXTRA_SUBGROUPS = ("TRENCH AND UNDERGROUND CONDUITS", "FIXTURES")
-_KNOWN_SUBGROUPS = {s.split("(")[0].strip() for subs in BOQ_SUBGROUPS.values() for s in subs}
-_KNOWN_SUBGROUPS.update(_EXTRA_SUBGROUPS)
-# Subhead prefix -> its group, for item rows that appear before any group
-# heading (seen on single-page site sheets that open with the trench subhead).
-_SUBGROUP_PARENT: tuple[tuple[str, str], ...] = tuple(
-    (prefix, g)
-    for g, subs in BOQ_SUBGROUPS.items()
-    for prefix in sorted({s.split("(")[0].strip().rstrip("S") for s in subs})
-) + (("TRENCH", "WIRING"),)
-_ACCESSORY_WORDS = re.compile(
-    r"\b(CONN|CONNECTOR|COUPLING|STRAP|ANCHOR|SCREW|ADAPTER|LOCKNUT|ELBOW|BUSHING|BLANK COVER)\b"
+from app.services.plans_reader_score import (  # noqa: E402, F401
+    DEFAULT_BACKUP_DIR,
+    _ACCESSORY_SUBGROUP,
+    _BLANK_SHEETS,
+    _boq_from,
+    _find_header_row,
+    _num,
+    find_backup_boq,
+    parse_estimator_boq,
+    rows_from_spec,
 )
-_CAVEAT_WORDS = re.compile(
-    r"ASSUMED|CONFIRM|NOT GIVEN|BY OTHERS|VERIFY|\bTBD\b|NOT SHOWN|NOT PROVIDED"
-)
-_UNIT_ALIASES = {
-    "EA": "EA", "EACH": "EA", "PCS": "EA", "PC": "EA", "NO": "EA", "NOS": "EA",
-    "FT": "FT", "LF": "FT", "FEET": "FT", "FOOT": "FT", "LFT": "FT",
-    "CU FT": "CU FT", "CUFT": "CU FT", "CF": "CU FT", "CFT": "CU FT",
-    "SQ FT": "SQ FT", "SQFT": "SQ FT", "SF": "SQ FT", "SFT": "SQ FT",
-    "LS": "LS", "LOT": "LS", "LUMP SUM": "LS",
-    "CY": "CY", "CU YD": "CY", "CUYD": "CY",
-}
-assert set(_UNIT_ALIASES.values()) <= set(UNITS)
-
 
 # Data shapes ------------------------------------------------------------------
-
-@dataclass
-class BoqRow:
-    area: str
-    section: str
-    group: str
-    subgroup: str
-    description: str
-    quantity: float
-    unit: str
-    is_accessory: bool = False
-    ref: str = ""  # 'SHEET!B14' for the estimator, 'areas[0]...' for the spec
-
-    @property
-    def group_key(self) -> str:
-        return f"{self.section} / {self.group or '-'}"
-
 
 @dataclass
 class MatchedPair:
@@ -133,376 +122,10 @@ class MatchReport:
     threshold: float = MATCH_THRESHOLD
 
 
-# Normalization ----------------------------------------------------------------
-
-_FRACTIONS = {"\u00bd": "1/2", "\u00bc": "1/4", "\u00be": "3/4", "\u215b": "1/8", "\u2153": "1/3"}
-_QUOTES = {
-    "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u2033": '"', "\u00ab": '"', "\u00bb": '"',
-    "\u2018": "'", "\u2019": "'", "\u2032": "'", "`": "'",
-}
-_DASHES = {"\u2013": "-", "\u2014": "-", "\u2212": "-", "\u2010": "-", "\u2011": "-"}
-
-
-def _clean_text(s: Any) -> str:
-    if s is None:
-        return ""
-    return re.sub(r"\s+", " ", str(s).replace("\u00a0", " ")).strip()
-
-
-def normalize_unit(u: Any) -> str:
-    key = _clean_text(u).upper().rstrip(".")
-    key = re.sub(r"[.]", "", key)
-    return _UNIT_ALIASES.get(key, key)
-
-
-def _strip_caveats(s: str) -> str:
-    prev = None
-    while prev != s:
-        prev = s
-        s = re.sub(
-            r"\(([^()]*)\)",
-            lambda m: " " if _CAVEAT_WORDS.search(m.group(1)) else m.group(0),
-            s,
-        )
-    return s
-
-
-def normalize_description(s: Any) -> str:
-    """Uppercase, unify quotes / fractions / dashes, drop caveat parentheticals,
-    collapse spaces and strip trailing punctuation. A rendered AI row carries
-    its material note on a second line in parentheses ("#3/0 THHN/THWN Cu
-    (ASSUMED)\n(Feeder 1: 4 x 300 FT ...)"); only the first line names the
-    item, so the note is dropped before matching."""
-    text = "" if s is None else str(s)
-    # Only a note that starts on its own line and is wrapped in parentheses
-    # is dropped; a line break inside the item text itself is kept.
-    text = re.sub(r"\n\s*\(.*\)\s*$", "", text, flags=re.S)
-    return _normalize(text)
-
-
-@lru_cache(maxsize=65536)
-def _normalize(t: str) -> str:
-    for src, dst in {**_QUOTES, **_DASHES}.items():
-        t = t.replace(src, dst)
-    for src, dst in _FRACTIONS.items():
-        # '1\u00bd' -> '1-1/2', '\u00bd' -> '1/2'
-        t = re.sub(rf"(\d)\s*{src}", rf"\1-{dst}", t)
-        t = t.replace(src, dst)
-    t = t.upper().replace("''", '"')
-    t = _strip_caveats(t)
-    t = re.sub(r"\s+", " ", t)
-    # Mixed numbers: '1 1/4"' -> '1-1/4"'
-    t = re.sub(r"\b(\d+)\s+(\d+/\d+)", r"\1-\2", t)
-    # Inch words after a size: '3/4 IN' / '3/4 INCH' -> '3/4"'
-    t = re.sub(r"(\d)\s*(?:INCHES|INCH|IN\.?)(?=\s|$|[,;)])", r'\1"', t)
-    # Size and conduit marker: '3/4" C EMT' -> '3/4"C EMT'
-    t = re.sub(r'(\d)\s*"\s*C\b', r'\1"C', t)
-    # '3/4"EMT' -> '3/4"C EMT' style consistency is not forced; spaces around
-    # commas and slashes are tidied.
-    t = re.sub(r"\s*,\s*", ", ", t)
-    t = re.sub(r"\s*/\s*", "/", t)
-    t = re.sub(r"\s+", " ", t).strip()
-    t = re.sub(r"[\s.,;:\-]+$", "", t)
-    return t.strip()
-
-
-def _heading_name(text: Any) -> tuple[str, str]:
-    """('WIRING', '(10% wastage ...)') from a two-line heading cell."""
-    raw = "" if text is None else str(text)
-    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
-    if not lines:
-        return "", ""
-    name = _clean_text(lines[0]).upper()
-    note = " ".join(lines[1:])
-    return name, note
-
-
-def _canonical(name: str) -> str:
-    """Heading without trailing notes or parentheticals, for vocabulary checks."""
-    return re.sub(r"\s+", " ", re.sub(r"\(.*", "", name)).strip().upper()
-
-
-# Key tokens -------------------------------------------------------------------
-
-_KEY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("wire", re.compile(r"#\s?(\d+/0|\d+)(?!\s*X)\b")),
-    ("wire", re.compile(r"(?<![#/\d])\b(\d+/0|\d{1,2})\s?AWG\b")),
-    ("kcmil", re.compile(r"\b(\d{3,4})\s?(?:KCMIL|MCM)\b")),
-    ("size", re.compile(r'(?<![#\w/-])(\d+(?:-\d+/\d+)?|\d+/\d+)"')),
-    ("amps", re.compile(r"\b(\d{1,4})\s?A(?:MP|MPS)?\b")),
-    ("poles", re.compile(r"\b(\d{1,2})[\s-]?(?:P|POLES?)\b")),
-    ("fuse", re.compile(r"\b(\d{1,4})\s?AF\b")),
-    ("main", re.compile(r"\b(MLO|MCB)\b")),
-    ("panel", re.compile(r"\b(?:PANEL|SWITCHBOARD|PANELBOARD)\s+'?(?!TYPE\b)(?!\d+A\b)([A-Z0-9-]{1,6})'?(?=[,\s]|$)")),
-    ("kva", re.compile(r"\b(\d+(?:\.\d+)?)\s?KVA\b")),
-    ("nema", re.compile(r"\bNEMA[\s-]?(\d+[A-Z]?)\b")),
-    ("conduit", re.compile(r"\b(EMT|PVC|RGS|RMC|IMC|FMC|LFMC|MC|ENT)\b")),
-    ("strand", re.compile(r"\b(\d+)[\s-]?STRAN?D\b")),
-    ("cable", re.compile(r"\b(CAT\s?\d+E?|RG\d+)\b")),
-    ("cores", re.compile(r"/(\d+)C\b")),  # '#22/3C CONTROL CABLE'
-    ("config", re.compile(r"\b(L?\d{1,2}-\d{2}[RP])\b")),  # 'NEMA L6-50R'
-)
-# A fixture or device tag leading the description: 'E3, ...', 'K6 - ...',
-# 'TYPE A: ...'. Letters only up to 3 characters, or up to 6 with a digit.
-_TAG_RE = re.compile(
-    r"^(?:TYPE\s+)?([A-Z]{1,3}|(?=[A-Z0-9.-]*\d)[A-Z][A-Z0-9.-]{0,5})\s*(?:,|:|\s-\s)"
-)
-_POLE_WORDS = {"SINGLE": "1", "TWO": "2", "THREE": "3"}
-# Device modifiers that make a different line item when only one side has them.
-_MODIFIERS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("GFCI", re.compile(r"\bGFC?I\b")),
-    ("WP", re.compile(r"\b(?:WP|WEATHER ?PROOF|WEATHER RESISTANT|WR)\b")),
-    ("DUPLEX", re.compile(r"\bDUPLEX\b")),
-    ("QUADPLEX", re.compile(r"\bQUAD(?:RU)?PLEX\b|\bFOURPLEX\b")),
-    ("SWITCHED", re.compile(r"\bSWITCHED\b")),
-    ("FLOOR", re.compile(r"\bFLOOR\b")),
-    ("USB", re.compile(r"\bUSB\b")),
-    ("ISOLATED", re.compile(r"\bISOLATED GROUND\b|\bIG\b")),
-    ("PULL STRING", re.compile(r"\bPULL ?(?:STRING|ROPE|TAPE)\b|\bMUL[EL]? ?TAPE\b")),
-    ("EMERGENCY", re.compile(r"\bEMERGENCY\b|\bBATTERY\b")),
-)
-_CONFLICT_PENALTY = {
-    "tag": 0.3, "wire": 0.15, "kcmil": 0.15, "size": 0.15, "amps": 0.15, "poles": 0.15,
-    "kva": 0.15, "conduit": 0.15, "strand": 0.15, "cores": 0.15, "config": 0.15,
-    "fuse": 0.15, "main": 0.15, "panel": 0.3, "volts": 0.15, "nema": 0.1,
-}
-
-
-_VOLTAGE_RE = re.compile(r"\b(\d{3})/(\d{3})V?\b")
-
-
-@lru_cache(maxsize=65536)
-def key_tokens(norm: str) -> frozenset[tuple[str, str]]:
-    """Identity tokens of a normalized description: wire and conduit sizes,
-    amperage, poles, kVA, NEMA rating, conduit type, fixture tag and device
-    modifiers (GFCI, WP, duplex / quadplex, ...)."""
-    toks: set[tuple[str, str]] = set()
-    for kind, pat in _KEY_PATTERNS:
-        for m in pat.finditer(norm):
-            toks.add((kind, m.group(1).replace(" ", "")))
-    for m in _VOLTAGE_RE.finditer(norm):
-        toks.add(("volts", "/".join(sorted((m.group(1), m.group(2))))))
-    for word, n in _POLE_WORDS.items():
-        if re.search(rf"\b{word}[\s-]POLE\b", norm):
-            toks.add(("poles", n))
-    for name, pat in _MODIFIERS:
-        if pat.search(norm):
-            toks.add(("mod", name))
-    m = _TAG_RE.match(norm)
-    if m:
-        toks.add(("tag", m.group(1)))
-    return frozenset(toks)
-
-
-_SYNONYMS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"\bCOPPER\b"), "CU"),
-    (re.compile(r"\bALUMINUM\b"), "AL"),
-    (re.compile(r"\bGFI\b"), "GFCI"),
-    (re.compile(r"\bQUAD(?:RU)?PLEX\b"), "QUADPLEX"),
-    (re.compile(r"\bWEATHER ?PROOF\b"), "WP"),
-    (re.compile(r"\bW/"), "WITH "),
-    (re.compile(r"\bCAT (\d)"), r"CAT\1"),
-    (re.compile(r"\b(\d+/0|\d{1,2}) ?AWG\b"), r"#\1"),
-    (re.compile(r"##"), "#"),
-)
-
-
-def _ratio_text(norm: str) -> str:
-    for pat, rep in _SYNONYMS:
-        norm = pat.sub(rep, norm)
-    return re.sub(r"\s+", " ", norm).strip()
-
-
-def similarity(a: BoqRow, b: BoqRow) -> float:
-    """Score two rows in 0..1.
-
-    Base: difflib ratio of the normalized descriptions (with a few synonyms
-    folded: COPPER / CU, GFI / GFCI, 12 AWG / #12, ...). When either side has
-    key tokens the score is 0.6 x ratio + 0.4 x key-token Jaccard (the key
-    credit fades out below a ratio of 0.6 so a shared size alone cannot carry an
-    unrelated row), then 0.15 off per identity kind that disagrees (0.3 for a
-    fixture tag; wire size, conduit size, amps, poles, conduit type, ...) and per device modifier
-    present on one side only. A same-unit bonus of 0.05 applies, and one side
-    being under half the length of the other costs 0.1. Equal fixture tags in
-    the same section and group score at least 0.75."""
-    na, nb = normalize_description(a.description), normalize_description(b.description)
-    if not na or not nb:
-        return 0.0
-    ratio = SequenceMatcher(None, _ratio_text(na), _ratio_text(nb)).ratio()
-    ka, kb = key_tokens(na), key_tokens(nb)
-    unit_bonus = 0.05 if normalize_unit(a.unit) == normalize_unit(b.unit) else 0.0
-    length_penalty = 0.1 if min(len(na), len(nb)) < 0.5 * max(len(na), len(nb)) else 0.0
-    if not ka and not kb:
-        return max(0.0, min(1.0, ratio + unit_bonus - length_penalty))
-    jacc = len(ka & kb) / len(ka | kb)
-    score = 0.6 * ratio + 0.4 * jacc * min(1.0, ratio / 0.6) + unit_bonus - length_penalty
-    kinds_a: dict[str, set[str]] = defaultdict(set)
-    kinds_b: dict[str, set[str]] = defaultdict(set)
-    for k, v in ka:
-        kinds_a[k].add(v)
-    for k, v in kb:
-        kinds_b[k].add(v)
-    for kind, penalty in _CONFLICT_PENALTY.items():
-        if kinds_a.get(kind) and kinds_b.get(kind) and not (kinds_a[kind] & kinds_b[kind]):
-            score -= penalty
-    score -= 0.15 * len(kinds_a.get("mod", set()) ^ kinds_b.get("mod", set()))
-    tags_a, tags_b = kinds_a.get("tag"), kinds_b.get("tag")
-    if tags_a and tags_a == tags_b and (a.section, a.group) == (b.section, b.group):
-        score = max(score, 0.75 + 0.25 * ratio)
-    return max(0.0, min(1.0, score))
-
 
 # Estimator workbook -----------------------------------------------------------
 
-def _num(v: Any) -> float | None:
-    if isinstance(v, bool):
-        return None
-    if isinstance(v, (int, float)):
-        return float(v)
-    if isinstance(v, str):
-        s = v.strip().replace(",", "")
-        if re.fullmatch(r"-?\d+(?:\.\d+)?", s):
-            return float(s)
-        if re.fullmatch(r"=[\d.+\-*/() ]+", s):  # cached value missing, simple math
-            try:
-                return float(eval(s[1:], {"__builtins__": {}}, {}))  # noqa: S307
-            except Exception:  # noqa: BLE001
-                return None
-    return None
-
-
-def _find_header_row(ws: Any) -> int | None:
-    for r in range(1, min(ws.max_row, 30) + 1):
-        if _clean_text(ws.cell(r, 2).value).upper() == "DESCRIPTION":
-            return r
-    return None
-
-
-def parse_estimator_boq(xlsx_bytes: bytes) -> list[BoqRow]:
-    """Walk every area sheet of an estimator BOQ and return its item rows with
-    the heading hierarchy (section, group, subgroup) resolved."""
-    raw_wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes))
-    val_wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), data_only=True)
-    level0 = set(BOQ_LEVEL0)
-    groups = set(BOQ_GROUPS)
-    rows: list[BoqRow] = []
-    for ws in raw_wb.worksheets:
-        title = _clean_text(ws.title)
-        header = _find_header_row(ws)
-        if header is None or (title.upper() in _BLANK_SHEETS and ws.max_row <= 1):
-            continue  # the blank 'Sheet1' / 'Chart1' and any non-BOQ sheet
-        vws = val_wb[ws.title]
-        section, group, subgroup = "NEW WORK", "", ""
-        for r in range(header + 1, ws.max_row + 1):
-            b_cell = ws.cell(r, 2)
-            desc_raw = b_cell.value
-            desc = _clean_text(desc_raw)
-            if not desc:
-                continue
-            qty = _num(vws.cell(r, 3).value)
-            if qty is None:
-                qty = _num(ws.cell(r, 3).value)
-            unit = normalize_unit(vws.cell(r, 4).value)
-            name, _note = _heading_name(desc_raw)
-            canon = _canonical(name)
-            bold = bool(b_cell.font and b_cell.font.b)
-            align = (b_cell.alignment.horizontal or "") if b_cell.alignment else ""
-            in_vocab = canon in level0 or canon in groups or canon in _KNOWN_SUBGROUPS
-            is_heading = (qty is None and (bold or in_vocab or (desc.isupper() and len(desc) <= 80)))
-            # A vocabulary heading with a stray number in C (seen on
-            # OTHER CONDUIT ACCESSORIES) is still a heading when it has no unit.
-            if not is_heading and in_vocab and bold and not unit:
-                is_heading = True
-            if is_heading:
-                if canon in level0:
-                    section, group, subgroup = canon, "", ""
-                elif canon in groups:
-                    group, subgroup = canon, ""
-                elif canon in _KNOWN_SUBGROUPS:
-                    subgroup = name
-                elif align == "center":
-                    group, subgroup = name, ""
-                elif align == "left" or group:
-                    subgroup = name
-                else:
-                    group, subgroup = name, ""
-                continue
-            if qty is None:
-                continue  # a note row
-            a_raw = ws.cell(r, 1).value
-            accessory = (
-                align == "right"
-                or _canonical(subgroup) == _ACCESSORY_SUBGROUP
-                or (a_raw in (None, "") and bool(_ACCESSORY_WORDS.search(desc.upper())))
-            )
-            if not group and subgroup:
-                csub = _canonical(subgroup)
-                group = next((g for pre, g in _SUBGROUP_PARENT if csub.startswith(pre)), "")
-            rows.append(
-                BoqRow(
-                    area=title,
-                    section=section,
-                    group=group or (section if section == "DEMOLITION" else ""),
-                    subgroup=subgroup,
-                    description=desc,
-                    quantity=qty,
-                    unit=unit,
-                    is_accessory=accessory,
-                    ref=f"{title}!B{r}",
-                )
-            )
-    return rows
-
-
 # AI spec ----------------------------------------------------------------------
-
-def _boq_from(spec: dict[str, Any]) -> dict[str, Any]:
-    if "areas" not in spec and isinstance(spec.get("boq"), dict):
-        return spec["boq"]
-    return spec
-
-
-def rows_from_spec(boq_spec: dict[str, Any]) -> list[BoqRow]:
-    """Flatten a BOQ_SPEC into rows, applying the renderer's wastage rule
-    (quantity x 1.1 on FT rows with wastage_applies). Accepts the full main
-    agent output too (uses its 'boq')."""
-    spec = _boq_from(boq_spec)
-    rows: list[BoqRow] = []
-    for ai, area in enumerate(spec.get("areas") or []):
-        area_name = _clean_text(area.get("area")) or "SHEET"
-        for si, sec in enumerate(area.get("sections") or []):
-            section = _canonical(_clean_text(sec.get("heading"))) or "NEW WORK"
-            for gi, grp in enumerate(sec.get("groups") or []):
-                gname = _canonical(_heading_name(grp.get("name"))[0])
-                if section == "DEMOLITION" and gname not in BOQ_GROUPS:
-                    gname = "DEMOLITION"  # the estimators list demolition rows ungrouped
-                for ui, sub in enumerate(grp.get("subgroups") or []):
-                    sname = _heading_name(sub.get("name"))[0]
-                    for ii, item in enumerate(sub.get("items") or []):
-                        qty = _num(item.get("quantity")) or 0.0
-                        unit = normalize_unit(item.get("unit"))
-                        if unit == "FT" and item.get("wastage_applies"):
-                            qty = qty * WASTAGE_FACTOR
-                        desc = _clean_text(item.get("description"))
-                        caveat = _clean_text(item.get("caveat"))
-                        if caveat and caveat.upper() not in desc.upper():
-                            desc = f"{desc} {caveat}"
-                        rows.append(
-                            BoqRow(
-                                area=area_name,
-                                section=section,
-                                group=gname,
-                                subgroup=sname,
-                                description=desc,
-                                quantity=qty,
-                                unit=unit,
-                                is_accessory=bool(item.get("is_accessory")),
-                                ref=f"areas[{ai}].sections[{si}].groups[{gi}]"
-                                f".subgroups[{ui}].items[{ii}]",
-                            )
-                        )
-    return rows
-
 
 # Matching ---------------------------------------------------------------------
 
@@ -768,33 +391,6 @@ def structure_markdown(rows: list[BoqRow]) -> str:
 
 
 # Backup lookup ----------------------------------------------------------------
-
-def find_backup_boq(prefix: str, backup_dir: Path = DEFAULT_BACKUP_DIR) -> Path:
-    """The estimator `BOQ - COUNTS.xlsx` of the project whose id starts with
-    `prefix` in the production backup (latest round, latest upload)."""
-    rows = json.loads((backup_dir / "data" / "project_files.json").read_text())
-    cands = [
-        r for r in rows
-        if r.get("category") == "boq"
-        and str(r.get("project_id", "")).startswith(prefix)
-        and str(r.get("filename", "")).lower().endswith((".xlsx", ".xlsm"))
-    ]
-    if not cands:
-        raise FileNotFoundError(f"no BOQ xlsx for project prefix {prefix!r} in {backup_dir}")
-    if len({r["project_id"] for r in cands}) > 1:
-        raise ValueError(f"project prefix {prefix!r} is ambiguous")
-    cands.sort(
-        key=lambda r: (
-            "COUNTS" in str(r.get("filename", "")).upper(),
-            r.get("submission_round") or 0,
-            r.get("created_at") or "",
-        )
-    )
-    path = backup_dir / "storage" / "project-files" / cands[-1]["storage_path"]
-    if not path.exists():
-        raise FileNotFoundError(str(path))
-    return path
-
 
 # CLI --------------------------------------------------------------------------
 

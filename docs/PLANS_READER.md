@@ -291,3 +291,71 @@ Owner request: "users should be able to preview the deliverables." Before this t
 - Route `GET /runs/{id}/deliverables/{kind}/{version}/preview-url` (`require_internal`) returns that dict. `?format=pdf` on the download route now works for every office kind (404 `MSG_NO_PDF_KIND` on a PDF kind, `MSG_NO_BRIEF_PDF` while no copy exists).
 - Frontend: `AI_ESTIMATING_FILES.fetchPreviewUrl` calls the route, so `canPreviewInline` is true for xlsx and docx and the Preview button appears on every version; `useFilePreview` polls while `pending` (2.5 s, up to 12 polls) and falls back to the download on `failed` or `unavailable`. The separate "PDF" button on the brief is gone (Preview opens the same copy; the viewer offers Download original); the `aiEstimating.deliverables.pdf` and `.pdfHint` strings were removed from the six locales.
 - Tests: `test_plans_reader_routes` (PDF download for office kinds, preview-url states), `test_plans_reader_runs` (copies for the workbooks, payload fields, path and name helpers), `test_plans_reader_render` (`office_pdf_bytes`).
+
+### 8.7 Autonomous build 2026-10-21 to 2026-10-24 (DEV ONLY)
+
+The autonomous build (spec `docs/AI_ESTIMATING_BUILD_SPEC.md`, untracked; report `docs/AI_ESTIMATING_BUILD_REPORT.md`; log `docs/AI_ESTIMATING_BUILD_LOG.md`) turned the section 8 pipeline into a checked estimating run. Reading now stores per-page facts (WS1). The main consolidator is a tool loop with a `finish` gate instead of one call (WS2, WS4). Branch wire and conduit lengths are derived by code from circuits and routes (WS3). A scope policy engine decides inclusions and exclusions from bid conditions (WS5). A pricing engine prices the BOQ from a cost library and vendor quotes (WS6). An independent review with a targeted recount pass checks the result and revises it (WS7). Every line carries evidence, and an autonomy state drives sign-off (WS8). An eval ledger and harness (WS0) capped and recorded all live spend (ceiling 400.00 USD; 114.46 spent at the report draft, 138.48 on the ledger by 2026-10-24 with the core sweep running). Everything is DEV ONLY on `bpidntbyvoooqvaispup`: all live calls ran on OpenAI, and staging and prod were never touched (no migration, no data, no env change).
+
+New files (manifest `tests/ai_estimating_new_files.txt`, 302 paths at this writing; the report counts 301): 94 `app/services` modules (24 of them in `app/services/pagefacts/`), 4 `app/routers`, 33 scripts, 114 test modules and helpers, 32 fixtures (7154, 7172 and 7177 run fixtures under `tests/fixtures/plans_reader/`), 7 migrations, 16 frontend files (13 components, 3 lib) and 2 docs (`AI_ESTIMATING_BUILD_LOG.md`, `AI_ESTIMATING_EVAL.md`). Existing files changed only through the integrator; the wave 3 spine pass applied 88 collected hook edits (54 applied or adapted, 24 already done, 9 handed back, 1 superseded) and merged 465 locale keys into all six locale files.
+
+Spine order (`plans_reader_runs.py`, spec 4.1). Reading: sub, roll-up and escalation groups as before. Then, per category with `PLANS_READER_RECOUNT_ENABLED`, `_request_recounts` runs the code merge (WS4), the census floors and the pre-gates (`census_floor` and `partial_basis` targets), WS7 target selection and one recount group per sheet (pass 3). The pre-recount v2 output is stored as the category's version 1. Consolidating: the re-merge takes the done recount outputs as patches. One `derive` group (code, $0, with `PLANS_READER_DERIVE_ENABLED`) runs `scope_engine.prepare` (WS5) and then the measure (WS3); main is queued only after derive settles. Main runs the consolidator tool loop in `tools` mode. A `finish` that passes ends the loop (`tool_stop`); a `LoopFailed` falls back to the code assembly. Finish (`_finish_with_main`, all code, fixed order): 1 assemble, 2 `scope_engine.enforce` (records `excluded_lines`), 3 final gates (`run_final`, persisted, `gate_summary` on the run), 4 `evidence.build`, 5 render every deliverable (marked plans from the evidence in `code` mode, annotated plans when enabled), 6 queue the `ai_pricing` job (`pricing_run.autotrigger`) and recompute the autonomy state. Post-run chain (`_advance_post_run`, done runs only): `ai_pricing` -> review -> revise -> BOQ v2 (`review_revision` marker) -> re-price -> autonomy. `PIPELINE_KINDS` are sub, rollup, escalation, recount, derive and main; review and revise are `REVIEW_KINDS`. With every parent flag off (`spine_enabled` false) the close is byte for byte the legacy one.
+
+| Workstream | Main new modules | Migration (dev) | Dev flags |
+|---|---|---|---|
+| S3 contracts | `estimating_contracts`, `plans_reader_tools`, `plans_reader_review_schemas`, `electrical_items`, `pricing_types` | none | none |
+| WS0 eval | `plans_reader_score` (scorer v2), `eval_ledger`, `plans_reader_replay`, `plans_reader_acceptance`, `scripts/eval_run.py` | 0163_ai_eval_ledger (never ships) | `EVAL_ROOT`, `LLM_CASSETTE_DIR`; ledger enforce, cassette mode, sweep id and claim types per process only |
+| WS1 page facts | `app/services/pagefacts/` (24 modules) | 0164_plans_reader_page_facts | `PLANS_READER_PAGE_FACTS_ENABLED=true`, `PLANS_READER_FACTS_RELABEL=true` |
+| WS2 tool loop | `plans_reader_toolloop`, `plans_reader_tool_handlers`, `llm_parts`, `llm_anthropic` (no live run), `plans_reader_model_routes` | none | routes on code defaults; `anthropic_plans_refusal_fallback` true and inert |
+| WS3 measure | `plans_reader_circuits`, `plans_reader_routes`, `plans_reader_measure`, `plans_reader_measure_assist` | none | `PLANS_READER_DERIVE_ENABLED=true`, `PLANS_READER_MEASURE_ASSIST_ENABLED=true`; route_factor 1.00 and home run 150 FT unchanged pending the owner |
+| WS4 consolidation and gates | `plans_reader_merge`, `plans_reader_gates`, `plans_reader_consolidator`, `scripts/plans_reader_import_run.py` | 0165_plans_reader_autonomy_core | `PLANS_READER_CONSOLIDATOR_MODE=tools`, `PLANS_READER_CODE_REGIONS=true`, `PLANS_READER_GATES_BLOCKING=true` |
+| WS5 scope policy | `scope_policy`, `bid_conditions`, `scope_engine`, `scope_attribution` | 0166_ai_scope_policy | `AI_SCOPE_POLICY_ENFORCE=true`, `AI_SCOPE_ATTRIB_LLM=true` |
+| WS6 pricing | `cost_library`, `pricing_engine`, `pricing_run`, `vendor_quotes`, frontend PricingTab | 0167_ai_pricing | `AI_PRICING_ENABLED`, `AI_PRICING_AUTORUN`, `AI_PRICING_CHAT_TOOLS_ENABLED`, `AI_PRICING_AGENT_TOOLS_ENABLED`, `QUOTE_LINES_LLM_FALLBACK_ENABLED` all true; `AI_PRICING_STATE=test` |
+| WS7 review and recount | `plans_reader_bands`, `plans_reader_recount`, `plans_reader_reviewer`, `scripts/review_gauntlet.py` | 0168_plans_reader_review | `PLANS_READER_RECOUNT_ENABLED=true`, `PLANS_READER_REVIEW_MODE=apply` |
+| WS8 evidence and UI | `plans_reader_evidence`, `plans_reader_autonomy`, `plans_reader_annotated`, frontend evidence and sign-off | 0169_plans_reader_evidence_signoff | `PLANS_READER_MARKED_PLANS_MODE=code`, `PLANS_READER_ANNOTATED_PLANS_ENABLED=true` |
+
+All seven migrations went to dev through `apply_migration` with a PostgREST reload, so the dev ledger has rows for them (unlike 0152 and 0153). Dev-only data: 64 cost sources, 1,768 items, 3,665 observations; history band version `hb1-20261021-bbd6157d` (19 rows) active. Tests at the last full run before the core sweep: 12,071 passed with the 2 baseline browser-agent failures (8,436 before the build; totals include the concurrent assistant session's tests from 2026-10-22), ruff clean; frontend `npx eslint .` 0 errors and build exit 0 at the wave 3 fix pass.
+
+Model routes (all OpenAI, owner Q3; spec routes naming `claude-opus-5-5` were replaced, and the Anthropic transport exists as code with fake tests only):
+
+| Step | Route |
+|---|---|
+| sub, escalation | gpt-6-astra medium (fixed by spec) |
+| recount | gpt-6-astra medium; per-group cap raised from 0.80 to 1.50 USD |
+| main consolidator | gpt-6-astra medium (gpt-5.4 truncated with 0 lines on 7154) |
+| review | gpt-6-astra (same model as the builder, the deviation's fallback; no review A/B) |
+| revise | gpt-6-astra |
+| scope attribution | gpt-6-astra low |
+| quote fallback | gpt-6-astra |
+| derive assist | gpt-6-astra (changes nothing on the corpus) |
+
+Where the code differs from the spec (report section 7, numbering kept):
+1. All-OpenAI routing.
+2. WS7 history bands measure 2.33 / 3.46 / 6.05 hours per device; the prototype read only the first labor block of multi-area workbooks.
+3. WS6 program targets missed (see open items).
+4. Recount cap 1.50 USD instead of 0.80.
+5. YMCA's 5-page addendum belongs to 7171 and is excluded, so 7177 has 7 big sheets.
+6. Dollar coverage is printed in both definitions; the in-band one gates.
+7. Hard seed rules with an `unless` became soft (spec 5.8 forbids it).
+8. PF7 maps 33 numbered spec sections, not 34.
+9. E3.01 reads 45 tags on 2 circuits, not 44 on 3.
+10. S2 seeding moved to wave 4 (spend hazard).
+11. The third full 7154 run stands in for the noise repeat, because the smoke tier includes 7154.
+12. Core opens before the gauntlet's second attempt, with the reviewer frozen.
+13. Recount re-merge is not wired for finished runs.
+
+Defaults used where the owner had not answered (spec 2.2): Q2 tiers frozen, Q4 sent truth, Q8 PG-A2 gate, Q9 lowest eligible quote, Q11 seed grades, Q14 thermostat inclusion beats the mechanical fact, Q16 code owns branch rows, Q17 drops 0, Q18 relabel in dev, Q20 override roles, Q21 apply in dev, Q25 proposal lines as suggestions, Q26 sign-off by `VERIFY_ROLES`, Q27 7154 fixtures committed, Q29 both plan outputs.
+
+Open items:
+- E13: the two occupancy-controlled receptacle lines are outside the seed keys (policy question).
+- Demolition lighting 48 of 49: C26 and C28 may count the same entry lights twice (reading question).
+- YMCA: feeder and site measurement and gear vocabulary are outside this build.
+- Five Star: switched and GFCI receptacles are legend knowledge the symbol rows do not carry; junction boxes, ground rod and weld have no rows.
+- Translation closed at 0 USD by owner decision; English placeholders stay in the five other locales.
+- B12 scales: draft at `EVAL_ROOT/manifest/scales_draft.json` (330 labeled, 34 unresolved, 332 pages unsent); not in the live product.
+- The Checks tab recount button stays uninstalled until a reopen path is designed.
+- Missed targets (6 strict xfails): WS6 LOPO fidelity and 1.3 item 4 (owner questions: keep 1.3 item 4 as a gate or report it, and allow a per-project productivity factor); WS3 B9 conduit within 15% on 31.2% (target 60%), within 30% on 50.0% (target 85%), wire within 20% on 43.8% (target 60%), with route_factor 0.90 and home run 60.1 FT awaiting sign-off; WS1 blind titles 18.3% (target 90%); WS8 marks precision 0.762 and recall 0.661 (target 0.85); WS3 markup truth 6 of 8 pages (target 80%).
+- The E3.01 tag count is a measured default for the owner to restate.
+- Core sweep (attempt 2 running on 2026-10-24), WS7 live gauntlet and holdout: results pending at this writing; see `docs/AI_ESTIMATING_BUILD_REPORT.md`.
+- The two commits (other uncommitted work first, then this build) wait for the assistant session's handoff diffs; the holdout refuses a dirty tree outside the `--allow-dirty-paths` list.
+
+Migration 0163 (eval ledger) is dev tooling and never ships to staging or prod; the `EVAL_ROOT` bundles, references and sweeps hold real project dollars and stay out of the repo.

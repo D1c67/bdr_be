@@ -49,9 +49,11 @@ from decimal import Decimal
 from typing import Any
 
 from app.core.config import PLANS_READER_REASONING_EFFORTS, get_settings
-from app.services import ai_spend, llm, llm_errors, llm_pricing, pdf_split, storage
+from app.services import ai_spend, eval_ledger, llm, llm_errors, llm_pricing, pdf_split, storage
 from app.services import plans_reader_images as images
 from app.services import plans_reader_pack as pack
+from app.services import plans_reader_prompt_hash
+from app.services.plans_reader_review_schemas import RECOUNT_SCHEMA, REVIEW_SCHEMA, REVISE_SCHEMA
 from app.services.plans_reader_schemas import (
     BOQ_GROUPS,
     BOQ_LEVEL0,
@@ -60,6 +62,7 @@ from app.services.plans_reader_schemas import (
     CAVEATS,
     DELIVERABLE_KINDS,
     DELIVERABLE_SPEC_SCHEMAS,
+    ESCALATION_SCHEMA,
     ESTIMATE_ALLOWANCES,
     MAIN_AGENT_SCHEMA,
     MATERIAL_CATEGORIES,
@@ -93,18 +96,46 @@ CATEGORY_LABELS: dict[str, str] = {
 }
 
 GROUP_KINDS = ("sub", "rollup", "escalation", "main")
+# Autonomous build (spec 4.2): the kinds run_group dispatches beyond the
+# four legacy single-call kinds. Loop kinds run the WS2 tool loop (main
+# only in consolidator mode tools); derive is code ($0) and runs before
+# the cap check; review kinds run on a done run and end partial on a cap.
+LOOP_KINDS = ("recount", "main", "review", "revise")
+REVIEW_KINDS = ("review", "revise")
 FEATURE_BY_KIND = {
     "sub": "plans_sub",
     "rollup": "plans_sub",
     "escalation": "plans_sub",
     "main": "plans_main",
     "modify": "plans_modify",
+    # Autonomous build (spec 4.2): the tool-loop kinds and the code derive
+    # group (its optional measure assist calls).
+    "recount": "plans_recount",
+    "review": "plans_review",
+    "revise": "plans_revise",
+    "derive": "plans_derive",
 }
+
+
+def _provider_for(feature: str) -> str:
+    """The provider a feature's route resolves to (for conservative pricing)."""
+    try:
+        return str(llm.resolve(feature).provider or "openai")
+    except Exception:  # noqa: BLE001 - pricing bookkeeping never fails a call
+        return "openai"
+
+
 SCHEMA_NAME_BY_KIND = {
     "sub": "plans_sub_agent",
     "rollup": "plans_rollup",
     "escalation": "plans_escalation",
     "main": "plans_main_agent",
+    # Tool-loop kinds (spec 5.8 schemas); main in tools mode answers
+    # through the consolidator's write tools and `finish`, no schema.
+    "recount": "plans_reader_recount",
+    "review": "plans_review",
+    "revise": "plans_revise",
+    "main_tools": "plans_main_tools",
 }
 
 # detail "high" images are resized by OpenAI to a 2,500-patch budget, about
@@ -312,7 +343,7 @@ ESCALATION_SYSTEM = f"""You re-read parts of ONE sheet of a construction bid set
 
 Return a PATCH for this sheet only, in the same schema (doc_index 1, the page number given):
 - pages: one entry for the sheet with the corrected title, page_role, scale, tags and notes; resolution_flags only for what is still unreadable.
-- counts, runs, schedules, details, specs, scope, questions: only rows that are NEW or CORRECTED by what the tiles show. Repeat a corrected row in full with the corrected values and write "corrects first pass: <old value>" in its notes. Do not repeat first-pass rows the tiles do not change.
+- counts, runs, schedules, details, specs, scope, questions: only rows that are NEW or CORRECTED by what the tiles show. Repeat a corrected row in full with the corrected values, set supersedes_row_id to the c-id of the first-pass row it corrects (null for a new row), and set coverage to whole_sheet only when every instance of that item on the sheet lies inside the tiles, else inside_tiles_only. Do not repeat first-pass rows the tiles do not change.
 - Count only what lies inside the tiles. For an item that lies partly outside them, keep the first-pass value and say so in notes. Give positions as page fractions of the WHOLE sheet, not of the tile.
 - The same counting discipline applies: per sheet, keyed notes and schedules override symbols, never invent quantities.
 - summary: what the higher resolution changed.
@@ -404,6 +435,94 @@ Rules:
 - Section headings are {", ".join(BOQ_LEVEL0)}; group names come from: {", ".join(BOQ_GROUPS)}.
 - Markups and marked plans address sheets with doc_index (the D number listed) and page, and points as page fractions with origin top-left.
 - {_NO_PRICING}"""
+
+
+# Main prompt variants of the autonomous build (spec 6 WS3 B8 and WS5 F8).
+# MAIN_SYSTEM stays byte for byte the legacy prompt (prod with the flags
+# off); these are selected for kind main only when their flags are on
+# (main_system_for), composed when both are, and registered with the
+# prompt hash by name.
+_NO_PRICING_ENGINE = (
+    "Never write prices, costs, rates, labor hours or dollar amounts, even when a "
+    "document shows them; the engine prices from your quantities. Quantities, "
+    "descriptions and evidence only."
+)
+_SCOPE_BREAKERS_OLD = (
+    "list the branch breakers of every panel as separate CIRCUIT BREAKER rows under SWITCHGEAR "
+    "(never fold them into the panel row)"
+)
+_SCOPE_BREAKERS_NEW = (
+    "list CIRCUIT BREAKER rows under SWITCHGEAR only for new panels and for panel positions a keynote "
+    "or the schedule marks new (never provisional breakers on existing, spare or space positions; never "
+    "fold them into the panel row)"
+)
+_SCOPE_ALLOWANCES_OLD = (
+    "- extra_allowances: project-specific allowances the documents require (owner allowances, utility "
+    "fees named in the specs), as short row names."
+)
+_SCOPE_ALLOWANCES_NEW = (
+    "- extra_allowances: only an allowance a document names with a dollar amount (an owner allowance "
+    "with its amount), as a short row name; never house-excluded scope (temporary power, HEPA, studies, "
+    "commissioning, patching, firestopping, BIM, training, phasing, ancillary work) and never scope "
+    "another party carries; usually empty."
+)
+_SCOPE_DECISIONS_LINE = (
+    "G3 SCOPE DECISIONS are binding: when the input carries a G3 SCOPE DECISIONS block, follow it (wage "
+    "type, raceway, demolition disposition, breakers, inclusions, exclusions and facts) and never raise an "
+    "RFI on a decided topic."
+)
+_MEASURE_BULLET_OLD = (
+    "  - The estimators always measure branch wire and conduit by size (#12 and #10 THHN/THWN Cu in FT, "
+    '3/4"C EMT in FT) from the plans and the scale; never replace them with a lump sum row. When a route '
+    "is not dimensioned, measure the plan at scale, mark the row (ASSUMED) and state the basis in the "
+    "estimate notes."
+)
+_MEASURE_BULLET_NEW = (
+    "  - Branch wire and conduit rows come from the app's measure output (M rows); never write them; never "
+    "state that scale or calibration is unavailable when the measure output gives scales."
+)
+
+
+def _replaced(text: str, old: str, new: str) -> str:
+    out = text.replace(old, new, 1)
+    assert out != text, f"prompt variant: {old[:40]!r} not found"
+    return out
+
+
+MAIN_SYSTEM_SCOPE = _replaced(
+    _replaced(
+        _replaced(MAIN_SYSTEM, _SCOPE_BREAKERS_OLD, _SCOPE_BREAKERS_NEW), _SCOPE_ALLOWANCES_OLD, _SCOPE_ALLOWANCES_NEW
+    ),
+    "\n\n" + _DATA_NOT_INSTRUCTIONS,
+    "\n\n" + _SCOPE_DECISIONS_LINE + "\n\n" + _DATA_NOT_INSTRUCTIONS,
+)
+MAIN_SYSTEM_MEASURE = _replaced(_replaced(MAIN_SYSTEM, _MEASURE_BULLET_OLD, _MEASURE_BULLET_NEW), _NO_PRICING, _NO_PRICING_ENGINE)
+MAIN_SYSTEM_SCOPE_MEASURE = _replaced(
+    _replaced(MAIN_SYSTEM_SCOPE, _MEASURE_BULLET_OLD, _MEASURE_BULLET_NEW), _NO_PRICING, _NO_PRICING_ENGINE
+)
+for _name, _text in (
+    ("plans_reader_agents.MAIN_SYSTEM_SCOPE", MAIN_SYSTEM_SCOPE),
+    ("plans_reader_agents.MAIN_SYSTEM_MEASURE", MAIN_SYSTEM_MEASURE),
+    ("plans_reader_agents.MAIN_SYSTEM_SCOPE_MEASURE", MAIN_SYSTEM_SCOPE_MEASURE),
+):
+    plans_reader_prompt_hash.register_prompt_part(_name, _text)
+
+
+def main_system_for(settings: Any = None, *, has_measure: bool = False) -> str:
+    """The main system prompt for a run: MAIN_SYSTEM unless the scope
+    policy is enforced (AI_SCOPE_POLICY_ENFORCE: MAIN_SYSTEM_SCOPE) and or
+    the run has a measure output (plans_reader_derive_enabled:
+    MAIN_SYSTEM_MEASURE), composed when both apply."""
+    s = settings if settings is not None else get_settings()
+    scope = bool(getattr(s, "ai_scope_policy_enforce", False))
+    measure = has_measure and bool(getattr(s, "plans_reader_derive_enabled", False))
+    if scope and measure:
+        return MAIN_SYSTEM_SCOPE_MEASURE
+    if scope:
+        return MAIN_SYSTEM_SCOPE
+    if measure:
+        return MAIN_SYSTEM_MEASURE
+    return MAIN_SYSTEM
 
 
 # ---------------------------------------------------------------------------
@@ -648,12 +767,17 @@ def build_ledger(sb, run: dict, documents: list[dict]) -> dict:
     no legend page; a document without page_meta contributes its document
     entry only. Pure data: plan_ledger decides which pages go as images and
     at which detail."""
-    project: dict[str, Any] = {"name": _clean_text(run.get("name"), 200), "number": None, "address": None}
-    if run.get("project_id"):
+    project: dict[str, Any] = {
+        "name": _clean_text(run.get("name"), 200), "number": None, "address": None,
+        # WS5 (spec 5.4 BidConditions): the project record's bid conditions
+        # ride in the ledger for the scope stage; ledger_text never prints them.
+        "wage_type": None, "owner_type": None, "labor_time": None, "labor_needed": None, "project_type": None,
+    }
+    if run.get("project_id") and sb is not None:
         try:
             prows = (
                 sb.table("projects")
-                .select("name, number, address")
+                .select("name, number, address, wage_type, owner_type, labor_time, labor_needed, project_type")
                 .eq("id", run["project_id"])
                 .limit(1)
                 .execute()
@@ -666,6 +790,11 @@ def build_ledger(sb, run: dict, documents: list[dict]) -> dict:
                 "name": _clean_text(prows[0].get("name"), 200) or project["name"],
                 "number": _clean_text(prows[0].get("number"), 40) or None,
                 "address": _clean_text(prows[0].get("address"), 300) or None,
+                "wage_type": prows[0].get("wage_type"),
+                "owner_type": prows[0].get("owner_type"),
+                "labor_time": prows[0].get("labor_time"),
+                "labor_needed": prows[0].get("labor_needed"),
+                "project_type": prows[0].get("project_type"),
             }
     ledger: dict[str, Any] = {
         "project": project,
@@ -692,7 +821,14 @@ def build_ledger(sb, run: dict, documents: list[dict]) -> dict:
             continue
         for entry in own:
             number, title = split_sheet_title(entry.get("title"))
+            if entry.get("sheet_number"):
+                # Page facts (text layer): the printed sheet number beats the
+                # title parse; the title keeps the printed words.
+                number = _clean_text(entry.get("sheet_number"), 40) or number
             role = entry.get("page_role") if entry.get("page_role") in PAGE_ROLES else "other"
+            # Multi-label roles from the page facts (`roles`); a page may be
+            # both a legend and a general notes sheet. Absent without facts.
+            roles = [r for r in (entry.get("roles") or []) if r in PAGE_ROLES] if isinstance(entry.get("roles"), list) else [role]
             if len(ledger["sheet_index"]) < LEDGER_MAX_INDEX_ENTRIES:
                 ledger["sheet_index"].append(
                     {
@@ -704,7 +840,9 @@ def build_ledger(sb, run: dict, documents: list[dict]) -> dict:
                         "page_role": role,
                     }
                 )
-            if role in ("legend_symbols", "general_notes"):
+            for key, want in (("legend_pages", "legend_symbols"), ("general_notes_pages", "general_notes")):
+                if want not in roles:
+                    continue
                 size = _page_size(doc, entry["pdf_page"])
                 ref = {
                     "document_id": str(doc.get("id")),
@@ -714,7 +852,8 @@ def build_ledger(sb, run: dict, documents: list[dict]) -> dict:
                     "w_in": size[0] if size else None,
                     "h_in": size[1] if size else None,
                 }
-                key = "legend_pages" if role == "legend_symbols" else "general_notes_pages"
+                if entry.get("sheet_number"):
+                    ref["sheet_number"] = number
                 ledger[key].append(ref)
     return ledger
 
@@ -738,10 +877,13 @@ def _high_detail_ppi(w_in: float, h_in: float, native: int) -> int:
     return max(36, min(native, int(HIGH_DETAIL_MAX_SIDE_PX / long_side)))
 
 
-def ledger_text(ledger: dict, *, max_tokens: int | None = None) -> str:
+def ledger_text(ledger: dict, *, max_tokens: int | None = None, audience: str | None = None) -> str:
     """The ledger as one text block. Sheet index rows are dropped from the
     end when `max_tokens` would otherwise be passed (the head of the index
-    and every legend reference stay)."""
+    and every legend reference stay). `audience` (`drawing`, `file` or
+    `main`) picks which page-facts blocks a ledger built with the facts
+    prints (pagefacts.ledger.facts_text); a ledger without facts prints
+    nothing extra."""
     project = ledger.get("project") or {}
     docs = {d.get("document_id"): d for d in ledger.get("documents") or []}
 
@@ -771,6 +913,7 @@ def ledger_text(ledger: dict, *, max_tokens: int | None = None) -> str:
             head.append(
                 f"- {img.get('label')}: {_quote(img.get('title') or 'untitled sheet', TITLE_MAX_CHARS)} "
                 f"from {doc_name(img.get('document_id'))} page {img.get('page')}"
+                + (" (legend region only)" if img.get("crop") else "")
             )
     else:
         legends = (ledger.get("legend_pages") or []) + (ledger.get("general_notes_pages") or [])
@@ -781,6 +924,12 @@ def ledger_text(ledger: dict, *, max_tokens: int | None = None) -> str:
                     f"- {_quote(ref.get('title') or 'untitled sheet', TITLE_MAX_CHARS)} "
                     f"from {doc_name(ref.get('document_id'))} page {ref.get('page')}"
                 )
+    if ledger.get("facts"):
+        # Page facts (WS1): legend text, schedules, scales and spec notes
+        # for this audience. A ledger built without facts has no key here.
+        from app.services.pagefacts import ledger as pagefacts_ledger
+
+        head.extend(pagefacts_ledger.facts_text(ledger.get("facts"), audience=audience or "drawing"))
     toc = ledger.get("spec_toc") or []
     tail: list[str] = []
     if toc:
@@ -836,6 +985,12 @@ def plan_ledger(
     is planned as a 42 x 30 sheet, the most common G3 size."""
     plan = {k: v for k, v in ledger.items() if k not in ("images", "image_detail", "text_tokens", "est_tokens", "est_images")}
     refs = _ledger_image_refs(plan)
+    if plan.get("facts"):
+        # Page facts (WS1): no notes image when the notes are text in the
+        # ledger; a legend page sends its legend region only.
+        from app.services.pagefacts import integration as pagefacts_integration
+
+        refs = pagefacts_integration.plan_image_refs(plan, refs)
     candidates = []
     for label, ref in refs:
         w = ref.get("w_in") or 42.0
@@ -845,6 +1000,11 @@ def plan_ledger(
         except ValueError:
             continue
         w_px, h_px = images.px_for_inches(float(w), native), images.px_for_inches(float(h), native)
+        crop = ref.get("crop")
+        native_tokens = images.image_tokens(w_px, h_px)
+        if crop:
+            box = images.box_from_fractions(tuple(float(v) for v in crop), w_px, h_px)  # type: ignore[arg-type]
+            native_tokens = images.image_tokens(max(1, box[2] - box[0]), max(1, box[3] - box[1]))
         candidates.append(
             {
                 "label": label,
@@ -855,7 +1015,8 @@ def plan_ledger(
                 "w_in": float(w),
                 "h_in": float(h),
                 "native_ppi": native,
-                "native_tokens": images.image_tokens(w_px, h_px),
+                "native_tokens": native_tokens,
+                **({"crop": [float(v) for v in crop]} if crop else {}),
             }
         )
     # Text first, with room for the image labels.
@@ -872,6 +1033,7 @@ def plan_ledger(
                     "label": c["label"], "document_id": c["document_id"], "page": c["page"],
                     "category": c["category"], "title": c["title"], "ppi": c["native_ppi"],
                     "detail": "original", "est_tokens": c["native_tokens"],
+                    **({"crop": c["crop"]} if c.get("crop") else {}),
                 }
             )
     elif candidates:
@@ -885,6 +1047,7 @@ def plan_ledger(
                     "category": c["category"], "title": c["title"],
                     "ppi": _high_detail_ppi(c["w_in"], c["h_in"], c["native_ppi"]),
                     "detail": "high", "est_tokens": HIGH_DETAIL_IMAGE_TOKENS,
+                    **({"crop": c["crop"]} if c.get("crop") else {}),
                 }
             )
             room -= HIGH_DETAIL_IMAGE_TOKENS
@@ -989,17 +1152,22 @@ class _PdfCache:
     """Each document's PDF downloaded once per call (docs/PLANS_READER.md 7:
     the group renders straight from memory, nothing is stored)."""
 
-    def __init__(self, documents: dict[str, dict]) -> None:
+    def __init__(self, documents: dict[str, dict], *, pdf_for: Any = None) -> None:
         self.documents = documents
         self._bytes: dict[str, bytes] = {}
         self._sizes: dict[str, list[tuple[float, float]]] = {}
+        # A replay reads the PDFs from a bundle instead of storage.
+        self._pdf_for = pdf_for
 
     def pdf(self, doc_id: str) -> bytes:
         if doc_id not in self._bytes:
             doc = self.documents.get(doc_id)
             if doc is None:
                 raise ValueError("A page in this group belongs to a document that no longer exists.")
-            self._bytes[doc_id] = storage.download_file(doc["storage_path"])
+            if self._pdf_for is not None:
+                self._bytes[doc_id] = self._pdf_for(doc_id)
+            else:
+                self._bytes[doc_id] = storage.download_file(doc["storage_path"])
         return self._bytes[doc_id]
 
     def sizes_pt(self, doc_id: str) -> list[tuple[float, float]]:
@@ -1026,15 +1194,19 @@ def _add_ledger(
     budget_tokens: int,
     include_images: bool,
     max_patches: int,
+    audience: str | None = None,
 ) -> None:
-    """The ledger text, then its images (each after a label naming it)."""
+    """The ledger text, then its images (each after a label naming it).
+    `audience` selects the page-facts blocks of the text (drawing, file or
+    main; see ledger_text). A ledger image with a `crop` (page fractions,
+    the legend region from the page facts) renders that region only."""
     plan = ledger if "images" in ledger else plan_ledger(ledger, budget_tokens=budget_tokens, max_patches=max_patches)
     if not include_images:
         plan = {k: v for k, v in plan.items() if k != "images"}
-        builder.text(ledger_text(plan, max_tokens=budget_tokens), role="ledger")
+        builder.text(ledger_text(plan, max_tokens=budget_tokens, audience=audience), role="ledger")
         return
     image_tokens = sum(int(i.get("est_tokens") or 0) for i in plan.get("images") or [])
-    builder.text(ledger_text(plan, max_tokens=max(1_000, budget_tokens - image_tokens)), role="ledger")
+    builder.text(ledger_text(plan, max_tokens=max(1_000, budget_tokens - image_tokens), audience=audience), role="ledger")
     if cache is None:
         return
     for img in plan.get("images") or []:
@@ -1051,8 +1223,12 @@ def _add_ledger(
             ppi = int(img.get("ppi") or 72)
             if detail == "original":
                 ppi = _safe_ppi(w_pt, h_pt, ppi, max_patches)
+            box = None
+            if img.get("crop"):
+                w_px, h_px = images.px_for_points(w_pt, ppi), images.px_for_points(h_pt, ppi)
+                box = images.box_from_fractions(tuple(float(v) for v in img["crop"]), w_px, h_px)  # type: ignore[arg-type]
             png, w, h = images.render_page_png(
-                cache.pdf(doc_id), page - 1, ppi, max_patches=max_patches if detail == "original" else None
+                cache.pdf(doc_id), page - 1, ppi, box, max_patches=max_patches if detail == "original" else None
             )
         except ValueError:
             # A ledger page that cannot render must not sink the group:
@@ -1061,13 +1237,18 @@ def _add_ledger(
             continue
         builder.text(
             f"{img.get('label')}: {_quote(img.get('title') or 'untitled sheet', TITLE_MAX_CHARS)} "
-            f"(ledger image, {img.get('category')}, page {page})",
+            f"(ledger image, {img.get('category')}, page {page}"
+            + (", legend region only" if img.get("crop") else "")
+            + ")",
             role="ledger_label",
         )
         builder.image(
             png,
             detail=detail,
-            ref={"ref": img.get("label"), "document_id": doc_id, "page": page, "ppi": ppi, "w_px": w, "h_px": h},
+            ref={
+                "ref": img.get("label"), "document_id": doc_id, "page": page, "ppi": ppi, "w_px": w, "h_px": h,
+                **({"crop": [float(v) for v in img["crop"]]} if img.get("crop") else {}),
+            },
         )
 
 
@@ -1126,9 +1307,18 @@ def _add_document_pages(
     *,
     max_patches: int,
     file_max_bytes: int,
+    facts: dict | None = None,
+    block_tokens: int = 2_500,
+    snippets: str | None = None,
 ) -> None:
     """One document's label and its pages: page images (whole or tiles)
-    each after its `D<n> P<p>` label, and PDF spans as input_file chunks."""
+    each after its `D<n> P<p>` label, and PDF spans as input_file chunks.
+    With `facts` (page facts by document id, loaded once per request) a
+    facts block follows every page image and every file span; `snippets`
+    (the document's tier B spec excerpts) close the document. Both are
+    absent without the page facts flags, so the parts are unchanged."""
+    from app.services.pagefacts import integration as pagefacts_integration
+
     doc_id = str(doc["id"])
     pdf = cache.pdf(doc_id)
     total = pdf_split.page_count(pdf)
@@ -1151,21 +1341,24 @@ def _add_document_pages(
                 detail=item.get("detail") or "original",
                 ref={"ref": f"D{n} P{page}", "document_id": doc_id, "page": page, "ppi": ppi, "w_px": w, "h_px": h},
             )
-            continue
-        w_px, h_px = images.px_for_points(w_pt, ppi), images.px_for_points(h_pt, ppi)
-        for k, frac in enumerate(tiles, start=1):
-            box = images.box_from_fractions(tuple(frac), w_px, h_px)  # type: ignore[arg-type]
-            png, w, h = images.render_page_png(pdf, page - 1, ppi, box, max_patches=max_patches)
-            cover = ",".join(f"{float(v):.3f}" for v in frac)
-            builder.text(f"D{n} P{page} tile {k} of {len(tiles)} covering {cover}", role="page_label")
-            builder.image(
-                png,
-                detail=item.get("detail") or "original",
-                ref={
-                    "ref": f"D{n} P{page} T{k}", "document_id": doc_id, "page": page, "ppi": ppi,
-                    "tile": [float(v) for v in frac], "w_px": w, "h_px": h,
-                },
-            )
+        else:
+            w_px, h_px = images.px_for_points(w_pt, ppi), images.px_for_points(h_pt, ppi)
+            for k, frac in enumerate(tiles, start=1):
+                box = images.box_from_fractions(tuple(frac), w_px, h_px)  # type: ignore[arg-type]
+                png, w, h = images.render_page_png(pdf, page - 1, ppi, box, max_patches=max_patches)
+                cover = ",".join(f"{float(v):.3f}" for v in frac)
+                builder.text(f"D{n} P{page} tile {k} of {len(tiles)} covering {cover}", role="page_label")
+                builder.image(
+                    png,
+                    detail=item.get("detail") or "original",
+                    ref={
+                        "ref": f"D{n} P{page} T{k}", "document_id": doc_id, "page": page, "ppi": ppi,
+                        "tile": [float(v) for v in frac], "w_px": w, "h_px": h,
+                    },
+                )
+        block = pagefacts_integration.page_block(facts, doc_id, page, max_tokens=block_tokens)
+        if block:
+            builder.text(f"D{n} P{page} {block}", role=pagefacts_integration.FACTS_BLOCK_ROLE)
     for start, end in _spans(file_pages):
         if not 1 <= start <= end <= total:
             raise ValueError(f"Pages {start}-{end} are outside document D{n} (1-{total}).")
@@ -1184,6 +1377,11 @@ def _add_document_pages(
             data,
             ref={"ref": f"D{n} P{start}-P{end}", "document_id": doc_id, "pages": [start, end]},
         )
+        block = pagefacts_integration.file_span_block(facts, doc_id, start, end, max_tokens=block_tokens)
+        if block:
+            builder.text(f"D{n} P{start}-P{end} {block}", role=pagefacts_integration.FACTS_BLOCK_ROLE)
+    if snippets:
+        builder.text(f"D{n} {snippets}", role=pagefacts_integration.SNIPPETS_ROLE)
 
 
 def _check_request_size(builder: _Parts, file_max_bytes: int) -> None:
@@ -1266,15 +1464,22 @@ def record_call(
     error: Exception | None = None,
     error_text: str | None = None,
     thread_id: str | None = None,
+    message_id: str | None = None,
 ) -> dict | None:
     """Insert one plans_reader_calls row (success or failure) and return it.
     A failed insert is logged, never raised: the call already happened, and
     losing its answer over a bookkeeping write would bill it twice."""
     if result is not None:
         usage = result.usage
-        cost_usd = llm_pricing.cost_for(result.model or model, usage)
+        # Spec WS2: conservative pricing (the provider's most expensive row)
+        # only where plans_reader_calls rows are written, never in llm._log.
+        cost_usd, conservative = llm_pricing.cost_or_conservative(
+            result.model or model, usage, _provider_for(FEATURE_BY_KIND.get(kind, "plans_sub"))
+        )
         if cost_usd is None:
             cost_usd = result.cost_usd
+        if conservative and isinstance(snapshot, dict):
+            snapshot = {**snapshot, "conservative_cost": True}
     row: dict[str, Any] = {
         "run_id": run_id,
         "group_id": group_id,
@@ -1295,6 +1500,8 @@ def record_call(
         "error_kind": llm_errors.classify(error) if error is not None else None,
         "error": (error_text or "")[:_ERROR_MAX_CHARS] or None if error is not None else None,
     }
+    if message_id is not None:  # column arrives with migration 0165 (MC)
+        row["message_id"] = message_id
     try:
         rows = sb.table("plans_reader_calls").insert(row).execute().data or []
         return rows[0] if rows else row
@@ -1342,6 +1549,9 @@ def _call_model(
     )
     started = time.monotonic()
     try:
+        # Spec WS0 ledger rule: the guard reserves this call's estimate (one
+        # shot, consumed by the next guarded call in this thread).
+        eval_ledger.set_call_estimate(est_usd)
         result = llm.complete_parts(
             feature,
             system=system,
@@ -1451,13 +1661,23 @@ def group_reasoning_effort(run: dict, group: dict | None) -> str:
     return base
 
 
-def prompt_tokens(kind: str) -> int:
+def prompt_tokens(kind: str, settings: Any = None) -> int:
     """Planning estimate of the system prompt plus the per-group
-    instructions and labels for one call of `kind`."""
+    instructions and labels for one call of `kind` (the page-facts
+    paragraph of the sub prompt included when `settings` turn it on)."""
     system = {"sub": SUB_SYSTEM, "rollup": ROLLUP_SYSTEM, "escalation": ESCALATION_SYSTEM, "main": MAIN_SYSTEM}.get(
         kind, SUB_SYSTEM
     )
-    return _text_tokens(system) + 1_000
+    if kind == "main" and settings is not None:
+        # The scope and measure variants only when their flags are on (the
+        # measure variant is the longer estimate; the run may have no output yet).
+        system = main_system_for(settings, has_measure=bool(getattr(settings, "plans_reader_derive_enabled", False)))
+    extra = 0
+    if kind == "sub" and settings is not None:
+        from app.services.pagefacts import integration as pagefacts_integration
+
+        extra = _text_tokens(pagefacts_integration.sub_system_suffix(settings))
+    return _text_tokens(system) + extra + 1_000
 
 
 # ---------------------------------------------------------------------------
@@ -1500,7 +1720,24 @@ def _documents_for(sb, run_id: str, ids: list[str] | None = None) -> dict[str, d
     return {str(r["id"]): r for r in rows}
 
 
-def _build_sub(sb, run: dict, group: dict, s) -> tuple[_Parts, dict[int, str]]:
+def _build_sub(
+    sb,
+    run: dict,
+    group: dict,
+    s,
+    *,
+    docs: dict[str, dict] | None = None,
+    pdf_for: Any = None,
+    category_groups: list[dict] | None = None,
+    facts: dict | None = None,
+) -> tuple[_Parts, dict[int, str]]:
+    """The sub request. `docs`, `pdf_for` and `category_groups` let a $0
+    replay build it without a database or storage (the document rows, a
+    `document_id -> pdf bytes` callable and the category's planned group
+    rows); `facts` injects DocFacts by document id instead of reading the
+    facts cache. With the page-facts flags off nothing is added."""
+    from app.services.pagefacts import integration as pagefacts_integration
+
     items = [i for i in group.get("pages") or [] if isinstance(i, dict)]
     if not items:
         raise ValueError("This group has no pages to read.")
@@ -1511,12 +1748,14 @@ def _build_sub(sb, run: dict, group: dict, s) -> tuple[_Parts, dict[int, str]]:
             order.append(doc_id)
     ledger = run.get("ledger") or {}
     ledger_ids = [str(i.get("document_id")) for i in ledger.get("images") or [] if i.get("document_id")]
-    docs = _documents_for(sb, run["id"], sorted(set(order) | set(ledger_ids)))
+    if docs is None:
+        docs = _documents_for(sb, run["id"], sorted(set(order) | set(ledger_ids)))
     missing = [d for d in order if d not in docs]
     if missing:
         raise ValueError("A document in this group no longer exists.")
-    cache = _PdfCache(docs)
+    cache = _PdfCache(docs, pdf_for=pdf_for)
     builder = _Parts()
+    category = group.get("category")
     if ledger:
         _add_ledger(
             builder,
@@ -1525,7 +1764,21 @@ def _build_sub(sb, run: dict, group: dict, s) -> tuple[_Parts, dict[int, str]]:
             budget_tokens=s.plans_reader_ledger_max_tokens,
             include_images=True,
             max_patches=s.plans_reader_native_max_patches,
+            audience="drawing" if category in DRAWING_CATEGORIES else "file",
         )
+    if category_groups is None:
+        category_groups = (
+            sb.table("plans_reader_groups")
+            .select("id, group_index, pages")
+            .eq("run_id", run["id"])
+            .eq("kind", "sub")
+            .eq("category", category)
+            .execute()
+            .data
+            or []
+        )
+    # Page facts (WS1): loaded once per request; None with the flags off.
+    facts_by_doc = pagefacts_integration.facts_provider(sb, order, s, facts=facts)
     doc_map: dict[int, str] = {}
     for n, doc_id in enumerate(order, start=1):
         doc_map[n] = doc_id
@@ -1537,17 +1790,11 @@ def _build_sub(sb, run: dict, group: dict, s) -> tuple[_Parts, dict[int, str]]:
             cache,
             max_patches=s.plans_reader_native_max_patches,
             file_max_bytes=s.plans_reader_file_max_bytes,
+            facts=facts_by_doc,
+            block_tokens=int(getattr(s, "plans_reader_facts_block_max_tokens", 2_500)),
+            snippets=pagefacts_integration.first_group_snippets(ledger, doc_id, group, category_groups),
         )
-    n_groups = len(
-        sb.table("plans_reader_groups")
-        .select("id")
-        .eq("run_id", run["id"])
-        .eq("kind", "sub")
-        .eq("category", group.get("category"))
-        .execute()
-        .data
-        or []
-    ) or 1
+    n_groups = len(category_groups) or 1
     builder.text(_group_user_prompt(group, n_groups, len(order)), role="instructions")
     _check_request_size(builder, s.plans_reader_file_max_bytes)
     return builder, doc_map
@@ -1732,6 +1979,12 @@ def _build_main(sb, run: dict, group: dict, s) -> tuple[_Parts, dict[int, str]]:
         except Exception:  # noqa: BLE001 - the TOC still rides in this call
             logger.exception("plans_reader: could not store the spec TOC for run %s", run["id"])
     builder = _Parts()
+    # WS5 (spec 4.1): the scope digest is the first user part when the
+    # policy is enforced (G3 SCOPE DECISIONS are binding).
+    if getattr(s, "ai_scope_policy_enforce", False):
+        digest = _scope_digest(sb, run)
+        if digest:
+            builder.text(digest, role="scope_digest")
     project = ledger.get("project") or {"name": run.get("name")}
     builder.text(
         "PROJECT (data): "
@@ -1741,15 +1994,29 @@ def _build_main(sb, run: dict, group: dict, s) -> tuple[_Parts, dict[int, str]]:
         role="project",
     )
     if ledger:
-        builder.text(ledger_text({k: v for k, v in ledger.items() if k != "images"}), role="ledger")
+        builder.text(ledger_text({k: v for k, v in ledger.items() if k != "images"}, audience="main"), role="ledger")
     builder.text(_doc_list_text(index_to_doc, usable, "Documents of this run (D numbers used everywhere below):"), role="doc_list")
+    # The legacy main call reads the legacy VIEW of each stored category
+    # output (plans_reader_merge.legacy_view with the run's groups: today's
+    # v1 assembly rebuilt from the groups), so the request stays byte for
+    # byte the pre-build one although the stored output is v2.
+    from app.services import plans_reader_merge as merge
+
+    groups = _pipeline_groups(sb, run["id"])
     for row in outputs:
         cat = row.get("category")
+        legacy = merge.legacy_view(row.get("output") or {}, groups=groups, category=cat)
         builder.text(
             f"CATEGORY OUTPUT: {cat} ({category_label(cat)}) (JSON, data):\n"
-            + _json(reindex_docs(row.get("output") or {}, doc_to_index)),
+            + _json(reindex_docs(legacy, doc_to_index)),
             role="category_output",
         )
+    # WS3 (B8): the measure output's summary rides in the main call when
+    # the derive stage produced one (branch rows come from its M rows).
+    if getattr(s, "plans_reader_derive_enabled", False):
+        summary = _measure_summary(sb, run)
+        if summary:
+            builder.text(summary, role="measure_summary")
     builder.text(
         "INSTRUCTIONS\n"
         "Consolidate the category outputs above into the brief, the BOQ, the estimate, the markups, the "
@@ -1761,6 +2028,53 @@ def _build_main(sb, run: dict, group: dict, s) -> tuple[_Parts, dict[int, str]]:
     return builder, index_to_doc
 
 
+def _pipeline_groups(sb, run_id: str) -> list[dict]:
+    """The run's pipeline group rows with their outputs (the legacy view of
+    a v2 category output is rebuilt from them)."""
+    from app.services import plans_reader_runs
+
+    return [g for g in plans_reader_runs._groups(sb, run_id) if g.get("kind") in plans_reader_runs.PIPELINE_KINDS]
+
+
+def _scope_digest(sb, run: dict) -> str | None:
+    """The WS5 scope digest of the run's stored ScopeContext, or None."""
+    try:
+        from app.services import scope_engine
+
+        ctx = scope_engine.context_for_run(sb, str(run["id"]))
+    except Exception:  # noqa: BLE001 - the digest is an enhancement
+        logger.exception("plans_reader: scope digest for run %s unavailable", run.get("id"))
+        return None
+    digest = (ctx or {}).get("digest") if isinstance(ctx, dict) else None
+    return str(digest) if digest else None
+
+
+def _latest_measure(sb, run_id: str) -> dict | None:
+    rows = (
+        sb.table("plans_reader_outputs").select("version, output").eq("run_id", run_id).eq("scope", "measure").execute().data
+        or []
+    )
+    if not rows:
+        return None
+    row = max(rows, key=lambda r: int(r.get("version") or 0))
+    return row.get("output") if isinstance(row.get("output"), dict) else None
+
+
+def _measure_summary(sb, run: dict) -> str | None:
+    """plans_reader_measure.measure_summary_text of the latest measure
+    output (WS3), or None without one."""
+    try:
+        measure = _latest_measure(sb, str(run["id"]))
+        if not measure:
+            return None
+        from app.services import plans_reader_measure
+
+        return plans_reader_measure.measure_summary_text(measure) or None
+    except Exception:  # noqa: BLE001 - the summary is an enhancement
+        logger.exception("plans_reader: measure summary for run %s unavailable", run.get("id"))
+        return None
+
+
 _BUILDERS = {
     "sub": _build_sub,
     "rollup": _build_rollup,
@@ -1769,12 +2083,26 @@ _BUILDERS = {
 }
 _SYSTEMS = {"sub": SUB_SYSTEM, "rollup": ROLLUP_SYSTEM, "escalation": ESCALATION_SYSTEM, "main": MAIN_SYSTEM}
 
+# The page-facts paragraph appended to the sub prompt behind the flags
+# (pagefacts.integration owns the text); named here so the prompt hash of
+# plans_reader_prompt_hash covers it like every other *_SYSTEM constant.
+from app.services.pagefacts.integration import SUB_FACTS_SYSTEM  # noqa: E402, F401
 
-def _system_for(group: dict) -> str:
+
+def _system_for(group: dict, settings: Any = None) -> str:
     kind = group.get("kind") or "sub"
     if kind == "sub":
+        from app.services.pagefacts import integration as pagefacts_integration
+
         focus = CATEGORY_FOCUS.get(group.get("category") or "", CATEGORY_FOCUS["other"])
-        return f"{SUB_SYSTEM}\n\nCATEGORY FOCUS ({group.get('category')}): {focus}"
+        # One paragraph about the facts block and legend text, only when
+        # they ride in the request (page facts flags), so the prompt is
+        # byte for byte the old one with the flags off.
+        suffix = pagefacts_integration.sub_system_suffix(settings if settings is not None else get_settings())
+        return f"{SUB_SYSTEM}\n\nCATEGORY FOCUS ({group.get('category')}): {focus}{suffix}"
+    if kind == "main":
+        s = settings if settings is not None else get_settings()
+        return main_system_for(s, has_measure=bool(group.get("_has_measure")))
     return _SYSTEMS[kind]
 
 
@@ -1787,6 +2115,18 @@ def _runs():
 
 _ACTIVE_RUN = ("reading", "consolidating")
 _ACTIVE_GROUP = ("queued", "running")
+# Spec 4.2: the run statuses each kind may run in. The pipeline kinds run
+# while the run reads or consolidates (as today); the review kinds run on a
+# done run (the post-run chain, change slot held by the review).
+_ACTIVE_RUN_BY_KIND: dict[str, tuple[str, ...]] = {
+    "review": ("done", "done_with_errors"),
+    "revise": ("done", "done_with_errors"),
+}
+_FINISHED_RUN = ("canceled", "failed", "done", "done_with_errors")
+
+
+def _active_run_for(kind: str | None) -> tuple[str, ...]:
+    return _ACTIVE_RUN_BY_KIND.get(kind or "", _ACTIVE_RUN)
 
 
 def _pause_for_cap(sb, run: dict, group: dict, message: str) -> None:
@@ -1800,20 +2140,254 @@ def _pause_for_cap(sb, run: dict, group: dict, message: str) -> None:
     ).in_("status", list(_ACTIVE_RUN)).execute()
 
 
+# WS7's partial finalizer seam (spec 4.2, 5.3): `plans_reader_review
+# .finish_partial(sb, run, group=group, reason=message)` ends the review
+# `partial` when a cap or budget stops a review or revise group. Resolved
+# by name so this module imports before the review module lands.
+REVIEW_PARTIAL_SEAM = ("app.services.plans_reader_review", "finish_partial")
+
+
+def _end_review_partial(sb, run: dict, group: dict, message: str) -> None:
+    """Review kinds over a cap or budget end the review partial (spec 4.2);
+    they are never queued, because _pause_for_cap only moves runs in
+    _ACTIVE_RUN and review runs on done runs. Calls WS7's partial finalizer
+    when it exists, marks the group failed with the message (guarded on
+    _ACTIVE_GROUP), then advances the run. Never touches the run status."""
+    import importlib
+
+    try:
+        module = importlib.import_module(REVIEW_PARTIAL_SEAM[0])
+        fn = getattr(module, REVIEW_PARTIAL_SEAM[1], None)
+    except ImportError:
+        fn = None
+    if callable(fn):
+        try:
+            fn(sb, run, group=group, reason=message)
+        except Exception:  # noqa: BLE001 - the group still ends; the review row is WS7's
+            logger.exception("plans_reader: ending the review of run %s partial failed", run.get("id"))
+    sb.table("plans_reader_groups").update(
+        {"status": "failed", "error": message[:_ERROR_MAX_CHARS], "finished_at": _now_iso()}
+    ).eq("id", group["id"]).in_("status", list(_ACTIVE_GROUP)).execute()
+    _runs().advance(sb, run["id"])
+
+
+# The tool-loop kinds (spec 4.2, WS2 hook): feature, response schema, route
+# step and the offered_tools mode. main is here but dispatched to the loop
+# only in consolidator mode tools (legacy keeps the one single call).
+_LOOP_KINDS: dict[str, tuple[str, dict | None, str, str]] = {
+    "recount": ("plans_recount", RECOUNT_SCHEMA, "recount", "read"),
+    "main": ("plans_main", None, "main", "write"),
+    "review": ("plans_review", REVIEW_SCHEMA, "review", "review"),
+    "revise": ("plans_revise", REVISE_SCHEMA, "revise", "write"),
+}
+# Seams for the loop modules built in parallel in wave 3, resolved by name
+# at dispatch (spec 7 wave 3): the WS4 consolidator and the WS7 reviewer.
+# Each module exports `<KIND>_SYSTEM` (the system prompt),
+# `build_<kind>_loop(sb, run, group, settings) -> (user_parts, precalls)`
+# (the deterministic pre-call stage of spec 4.3 rule 1) and
+# `finalize_<kind>_loop(parsed, result, *, sb, run, group) -> group output`.
+# The recount kind runs through plans_reader_runs.run_recount_group (WS7's
+# own builder and resolver) and needs no seam.
+_LOOP_SEAMS: dict[str, tuple[str, str, str, str]] = {
+    "main": ("app.services.plans_reader_consolidator", "CONSOLIDATOR_SYSTEM", "build_main_loop", "finalize_main_loop"),
+    "review": ("app.services.plans_reader_reviewer", "REVIEW_SYSTEM", "build_review_loop", "finalize_review_loop"),
+    "revise": ("app.services.plans_reader_revise", "REVISE_SYSTEM", "build_revise_loop", "finalize_revise_loop"),
+}
+# Filled from the seams at dispatch; tests and the owning workstreams may
+# set entries directly (a set entry wins over the seam).
+_LOOP_SYSTEMS: dict[str, str] = {}
+_LOOP_BUILDERS: dict[str, Any] = {}
+_LOOP_FINALIZERS: dict[str, Any] = {}
+
+
+class LoopModuleMissing(RuntimeError):
+    """A loop kind was dispatched before its module landed (spec 7 wave
+    3); declared bad_input so the queue fails the job without retrying."""
+
+    llm_error_kind = "bad_input"
+
+
+def _resolve_loop_seam(kind: str) -> tuple[str, Any, Any]:
+    """(system, builder, finalizer) of a loop kind from the set tables or
+    the seam module. Raises LoopModuleMissing when neither exists."""
+    import importlib
+
+    if kind in _LOOP_SYSTEMS and kind in _LOOP_BUILDERS and kind in _LOOP_FINALIZERS:
+        return _LOOP_SYSTEMS[kind], _LOOP_BUILDERS[kind], _LOOP_FINALIZERS[kind]
+    seam = _LOOP_SEAMS.get(kind)
+    if seam is None:
+        raise LoopModuleMissing(f"AI Estimating groups of kind '{_clean_text(kind, 20)}' have no loop module.")
+    module_name, system_name, builder_name, finalizer_name = seam
+    try:
+        module = importlib.import_module(module_name)
+    except ImportError as exc:
+        raise LoopModuleMissing(f"The {module_name.rsplit('.', 1)[-1]} module is not available on this server.") from exc
+    system = _LOOP_SYSTEMS.get(kind) or getattr(module, system_name, None)
+    builder = _LOOP_BUILDERS.get(kind) or getattr(module, builder_name, None)
+    finalizer = _LOOP_FINALIZERS.get(kind) or getattr(module, finalizer_name, None)
+    if not (isinstance(system, str) and callable(builder) and callable(finalizer)):
+        raise LoopModuleMissing(f"The {module_name.rsplit('.', 1)[-1]} module does not export the {kind} loop.")
+    return system, builder, finalizer
+
+
+def _settle_group_done(sb, group_id: str, output: dict, *, loop_state: dict | None = None) -> None:
+    patch: dict[str, Any] = {"status": "done", "output": output, "error": None, "finished_at": _now_iso()}
+    if loop_state is not None:
+        patch["loop_state"] = loop_state
+    sb.table("plans_reader_groups").update(patch).eq("id", group_id).in_("status", list(_ACTIVE_GROUP)).execute()
+
+
+def _run_derive(sb, run: dict, group: dict) -> None:
+    """The derive group (spec 4.1: code, $0): claim it, run
+    plans_reader_runs.run_derive (scope prepare, then the measure) and
+    settle it done. A failure inside never blocks main: the group ends done
+    with the error noted (run_derive itself falls back to the density
+    tier), and the run advances to queue the main group."""
+    runs = _runs()
+    claimed = (
+        sb.table("plans_reader_groups")
+        .update({"status": "running", "error": None, "attempts": int(group.get("attempts") or 0) + 1,
+                 "started_at": group.get("started_at") or _now_iso()})
+        .eq("id", group["id"])
+        .in_("status", list(_ACTIVE_GROUP))
+        .execute()
+        .data
+        or []
+    )
+    if not claimed:
+        return
+    error: str | None = None
+    try:
+        output = runs.run_derive(sb, run, group)
+    except llm.LlmLeaseLost:
+        raise  # the measure assist lost the job's lease: the queue decides
+    except Exception as exc:  # noqa: BLE001 - a $0 code step never fails the run
+        logger.exception("plans_reader: derive group %s of run %s failed", group.get("id"), run.get("id"))
+        output = {"policy_version": None, "measure_version": None, "warnings": [f"derive_failed: {str(exc)[:200]}"]}
+        error = f"The derive step failed: {str(exc)[:300]}"
+    sb.table("plans_reader_groups").update(
+        {"status": "done", "output": output, "error": error, "finished_at": _now_iso()}
+    ).eq("id", group["id"]).in_("status", list(_ACTIVE_GROUP)).execute()
+    runs.advance(sb, run["id"])
+
+
+def _main_stop_when(tool_ctx: Any) -> Any:
+    """The consolidator loop's stop listener (toolloop.LoopContext.stop_when):
+    True once the session's `finish` passed (or its third call ended it),
+    so the loop ends as soon as that round's tools are served instead of
+    spending another round on a closing message. Resolved lazily; without
+    a session (or the module) it never stops the loop."""
+
+    def _stop() -> bool:
+        try:
+            from app.services import plans_reader_consolidator as consolidator
+
+            return bool(getattr(consolidator.session_for(tool_ctx), "finished", False))
+        except Exception:  # noqa: BLE001 - a missing session never ends the loop early
+            return False
+
+    return _stop
+
+
+def _run_loop_group(sb, run: dict, group: dict, s, *, budget: Any) -> None:
+    """Run a tool-loop group (spec 4.3) after its claim: recount through
+    WS7's runner (plans_reader_runs.run_recount_group); main (tools mode),
+    review and revise through the WS2 loop with the kind's system, builder
+    and finalizer (the seams). Cap and budget stops: review kinds end the
+    review partial, the others pause the run (SpendCapReached) or fail the
+    job (LoopFailed is bad_input)."""
+    from app.services import plans_reader_evidence_inputs
+    from app.services import plans_reader_tool_handlers as tool_handlers
+    from app.services import plans_reader_toolloop as toolloop
+    from app.services.plans_reader_loop_store import SupabaseLoopStore
+    from app.services.plans_reader_tools import ToolContext, offered_tools
+
+    kind = str(group.get("kind"))
+    runs = _runs()
+    group_id = str(group["id"])
+    try:
+        if kind == "recount":
+            output = runs.run_recount_group(sb, run, group, settings=s)
+            loop_state = None
+        else:
+            feature, schema, step, mode = _LOOP_KINDS[kind]
+            system, builder, finalizer = _resolve_loop_seam(kind)
+            snapshot_routes = (run.get("settings_snapshot") or {}).get("routes") or {}
+            route = snapshot_routes.get(step)
+            user_parts, precalls = builder(sb, run, group, s)
+            inputs = plans_reader_evidence_inputs.inputs_for(sb)
+            document_rows = list(_documents_for(sb, run["id"]).values())
+            services = runs._run_services(sb, run["id"], document_rows, inputs=inputs)
+            tool_ctx = ToolContext(
+                run_id=str(run["id"]), kind=kind, sb=sb, group_id=group_id, services=services,
+                heartbeat=tool_handlers.heartbeat,
+            )
+            # Pricing tools reach an agent loop only with pricing on AND the
+            # agent-tools child flag on (spec 5.7).
+            pricing_allowed = bool(getattr(s, "ai_pricing_enabled", False) and s.ai_pricing_agent_tools_enabled)
+            ctx = toolloop.LoopContext(
+                run=run, kind=kind, feature=feature, system=system, user_parts=user_parts,
+                tools=offered_tools(kind, mode=mode, pricing_allowed=pricing_allowed),
+                tool_ctx=tool_ctx, store=SupabaseLoopStore(sb, run_id=str(run["id"])), sb=sb,
+                response_schema=schema, schema_name=SCHEMA_NAME_BY_KIND["main_tools" if kind == "main" else kind],
+                budget=budget, route=route, step=step, group_id=group_id, category=group.get("category"),
+                precalls=precalls, settings=s, timeout=s.plans_reader_call_timeout_seconds,
+                stop_when=_main_stop_when(tool_ctx) if kind == "main" else None,
+            )
+            result = toolloop.run_loop(ctx)
+            output = finalizer(result.parsed, result, sb=sb, run=run, group=group)
+            loop_state = {**(group.get("loop_state") or {}), **result.as_dict()}
+    except ai_spend.SpendCapReached as exc:
+        if kind in REVIEW_KINDS:
+            _end_review_partial(sb, run, group, str(exc))
+            return
+        _pause_for_cap(sb, run, group, str(exc))
+        return
+    except (toolloop.LoopFailed, LoopModuleMissing) as exc:
+        if kind in REVIEW_KINDS:
+            _end_review_partial(sb, run, group, str(exc))
+            return
+        if kind != "main":
+            raise
+        # The consolidator loop failed for good (budget, a cut-off answer,
+        # a second stray call): code alone assembles the main output
+        # (plans_reader_consolidator.fallback_main_output, no model call)
+        # and the group settles done, so the run still renders.
+        logger.warning("plans_reader: main loop of run %s fell back to code: %s", run.get("id"), str(exc)[:300])
+        from app.services import plans_reader_consolidator as consolidator
+
+        output = consolidator.fallback_main_output(sb, run, group, s, reason=str(exc))
+        loop_state = {**(group.get("loop_state") or {}), "fallback": str(exc)[:300]}
+    try:
+        runs.recompute_totals(sb, run["id"])
+    except Exception:  # noqa: BLE001 - totals are recomputed on every call
+        logger.exception("plans_reader: totals for run %s failed", run["id"])
+    _settle_group_done(sb, group_id, output, loop_state=loop_state)
+    runs.advance(sb, run["id"])
+
+
 def run_group(sb, group_id: str) -> None:
-    """Execute one plans_reader_groups row (sub, rollup, escalation or main;
-    docs/PLANS_READER.md 7). The queue job's run: raises on failure so the
-    queue classifies, retries or fails it (its mark advances the run on a
-    terminal failure); returns normally when the group is already settled,
-    the run was canceled, or the spend cap paused it (group left queued,
-    run over_cap). The call runs at the run's reasoning effort, one step
+    """Execute one plans_reader_groups row (docs/PLANS_READER.md 7 and
+    docs/AI_ESTIMATING_BUILD_SPEC.md 4.2). The queue job's run: raises on
+    failure so the queue classifies, retries or fails it (its mark advances
+    the run on a terminal failure); returns normally when the group is
+    already settled, the run was canceled, or the spend cap paused it
+    (group left queued, run over_cap).
+
+    Dispatch per kind: derive (code, $0) runs before the cap and builder
+    checks, so it can never pause a run over_cap; recount, review, revise
+    and main in consolidator mode tools run the WS2 tool loop
+    (_run_loop_group), with the daily-cap estimate taken from the loop
+    budget; a review kind stopped by a cap ends the review partial instead
+    of pausing the run. Every other kind (and main in legacy mode) makes
+    the one legacy single call at the run's reasoning effort, one step
     lower for the retry of a failed consolidation (group_reasoning_effort)."""
     s = get_settings()
     group = _one(sb, "plans_reader_groups", group_id)
     if group is None:
         raise ValueError("This AI Estimating group no longer exists.")
     kind = group.get("kind")
-    if kind not in _BUILDERS:
+    if kind not in _BUILDERS and kind not in _LOOP_KINDS and kind != "derive":
         raise ValueError(f"AI Estimating groups of kind '{_clean_text(kind, 20)}' are not run here.")
     run = _one(sb, "plans_reader_runs", group["run_id"])
     if run is None:
@@ -1823,19 +2397,42 @@ def run_group(sb, group_id: str) -> None:
         return
     if group.get("status") not in _ACTIVE_GROUP:
         return
-    if run.get("status") not in _ACTIVE_RUN:
-        if run.get("status") in ("canceled", "failed", "done", "done_with_errors"):
+    active_run = _active_run_for(kind)
+    if run.get("status") not in active_run:
+        if run.get("status") in _FINISHED_RUN and kind not in REVIEW_KINDS:
+            sb.table("plans_reader_groups").update(
+                {"status": "canceled", "finished_at": _now_iso()}
+            ).eq("id", group_id).in_("status", list(_ACTIVE_GROUP)).execute()
+        elif kind in REVIEW_KINDS and run.get("status") in ("canceled", "failed"):
             sb.table("plans_reader_groups").update(
                 {"status": "canceled", "finished_at": _now_iso()}
             ).eq("id", group_id).in_("status", list(_ACTIVE_GROUP)).execute()
         return  # over_cap: stays queued for resume
+    if kind == "derive":
+        _run_derive(sb, run, group)
+        return
 
+    uses_loop = kind in ("recount", "review", "revise") or (
+        kind == "main" and getattr(s, "plans_reader_consolidator_mode", "legacy") == "tools"
+    )
     model = run.get("model") or s.openai_plans_model
     expected_out = expected_output_tokens(group)
-    est_usd = _estimate_usd(model, int(group.get("est_input_tokens") or 0), expected_out)
+    budget = None
+    if uses_loop:
+        from app.services import plans_reader_budgets as budgets
+
+        step = _LOOP_KINDS[kind][2]
+        snapshot_routes = (run.get("settings_snapshot") or {}).get("routes") or {}
+        budget = budgets.budget_for(kind, settings=s, route=snapshot_routes.get(step))
+        est_usd = budget.max_usd
+    else:
+        est_usd = _estimate_usd(model, int(group.get("est_input_tokens") or 0), expected_out)
     try:
         ai_spend.check_cap(sb, estimated_usd=est_usd)
     except ai_spend.SpendCapReached as exc:
+        if kind in REVIEW_KINDS:
+            _end_review_partial(sb, run, group, str(exc))
+            return
         _pause_for_cap(sb, run, group, str(exc))
         return
 
@@ -1858,6 +2455,16 @@ def run_group(sb, group_id: str) -> None:
     if not claimed:
         return  # canceled between the read and the mark
 
+    if uses_loop:
+        fresh = _one(sb, "plans_reader_runs", run["id"]) or run
+        if fresh.get("status") not in active_run:
+            sb.table("plans_reader_groups").update({"status": "queued"}).eq("id", group_id).eq(
+                "status", "running"
+            ).execute()
+            return
+        _run_loop_group(sb, fresh, group, s, budget=budget)
+        return
+
     builder, doc_map = _BUILDERS[kind](sb, run, group, s)
 
     # Rendering can take a while: do not spend on a run canceled meanwhile.
@@ -1874,7 +2481,11 @@ def run_group(sb, group_id: str) -> None:
         return
 
     feature = FEATURE_BY_KIND[kind]
-    schema = MAIN_AGENT_SCHEMA if kind == "main" else SUB_AGENT_SCHEMA
+    schema = MAIN_AGENT_SCHEMA if kind == "main" else ESCALATION_SCHEMA if kind == "escalation" else SUB_AGENT_SCHEMA
+    if kind == "main" and getattr(s, "plans_reader_derive_enabled", False):
+        # The measure variant of the main prompt only when the derive stage
+        # produced a measure output for this run (byte-identical otherwise).
+        group = {**group, "_has_measure": _latest_measure(sb, str(run["id"])) is not None}
     result = _call_model(
         sb,
         run=run,
@@ -1882,7 +2493,7 @@ def run_group(sb, group_id: str) -> None:
         kind=kind,
         category=group.get("category"),
         feature=feature,
-        system=_system_for(group),
+        system=_system_for(group, s),
         builder=builder,
         schema=schema,
         schema_name=SCHEMA_NAME_BY_KIND[kind],
@@ -1938,6 +2549,9 @@ def _modify_group_id() -> str | None:
     return None
 
 
+MSG_MARKED_PLANS_FROM_EVIDENCE = "Marked plans are drawn from the evidence; re-render instead"
+
+
 def modify_deliverable(
     sb,
     run: dict,
@@ -1957,8 +2571,10 @@ def modify_deliverable(
     parsed spec is kept on the group before rendering (_keep_pending_spec),
     so a failure after the paid call can be rendered again without paying.
     Returns the new plans_reader_deliverables row. Raises ValueError for bad
-    input, ai_spend.SpendCapReached when the cap refuses, and the model's
-    errors as they come."""
+    input (and, with no model call, for marked plans in code mode: they are
+    drawn from the evidence and re-rendered, spec WS8),
+    ai_spend.SpendCapReached when the cap refuses, and the model's errors
+    as they come."""
     s = get_settings()
     if kind not in DELIVERABLE_KINDS:
         raise ValueError(f"Unknown deliverable kind '{_clean_text(kind, 40)}'.")
@@ -1967,11 +2583,17 @@ def modify_deliverable(
         raise ValueError("Say what to change in the deliverable.")
     if len(text) > INSTRUCTION_MAX_CHARS:
         raise ValueError(f"The instruction is too long (at most {INSTRUCTION_MAX_CHARS} characters).")
+    if kind == "marked_plans" and getattr(s, "plans_reader_marked_plans_mode", "model") == "code":
+        # Spec WS8: in code mode the marks are drawn from the evidence; the
+        # evidence spec is renderer-only and never goes to a model.
+        raise ValueError(MSG_MARKED_PLANS_FROM_EVIDENCE)
     runs = _runs()
     main_output = runs.main_output(sb, run["id"])
     if main_output is None:
         raise ValueError("This run has no consolidated output yet, so there is nothing to modify.")
     latest = runs.latest_deliverable(sb, run["id"], kind)
+    # No client and no run: the evidence-derived marked plans spec never
+    # reaches the model as the CURRENT SPEC.
     current = latest.get("spec_json") if latest else runs.deliverable_spec(kind, main_output)
     if current is None:
         # Only a markup or marked plans spec can be legitimately empty (the
@@ -2029,11 +2651,32 @@ def modify_deliverable(
         raise llm.LlmBadOutput("The AI model returned an unusable deliverable. Retry the generation.")
     spec = map_doc_index(copy.deepcopy(result.parsed), index_to_doc)
     version = int(latest.get("version") or 0) + 1 if latest else 1
+    _mark_spec_edits(kind, spec, current, s)
     if gid:
         _keep_pending_spec(sb, gid, kind, spec)
-    return runs.render_deliverable(
+    row = runs.render_deliverable(
         sb, run, kind, spec, version=version, instruction=text, user=user, documents=docs
     )
+    runs.after_deliverable_change(sb, run, row, kind=kind)
+    return row
+
+
+def _mark_spec_edits(kind: str, spec: dict, previous: dict | None, s) -> None:
+    """WS5 (F7): with the scope policy enforced, the BOQ rows a modify
+    added or changed are stamped origin `modify` against the previous
+    spec, so the automatic rules leave them alone (scope_engine
+    .mark_spec_edits). Specs stay byte-identical with the flag off."""
+    if not getattr(s, "ai_scope_policy_enforce", False) or kind not in ("boq", "estimate"):
+        return
+    try:
+        from app.services import scope_engine
+
+        boq = spec if kind == "boq" else spec.get("boq")
+        prev = previous if kind == "boq" else (previous or {}).get("boq") if isinstance(previous, dict) else None
+        if isinstance(boq, dict):
+            scope_engine.mark_spec_edits(boq, prev if isinstance(prev, dict) else None)
+    except Exception:  # noqa: BLE001 - enforce_for_run derives the same marks itself
+        logger.exception("plans_reader: marking the modified %s spec failed", kind)
 
 
 PENDING_SPEC_KEY = "pending_spec"
@@ -2064,4 +2707,6 @@ def render_pending_spec(sb, run: dict, *, kind: str, spec: dict, instruction: st
     runs = _runs()
     latest = runs.latest_deliverable(sb, run["id"], kind)
     version = int(latest.get("version") or 0) + 1 if latest else 1
-    return runs.render_deliverable(sb, run, kind, spec, version=version, instruction=instruction, user=user)
+    row = runs.render_deliverable(sb, run, kind, spec, version=version, instruction=instruction, user=user)
+    runs.after_deliverable_change(sb, run, row, kind=kind)
+    return row

@@ -1,0 +1,229 @@
+{
+ "bid_conditions": {
+  "bond_required": null,
+  "cues": [],
+  "federal_wage": false,
+  "labor_time": "day",
+  "labor_time_basis": "default",
+  "needs_review": [
+   "wage_unknown",
+   "labor_time_unknown"
+  ],
+  "owner_type": null,
+  "pw_score": 0,
+  "rate_table_key": "pw",
+  "union": "unknown",
+  "wage_basis": "default",
+  "wage_confidence": "low",
+  "wage_type": "prevailing_wage"
+ },
+ "breaker_plan": {
+  "clarification": "Branch breakers carried: 4 EA CIRCUIT BREAKER (AND-1, AND-1, AND-1, AND-1). Per E0.00.",
+  "keynotes": {},
+  "lines": [
+   {
+    "afci": false,
+    "amps": null,
+    "basis": "new_panel",
+    "circuits": [
+     "AND-1",
+     "AND-1",
+     "AND-1",
+     "AND-1"
+    ],
+    "description": "CIRCUIT BREAKER",
+    "gfci": false,
+    "poles": null,
+    "quantity": 4,
+    "sheet": "E0.00",
+    "unit": "EA"
+   }
+  ],
+  "needs_review": null,
+  "new_count": 4,
+  "panels": [
+   "AND"
+  ],
+  "reuse_circuits": [],
+  "reuse_count": 0,
+  "sheets": [
+   "E0.00"
+  ],
+  "status": "resolved",
+  "unresolved_circuits": [],
+  "warnings": []
+ },
+ "device_facts": {
+  "grade_notes": [],
+  "spec_facts": [],
+  "tr_cite": null,
+  "tr_count": null,
+  "tr_method": "unavailable",
+  "tr_pages": {},
+  "tr_room_rule": null,
+  "warnings": []
+ },
+ "document_amounts": [],
+ "drawn_systems": [
+  "low_voltage",
+  "mechanical_equipment"
+ ],
+ "engine_version": "ws5-engine-1",
+ "fact_splits": {},
+ "facts": [],
+ "fallback": {
+  "applied": [],
+  "called": false,
+  "error": null,
+  "rejected": [],
+  "sent": 0
+ },
+ "inclusions": [
+  {
+   "also_pattern": "\\bconnect(?:ion|ions)?\\b",
+   "basis": "counted",
+   "caveat": null,
+   "clarification": null,
+   "companion_of": null,
+   "dedupe_scope": "sheet",
+   "description": "ELECTRICAL CONNECTION",
+   "group": "OTHER ITEMS",
+   "material_category": "General Material",
+   "measure_row_id": null,
+   "pattern": "\\b(?:vav|fcu|ahu|rtu|exhaust\\s+fans?|fans?|pumps?|unit\\s+heaters?|(?:fire[\\s/]+)?smoke\\s+dampers?|dampers?)\\b",
+   "quantity": 11,
+   "rule_id": "IN-EQUIP-CONNECTION",
+   "section": "NEW WORK",
+   "subgroup": "MISCELLANEOUS",
+   "trigger_family": "equipment_connection",
+   "trigger_source": "reader_rows",
+   "triggers": [
+    {
+     "demolition": false,
+     "description": "Rooftop-unit electrical connections, RTU-1 through RTU-6",
+     "quantity": 6.0,
+     "row_id": "C26",
+     "sheet": "E1.01",
+     "used": true
+    },
+    {
+     "demolition": false,
+     "description": "Exhaust-fan-type electrical connections",
+     "quantity": 5.0,
+     "row_id": "C33",
+     "sheet": "E1.01",
+     "used": true
+    }
+   ],
+   "unit": "EA",
+   "wastage_applies": false
+  }
+ ],
+ "luminaire_schedule": [
+  {
+   "control": null,
+   "description": "2' X 4' CEILING LIGHT",
+   "ref": "S1#r1",
+   "sheet": "E0.02",
+   "tag": "A"
+  },
+  {
+   "control": null,
+   "description": "2' X 4' CEILING LIGHT",
+   "ref": "S1#r2",
+   "sheet": "E0.02",
+   "tag": "AE"
+  },
+  {
+   "control": null,
+   "description": "SQUARE RECESSED CAN",
+   "ref": "S1#r3",
+   "sheet": "E0.02",
+   "tag": "B"
+  },
+  {
+   "control": null,
+   "description": "SQUARE RECESSED CAN",
+   "ref": "S1#r4",
+   "sheet": "E0.02",
+   "tag": "BE"
+  },
+  {
+   "control": null,
+   "description": "PENDANT LIGHT",
+   "ref": "S1#r5",
+   "sheet": "E0.02",
+   "tag": "C"
+  },
+  {
+   "control": null,
+   "description": "PENDANT LIGHT",
+   "ref": "S1#r6",
+   "sheet": "E0.02",
+   "tag": "CE"
+  },
+  {
+   "control": null,
+   "description": "LINEAR LIGHT FIXTURE",
+   "ref": "S1#r7",
+   "sheet": "E0.02",
+   "tag": "D"
+  },
+  {
+   "control": null,
+   "description": "LINEAR LIGHT FIXTURE",
+   "ref": "S1#r8",
+   "sheet": "E0.02",
+   "tag": "DE"
+  },
+  {
+   "control": null,
+   "description": "CEILING LIGHT FIXTURE",
+   "ref": "S1#r9",
+   "sheet": "E0.02",
+   "tag": "E"
+  },
+  {
+   "control": null,
+   "description": "EXIT SIGN",
+   "ref": "S1#r10",
+   "sheet": "E0.02",
+   "tag": "EX1"
+  },
+  {
+   "control": null,
+   "description": "EXIT SIGN",
+   "ref": "S1#r11",
+   "sheet": "E0.02",
+   "tag": "EX2"
+  },
+  {
+   "control": null,
+   "description": "LINEAR LIGHT FIXTURE",
+   "ref": "S1#r12",
+   "sheet": "E0.02",
+   "tag": "F"
+  },
+  {
+   "control": null,
+   "description": "LINEAR LIGHT FIXTURE",
+   "ref": "S1#r13",
+   "sheet": "E0.02",
+   "tag": "FE"
+  }
+ ],
+ "notes": [],
+ "policy_id": null,
+ "policy_sha": "75b43645aeff9463629ed394434644da71818d83bb796dd85653fec4c267d03d",
+ "policy_source": "seed",
+ "policy_version": 1,
+ "schema": "bdr.scope_context/1",
+ "stats": {
+  "excluded_obligations": 1,
+  "facts": 0,
+  "obligations": 52,
+  "seconds": 2.12,
+  "statements": 427,
+  "verified_facts": 0
+ }
+}

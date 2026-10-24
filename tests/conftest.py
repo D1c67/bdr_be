@@ -48,6 +48,35 @@ os.environ["CERTIFIED_PAYROLL_ENABLED"] = "true"
 os.environ["BID_FILE_SPLITTER_ENABLED"] = "true"
 os.environ["PLANS_READER_ENABLED"] = "true"  # AI Estimating routes stay reachable in the suite
 os.environ["AI_ESTIMATING_STATE"] = "live"
+# The AI Estimating autonomous build (docs/AI_ESTIMATING_BUILD_SPEC.md 5.7):
+# every parent flag is off in code and on in the dev .env, so pin the suite to
+# the code defaults. Tests that exercise a flag being on set it themselves.
+for _k, _v in (
+    ("AI_PRICING_ENABLED", "false"),
+    ("AI_PRICING_STATE", "test"),
+    ("AI_PRICING_AUTORUN", "false"),
+    ("AI_EVAL_LEDGER_ENFORCE", "false"),
+    ("LLM_CASSETTE_MODE", "off"),
+    ("EVAL_SWEEP_ID", ""),
+    ("LLM_QUEUE_CLAIM_TYPES", ""),
+    ("PLANS_READER_PAGE_FACTS_ENABLED", "false"),
+    ("PLANS_READER_FACTS_RELABEL", "false"),
+    ("PLANS_READER_DERIVE_ENABLED", "false"),
+    ("PLANS_READER_MEASURE_ASSIST_ENABLED", "false"),
+    ("PLANS_READER_CONSOLIDATOR_MODE", "legacy"),
+    ("PLANS_READER_CODE_REGIONS", "false"),
+    ("PLANS_READER_GATES_BLOCKING", "false"),
+    ("PLANS_READER_RECOUNT_ENABLED", "false"),
+    ("PLANS_READER_REVIEW_MODE", "off"),
+    ("AI_SCOPE_POLICY_ENFORCE", "false"),
+    ("AI_SCOPE_ATTRIB_LLM", "false"),
+    ("AI_PRICING_CHAT_TOOLS_ENABLED", "false"),
+    ("AI_PRICING_AGENT_TOOLS_ENABLED", "false"),
+    ("QUOTE_LINES_LLM_FALLBACK_ENABLED", "false"),
+    ("PLANS_READER_MARKED_PLANS_MODE", "model"),
+    ("PLANS_READER_ANNOTATED_PLANS_ENABLED", "false"),
+):
+    os.environ[_k] = _v
 # The RFP Ingestion sandbox flag defaults FALSE too (experimental tool); pin it
 # ON so its router, gate and queue-pass tests exercise the real code paths.
 # Tests that exercise the flag being off set it themselves (test_feature_flags).

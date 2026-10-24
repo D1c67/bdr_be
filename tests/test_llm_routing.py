@@ -95,6 +95,35 @@ def test_email_match_is_self_hosted_only_on_the_live_box():
     assert llm.is_configured("email_match", bare) is False
 
 
+def test_email_classify_is_self_hosted_only_and_honors_its_pin():
+    """PM email classification: the box in both modes, never 3rd party. Unlike
+    email_match a SELF_HOSTED_EMAIL_CLASSIFY_MODEL pin is honored on the
+    default box; "off" and EMAIL_CLASSIFY_ENABLED=false switch it off."""
+    spec = llm._FEATURES["email_classify"]
+    assert spec.self_hosted_only and spec.self_hosted_pin and not spec.openai_only
+    s = _s(
+        openai_api_key="o",
+        anthropic_api_key="a",
+        email_classify_enabled=True,
+        self_hosted_llm_target="ec2c",
+        self_hosted_llm_ec2c_base_url="https://box-c.example/v1",
+        self_hosted_llm_ec2c_model="qwen-3.8-27b",
+    )
+    for flag in (False, True):
+        route = llm.resolve("email_classify", s.model_copy(update={"full_self_hosted_llms_enabled": flag}))
+        assert (route.provider, route.model) == ("self_hosted", "qwen-3.8-27b")
+    pinned = s.model_copy(update={"self_hosted_email_classify_model": "qwen-small"})
+    assert llm.resolve("email_classify", pinned).model == "qwen-small"
+    off = s.model_copy(update={"self_hosted_email_classify_model": "off"})
+    assert llm.is_configured("email_classify", off) is False
+    switched = s.model_copy(update={"email_classify_enabled": False})
+    assert llm.is_configured("email_classify", switched) is False
+    assert llm.unavailable_reason("email_classify", switched) is not None
+    bare = _s(openai_api_key="o", email_classify_enabled=True)
+    assert llm.resolve("email_classify", bare).provider == "self_hosted"
+    assert llm.is_configured("email_classify", bare) is False
+
+
 def test_email_match_follows_the_settings_override(monkeypatch):
     from app.services import llm_target
 
@@ -135,7 +164,14 @@ def test_flag_on_routes_everything_self_hosted_even_with_3p_keys():
     assert llm.resolve("boq", s).base_url == "http://localhost:11434/v1"
 
 
-PLANS_FEATURES = ("plans_sub", "plans_main", "plans_modify", "plans_chat")
+# The four original AI Estimating features plus the six the autonomous build
+# registered (docs/AI_ESTIMATING_BUILD_SPEC.md 4.2); all pinned off the
+# self-hosted pool and, with no route set, on OPENAI_PLANS_MODEL.
+PLANS_FEATURES = (
+    "plans_sub", "plans_main", "plans_modify", "plans_chat",
+    "plans_recount", "plans_review", "plans_revise", "plans_derive",
+    "plans_scope_attrib", "pricing_quote",
+)
 
 
 def test_plans_features_are_openai_only_on_the_astra_model():

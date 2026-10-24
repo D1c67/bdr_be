@@ -173,6 +173,12 @@ def _enum(values: tuple[str, ...], nullable: bool = False) -> dict[str, Any]:
     return {"type": "string", "enum": list(values)}
 
 
+def _nullable(schema: dict[str, Any]) -> dict[str, Any]:
+    """`schema | null` for a strict schema (arrays and objects cannot take a
+    `["type", "null"]` list, so the alternative is spelled with anyOf)."""
+    return {"anyOf": [schema, {"type": "null"}]}
+
+
 _STR_LIST = _arr(_str())
 _POINT = _arr(_num())  # [x, y] as page fractions
 _POINTS = _arr(_POINT)
@@ -192,6 +198,12 @@ RESOLUTION_FLAG = _obj(
     }
 )
 
+# A viewport the reader saw on the page (WS3 scale and measurement, spec
+# 5.4): the view title as printed, its scale text when printed, and its
+# region in the RESOLUTION_FLAG form ("x0,y0,x1,y1" page fractions or a grid
+# cell). Null when the reader did not separate views.
+VIEWPORT = _obj({"title": _str(), "scale_text": _str(True), "region": _str()})
+
 SUB_PAGE = _obj(
     {
         **_PAGE_REF,
@@ -201,6 +213,7 @@ SUB_PAGE = _obj(
         "tags": _STR_LIST,
         "notes": _STR_LIST,
         "resolution_flags": _arr(RESOLUTION_FLAG),
+        "viewports": _nullable(_arr(VIEWPORT)),
     }
 )
 
@@ -216,6 +229,23 @@ COUNT_ITEM = _obj(
         "confidence": _num(),
         "material_category_hint": _enum(MATERIAL_CATEGORIES, nullable=True),
         "notes": _str(True),
+        # Device centers as page fractions (origin top-left, 4 decimals), one per
+        # counted instance, or null when the reader did not place them (WS4).
+        "points": _nullable(_POINTS),
+    }
+)
+
+# Escalation and recount rows say what they correct and what they cover (WS4,
+# spec 5.4): `supersedes_row_id` is the first-pass row id the patch replaces
+# (the c-id shown in the escalation prompt, or a run-level C<n>), null for a
+# new row; `coverage` is the model's own claim, which code only ever lowers
+# (a whole_sheet claim becomes a sheet total only with complete containment).
+ESCALATION_COVERAGES: tuple[str, ...] = ("whole_sheet", "inside_tiles_only")
+ESCALATION_COUNT_ITEM = _obj(
+    {
+        **COUNT_ITEM["properties"],
+        "supersedes_row_id": _str(True),
+        "coverage": _enum(ESCALATION_COVERAGES),
     }
 )
 
@@ -233,6 +263,8 @@ RUN_ITEM = _obj(
         **_PAGE_REF,
         "confidence": _num(),
         "notes": _str(True),
+        # The run's polyline as page fractions when the reader traced it (WS3).
+        "route": _nullable(_POINTS),
     }
 )
 
@@ -270,6 +302,11 @@ SCHEDULE_ITEM = _obj(
         "columns": _STR_LIST,
         "rows": _arr(_STR_LIST),
         "notes": _str(True),
+        # The page-facts schedule this transcribes (WS1 "doc8:sN"), or null.
+        "schedule_id": _str(True),
+        # Where the rows came from: the text layer the facts block printed, or
+        # the rendered image.
+        "source": _enum(("text_layer", "vision")),
     }
 )
 
@@ -299,10 +336,13 @@ SUB_AGENT_SCHEMA: dict[str, Any] = _obj(
     }
 )
 
-# A roll-up (merging several groups of one category) and an escalation patch
-# return the same shape as a sub agent group.
+# A roll-up (merging several groups of one category) returns the same shape
+# as a sub agent group. An escalation patch returns it with ESCALATION_COUNT_ITEM
+# count rows (supersedes_row_id and coverage, spec 5.4).
 ROLLUP_SCHEMA = SUB_AGENT_SCHEMA
-ESCALATION_SCHEMA = SUB_AGENT_SCHEMA
+ESCALATION_SCHEMA: dict[str, Any] = _obj(
+    {**SUB_AGENT_SCHEMA["properties"], "counts": _arr(ESCALATION_COUNT_ITEM)}
+)
 
 
 # Main agent -------------------------------------------------------------------

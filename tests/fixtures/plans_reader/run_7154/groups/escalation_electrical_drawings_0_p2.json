@@ -1,0 +1,44 @@
+{
+ "runs": [],
+ "pages": [
+  {
+   "page": 5,
+   "tags": [
+    "fixture schedule",
+    "COMcheck",
+    "lighting controls",
+    "2024 IECC",
+    "exit signs",
+    "undercabinet lighting"
+   ],
+   "notes": [
+    "Higher-resolution review is limited to whole-sheet region 0.780,0.045,0.820,0.060.",
+    "The tile clearly shows 277 under VOLTAGE and 0-10V under CONTROL METHOD, but does not include a fixture tag or an identifiable L4 row. These values cannot be assigned to L4.",
+    "First-pass quantities and other schedule values are retained; the supplied crop provides no basis to change them."
+   ],
+   "scale": null,
+   "title": "E0.04 LIGHTING FIXTURE SCHEDULE AND COMPLIANCE CERTIFICATE",
+   "doc_index": 1,
+   "page_role": "schedule",
+   "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+   "sheet_number": "E0.04",
+   "resolution_flags": [
+    {
+     "page": 5,
+     "reason": "The supplied flagged-region crop does not show an identifiable L4 row. Obtain a crop spanning the L4 tag and its CONTROL METHOD cell to resolve the original uncertainty.",
+     "region": "0.780,0.045,0.820,0.060",
+     "doc_index": 1,
+     "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20"
+    }
+   ]
+  }
+ ],
+ "scope": [],
+ "specs": [],
+ "counts": [],
+ "details": [],
+ "summary": "The supplied tile shows the VOLTAGE and CONTROL METHOD headers and a row reading 277 / 0-10V, but no fixture tag or identifiable L4 row. L4 control remains unresolved; no quantities or schedule values are changed.",
+ "category": "electrical_drawings",
+ "questions": [],
+ "schedules": []
+}

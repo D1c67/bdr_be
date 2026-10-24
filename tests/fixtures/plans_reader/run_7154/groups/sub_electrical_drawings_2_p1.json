@@ -1,0 +1,708 @@
+{
+ "runs": [],
+ "pages": [
+  {
+   "page": 3,
+   "tags": [
+    "mechanical connections",
+    "terminal air box schedule",
+    "fire alarm",
+    "smoke/fire damper",
+    "controls"
+   ],
+   "notes": [
+    "Two new single-duct terminal boxes are scheduled: VV-1-N serving STORAGE and VV-2-N serving OFFICES. Both have hot-water reheat, not scheduled electric resistance heat.",
+    "No voltage, phase, current, control-transformer or disconnect information is included in the terminal-box schedule.",
+    "Detail 2 assigns junction box and fire alarm signaling line to E.C.; fire alarm addressable control module is labeled 'WIRED BY E.C.'",
+    "For engineered smoke control, the detail shows a temperature-controls relay and wiring by T.C.C. through the alarm control module to the control damper.",
+    "Where a duct smoke detector cannot be reached through the damper access door, E.C. furnishes a separate duct access door and mechanical contractor installs it.",
+    "Refer to electrical drawings for fire/smoke damper wiring schematic and FSD/CM locations. Detail symbols are not installation quantities.",
+    "Terminal-box detail requires NFPA 70 electrical working clearance: equipment width or 30 inches minimum; indicated depths vary with voltage.",
+    "Ventilation calculation table is an airflow/code calculation, not an electrical equipment or connection schedule."
+   ],
+   "scale": "NTS",
+   "title": "M0.02 MECHANICAL SCHEDULES AND DIAGRAMS",
+   "doc_index": 1,
+   "page_role": "schedule",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M0.02",
+   "resolution_flags": []
+  },
+  {
+   "page": 4,
+   "tags": [
+    "ductwork",
+    "ceiling coordination"
+   ],
+   "notes": [
+    "Details 1, 2, 3, 5 and 6 show duct hangers, elbows, diffuser connections and branch connections.",
+    "No electrical equipment, powered damper operator, electrical connection or electrical installation quantity is specified on this sheet. Coordinate overhead electrical routing with ductwork and supports."
+   ],
+   "scale": "NTS",
+   "title": "M0.03 MECHANICAL DIAGRAMS",
+   "doc_index": 1,
+   "page_role": "detail",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M0.03",
+   "resolution_flags": []
+  },
+  {
+   "page": 5,
+   "tags": [
+    "demo",
+    "thermostat relocation",
+    "controls",
+    "smoke/fire damper",
+    "existing to remain"
+   ],
+   "notes": [
+    "Keynote 10 requires relocation of existing thermostat sensors per new work plan and removal of all wiring and conduits up to the indicated VV. Five sensor symbols are identified for relocation.",
+    "Keynote 8 removes an existing SFD and all associated appurtenances and requires patching/repair of the rated wall. One SFD is marked with this note.",
+    "Keynote 9 identifies existing SFDs and associated appurtenances to remain; field verify exact locations and requirements.",
+    "Keynote 3 identifies existing VVs and associated appurtenances to remain. These same boxes are recorded on M2.01 rather than counted again here.",
+    "Keynote 11 requires field verification of equipment serving ductwork and notification of engineer if actual conditions differ.",
+    "Sheet note 2 requires thermostat locations to be verified with architect, mounting at 48 inches AFF in accordance with ADA, and locking covers.",
+    "Sheet notes 1 and 6 require access doors for dampers above inaccessible ceilings and coordination of HVAC equipment/ductwork routing with other trades.",
+    "Diffuser/grille demolition and relocation are mechanical work; SD-X and SD-E at air outlets are not counted as smoke detectors.",
+    "The five sensor removal locations here and five relocated sensor installation locations on M2.01 are two phases of the same relocation work."
+   ],
+   "scale": "1/4\" = 1'-0\"",
+   "title": "MD2.01 OVERALL MECHANICAL PLAN - DEMOLITION WORK",
+   "doc_index": 1,
+   "page_role": "plan",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "MD2.01",
+   "resolution_flags": []
+  },
+  {
+   "page": 6,
+   "tags": [
+    "hydronic piping",
+    "existing to remain",
+    "controls"
+   ],
+   "notes": [
+    "Keynote 1: existing VV to remain; verify good operating condition and ensure no broken controls, valves or damper actuators.",
+    "Existing terminal boxes and sensors are repeated from MD2.01; no additional electrical equipment quantities are counted on this piping view.",
+    "Sheet note 2 repeats thermostat mounting at 48 inches AFF, architect location verification and locking covers.",
+    "HWS/HWR and CWS/CWR linework is mechanical piping, not electrical conduit."
+   ],
+   "scale": "1/4\" = 1'-0\"",
+   "title": "MD3.02 OVERALL MECHANICAL PIPING PLAN - DEMOLITION WORK",
+   "doc_index": 1,
+   "page_role": "plan",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "MD3.02",
+   "resolution_flags": []
+  },
+  {
+   "page": 7,
+   "tags": [
+    "mechanical connections",
+    "new work",
+    "controls",
+    "thermostat relocation",
+    "fire alarm",
+    "smoke/fire damper"
+   ],
+   "notes": [
+    "Keynote 9 requires SFD in rated wall and refers to diagrams. Six new SFD locations are shown.",
+    "Keynote 10 requires relocation of existing thermostat sensor, coordination with architect and new conduit/wiring up to VV; clean, repair and refurbish to good operating condition.",
+    "Keynote 11 requires new thermostat sensor wiring and conduit up to VV and architect coordination. Two new sensor locations serve VV-1-N and VV-2-N.",
+    "Five relocated sensor locations serve VV-4-E, VV-7-E, VV-6-E and the two boxes both tagged VV-1-E.",
+    "Keynote 2 requires existing VVs to remain, be recommissioned, maintained and rebalanced as indicated. Keynote 12 separately identifies VV-2-E to remain as is.",
+    "Keynote 14 retains existing SFDs and associated appurtenances. Existing retained SFD inventory is recorded on MD2.01; do not add it again from this sheet.",
+    "Keynote 15 requires verification, cleaning, repair/refurbishment and rebalancing as required of equipment serving existing ducts; notify engineer of differences.",
+    "New VV-1-N and VV-2-N are counted from the M0.02 schedule, not again from these plan symbols.",
+    "Dashed sensor-to-VV lines show control associations, not established installed raceway routes. No conduit sizes, conductor types, lengths or vertical dimensions are supplied.",
+    "New terminal-box controls and damper power/fire alarm connections must be coordinated with electrical drawings and controls specifications."
+   ],
+   "scale": "1/4\" = 1'-0\"",
+   "title": "M2.01 OVERALL MECHANICAL PLAN - NEW WORK",
+   "doc_index": 1,
+   "page_role": "plan",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M2.01",
+   "resolution_flags": []
+  },
+  {
+   "page": 8,
+   "tags": [
+    "hydronic piping",
+    "terminal boxes",
+    "controls",
+    "existing to remain"
+   ],
+   "notes": [
+    "New VV-1-N and VV-2-N receive new HWS/HWR piping connected to existing hydronic piping under keynote 1; these are hydronic reheat boxes.",
+    "Keynote 2 requires existing VVs to remain and be cleaned, repaired and refurbished; repair and/or replace broken controls, valves or damper actuators as needed.",
+    "This piping view repeats the terminal boxes and sensors shown on M2.01. No additional electrical quantities are counted.",
+    "Hydronic pipe routes and sizes are not electrical raceway routes.",
+    "Sheet notes require field verification of equipment and piping sizes/locations; owner-selected removed equipment is to be moved to owner's on-site storage."
+   ],
+   "scale": "1/4\" = 1'-0\"",
+   "title": "M3.02 OVERALL MECHANICAL PIPING PLAN - NEW WORK",
+   "doc_index": 1,
+   "page_role": "plan",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M3.02",
+   "resolution_flags": []
+  }
+ ],
+ "scope": [
+  {
+   "page": 3,
+   "quote": "JUNCTION BOX BY E.C. / FIRE ALARM SIGNALING LINE BY E.C. / FIRE ALARM ADDRESSABLE CONTROL MODULE. WIRED BY E.C.",
+   "section": "Detail 2",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Provide junction boxes and fire alarm signaling line for electrically actuated fire/smoke damper interfaces; wire addressable control module as indicated. Obtain actual circuiting and module locations from electrical drawings.",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M0.02"
+  },
+  {
+   "page": 3,
+   "quote": "WHERE DUCT SMOKE DETECTORS CANNOT BE ACCESSED BY THE DAMPER ACCESS DOOR THE ELECTRICAL CONTRACTOR SHALL FURNISH A DUCT ACCESS DOOR FOR THE DETECTOR. THE MECHANICAL CONTRACTOR SHALL INSTALL THE DOOR IN THE DUCT.",
+   "section": "Detail 2, note 4",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Separate duct smoke detector access doors, when necessary, are furnished by electrical contractor and installed by mechanical contractor.",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M0.02"
+  },
+  {
+   "page": 3,
+   "quote": "WIRING BY T.C.C. THROUGH ALARM CONTROL MODULE TO CONTROL DAMPER",
+   "section": "Detail 2",
+   "doc_index": 1,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "Coordinate normally closed electric damper operators, fire alarm interfaces and any engineered smoke-control relay wiring. No operator voltage or load is specified.",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M0.02"
+  },
+  {
+   "page": 3,
+   "quote": null,
+   "section": "TERMINAL AIR BOX SCHEDULE - SINGLE DUCT",
+   "doc_index": 1,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "Two new TITUS ESV terminal boxes require controls coordination. Scheduled heating is hydronic: EWT 190\u00b0F, maximum 0.30 GPM for VV-1-N and 0.85 GPM for VV-2-N. Electrical control-power requirements and trade furnishing split are not stated.",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M0.02"
+  },
+  {
+   "page": 5,
+   "quote": "EXISTING THERMOSTAT SENSORS TO BE RELOCATED PER NEW WORK PLAN. REMOVE ALL WIRING AND CONDUITS UP TO VV AS INDICATED.",
+   "section": "Keynote 10",
+   "doc_index": 1,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "Remove sensor wiring and conduit back to existing VV as part of five thermostat sensor relocations.",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "MD2.01"
+  },
+  {
+   "page": 5,
+   "quote": "REMOVE EXISTING SFD AND ALL ASSOCIATED APPURTENANCES. PATCH AND REPAIR RATED WALL TO GOOD OPERATING CONDITION.",
+   "section": "Keynote 8",
+   "doc_index": 1,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "Coordinate disconnection of the SFD being removed and disposition of its existing power/control/fire alarm interface before mechanical demolition.",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "MD2.01"
+  },
+  {
+   "page": 5,
+   "quote": "MOUNT ALL THERMOSTATS @48\" A.F.F. IN ACCORDANCE WITH ADA STANDARDS. PROVIDE LOCKING COVERS FOR T-STATS.",
+   "section": "Sheet note 2",
+   "doc_index": 1,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "Thermostat rough-in and placement must comply with the stated height and locking-cover requirement.",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "MD2.01"
+  },
+  {
+   "page": 6,
+   "quote": "ENSURE NO BROKEN CONTROLS, VALVES, OR DAMPER ACTUATORS.",
+   "section": "Keynote 1",
+   "doc_index": 1,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "Verify existing VV controls, valves and damper actuators are operational before commencing work; coordinate any deficiencies with controls contractor.",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "MD3.02"
+  },
+  {
+   "page": 7,
+   "quote": "RELOCATE EXISTING THERMOSTAT SENSOR AS INDICATED. COORDINATE FINAL LOCATION WITH ARCHITECT. PROVIDE NEW CONDUIT WIRING UP TO VV AS INDICATED.",
+   "section": "Keynote 10",
+   "doc_index": 1,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "Provide new conduit and wiring from relocated thermostat sensors to their associated existing VVs, with final locations coordinated with architect.",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M2.01"
+  },
+  {
+   "page": 7,
+   "quote": "PROVIDE NEW THERMOSTAT SENSOR WIRING AND CONDUIT UP TO VV AS INDICATED. COORDINATE FINAL LOCATION WITH ARCHITECT.",
+   "section": "Keynote 11",
+   "doc_index": 1,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "Provide new sensor wiring and conduit for the two new terminal boxes; confirm electrical versus temperature-controls contractor responsibility.",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M2.01"
+  },
+  {
+   "page": 7,
+   "quote": "PROVIDE SFD IN RATED WALL. REFER TO DIAGRAMS FOR ADDITIONAL INFORMATION.",
+   "section": "Keynote 9",
+   "doc_index": 1,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "Coordinate electrical/fire alarm connection work for six new SFDs installed in rated walls.",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M2.01"
+  },
+  {
+   "page": 7,
+   "quote": "EXISTING VV TO REMAIN. RECOMMISSION AND PROVIDE MAINTENANCE AS REQUIRED. REBALANCE VV AS INDICATED.",
+   "section": "Keynote 2",
+   "doc_index": 1,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "Existing terminal boxes require recommissioning and maintenance as required, which may require controls testing and electrical coordination.",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M2.01"
+  },
+  {
+   "page": 8,
+   "quote": "REPAIR AND/OR REPLACE AS NEEDED ANY BROKEN CONTROLS, VALVES, OR DAMPER ACTUATORS.",
+   "section": "Keynote 2",
+   "doc_index": 1,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "Existing terminal-box controls, valves and actuators must be repaired or replaced if broken; quantity and extent are field-dependent.",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M3.02"
+  }
+ ],
+ "specs": [
+  {
+   "item": "New terminal air boxes VV-1-N and VV-2-N",
+   "page": 3,
+   "section": "TERMINAL AIR BOX SCHEDULE - SINGLE DUCT",
+   "doc_index": 1,
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "manufacturer": "TITUS",
+   "sheet_number": "M0.02",
+   "approved_equals": [],
+   "basis_of_design": "ESV",
+   "substitution_rule": null,
+   "material_category_hint": "Other",
+   "vendor_or_organization_requirements": null
+  },
+  {
+   "item": "Fire/smoke damper electric operator",
+   "page": 3,
+   "section": "Detail 2",
+   "doc_index": 1,
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "manufacturer": null,
+   "sheet_number": "M0.02",
+   "approved_equals": [],
+   "basis_of_design": "NORMALLY CLOSED ELECTRIC OPERATOR AND LINKAGE OUTSIDE OF DUCT.",
+   "substitution_rule": null,
+   "material_category_hint": "Other",
+   "vendor_or_organization_requirements": "DAMPER CLOSES BY SPRING ACTION IN EVENT OF HIGH TEMPERATURE."
+  },
+  {
+   "item": "Thermostat mounting and covers",
+   "page": 5,
+   "section": "Sheet note 2",
+   "doc_index": 1,
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "manufacturer": null,
+   "sheet_number": "MD2.01",
+   "approved_equals": [],
+   "basis_of_design": null,
+   "substitution_rule": null,
+   "material_category_hint": "Low Voltage",
+   "vendor_or_organization_requirements": "MOUNT ALL THERMOSTATS @48\" A.F.F. IN ACCORDANCE WITH ADA STANDARDS. PROVIDE LOCKING COVERS FOR T-STATS."
+  }
+ ],
+ "counts": [
+  {
+   "page": 3,
+   "unit": "EA",
+   "basis": "schedule_text",
+   "notes": "Mechanical equipment, not an electrical equipment purchase. TITUS ESV; electrical/control power requirements not scheduled. Same unit appears on M2.01 and M3.02.",
+   "location": "STORAGE; terminal air box schedule",
+   "quantity": 1,
+   "doc_index": 1,
+   "confidence": 1,
+   "description": "New hydronic-reheat terminal air box requiring controls coordination, storage",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M0.02",
+   "symbol_or_tag": "VV-1-N",
+   "material_category_hint": "Other"
+  },
+  {
+   "page": 3,
+   "unit": "EA",
+   "basis": "schedule_text",
+   "notes": "Mechanical equipment, not an electrical equipment purchase. TITUS ESV; electrical/control power requirements not scheduled. Same unit appears on M2.01 and M3.02.",
+   "location": "OFFICES; terminal air box schedule",
+   "quantity": 1,
+   "doc_index": 1,
+   "confidence": 1,
+   "description": "New hydronic-reheat terminal air box requiring controls coordination, offices",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M0.02",
+   "symbol_or_tag": "VV-2-N",
+   "material_category_hint": "Other"
+  },
+  {
+   "page": 5,
+   "unit": "EA",
+   "basis": "counted_symbols",
+   "notes": "Five symbols carrying keynote 10. Relocated installation phase is separately recorded on M2.01; not five additional sensors to purchase.",
+   "location": "VV-4-E, VV-7-E, VV-6-E and two VV-1-E sensor locations; at (0.26,0.50) (0.18,0.61) (0.58,0.68) (0.40,0.81) (0.53,0.82)",
+   "quantity": 5,
+   "doc_index": 1,
+   "confidence": 0.98,
+   "description": "Existing thermostat sensor relocation demolition phase: remove wiring and conduit back to VV",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "MD2.01",
+   "symbol_or_tag": "S / keynote 10",
+   "material_category_hint": "Demolition"
+  },
+  {
+   "page": 5,
+   "unit": "EA",
+   "basis": "counted_symbols",
+   "notes": "Damper removal is mechanical; electrical disconnection/interface disposition requires coordination. No separate existing control module or circuit is identified.",
+   "location": "Interior partition east of center; at (0.56,0.69)",
+   "quantity": 1,
+   "doc_index": 1,
+   "confidence": 0.98,
+   "description": "Remove existing smoke/fire damper and associated appurtenances; coordinate electrical isolation and fire alarm removal",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "MD2.01",
+   "symbol_or_tag": "SFD / keynote 8",
+   "material_category_hint": "Demolition"
+  },
+  {
+   "page": 5,
+   "unit": "EA",
+   "basis": "counted_symbols",
+   "notes": "Existing inventory, not new purchases or new connections. Repeated on M2.01 under keynote 14; counted only here.",
+   "location": "Perimeter and interior rated walls; at (0.20,0.47) (0.17,0.50) (0.38,0.47) (0.62,0.51) (0.17,0.58) (0.17,0.62) (0.50,0.69) (0.54,0.69) (0.54,0.73) (0.62,0.74) (0.62,0.78) (0.09,0.85) (0.17,0.85) (0.19,0.85) (0.27,0.85) (0.37,0.85) (0.40,0.85) (0.61,0.85) (0.62,0.91)",
+   "quantity": 19,
+   "doc_index": 1,
+   "confidence": 0.92,
+   "description": "Existing smoke/fire dampers and associated appurtenances to remain",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "MD2.01",
+   "symbol_or_tag": "SFD / keynote 9",
+   "material_category_hint": "Other"
+  },
+  {
+   "page": 7,
+   "unit": "EA",
+   "basis": "counted_symbols",
+   "notes": "Mechanical-furnished damper assemblies; electrical scope governed by detail 2/M0.02 and electrical drawings. Six damper locations do not establish six independently addressed control modules; module grouping must be confirmed.",
+   "location": "Restroom west wall and new interior rated partitions; at (0.17,0.52) (0.23,0.71) (0.28,0.71) (0.29,0.72) (0.40,0.70) (0.47,0.69)",
+   "quantity": 6,
+   "doc_index": 1,
+   "confidence": 0.97,
+   "description": "New smoke/fire damper requiring electrical/fire alarm interface coordination",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M2.01",
+   "symbol_or_tag": "SFD / keynote 9",
+   "material_category_hint": "Other"
+  },
+  {
+   "page": 7,
+   "unit": "EA",
+   "basis": "counted_symbols",
+   "notes": "Installation phase of five relocations shown on MD2.01. Coordinate division of conduit, sensor wiring, termination and recommissioning with temperature controls contractor.",
+   "location": "VV-4-E, VV-7-E, VV-6-E and two VV-1-E new sensor positions; at (0.31,0.48) (0.17,0.70) (0.52,0.63) (0.41,0.84) (0.58,0.84)",
+   "quantity": 5,
+   "doc_index": 1,
+   "confidence": 0.99,
+   "description": "Relocate existing thermostat sensors and provide new conduit and wiring to VV",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M2.01",
+   "symbol_or_tag": "S / keynote 10",
+   "material_category_hint": "Low Voltage"
+  },
+  {
+   "page": 7,
+   "unit": "EA",
+   "basis": "counted_symbols",
+   "notes": "Keynote explicitly requires new thermostat sensor wiring and conduit. Confirm sensor furnishing and installation responsibilities; no model or wiring specification is supplied here.",
+   "location": "Sensors serving VV-2-N at west offices and VV-1-N at east storage; at (0.16,0.82) (0.62,0.73)",
+   "quantity": 2,
+   "doc_index": 1,
+   "confidence": 0.99,
+   "description": "New thermostat sensor location with wiring and conduit to new VV",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M2.01",
+   "symbol_or_tag": "S / keynote 11",
+   "material_category_hint": "Low Voltage"
+  },
+  {
+   "page": 7,
+   "unit": "EA",
+   "basis": "counted_symbols",
+   "notes": "Existing mechanical equipment, not new electrical equipment. Shown flows are respectively 650, 1050, 1400, 210 and 100 CFM. Two distinct boxes share tag VV-1-E.",
+   "location": "VV-4-E, VV-6-E, VV-7-E and two VV-1-E boxes; at (0.35,0.50) (0.57,0.66) (0.29,0.74) (0.48,0.83) (0.54,0.82)",
+   "quantity": 5,
+   "doc_index": 1,
+   "confidence": 0.99,
+   "description": "Existing terminal air boxes to remain, recommission and rebalance",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M2.01",
+   "symbol_or_tag": "VV / keynote 2",
+   "material_category_hint": "Other"
+  },
+  {
+   "page": 7,
+   "unit": "EA",
+   "basis": "counted_symbols",
+   "notes": "M2.01 says remain as is, while M3.02 keynote 2 calls for repair/replacement of broken controls, valves or actuators on existing VVs. Confirm extent of required remedial work.",
+   "location": "Work Area 1, above ceiling; at (0.37,0.57)",
+   "quantity": 1,
+   "doc_index": 1,
+   "confidence": 0.99,
+   "description": "Existing terminal air box VV-2-E to remain as is",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M2.01",
+   "symbol_or_tag": "VV-2-E / keynote 12",
+   "material_category_hint": "Other"
+  }
+ ],
+ "details": [
+  {
+   "page": 3,
+   "title": "TERMINAL AIR BOX - SINGLE DUCT - WRAPPED",
+   "doc_index": 1,
+   "detail_ref": "1/M0.02",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M0.02",
+   "electrical_relevance": "Maintain electrical working clearance per NFPA 70: width of equipment or 30 inches minimum. Detail indicates 36 inches depth at 0\u2013150V nominal, 42 inches at 151\u2013600V nominal, 48 inches above 601V nominal and a 30-inch exception only with special AHJ permission. These are generic detail values, not scheduled terminal-box voltage."
+  },
+  {
+   "page": 3,
+   "title": "FIRE/SMOKE DAMPER - ELECTRIC ACTUATION",
+   "doc_index": 1,
+   "detail_ref": "2/M0.02",
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M0.02",
+   "electrical_relevance": "Shows normally closed electric actuator, E.C. junction box, fire alarm addressable control module wired by E.C., signaling line by E.C., and engineered smoke-control relay wiring by T.C.C. Includes conditional E.C.-furnished detector access door. Refers to electrical drawings for wiring schematic and FSD/CM locations; no operator voltage, power circuit or module quantity is established by this typical detail."
+  }
+ ],
+ "summary": "These six sheets are mechanical schedules, details, demolition plans and new-work plans with electrical and controls coordination requirements. The electrical-related work includes five thermostat sensor relocations with replacement conduit and wiring, two new terminal-box sensor installations, six new smoke/fire dampers, and removal of one existing smoke/fire damper. The damper detail assigns junction boxes, fire alarm signaling wiring and addressable control-module wiring to the electrical contractor, with certain smoke-control wiring assigned to the temperature controls contractor. Two new terminal boxes have hydronic reheat; no electrical voltage, load or circuit data is supplied for their controls or for the damper operators. Existing terminal boxes and numerous smoke/fire dampers remain, with verification, maintenance and recommissioning requirements. No electrical feeders, panel schedules or dimensioned electrical raceway routes appear on these pages.",
+ "category": "electrical_drawings",
+ "questions": [
+  {
+   "why": "The schedule specifies hydronic reheat performance but contains no electrical connection data.",
+   "page": 3,
+   "question": "Provide terminal-box control power voltage/load, transformer requirements, disconnect requirements and electrical circuit sources for VV-1-N and VV-2-N.",
+   "doc_index": 1,
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M0.02"
+  },
+  {
+   "why": "Six new damper locations are shown, but the typical detail does not establish power or individual module/detector quantities.",
+   "page": 7,
+   "question": "Confirm new SFD operator voltage/load, normal or emergency power source, circuiting, control-module grouping and required duct smoke detectors.",
+   "doc_index": 1,
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M2.01"
+  },
+  {
+   "why": "Mechanical notes require new and relocated sensor wiring/conduit without assigning the complete trade split.",
+   "page": 7,
+   "question": "Confirm the furnishing/installing split for thermostat sensors, locking covers, conduit, cable, terminations and controls programming between E.C. and T.C.C.",
+   "doc_index": 1,
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M2.01"
+  },
+  {
+   "why": "This determines whether smoke-control relay wiring and remote override testing are required beyond ordinary fire alarm damper closure.",
+   "page": 3,
+   "question": "Is engineered smoke control applicable to this remodel, or is the T.C.C. relay/remote-override portion of detail 2 generic only?",
+   "doc_index": 1,
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M0.02"
+  },
+  {
+   "why": "The mechanical demolition note removes all appurtenances without defining electrical system disposition.",
+   "page": 5,
+   "question": "Identify the existing circuit and fire alarm interface associated with the SFD removed under keynote 8, and state whether the module/circuit is removed, retained or reused.",
+   "doc_index": 1,
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "MD2.01"
+  },
+  {
+   "why": "The boxes have separate relocated sensors and different indicated airflow values; unique identification is needed for controls wiring and testing.",
+   "page": 7,
+   "question": "Confirm unique equipment identifiers for the two distinct terminal boxes both tagged VV-1-E.",
+   "doc_index": 1,
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M2.01"
+  },
+  {
+   "why": "M2.01 keynote 12 says VV-2-E remains as is, while M3.02 keynote 2 calls for repair/replacement as needed. No condition survey or quantified repair scope is supplied.",
+   "page": 8,
+   "question": "Define the extent and responsibility for field-discovered repairs/replacement of existing VV controls and actuators, including VV-2-E.",
+   "doc_index": 1,
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M3.02"
+  },
+  {
+   "why": "The heating-coil header references notes 5 and 6, but the printed note block ends at note 5.",
+   "page": 3,
+   "question": "Provide the missing terminal-box schedule note 6, or confirm its header reference is erroneous.",
+   "doc_index": 1,
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M0.02"
+  },
+  {
+   "why": "Only schematic association lines are shown; no dependable installed electrical route lengths or conductor specifications can be taken from these mechanical plans.",
+   "page": 7,
+   "question": "Confirm installed routing, conduit sizes and control cable requirements for the five relocated and two new thermostat sensor connections.",
+   "doc_index": 1,
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M2.01"
+  }
+ ],
+ "schedules": [
+  {
+   "name": "TERMINAL AIR BOX SCHEDULE - SINGLE DUCT",
+   "page": 3,
+   "rows": [
+    [
+     "VV-1-N",
+     "STORAGE",
+     "100",
+     "50",
+     "50",
+     "55.0",
+     "90.0",
+     "190",
+     "0.30",
+     "4\"",
+     "20",
+     "TITUS",
+     "ESV",
+     "1,2,3,4,5"
+    ],
+    [
+     "VV-2-N",
+     "OFFICES",
+     "650",
+     "325",
+     "170",
+     "55.0",
+     "90.0",
+     "190",
+     "0.85",
+     "8\"",
+     "20",
+     "TITUS",
+     "ESV",
+     "1,2,3,4,5"
+    ]
+   ],
+   "notes": "Grouped headers: CFM over COOLING MAX., HEATING MAX., MIN.; HEATING COIL (NOTES 5, 6) over EAT \u00b0F, LAT \u00b0F, EWT \u00b0F, MAX. GPM. Printed notes: 1. NEITHER RADIATED NOR DISCHARGE SOUND LEVELS SHALL EXCEED NC 35 AT 1.5\" INLET STATIC PRESSURE WHEN TESTED PER AHRI STANDARD 885-2008 USING 5/8\" 20-LB DENSITY MINERAL FIBER CEILING TILE. 2. TOTAL AIR PRESSURE DROP OF TAB AND REHEAT COIL SHALL NOT EXCEED 0.50\" WC. 3. HEATING COIL IS BASED ON HEATING AIR FLOW. WATER PRESSURE DROP OF REHEAT COIL SHALL NOT EXCEED 5'. PROVIDE REHEAT COILS SEPARATE FROM BOXES IF REQUIRED TO MEET WATER PRESSURE DROP REQUIREMENTS. 4. WHEN LAT \u00b0F, EWT \u00b0F, AND GPM VALUES ARE BLANK, HEATING COIL IS NOT REQUIRED FOR TAB. 5. HEATING COIL SELECTION SHALL BE BASED ON A FIXED LEAVING AIR TEMPERATURE AND VARIABLE FLOW (GPM). PROVIDE FINAL MAXIMUM FLOW RATE (GPM) TO TEST & BALANCE TEMPERATURE CONTROLS CONTRACTORS. Header references note 6, but only notes 1\u20135 appear.",
+   "columns": [
+    "TAG NAME",
+    "AREA SERVED",
+    "COOLING MAX.",
+    "HEATING MAX.",
+    "MIN.",
+    "EAT \u00b0F",
+    "LAT \u00b0F",
+    "EWT \u00b0F",
+    "MAX. GPM",
+    "MIN. INLET SIZE (IN.) DIA.",
+    "WEIGHT",
+    "MANUFACTURER",
+    "MODEL (NOTES 1, 2)",
+    "NOTES"
+   ],
+   "doc_index": 1,
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M0.02",
+   "schedule_type": "mechanical_equipment"
+  },
+  {
+   "name": "AIR TERMINAL SCHEDULE",
+   "page": 3,
+   "rows": [
+    [
+     "EG-1",
+     "12x12",
+     "PERFORATED FACE",
+     "LAY-IN",
+     "STEEL",
+     "TITUS",
+     "PAR",
+     "1,2,3,4"
+    ],
+    [
+     "RG-1",
+     "24x24",
+     "PERFORATED FACE",
+     "LAY-IN",
+     "STEEL",
+     "TITUS",
+     "PAR",
+     "1,2,3,4"
+    ],
+    [
+     "RG-2",
+     "12x12",
+     "PERFORATED FACE",
+     "LAY-IN",
+     "STEEL",
+     "TITUS",
+     "PAR",
+     "1,2,3,4"
+    ],
+    [
+     "SD-1",
+     "24x24",
+     "MODULAR CORE",
+     "LAY-IN",
+     "STEEL",
+     "TITUS",
+     "MCD",
+     "1,2,3,4"
+    ],
+    [
+     "SD-2",
+     "12x12",
+     "MODULAR CORE",
+     "LAY-IN",
+     "STEEL",
+     "TITUS",
+     "MCD",
+     "1,2,3,4"
+    ]
+   ],
+   "notes": "1. CONTRACTOR SHALL DETERMINE PROPER BORDER TYPE TO MATCH CEILING CONSTRUCTION. 2. REFER TO DRAWINGS FOR NECK SIZE. ALL BRANCH DUCTWORK TO AIR TERMINALS SHALL BE NECK SIZE UNLESS NOTED OTHERWISE. 3. COORDINATE BORDER, COLOR, FINISH AND EXACT LOCATION WITH ARCHITECT. 4. PROVIDE DUCT TRANSITION AS REQUIRED. Passive air outlets; these SD tags are not lighting or smoke-detector types.",
+   "columns": [
+    "TAG NAME",
+    "FACE SIZE (IN.) (NOTE 2)",
+    "TYPE",
+    "BORDER (NOTE 1)",
+    "MATERIAL",
+    "MANUFACTURER",
+    "MODEL",
+    "NOTES"
+   ],
+   "doc_index": 1,
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M0.02",
+   "schedule_type": "mechanical_equipment"
+  }
+ ]
+}

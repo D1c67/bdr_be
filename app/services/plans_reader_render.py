@@ -54,6 +54,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.styles.colors import Color
 from openpyxl.worksheet.worksheet import Worksheet
 
+from app.services.electrical_items import CONDUIT_ACCESSORY_RATIOS, conduit_accessory_counts
 from app.services.plans_reader_schemas import (
     ESTIMATE_ALLOWANCES,
     LOW_VOLTAGE_NOTE,
@@ -176,7 +177,8 @@ def parse_conduit(description: str) -> tuple[str, str] | None:
 def conduit_fittings(description: str, length_ft: float) -> tuple[list[tuple[str, int, str]], int]:
     """Fitting rows for one conduit run of `length_ft` (the post-wastage BOQ
     length) and the 1-H strap count it contributes to OTHER CONDUIT
-    ACCESSORIES. Ratios measured on the sent BOQs:
+    ACCESSORIES. Ratios measured on the sent BOQs, owned by
+    electrical_items.CONDUIT_ACCESSORY_RATIOS (conduit_accessory_counts):
 
     - EMT / RGS: compression connector ceil(L/50), coupling ceil(L/10),
       1-H strap = couplings.
@@ -188,33 +190,33 @@ def conduit_fittings(description: str, length_ft: float) -> tuple[list[tuple[str
         return [], 0
     size, kind = parsed
     if kind in ("EMT", "RGS"):
-        conn = _ceil(length_ft / 50)
-        coupling = _ceil(length_ft / 10)
+        counts = conduit_accessory_counts(length_ft)
         rows = [
-            (f'{size}"C {kind} Compression Conn Stl', conn, "EA"),
-            (f'{size}"C {kind} Compression Coupling Stl', coupling, "EA"),
-            (f'{size}"C {kind} 1-H Strap - Steel', coupling, "EA"),
+            (f'{size}"C {kind} Compression Conn Stl', counts["connectors"], "EA"),
+            (f'{size}"C {kind} Compression Coupling Stl', counts["couplings"], "EA"),
+            (f'{size}"C {kind} 1-H Strap - Steel', counts["straps"], "EA"),
         ]
-        return rows, coupling
-    adapters = _ceil(length_ft / 50)
+        return rows, counts["straps"]
+    adapters = _ceil(length_ft / CONDUIT_ACCESSORY_RATIOS["connector_ft"])
     rows = [
         (f'{size}" ELBOW 90 DEG - RMC - GALV', max(1, _round_half_up(0.75 * adapters)), "EA"),
         (f'{size}" LOCKNUT - STEEL', adapters, "EA"),
-        (f'{size}" COUPLING - PVC', _ceil(length_ft / 10), "EA"),
+        (f'{size}" COUPLING - PVC', _ceil(length_ft / CONDUIT_ACCESSORY_RATIOS["coupling_ft"]), "EA"),
         (f'{size}" ADAPTER FEM - PVC', adapters, "EA"),
     ]
     return rows, 0
 
 
 def other_conduit_accessories(straps: int) -> list[tuple[str, int, str]]:
-    """Anchors and screws ceil(straps/2), SQ boxes ceil(anchors/5)."""
+    """Anchors and screws ceil(straps/2), SQ boxes ceil(anchors/5)
+    (electrical_items.CONDUIT_ACCESSORY_RATIOS)."""
     if straps <= 0:
         return []
-    anchors = _ceil(straps / 2)
+    anchors = _ceil(straps / CONDUIT_ACCESSORY_RATIOS["straps_per_anchor"])
     return [
         (ANCHOR_DESC, anchors, "EA"),
         (SCREW_DESC, anchors, "EA"),
-        (SQ_BOX_DESC, _ceil(anchors / 5), "EA"),
+        (SQ_BOX_DESC, _ceil(anchors / CONDUIT_ACCESSORY_RATIOS["anchors_per_box"]), "EA"),
     ]
 
 
@@ -978,7 +980,12 @@ def _write_estimate_area(
     return labels
 
 
-def _write_recap(ws: Worksheet, labels: list[str]) -> None:
+def _write_recap(ws: Worksheet, labels: list[str]) -> dict[str, Any]:
+    """Write the Bid Recap sheet and return its layout: the row of every
+    label (in order, duplicates numbered), the first and last label rows,
+    the TOTALS row, the BID SUMMARY rows by label, the BASE BID row and the
+    disclaimer row. The priced workbook (pricing_render) addresses its
+    recap cells through this layout instead of re-deriving it."""
     for col, width in RECAP_WIDTHS.items():
         ws.column_dimensions[col].width = width
     t = ws.cell(row=2, column=2, value="BID RECAP")
@@ -991,7 +998,10 @@ def _write_recap(ws: Worksheet, labels: list[str]) -> None:
     ws.row_dimensions[3].height = 27.75
 
     r = 4
+    label_rows: dict[str, int] = {}
     for label in labels:
+        key = label if label not in label_rows else f"{label}#{sum(1 for k in label_rows if k.split('#')[0] == label) + 1}"
+        label_rows[key] = r
         b = ws.cell(row=r, column=2, value=f"=1+MAX($B$3:B{r - 1})")
         _style(b, h="center", v="center")
         c = _text_cell(ws, r, 3, label)
@@ -1022,7 +1032,9 @@ def _write_recap(ws: Worksheet, labels: list[str]) -> None:
     ws.merge_cells(start_row=summary, start_column=2, end_row=summary, end_column=5)
     ws.row_dimensions[summary].height = 30
     r = summary + 1
+    summary_rows: dict[str, int] = {}
     for number, label, bold, size in RECAP_SUMMARY_ROWS:
+        summary_rows[label] = r
         if number is not None:
             _style(ws.cell(row=r, column=2, value=number), h="center", v="center")
         _style(
@@ -1050,6 +1062,16 @@ def _write_recap(ws: Worksheet, labels: list[str]) -> None:
     d = ws.cell(row=disclaimer, column=3, value=ESTIMATE_DISCLAIMER)
     _style(d, v="center", wrap=True, border=False)
     ws.row_dimensions[disclaimer].height = 234
+    return {
+        "label_rows": label_rows,
+        "first_row": 4,
+        "last_row": 4 + len(labels) - 1,
+        "totals_row": totals,
+        "summary_title_row": summary,
+        "summary_rows": summary_rows,
+        "base_bid_row": base,
+        "disclaimer_row": disclaimer,
+    }
 
 
 def _area_key(name: Any) -> str:

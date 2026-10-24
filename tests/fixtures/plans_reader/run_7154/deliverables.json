@@ -1,0 +1,42 @@
+[
+ {
+  "id": "d6fb58da-f343-4391-a614-5690c471420c",
+  "kind": "boq",
+  "version": 1,
+  "filename": "BOQ - COUNTS.xlsx",
+  "instruction": null,
+  "created_at": "2026-10-18T19:07:36.948202+00:00"
+ },
+ {
+  "id": "67fa69c6-bcf0-4831-b4b9-e3785516f6c1",
+  "kind": "brief",
+  "version": 1,
+  "filename": "Deep Brief.docx",
+  "instruction": null,
+  "created_at": "2026-10-18T19:07:51.811671+00:00"
+ },
+ {
+  "id": "4a3b2e0c-b346-43fb-b2c7-6e300a36b688",
+  "kind": "estimate",
+  "version": 1,
+  "filename": "UMC OUTPATIENT PHARMACY REMODEL - ELECTRICAL ESTIMATE.xlsx",
+  "instruction": null,
+  "created_at": "2026-10-18T19:07:37.938607+00:00"
+ },
+ {
+  "id": "7e2cb8c1-7826-42db-b756-a3ada3d03149",
+  "kind": "estimate",
+  "version": 2,
+  "filename": "Rev 2 - UMC OUTPATIENT PHARMACY REMODEL - ELECTRICAL ESTIMATE.xlsx",
+  "instruction": null,
+  "created_at": "2026-10-18T23:22:37.24287+00:00"
+ },
+ {
+  "id": "428d5f1e-5d1b-4f73-88e8-79eff2f5eed0",
+  "kind": "marked_plans",
+  "version": 1,
+  "filename": "Marked Plans.pdf",
+  "instruction": null,
+  "created_at": "2026-10-18T19:07:50.202015+00:00"
+ }
+]

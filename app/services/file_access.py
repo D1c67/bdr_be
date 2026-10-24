@@ -36,6 +36,8 @@ SOURCES = (
     "ai_estimating_deliverable",
     "submittal_file",
     "email_attachment",
+    "ai_pricing_estimate",
+    "ai_pricing_quote",
 )
 
 # Most rows the report scans for one request; past it `truncated` is set and

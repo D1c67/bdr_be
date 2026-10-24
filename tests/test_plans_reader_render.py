@@ -243,6 +243,21 @@ def test_fitting_ratios_match_sent_boqs():
     assert prr.other_conduit_accessories(0) == []
 
 
+def test_fitting_ratios_are_owned_by_electrical_items(monkeypatch):
+    """One module owns the accessory ratios: a change to
+    electrical_items.CONDUIT_ACCESSORY_RATIOS moves the renderer's rows."""
+    from app.services import electrical_items as ei
+
+    monkeypatch.setitem(ei.CONDUIT_ACCESSORY_RATIOS, "coupling_ft", 20.0)
+    monkeypatch.setitem(ei.CONDUIT_ACCESSORY_RATIOS, "connector_ft", 25.0)
+    rows, straps = prr.conduit_fittings('3/4"C EMT', 100.0)
+    assert [r[1] for r in rows] == [4, 5, 5] and straps == 5
+    assert [r[1] for r in prr.conduit_fittings('3"C PVC', 100.0)[0]] == [3, 4, 5, 4]
+    monkeypatch.setitem(ei.CONDUIT_ACCESSORY_RATIOS, "straps_per_anchor", 5.0)
+    monkeypatch.setitem(ei.CONDUIT_ACCESSORY_RATIOS, "anchors_per_box", 2.0)
+    assert [r[1] for r in prr.other_conduit_accessories(10)] == [2, 2, 1]
+
+
 # BOQ workbook ----------------------------------------------------------------
 
 

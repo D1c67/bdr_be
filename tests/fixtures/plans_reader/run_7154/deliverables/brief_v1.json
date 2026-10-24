@@ -1,0 +1,535 @@
+{
+ "rfis": [
+  {
+   "source": "E1.00; E2.01; E3.01",
+   "question": "Provide full-size calibrated electrical plans or CAD, source junction-box locations, permissible branch routes and circuit-extension limits so branch wire and conduit can be measured by size."
+  },
+  {
+   "source": "E0.02\u2013E0.03",
+   "question": "Correct the panel phase totals, provide complete 1HD circuit 37 data and confirm existing feeder/panel capacity without replacement."
+  },
+  {
+   "source": "E0.03",
+   "question": "Identify existing panel/breaker manufacturers, catalog families, 1EELC source and interrupting rating. Which of the 22 non-GFCI pharmacy branch breakers are reused versus new?"
+  },
+  {
+   "source": "E0.00",
+   "question": "Provide the hospital coordination study, required update boundaries and provider, essential-power commissioning procedures and acceptance requirements."
+  },
+  {
+   "source": "E0.01; E2.01",
+   "question": "Resolve above-ceiling rigid versus EMT permission and MC prohibition versus hospital-grade MC language. Delineate patient-care rooms requiring NEC 517.13 and hospital-grade receptacles."
+  },
+  {
+   "source": "E0.01; D6 pp1\u20132",
+   "question": "Provide Honeywell's referenced scope, existing system/model information, authorized service contacts and monitoring agency. Allocate design, devices, wiring, programming, disarming, testing and restoration between Honeywell, G3 and GC."
+  },
+  {
+   "source": "E0.01; D6 pp3\u20134",
+   "question": "Provide approved FA impairment, detector-protection and fire-watch procedures while maintaining the required operating system."
+  },
+  {
+   "source": "E0.01; 01 50 00; D6 pp1\u20135",
+   "question": "Confirm normal work hours, approved outage windows, shutdown approval process, project ICRA/ILSM, containment phasing and available temporary power."
+  },
+  {
+   "source": "ED2.01 and escalation patch",
+   "question": "Provide full lower-plan demolition coverage to verify the nine hatched receptacle assemblies, eight multiple-outlet assemblies and seven floor assemblies, including floor contents and restoration."
+  },
+  {
+   "source": "ED3.01 and escalation patch",
+   "question": "Provide full ED3.01 coverage for clipped rectangular fixtures, all track rows and unidentified entry graphics. Confirm whether lighting conduit/conductors are retained/capped or removed to source."
+  },
+  {
+   "source": "ED2.01",
+   "question": "Confirm ED2.01 keynote 2's LIGHT FIXTURE wording does not add duplicate lighting demolition."
+  },
+  {
+   "source": "E0.00; E3.01",
+   "question": "Confirm shaded L1/L3 source circuits, life-safety classification and required emergency bypass devices/drivers, particularly fixtures labeled 1HD-21."
+  },
+  {
+   "source": "E0.04; E3.01",
+   "question": "Provide full L4 control information and coordinated L5 run lengths/module configurations. Reconcile L3 21W schedule versus 20W COMcheck and treatment of L4/L5/X1."
+  },
+  {
+   "source": "E0.04; E2.01; E3.01",
+   "question": "Provide lighting/receptacle control architecture, power packs, relays, control wiring requirements, controlled-receptacle markings and sensor interfaces."
+  },
+  {
+   "source": "E2.01; M0.02; M2.01",
+   "question": "Provide voltage, load, transformer, disconnect and circuit-source requirements for VV-1-N, VV-2-N and six new dampers. Confirm the missing VV-1-N electrical connection."
+  },
+  {
+   "source": "E0.01; M0.01\u2013M0.02; M2.01",
+   "question": "Define damper module grouping, duct detector quantities, emergency circuit assignments and whether engineered smoke-control relay/override requirements apply."
+  },
+  {
+   "source": "MD2.01 keynote 8",
+   "question": "Identify circuit and FA interface disposition for the removed smoke/fire damper, including removal versus reuse of its module."
+  },
+  {
+   "source": "E0.01; M0.01; MD2.01; M2.01",
+   "question": "Resolve electrical versus mechanical/controls scope for 120V ATC sources, breakers, transformers, sensor conduit/cable, five relocations, two new sensors, covers, terminations and programming."
+  },
+  {
+   "source": "M2.01; M3.02",
+   "question": "Provide unique identifiers for the two VV-1-E boxes, define field-discovered controls/actuator repair responsibility and clarify VV-2-E remain-as-is versus repair language."
+  },
+  {
+   "source": "M0.01\u2013M0.02",
+   "question": "Provide terminal-box schedule note 6 or confirm an erroneous reference; identify any actual project VFDs, loose starters/disconnects or condensate pumps."
+  },
+  {
+   "source": "E0.00\u2013E0.01; E2.01; M0.00; 07 84 13; 09 29 00; D6",
+   "question": "Confirm electrical restoration, ceiling removal/replacement, firestopping, labeling, putty pads and acoustical sealing responsibilities, including work outside construction limits."
+  },
+  {
+   "source": "D4; D6 p1; E2.01",
+   "question": "Provide selected Uniweb/furniture shop drawings, elevations, circuit/grounding assignments and external connection points; identify which E2.01 receptacles are factory furnished versus field furnished."
+  },
+  {
+   "source": "E0.01; D3 00 01 10; D6 p1",
+   "question": "Provide telecommunications drawings and allocate furniture data connections, communications rough-ins, cabling, outlets and testing."
+  },
+  {
+   "source": "D6 pp2,4",
+   "question": "Provide telemetry, Centrak and wireless access device inventory, relocation locations, storage conditions and testing responsibility. Confirm the specific device-storage obligation governs over the general contents-storage exclusion."
+  },
+  {
+   "source": "E2.01; D3 08 11 13, 08 14 00, 08 34 00; D5; D6 pp5\u20136",
+   "question": "Confirm whether CR is a new card reader. Provide approved opening-specific hardware sets, wiring diagrams, door operator/closer/lock power, release sequences and trade responsibilities."
+  },
+  {
+   "source": "D3 08 34 00; D5 pp1\u20132; D6 p6",
+   "question": "Confirm the current UMC hardware standard and substitution precedence, including optional AD Systems magnetic locks and Von Duprin PS 914 or equal."
+  },
+  {
+   "source": "D3 12 24 13",
+   "question": "Confirm roller shades are manual; if motorized, provide locations, loads, controls and circuits."
+  },
+  {
+   "source": "D3 01 50 00; D6 p3",
+   "question": "Confirm temporary office and HEPA equipment loads/layouts, emergency shutoff arrangement, secure WiFi responsibility and UMC metering procedures."
+  },
+  {
+   "source": "D3 01 31 00; M0.01",
+   "question": "Provide BIM platform/detail requirements, survey expectations and subcontract responsibility for project software and coordination deliverables."
+  },
+  {
+   "source": "E0.02; E1.00",
+   "question": "Confirm XF5 identity/rating and whether XF-18 or 1ECLB requires any work."
+  },
+  {
+   "source": "D6 p2",
+   "question": "Provide remaining bid instructions, applicable wage determination, reporting requirements, insurance/bonding requirements, bid deadline/form and any alternates, allowances or unit-price requirements."
+  }
+ ],
+ "risks": [
+  {
+   "risk": "Branch wire and conduit footage is absent, so the quantified BOQ is materially incomplete for branch distribution.",
+   "source": "E1.00, E2.01, E3.01; reader runs arrays empty",
+   "severity": "high"
+  },
+  {
+   "risk": "Printed panel phase currents exceed mains while demand summaries are lower; 1HD circuit 37 is truncated and 1EELC source/AIC data are incomplete.",
+   "source": "E0.03",
+   "severity": "high"
+  },
+  {
+   "risk": "Live hospital work, essential systems and undefined shutdown boundaries require phased continuity, infection control and tightly coordinated outages.",
+   "source": "E0.00\u2013E0.01; D6 pp1\u20135",
+   "severity": "high"
+  },
+  {
+   "risk": "Honeywell scope and FA device design are missing despite complete design-build obligations and damper interfaces.",
+   "source": "E0.01; M0.02; D6 pp1\u20132",
+   "severity": "high"
+  },
+  {
+   "risk": "Furniture factory devices may overlap the field receptacle counts; external connection requirements and normal/UPS/ISO assignments are not defined.",
+   "source": "E2.01; D4; D6 p1",
+   "severity": "high"
+  },
+  {
+   "risk": "Lighting demolition remains partial; source-removal versus conductor/raceway reuse notes conflict.",
+   "source": "ED3.01 and escalation patch",
+   "severity": "high"
+  },
+  {
+   "risk": "Shaded luminaires retain normal-panel labels, creating unresolved essential-branch and control-bypass requirements.",
+   "source": "E0.00; E3.01",
+   "severity": "high"
+  },
+  {
+   "risk": "Above-ceiling rigid, dry-interior EMT and hospital-grade MC language conflicts; patient-care boundaries are not delineated.",
+   "source": "E0.01; E2.01",
+   "severity": "high"
+  },
+  {
+   "risk": "90-day completion, two-week long-lead ordering and 15/21-day submittal reviews may constrain specialty lighting and compatible breaker procurement.",
+   "source": "D6 pp4\u20135; 01 33 00",
+   "severity": "high"
+  },
+  {
+   "risk": "L5 run lengths, L4 control method and complete fixture ordering data remain unresolved.",
+   "source": "E0.04; E3.01; escalation patches",
+   "severity": "medium"
+  },
+  {
+   "risk": "Trade assignments conflict for firestopping, restoration and ATC control-power work.",
+   "source": "E0.00\u2013E0.01; E2.01; M0.00\u2013M0.02; D6 p3",
+   "severity": "high"
+  },
+  {
+   "risk": "Normal work-hour wording conflicts, and device storage is specifically required despite a general contents-storage exclusion.",
+   "source": "D6 pp1\u20134",
+   "severity": "medium"
+  },
+  {
+   "risk": "Door/access-control, telecommunications and existing technology device quantities cannot be established without missing drawings and inventories.",
+   "source": "D3 00 01 10; D5; D6; E2.01",
+   "severity": "high"
+  },
+  {
+   "risk": "Public-works requirements are referenced but wage determination, insurance, bonding and complete bid instructions are absent.",
+   "source": "D6 p2",
+   "severity": "high"
+  }
+ ],
+ "systems": [
+  {
+   "notes": "Existing service, ATS, transformers and panelboards remain. Four new 20A/1P GFCI breakers are explicit; 22 additional scheduled pharmacy branch breakers require reuse-versus-new confirmation. No new service or feeder replacement is established.",
+   "system": "Service and distribution",
+   "in_scope": "partial"
+  },
+  {
+   "notes": "74 new receptacle assemblies, including two quad assemblies. Extend existing circuits; E0.03 requires #10 H/N/G for new receptacle circuits. Furniture integration may change field-device versus factory-device furnishing.",
+   "system": "Branch power and receptacles",
+   "in_scope": "yes"
+  },
+  {
+   "notes": "21 L1, one L2, 16 L3, three L4, seven variable-length L5 runs and two X1. L5 run counts are not module quantities or measured footage.",
+   "system": "Interior lighting and exit signs",
+   "in_scope": "yes"
+  },
+  {
+   "notes": "Three ceiling occupancy sensors, ten ordinary dimmers, one dimmer with lockable cover, two occupancy-sensor dimmers and one occupancy-sensor switch. Ancillary packs, relays and emergency bypass components are not scheduled.",
+   "system": "Lighting controls",
+   "in_scope": "yes"
+  },
+  {
+   "notes": "Four controlled duplexes, one controlled GFCI duplex and one controlled quad. Controller architecture and integration with lighting sensors require confirmation.",
+   "system": "Automatic receptacle controls",
+   "in_scope": "yes"
+  },
+  {
+   "notes": "Maintain branch segregation and individual neutrals. Confirm shaded lighting circuit assignments and emergency control bypass. Essential-power commissioning and coordination-study update are required.",
+   "system": "Essential electrical and life-safety power",
+   "in_scope": "yes"
+  },
+  {
+   "notes": "Six new damper connections and VV-2-N are explicitly shown. VV-1-N is scheduled mechanically but lacks an electrical connection designation. Loads and disconnect requirements are absent.",
+   "system": "Mechanical equipment power",
+   "in_scope": "partial"
+  },
+  {
+   "notes": "Coordinate five sensor relocations and two new sensors. M0.01 assigns ATC wiring/conduit and controls to mechanical/controls, potentially conflicting with electrical control-power requirements. Do not purchase sensors under G3 without scope confirmation.",
+   "system": "Building automation and thermostat controls",
+   "in_scope": "partial"
+  },
+  {
+   "notes": "E0.01 requires design-build revisions and continuous operation. M0.02 assigns junction boxes, signaling line and module wiring to electrical. Honeywell provides building fire detection under Exhibit A; contracting boundary and device counts are missing.",
+   "system": "Fire alarm and smoke-control interfaces",
+   "in_scope": "partial"
+  },
+  {
+   "notes": "E0.01 assigns outlets/raceways to electrical and cabling/devices to others. Exhibit A requires infrastructure connections to furniture. Telecommunications drawings and project outlet counts are missing.",
+   "system": "Communications and data",
+   "in_scope": "partial"
+  },
+  {
+   "notes": "Successful bidder must survey, mark locations, remove, store and reinstall existing devices. Inventory and assignment to G3 versus a specialist are not established.",
+   "system": "Telemetry, Centrak and wireless access devices",
+   "in_scope": "partial"
+  },
+  {
+   "notes": "Honeywell integration is required for new card readers. CR notation, owner hardware standards and optional magnetic locks do not establish opening-specific quantities or power requirements.",
+   "system": "Security, access control and electrified doors",
+   "in_scope": "unclear"
+  },
+  {
+   "notes": "Remove indicated devices and lighting, preserve through circuits and owner-selected salvage. Partial enlarged reads correct receptacle classifications and track-head interpretation but do not complete the demolition takeoff.",
+   "system": "Demolition",
+   "in_scope": "yes"
+  },
+  {
+   "notes": "Provide all-trade temporary distribution and locally switched lighting. Coordinate office facilities and continuous negative-air equipment power with a single emergency shutoff.",
+   "system": "Temporary power and lighting",
+   "in_scope": "yes"
+  },
+  {
+   "notes": "Insulated EGC in every branch/feeder raceway; NEC 517.13 metallic grounding path in patient-care spaces. Maintain rated/acoustical assemblies and coordinate firestop trade responsibility.",
+   "system": "Grounding and penetration protection",
+   "in_scope": "yes"
+  },
+  {
+   "notes": "Shade products are manual but execution text references motor connections. No powered toilet accessory, window or room-sign quantity is established.",
+   "system": "Motorized shades and powered architectural accessories",
+   "in_scope": "unclear"
+  },
+  {
+   "notes": "No project-specific underground, trench, sawcut or site-lighting route is shown. Generic underground specifications do not establish scope.",
+   "system": "Site lighting and underground electrical",
+   "in_scope": "no"
+  },
+  {
+   "notes": "Not shown.",
+   "system": "EV charging",
+   "in_scope": "no"
+  },
+  {
+   "notes": "Not shown.",
+   "system": "Solar",
+   "in_scope": "no"
+  },
+  {
+   "notes": "Existing essential distribution is used. Uniweb sample UPS options do not establish a project UPS purchase.",
+   "system": "New generator or UPS equipment",
+   "in_scope": "no"
+  }
+ ],
+ "exclusions": [
+  "No new service, ATS, generator, transformer, panelboard or distribution feeder purchase unless subsequently directed.",
+  "Mechanical equipment furnishing, hydronic piping, air terminals and damper assemblies are by mechanical; G3 carries only identified electrical connections and coordinated interfaces.",
+  "ATC sensors, low-voltage control wiring, programming and thermostat relocation work are provisionally by mechanical/controls under M0.01, subject to clarification of line-voltage sources.",
+  "Communications cabling and end devices are by others per E0.01; do not interpret this as excluding the separate Exhibit A device preservation and reinstallation obligation.",
+  "No project-selected Uniweb panel, UPS, isolated-ground assembly, powered shade, door operator or magnetic-lock quantity is inferred from reference catalogs or general standards.",
+  "Hazardous-material removal is by Owner's separate contractor under 02 41 19.",
+  "GC containment barriers, negative-air equipment and general site facilities are not electrical equipment purchases; their required temporary electrical supply remains in scope.",
+  "No trenching, sawcutting, EV charging, solar or site-lighting work is established.",
+  "Missing takeoff quantities are not scope exclusions; obtain them before completing the bid."
+ ],
+ "assumptions": [
+  "Use one project area; room divisions and overall/enlarged views are not separate additive areas.",
+  "Use E0.03 scheduled conductor sizes over generic #12 minimum plan notes.",
+  "Existing distribution equipment remains; do not purchase equipment inventoried on the one-line or overall plan.",
+  "Four GFCI breakers are explicitly new. The other 22 pharmacy branch breakers are carried provisionally by panel pending confirmation of reuse; unrelated existing loads and spare breakers are excluded from procurement.",
+  "Normal working hours are provisionally Monday\u2013Friday, 6:00 am\u20133:30 pm, based on repeated Exhibit A sections 5.2.6 and 7.1.1; disruptive outages may require other hours.",
+  "Maintain both the 72-hour operational-area coordination requirement and the separate minimum 48-hour utility-outage notice.",
+  "For demolition, higher-resolution patches replace the original nine filled-duplex classification with nine hatched receptacle assemblies of unresolved type, and replace paired track heads with 12 provisional track-head assemblies, not 24 heads.",
+  "Five rectangular and two narrow linear demolition fixtures are confirmed within the enlarged tile only; neither quantity establishes a complete sheet total.",
+  "Carry patient-care metallic raceway plus insulated EGC; do not assume hospital-grade MC is accepted while E0.01 prohibits MC.",
+  "The BOQ assumes field-furnished receptacle assemblies pending reconciliation with selected Uniweb factory-prewired furniture; do not add brochure sample devices.",
+  "Branch wiring, raceway and L5 footage cannot be defensibly measured from the supplied reader outputs: no run lengths, physical page calibration, full route geometry or source-box locations were supplied."
+ ],
+ "project_summary": "UMC Outpatient Pharmacy Remodel, project 26.8.7154, at 1800 W. Charleston Blvd., Las Vegas, NV 89102, first-floor main lobby. Remodel within an operating hospital using existing normal and essential electrical distribution. Exhibit A identifies the work as 2026-05 and requires completion within 90 days of notice to proceed. This consolidation covers D1\u2013D6; architectural plans, telecommunications plans, project-specific furniture drawings and the referenced Honeywell scope were not supplied.",
+ "sheet_summaries": [
+  {
+   "title": "ELECTRICAL COVERSHEET",
+   "summary": "D1 p1. Legend, scope lineweights, branch segregation, separate neutrals, mounting heights, healthcare coordination, essential-power commissioning and hospital coordination-study update. Legend graphics are not counts.",
+   "sheet_number": "E0.00"
+  },
+  {
+   "title": "ELECTRICAL SPECIFICATIONS",
+   "summary": "D1 p2. Complete systems, prebid site visit, substitutions, temporary power, demolition continuity, matching existing components, control power, communications rough-ins and design-build FA. Contains conflicting raceway/MC language and occupied-hospital restrictions.",
+   "sheet_number": "E0.01"
+  },
+  {
+   "title": "SINGLE LINE DIAGRAMS",
+   "summary": "D1 p3. Existing normal and emergency distribution only; no new feeder lengths or sizes. Do not procure existing SB1, ATS-5, EM2, transformers or panels from this diagram.",
+   "sheet_number": "E0.02"
+  },
+  {
+   "title": "PANEL SCHEDULES",
+   "summary": "D1 p4. Existing 1HD, 1EELC, 1LH and 1LI schedules. Four explicit new 20A/1P GFCI breakers and 22 other pharmacy branch positions. #10 H/N/G except 1LH-11 #12. Phase totals/source/AIC require correction.",
+   "sheet_number": "E0.03"
+  },
+  {
+   "title": "LIGHTING FIXTURE SCHEDULE AND COMPLIANCE CERTIFICATE",
+   "summary": "D1 p5. L1\u2013L5 and X1 product basis. COMcheck totals agree with plan L1/L2/L3 and are not additive. L4 control remains unreadable; L3 wattage and omitted fixture types require reconciliation.",
+   "sheet_number": "E0.04"
+  },
+  {
+   "title": "ELECTRICAL OVERALL PLAN",
+   "summary": "D1 p6. Locates pharmacy and existing distribution; references enlarged work plans. No new branch routes. XF5 labeling differs from one-line; XF-18 and 1ECLB are existing references, not purchases.",
+   "sheet_number": "E1.00"
+  },
+  {
+   "title": "OVERALL POWER PLAN - DEMOLITION WORK",
+   "summary": "D1 p7. Ten open duplexes, nine hatched receptacle assemblies of unresolved type, eight multiple-outlet assemblies and seven floor assemblies. Preserve roll-up door and through circuits. Enlarged patch corrects classification, not totals.",
+   "sheet_number": "ED2.01"
+  },
+  {
+   "title": "OVERALL LIGHTING PLAN - DEMOLITION WORK",
+   "summary": "D1 p8. Thirteen downlights, three track rows, 12 provisional track-head assemblies and two switches. Patch adds five complete rectangular and two narrow linear fixtures within a tile only. Entry graphics and remaining rectangular fixtures unresolved; circuit removal/reuse conflict remains.",
+   "sheet_number": "ED3.01"
+  },
+  {
+   "title": "OVERALL POWER PLAN - NEW WORK",
+   "summary": "D1 p9. 74 receptacle assemblies, six FSD connections and one VV-2-N connection. Healthcare wiring/device grades, circuit extensions and controlled receptacles. Revision 1 dated 06/15/2026; source boxes and complete branch routes absent.",
+   "sheet_number": "E2.01"
+  },
+  {
+   "title": "OVERALL LIGHTING PLAN - NEW WORK",
+   "summary": "D1 p10. 21 L1, one L2, 16 L3, three L4, seven L5 runs, two X1 and 17 controls. Separate shaded fixtures for circuit review; L5 lengths and complete branch routes are not established.",
+   "sheet_number": "E3.01"
+  },
+  {
+   "title": "MECHANICAL COVERSHEET",
+   "summary": "D2 p1. Existing-service continuity, shutdown permissions, electrical working/dedicated clearances and support-load coordination. GC restoration language conflicts with electrical assignments.",
+   "sheet_number": "M0.00"
+  },
+  {
+   "title": "MECHANICAL SPECIFICATIONS",
+   "summary": "D2 p2. Mechanical/controls ATC responsibility, electrical loose disconnect/starter responsibilities, FA duct detector split and mechanical-led AutoCAD coordination. Generic VFD/pump requirements do not establish project quantities.",
+   "sheet_number": "M0.01"
+  },
+  {
+   "title": "MECHANICAL SCHEDULES AND DIAGRAMS",
+   "summary": "D2 p3. Two TITUS ESV hydronic terminal boxes without electrical ratings. Damper detail assigns EC boxes, signaling line and module wiring, with conditional detector access doors. Typical detail does not establish module counts.",
+   "sheet_number": "M0.02"
+  },
+  {
+   "title": "MECHANICAL DIAGRAMS",
+   "summary": "D2 p4. Passive duct/support details only; coordinate overhead electrical routing and supports. No electrical installation quantities.",
+   "sheet_number": "M0.03"
+  },
+  {
+   "title": "OVERALL MECHANICAL PLAN - DEMOLITION WORK",
+   "summary": "D2 p5. Five sensor relocation demolition phases, one removed SFD and nineteen retained SFDs. Electrical isolation/interface disposition for removed damper requires coordination.",
+   "sheet_number": "MD2.01"
+  },
+  {
+   "title": "OVERALL MECHANICAL PIPING PLAN - DEMOLITION WORK",
+   "summary": "D2 p6. Existing VVs remain; verify controls/actuators. Repeats terminal boxes/sensors; no additional electrical quantities.",
+   "sheet_number": "MD3.02"
+  },
+  {
+   "title": "OVERALL MECHANICAL PLAN - NEW WORK",
+   "summary": "D2 p7. Six new SFDs match E2.01 connections, five relocated and two new sensors, five VVs for recommissioning and VV-2-E remaining. Sensor association lines are not measured raceway routes.",
+   "sheet_number": "M2.01"
+  },
+  {
+   "title": "OVERALL MECHANICAL PIPING PLAN - NEW WORK",
+   "summary": "D2 p8. Hydronic piping to new boxes; repeats equipment and sensor quantities. Field-dependent repair of existing controls/actuators requires defined trade scope.",
+   "sheet_number": "M3.02"
+  }
+ ],
+ "spec_highlights": [
+  {
+   "title": "Electrical execution and healthcare systems",
+   "section": "E0.00\u2013E0.01",
+   "summary": "Separate essential branch raceways/boxes and individual neutrals; EGC in every raceway. Essential-power commissioning per 2022 FGI 1.2-8.1.5 and hospital coordination-study update for final sign-off. Minimum one-year warranty from acceptance; permits, records and O&M required."
+  },
+  {
+   "title": "Materials and wiring methods",
+   "section": "E0.01 Part Two; E2.01",
+   "summary": "Copper THHN/THWN, specification-grade minimum 20A devices, patient-care hospital-grade green-dot receptacles and office/corridor tamper resistance. EMT permitted in dry protected interiors, but above-ceiling rigid and MC prohibition require clarification against E2.01."
+  },
+  {
+   "title": "Substitutions",
+   "section": "E0.01; 01 60 00",
+   "summary": "Drawing requests at least five business days before bid closing; engineer review and written owner-representative approval. Manual preaward approval by addendum; postaward requests through Contractor at least five working days before ordering. Shop-drawing approval is not substitution approval."
+  },
+  {
+   "title": "Luminaire products",
+   "section": "E0.04",
+   "summary": "METALUX L1/L2, HALO L3, WAC LIGHTING L4/L5 and SURE-LITES X1. L1\u2013L3 are 277V with 0\u201310V control; L4/L5 are 120V. Ordering strings are incomplete; coordinate finishes, ceiling trim, mounting and controls."
+  },
+  {
+   "title": "Fire alarm and access-control provider",
+   "section": "E0.01 Part Three 20; D6",
+   "summary": "Maintain FA operation and obtain fire marshal approval before rough-in. Use project-compatible factory-certified components and connection technician with monitoring-agency acceptance. Honeywell coordination is mandatory, but the referenced scope is missing."
+  },
+  {
+   "title": "Coordination and BIM",
+   "section": "01 31 00; M0.01",
+   "summary": "Project-specific coordination drawings, conduit 1-1/4 inches and larger, devices and dimensioned boxes; BIM integration and 3D clash analysis. Electrical supplies AutoCAD information for mechanical-led coordination. Weekly meetings and project-platform participation apply."
+  },
+  {
+   "title": "Concealed-work records",
+   "section": "01 32 33; 01 78 39",
+   "summary": "Photograph conduit and concealed services before closure; keyed images submitted within three working days. Record actual circuitry/routes before concealment; provide annotated PDFs and final printed record drawings."
+  },
+  {
+   "title": "Submittals and procurement",
+   "section": "01 33 00",
+   "summary": "Allow 15 calendar days for initial review/resubmittals and 21 days for sequential review. Include factory wiring diagrams, clearances and project-specific field dimensions. Build these periods into the 90-day project schedule."
+  },
+  {
+   "title": "Temporary electrical facilities",
+   "section": "01 50 00; E0.01",
+   "summary": "All-trade temporary power/lighting from approved Owner sources; verify metering procedures. Locally switched security/construction lighting, office power and continuous HEPA equipment power with single emergency shutoff. Secure WiFi responsibility needs allocation."
+  },
+  {
+   "title": "Penetrations and restoration",
+   "section": "01 73 29; 07 84 13; D6 5.1.11",
+   "summary": "Maintain airtight and rated assemblies; restore finishes to prescribed boundaries using original installers where required. ASTM E814/UL 1479 systems, qualified firestop installer with five years' experience, inspections before concealment and labels within six inches. Do not mix sealant types in a penetration."
+  },
+  {
+   "title": "Acoustical seals and box pads",
+   "section": "09 29 00",
+   "summary": "Seal electrical penetrations airtight; box backs/sides in sound-rated assemblies require putty pads and perimeter sealant. Fire-rated pads: Tremco TREMstop MP. Non-fire-rated listed options: Specified Technologies, Inc. Firestop Putty Pads or Hilti CP-617."
+  },
+  {
+   "title": "Closeout and training",
+   "section": "01 77 00; 01 78 23; 01 79 00",
+   "summary": "Startup/testing, AHJ releases, cleaning, spares, warranties and recorded training before turnover. O&M draft at least 30 days before training, final at least 15 days before. Factory-authorized instructors; seven-day training notice."
+  },
+  {
+   "title": "Selective demolition and salvage",
+   "section": "02 41 19; E0.01",
+   "summary": "Protect occupied adjacent areas, verify disconnections, maintain through circuits and document conditions. Offer electrical salvage to Owner and move selected items onsite. Owner handles hazardous materials."
+  },
+  {
+   "title": "Electrified door coordination",
+   "section": "08 11 13; 08 14 00; 08 34 00; D5; D6",
+   "summary": "Coordinate frame boxes and factory door wiring paths. Owner standards include Schlage Electronics CO, LCN Sentronics and Sr./Senior Swing, and 1511S delayed egress. Exhibit A identifies Von Duprin PS 914 or equal. AD Systems ExamSlide is no-substitution with an optional magnetic lock; opening selections and electrical interfaces are missing."
+  },
+  {
+   "title": "Uniweb reference literature",
+   "section": "D4",
+   "summary": "Sample factory-prewired configurations only; no project quantities or selected models. One-inch data conduit is catalog information, not a measured project run. Red Special Purpose ISO is not automatically hospital emergency power."
+  },
+  {
+   "title": "Owner execution requirements",
+   "section": "D6 Exhibit A",
+   "summary": "90 days from notice to proceed; long-lead orders within two weeks of associated purchase order. Continuous hospital access, 72-hour operational-area coordination, minimum 48-hour outage notice, badging, infection-control compliance, hot-work permits and third-party inspections. Work-hour and storage conflicts require resolution."
+  },
+  {
+   "title": "Roller shades",
+   "section": "12 24 13",
+   "summary": "Manual chain-and-clutch products conflict with a motor-connection execution clause. No electrical shade quantity is inferred."
+  }
+ ],
+ "missing_documents": [
+  "Architectural plans, reflected ceiling plans, room/partition ratings, elevations, casework details and opening-specific door hardware sets referenced by the supplied documents.",
+  "Telecommunications drawings referenced by D3 Division 27.",
+  "Honeywell scope referenced by Exhibit A, existing FA/access-control system documentation and project-specific interface design.",
+  "Project-selected Uniweb/furniture shop drawings, electrical/data schedules and external connection details; D4 contains samples only.",
+  "Existing telemetry, Centrak and wireless access inventory and relocation plan.",
+  "Project ICRA, applicable ILSM and owner-approved phasing/shutdown procedures.",
+  "Hospital coordination study and owner-specific commissioning/acceptance procedures.",
+  "Complete calibrated branch-route takeoff information and source junction-box locations.",
+  "Complete L5 lengths/configurations, identifiable L4 control cell and full demolition enlargement coverage.",
+  "Terminal-box schedule note 6 referenced but not printed on M0.02.",
+  "Remaining bid/contract instructions, wage determination and insurance/bonding requirements.",
+  "Any supplemental Division 26/27/28 requirements; D3 intentionally refers electrical specifications to drawings, and E0.01 is supplied."
+ ],
+ "electrical_scope_summary": "G3 carries selective electrical demolition and make-safe work, pharmacy receptacles and branch-circuit extensions, modifications to existing panelboards, new lighting and controls, six fire/smoke-damper power connections and the explicitly shown VV-2-N connection. Carry temporary electrical services, electrical restoration, healthcare grounding and branch separation, essential-power commissioning and the hospital coordination-study update. Fire alarm is design-build with Honeywell coordination; its vendor/subcontract boundary remains unresolved. Communications rough-ins and furniture infrastructure connections are required, while E0.01 assigns communications cabling and devices to others. Exhibit A separately requires removal, storage and reinstallation of existing telemetry, Centrak and wireless access devices. The BOQ is a quantified-device baseline, not a complete material takeoff: branch wire/conduit footage, complete demolition lighting totals, L5 lengths and several vendor-designed systems remain unquantified.",
+ "other_trades_affecting_electrical": [
+  "Mechanical furnishes six new smoke/fire dampers; E0.01 generally calls for 120V emergency control power, maximum ten devices per circuit. Actual actuator loads and interfaces remain unconfirmed.",
+  "Mechanical furnishes TITUS ESV VV-1-N and VV-2-N, both hydronic reheat, not electric heat. Electrical schedule data are absent; E2.01 explicitly depicts only VV-2-N connection.",
+  "Mechanical/controls handles five thermostat relocations and two new sensor locations under M0.01 ATC scope; sensors mount 48 inches AFF with locking covers.",
+  "FA duct detectors are furnished/wired by FA and installed by mechanical; standalone detectors are mechanical scope. Electrical conditionally furnishes separate detector access doors for mechanical installation.",
+  "Mechanical removes one existing SFD; G3 must coordinate electrical isolation and FA disposition. Nineteen existing SFDs remain.",
+  "GC operates containment and negative-air filtration continuously. Coordinate electrical capacity and the specified single emergency shutoff; equipment counts and ratings are absent.",
+  "Furniture/casework trade must provide selected prewired assembly details, cutout templates, connection points and cable management. Uniweb brochure colors do not establish hospital emergency branch identification.",
+  "Door/hardware trade must coordinate frame boxes, built-in wood-door wiring paths, electronic locks, LCN operators/closers and any power supplies with Honeywell and G3.",
+  "Carpentry backing is minimum 5/8-inch exterior A-C plywood where unspecified, with fire-retardant treatment. Confirm furnishing assignment.",
+  "Ceiling, sprinkler and HVAC trades must coordinate device positions, access and supports; occupancy/smoke devices require separation from air outlets under E0.00.",
+  "GC/original finish installers must coordinate matching restoration and flooring access restrictions, including work outside pharmacy limits.",
+  "Owner/GC must establish salvage destinations, access/badging and safe shutdown windows; Owner handles hazardous-material removal."
+ ]
+}

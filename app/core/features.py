@@ -35,7 +35,7 @@ from enum import Enum
 from fastapi import HTTPException, status
 
 from app.core.config import get_settings
-from app.core.roles import INTERNAL_ROLES, Role
+from app.core.roles import AI_PRICING_VIEW_ROLES, INTERNAL_ROLES, Role
 
 
 class SubApp(str, Enum):
@@ -122,6 +122,10 @@ def enabled_map(role: Role | None = None) -> dict[str, bool]:
     # stopped queue keeps the page reachable but inert, and GET
     # /ai-estimating/status says so.
     flags["ai_estimating"] = ai_estimating_allowed(role)
+    # AI pricing (docs/AI_ESTIMATING_BUILD_SPEC.md 5.5): per caller, on top of
+    # ai_estimating. AI_PRICING_ENABLED plus AI_PRICING_STATE admitting the
+    # caller's role; the accountant and the estimator always read false.
+    flags["ai_pricing"] = ai_pricing_allowed(role)
     # PM RFI sync from the GC's Procore (docs/PM_RFI_SYNC.md): the PM sub-app
     # and PM_RFI_SYNC_ENABLED. getattr: fails closed on a settings stand-in.
     flags["pm_rfi_sync"] = bool(
@@ -256,3 +260,42 @@ def require_feature(sub_app: SubApp):
             raise feature_404(sub_app)
 
     return _dep
+
+
+# AI_PRICING_STATE -> the roles that may see AI prices (docs/
+# AI_ESTIMATING_BUILD_SPEC.md 5.5). test is the owner's preview audience;
+# live opens it to every pricing viewer (never the accountant, Q7).
+AI_PRICING_STATE_ROLES: dict[str, frozenset[Role]] = {
+    "live": AI_PRICING_VIEW_ROLES,
+    "test": frozenset({Role.EXECUTIVE, Role.IT_ADMIN}),
+}
+
+
+def ai_pricing_roles() -> frozenset[Role]:
+    """Roles AI_PRICING_STATE admits. An unknown state admits nobody.
+    getattr: fails closed on a settings stand-in without the field."""
+    state = getattr(get_settings(), "ai_pricing_state", None)
+    return AI_PRICING_STATE_ROLES.get(state, frozenset())
+
+
+def ai_pricing_allowed(role: Role | None) -> bool:
+    """Whether this role may see AI prices right now: AI Estimating is open to
+    it (ai_estimating_allowed), the pricing switch (AI_PRICING_ENABLED) is on
+    and AI_PRICING_STATE admits the role. The external estimator never, in
+    any state; the accountant never (not a pricing viewer)."""
+    if role is None or role == Role.ESTIMATOR:
+        return False
+    if not getattr(get_settings(), "ai_pricing_enabled", False):
+        return False
+    if not ai_estimating_allowed(role):
+        return False
+    return role in ai_pricing_roles()
+
+
+def require_ai_pricing() -> None:
+    """Router-level dependency gating the AI pricing routes on
+    AI_PRICING_ENABLED. Same contract as require_plans_reader: while the flag
+    is false every route 404s with the bare "Not Found" body before auth
+    runs. The per-caller role check is core/deps.require_pricing_view."""
+    if not getattr(get_settings(), "ai_pricing_enabled", False):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")

@@ -1,0 +1,2454 @@
+{
+ "schema": "bdr.scope_attribution_labels/1",
+ "frozen": "2026-10-21",
+ "note": "Labeled scope statements from the production backup of 2026-10-01 (holdout projects excluded), written and frozen before the WS5 attribution classifier. carry: exclude = the statement assigns physical scope (work or equipment) to a party other than the electrical contractor; include = it assigns physical scope to the electrical contractor (an electrical sheet's contractor or an imperative electrical note); neutral = administrative, coordination, code reference, product standard without a party on an electrical sheet, or no obligation. In an owner exhibit or Division 01 text the contractor or successful bidder is the prime (gc). No dollar figures.",
+ "vocabulary": {
+  "party": [
+   "ec",
+   "gc",
+   "owner",
+   "owner_vendor",
+   "other_trade",
+   "others",
+   "none"
+  ],
+  "carry": [
+   "include",
+   "exclude",
+   "neutral"
+  ],
+  "split": [
+   null,
+   "devices_by_others",
+   "raceway_by_ec"
+  ]
+ },
+ "statements": [
+  {
+   "id": "L001",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.1",
+   "text": "The work includes the removal of walls, mechanical systems, plumbing fixtures, and electrical elements.",
+   "label": {
+    "party": "none",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L002",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.1",
+   "text": "It is the contractor's responsibility to patch and repair as required to match existing building's finishes.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "cutting_patching"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L003",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.1",
+   "text": "All patch and repair work done outside the limit of the new construction shall be included as part of the scope of work.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "cutting_patching"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L004",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.1",
+   "text": "The general contractor shall furnish, install, and maintain suitable barriers (fire-rated where required) in compliance with the infection control risk assessment as required to prevent public entry into all work areas.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "temporary_protection"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L005",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.1",
+   "text": "The general contractor shall provide electrical, data, and plumbing connections from infrastructure to pre-manufactured furniture systems.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "furniture"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L006",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.1",
+   "text": "The general contractor is responsible for contacting and coordinating with Honeywell prior to demolition to disarm the existing system.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "fire_alarm"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L007",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.1",
+   "text": "Time of work will be after business hours (6:00 am - 3:30 pm) Monday through Friday.",
+   "label": {
+    "party": "none",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L008",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.2",
+   "text": "Access controls and all Fire detection systems for the building are provided by Honeywell.",
+   "label": {
+    "party": "owner_vendor",
+    "systems": [
+     "access_control",
+     "fire_alarm"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L009",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.2",
+   "text": "Any additional or new card readers will need to be integrated with the Honeywell access controls system.",
+   "label": {
+    "party": "none",
+    "systems": [
+     "access_control"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L010",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.2",
+   "text": "Telemetry antennas, Centrak devices, and wireless access point exact locations must be noted on a marked-up floor plan delivered to the engineering representative prior to any demolition. Removal, storage, and re-installation of these devices shall be the responsibility of the SUCCESSFUL BIDDER.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "rtls",
+     "telemetry",
+     "wireless_ap"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L011",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.2",
+   "text": "SUCCESSFUL BIDDER must be able to demonstrate experience working in an operational hospital.",
+   "label": {
+    "party": "gc",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L012",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.2",
+   "text": "General contractors shall possess a valid B - General Building license, in accordance with NRS, Chapter 624.",
+   "label": {
+    "party": "gc",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L013",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.2",
+   "text": "All subcontractors shall possess the appropriate valid specialty license(s), in accordance with NRS, Chapter 624.",
+   "label": {
+    "party": "none",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L014",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.2",
+   "text": "Nevada Revised Statutes (NRS), Chapter 338 - Public Works",
+   "label": {
+    "party": "none",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L015",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.2",
+   "text": "Contractor is responsible for daily clean up and removal of refuse from areas of work.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "general_conditions"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L016",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.3",
+   "text": "Contractor will furnish and install proper floor and wall protection for existing finishes.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "temporary_protection"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L017",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.3",
+   "text": "Contractor will provide a dumpster for projects determined to generate more than 3 yards of refuse.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "general_conditions"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L018",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.3",
+   "text": "Contractor is responsible to set up full containment area(s), and negative air filtration systems for the scope of work.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "temporary_protection"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L019",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.3",
+   "text": "Contractor will provide a copy of their current Safety Manual to UMC's Safety Department.",
+   "label": {
+    "party": "gc",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L020",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.3",
+   "text": "Contractor will secure all HVAC ducting when performance of work creates dust or smoke particulates as necessary to prevent contamination of existing duct systems.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "temporary_protection"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L021",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.3",
+   "text": "Contractor will follow and be compliant with any Interim Life Safety Management plans (ILSM) when deemed necessary.",
+   "label": {
+    "party": "gc",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L022",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.3",
+   "text": "Contractor is responsible for sealing of all penetrations disturbed or created in performance of contract work.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "firestopping"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L023",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.3",
+   "text": "Obtain any required permits and pay all associated fees.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "permits"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L024",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.4",
+   "text": "Secure/cover fire alarm smoke detectors in areas of construction to avoid false alarms.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "fire_alarm"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L025",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.4",
+   "text": "All work to take place during hours of (6:00am - 3:30pm) Monday - Friday.",
+   "label": {
+    "party": "none",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L026",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.4",
+   "text": "Responsible for the replacement, as well as patching or repair, of any of the building materials or adjacent surfaces damaged while performing scope of work.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "cutting_patching"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L027",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.4",
+   "text": "Standard toilet tissue, paper towel, soap, hand sanitizer dispensers, sharps container, glove box holders and PDI wipe holders shall be furnished by Owner and installed by Contractor.",
+   "label": {
+    "party": "owner",
+    "systems": [
+     "accessories"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L028",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.4",
+   "text": "All long lead materials shall be ordered for the project no later than two (2) weeks after issuance of an associated Purchase Order.",
+   "label": {
+    "party": "none",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L029",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.5",
+   "text": "All utility disruptions must be scheduled with UMC's Engineering Department at least 48 hours in advance.",
+   "label": {
+    "party": "none",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L030",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.5",
+   "text": "Cylindrical locksets: Schlage or equal ND series prepped for large format interchangeable core, Rhodes lever 626 finish",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "door_hardware"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L031",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.5",
+   "text": "Exit Devices: Von Duprin 99 Series or equal - rim panics on single doors, concealed vertical rods panics less bottom rod on pairs (no surface rods).",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "door_hardware"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L032",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.6",
+   "text": "Low Energy Auto Operators: LCN Senior Swing operators. Pair - 9550 Series. Single - 9530/9540 series. Power Supply - Von Duprin PS 914 or equal",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "door_hardware"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L033",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.6",
+   "text": "Door and Frame Paint Spec / Sherwin-Williams - Substitutes for paint brand and sheen are not acceptable.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "paint"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L034",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.6",
+   "text": "UMC Paint Standards for walls/ceilings Dunn Edwards Versasatin",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "paint"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L035",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.1",
+   "text": "The general contractor and subcontractors are responsible for referencing the permit set - construction documents; architectural, mechanical, electrical, and plumbing to include scope of work, specifications, general notes, keyed notes, sheet indexes, and legend.",
+   "label": {
+    "party": "gc",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L036",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.1",
+   "text": "General Contractor shall coordinate and schedule with the facility all demolition and construction not less than 72 hours prior to work in any areas that will maintain operations and patient treatment.",
+   "label": {
+    "party": "gc",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L037",
+   "project": "26.8.7154",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit A p.1",
+   "text": "Major utility disruptions shall be scheduled 48 hours in advance and will need to be performed in the after business hours (off hours) for the occupants.",
+   "label": {
+    "party": "none",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L038",
+   "project": "26.8.7154",
+   "doc_role": "general_note",
+   "ref": "E0.00 GN10",
+   "text": "CONTRACTOR SHALL BE RESPONSIBLE FOR ALL OPENINGS REQUIRED IN WALLS. ALL OPENINGS SHALL BE REPAIRED TO MATCH EXISTING BY A QUALIFIED CONTRACTOR AT THE EXPENSE OF THIS CONTRACTOR. ALL CONDUITS THROUGH WALLS SHALL BE GROUTED OR SEALED INTO OPENINGS.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "cutting_patching"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L039",
+   "project": "26.8.7154",
+   "doc_role": "sheet_note",
+   "ref": "ED2.01 SN1",
+   "text": "THE CONTRACTOR SHALL REMOVE OUTLETS/EQUIPMENT AS INDICATED AND RETURN TO OWNER AS DIRECTED BY OWNER'S REPRESENTATIVE. DEMOLITION WILL INCLUDE REMOVAL OF ALL BRANCH CIRCUIT/FEEDER CONDUIT AND WIRING FROM LIGHT FIXTURES/EQUIPMENT TO SOURCE.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "demolition"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L040",
+   "project": "26.8.7154",
+   "doc_role": "sheet_note",
+   "ref": "ED2.01 SN2",
+   "text": "THE CONTRACTOR IS RESPONSIBLE FOR MAINTAINING CONTINUITY OF ALL EXISTING POWER AND LOW VOLTAGE CIRCUITING SCHEDULED TO REMAIN, WHICH MAY PASS THROUGH DEMOLITION AREA.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "power"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L041",
+   "project": "26.8.7154",
+   "doc_role": "sheet_note",
+   "ref": "ED2.01 SN4",
+   "text": "CONTRACTOR SHALL BE RESPONSIBLE FOR VISITING THE SITE TO CONFIRM EXISTING CONDITIONS AND TO PERFORM THE NECESSARY DUE DILIGENCE IN ORDER TO COMPLETELY UNDERSTAND THE SCOPE OF THE DEMOLITION WORK.",
+   "label": {
+    "party": "ec",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L042",
+   "project": "26.8.7154",
+   "doc_role": "sheet_note",
+   "ref": "ED2.01 SN6",
+   "text": "COORDINATE WITH GENERAL CONTRACTOR FOR PHASING OF DEMOLITION WORK AND HOURS THAT WORK CAN BE PERFORMED.",
+   "label": {
+    "party": "ec",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L043",
+   "project": "26.8.7154",
+   "doc_role": "sheet_note",
+   "ref": "ED3.01 SN1",
+   "text": "THE CONTRACTOR SHALL REMOVE LIGHT FIXTURES/EQUIPMENT AS INDICATED AND RETURN TO OWNER AS DIRECTED BY OWNER'S REPRESENTATIVE. MAINTAIN AND CAP OFF EXISTING CONDUIT AND CONDUCTORS FOR USE IN NEW CONSTRUCTION.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "demolition"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L044",
+   "project": "26.8.7154",
+   "doc_role": "sheet_note",
+   "ref": "E2.01 SN4",
+   "text": "THE GENERAL CONTRACTOR SHALL SEAL AROUND ALL PIPE PENETRATIONS THROUGH WALLS, FLOORS AND CEILINGS WITH AN INTUMESCENT FIRE STOP MATERIAL TO MAINTAIN FIRE AND SMOKE RATINGS.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "firestopping"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L045",
+   "project": "26.8.7154",
+   "doc_role": "sheet_note",
+   "ref": "E2.01 SN5",
+   "text": "THE ELECTRICAL CONTRACTOR SHALL BE RESPONSIBLE FOR ALL CUTTING, PATCHING AND PAINTING ASSOCIATED WITH THE ELECTRICAL WORK.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "cutting_patching",
+     "paint"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L046",
+   "project": "26.8.7154",
+   "doc_role": "sheet_note",
+   "ref": "E2.01 SN9",
+   "text": "ELECTRICAL CONTRACTOR TO LABEL ALL OUTLETS WITH PANEL AND CIRCUIT NUMBER.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "power"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L047",
+   "project": "26.8.7154",
+   "doc_role": "sheet_note",
+   "ref": "E2.01 SN1",
+   "text": "ALL CIRCUITS SHALL CARRY A GREEN GROUND CONDUCTOR.",
+   "label": {
+    "party": "none",
+    "systems": [
+     "power"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L048",
+   "project": "26.8.7154",
+   "doc_role": "sheet_note",
+   "ref": "E2.01 SN8",
+   "text": "CONTRACTOR SHALL COMPLY WITH NEC 517, NFPA 99 AND RELATED ARTICLES FOR INSTALLATIONS WITHIN THE ESSENTIAL SYSTEMS AREAS. PER NEC 517.12 WIRING METHODS SHALL COMPLY WITH STATED PROVISIONS IN CHAPTERS 1 THRU 4. FOR CONDUCTORS WITHIN PVC FOLLOW NEC 352, AND EMT FOLLOW NEC 358.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "raceway"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L049",
+   "project": "26.8.7154",
+   "doc_role": "sheet_note",
+   "ref": "E2.01 SN10",
+   "text": "ALL RECEPTACLES INSTALLED IN PATIENT CARE AREAS SHALL BE HOSPITAL GRADE DEVICES WITH GREEN DOT. ALL RECEPTACLES IN OFFICES, CORRIDORS SHALL BE TAMPER RESISTANT PER NEC ARTICLES 517 AND 406.12.",
+   "label": {
+    "party": "none",
+    "systems": [
+     "power"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L050",
+   "project": "26.8.7154",
+   "doc_role": "sheet_note",
+   "ref": "E2.01 SN11",
+   "text": "THE CONTRACTOR SHALL COORDINATE BETWEEN THE ELECTRICAL AND LOW VOLTAGE INSTALLER TO ENSURE THAT ELECTRICAL AND LOW VOLTAGE DEVICES AND FACEPLATES MATCH IN COLOR.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "low_voltage"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L051",
+   "project": "26.8.7154",
+   "doc_role": "sheet_note",
+   "ref": "E2.01 SN12",
+   "text": "COORDINATE LOCATION AND CONNECTION REQUIREMENTS OF MECHANICAL UNITS WITH MECHANICAL CONTRACTOR PRIOR TO ROUGH - IN.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "mechanical_equipment"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L052",
+   "project": "26.8.7154",
+   "doc_role": "sheet_note",
+   "ref": "E2.01 SN6",
+   "text": "PROVIDE ACOUSTICAL SEALANT AT ALL BACK BOXES IN INSULATED WALLS.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "power"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L053",
+   "project": "26.8.7154",
+   "doc_role": "general_note",
+   "ref": "E0.01 GN19",
+   "text": "IN ADDITION, THE TELEPHONE, DATA, POINT-OF-SALE, SOUND, SECURITY, AUDIO/VISUAL, CCTV, MATV, CABLING AND DEVICES SHALL BE INSTALLED AND TERMINATED BY OTHERS.",
+   "label": {
+    "party": "others",
+    "systems": [
+     "av",
+     "security",
+     "telecom_data"
+    ],
+    "carry": "exclude",
+    "split": "devices_by_others"
+   }
+  },
+  {
+   "id": "L054",
+   "project": "26.8.7154",
+   "doc_role": "general_note",
+   "ref": "E0.01 GN19",
+   "text": "THE ELECTRICAL CONTRACTOR SHALL PROVIDE OUTLETS AND RACEWAYS FOR COMMUNICATION SYSTEMS AS INDICATED HEREIN.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "telecom_data"
+    ],
+    "carry": "include",
+    "split": "raceway_by_ec"
+   }
+  },
+  {
+   "id": "L055",
+   "project": "26.8.7154",
+   "doc_role": "general_note",
+   "ref": "E0.01",
+   "text": "CONNECT ALL EQUIPMENT, SYSTEMS, AND ASSEMBLIES PROVIDED BY OTHERS INCLUDING CONTROLS, SAFETY DEVICES AND INTERCONNECTIONS.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "owner_equipment"
+    ],
+    "carry": "include",
+    "split": "raceway_by_ec"
+   }
+  },
+  {
+   "id": "L056",
+   "project": "26.8.7154",
+   "doc_role": "general_note",
+   "ref": "E0.01",
+   "text": "FURNISHINGS, FIXTURES AND EQUIPMENT - PROVIDED BY OTHERS.",
+   "label": {
+    "party": "others",
+    "systems": [
+     "furniture"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L057",
+   "project": "26.8.7154",
+   "doc_role": "general_note",
+   "ref": "E0.01",
+   "text": "EXISTING FIRE ALARM SYSTEM - DESIGN/BUILD REVISIONS: AUGMENT/EXPAND FIRE ALARM CONTROL PANEL AND ANNUNCIATOR TO ACCOMMODATE ADDED DEVICES AND CIRCUITING AS REQUIRED TO ACCOMMODATE NEW WORK.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "fire_alarm"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L058",
+   "project": "26.8.7154",
+   "doc_role": "general_note",
+   "ref": "E0.01",
+   "text": "EMT WITH STEEL INSULATED THROAT SET SCREW FITTINGS MAY BE USED IN DRY, PROTECTED INTERIOR LOCATIONS.",
+   "label": {
+    "party": "none",
+    "systems": [
+     "raceway"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L059",
+   "project": "26.8.7154",
+   "doc_role": "general_note",
+   "ref": "E0.01",
+   "text": "ALL WIRING ABOVE CEILING SHALL BE IN RIGID CONDUIT. NO EXPOSED ELEMENTS SHALL BE ALLOWED. MC CABLE SHALL NOT BE ALLOWED.",
+   "label": {
+    "party": "none",
+    "systems": [
+     "raceway"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L060",
+   "project": "26.8.7154",
+   "doc_role": "general_note",
+   "ref": "E0.01",
+   "text": "MAINTAIN IN CONSTANT OPERATION DURING THIS PROJECT. (ENERGY COSTS BY OTHERS).",
+   "label": {
+    "party": "others",
+    "systems": [
+     "utility"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L061",
+   "project": "26.8.7154",
+   "doc_role": "spec",
+   "ref": "SPECS p.2",
+   "text": "DIVISION 28 - ELECTRONIC SAFTEY AND SECURITY - NOT USED",
+   "label": {
+    "party": "none",
+    "systems": [
+     "fire_alarm",
+     "security"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L062",
+   "project": "26.8.7154",
+   "doc_role": "spec",
+   "ref": "SPECS p.56",
+   "text": "Review Project Record Documents of existing construction or other existing condition and hazardous material information provided by Owner.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "hazardous"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L063",
+   "project": "26.8.7154",
+   "doc_role": "spec",
+   "ref": "SPECS p.9",
+   "text": "Digital data files of Architect's BIM model and CAD drawings will be provided by Architect for Contractor's use during construction.",
+   "label": {
+    "party": "none",
+    "systems": [
+     "bim"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L064",
+   "project": "26.8.7154",
+   "doc_role": "general_note",
+   "ref": "E0.00",
+   "text": "COMMON NEUTRALS MAY NOT BE USED FOR BRANCH CIRCUITS.",
+   "label": {
+    "party": "none",
+    "systems": [
+     "power"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L065",
+   "project": "26.8.7154",
+   "doc_role": "general_note",
+   "ref": "E0.00",
+   "text": "CONTRACTOR SHALL PROVIDE TO THE BUILDING DEPARTMENT THE UPDATED COORDINATION STUDY FOR FINAL SIGN-OFF.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "studies"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L066",
+   "project": "26.7.7146",
+   "doc_role": "general_note",
+   "ref": "E GN-E",
+   "text": "AWARDED CONTRACTOR IS RESPONSIBLE TO FIELD VERIFY EXISTING RACEWAY AND EXISTING WIRE TO EACH DOOR WITHIN SCOPE. UTILIZE EXISTING RACEWAY AND WIRING WHERE PRESENT AND EXTEND TO ACCESS CONTROL DEVICE. TERMINATE, LABEL AND TEST ALL ACCESS CONTROL WIRING TO PROVIDE A FULLY FUNCTIONAL SYSTEM.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "access_control"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L067",
+   "project": "26.7.7146",
+   "doc_role": "general_note",
+   "ref": "E GN-G",
+   "text": "AWARDED CONTRACTOR IS TO COORDINATE WITH OWNER'S REPRESENTATIVE FOR PREFERRED SYSTEM REQUIREMENTS.",
+   "label": {
+    "party": "ec",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L068",
+   "project": "26.7.7146",
+   "doc_role": "keynote",
+   "ref": "E KN3",
+   "text": "PROVIDE NEW LIFE SAFETY POWER E6M1 ENCLOSURE OR OWNER APPROVED EQUAL. INTEGRATE NEW DOOR CONTROLLERS WITHIN ACCESS CONTROL PANEL INTO EXISTING SYSTEM. REFER TO DIAGRAM 4/E4.01 FOR MOUNTING INFORMATION.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "access_control"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L069",
+   "project": "26.7.7146",
+   "doc_role": "general_note",
+   "ref": "E GN2",
+   "text": "THE CONTRACTOR IS RESPONSIBLE FOR FIELD COORDINATING WITH OTHER TRADES PRIOR TO ROUGH-IN TO AVOID INSTALLATION CONFLICTS.",
+   "label": {
+    "party": "ec",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L070",
+   "project": "26.7.7146",
+   "doc_role": "general_note",
+   "ref": "E GN9",
+   "text": "THE CONTRACTOR SHALL BE RESPONSIBLE FOR CUTTING AND PATCHING SURFACES AS REQUIRED WHERE NEW DEVICES OR EQUIPMENT WILL BE INSTALLED. PATCHING SHALL MATCH EXISTING ADJACENT SURFACES.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "cutting_patching"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L071",
+   "project": "26.7.7146",
+   "doc_role": "electrical_spec",
+   "ref": "Div 26 p.26",
+   "text": "OFOI - Owner Furnished Owner Installed.",
+   "label": {
+    "party": "none",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L072",
+   "project": "26.7.7146",
+   "doc_role": "electrical_spec",
+   "ref": "Div 26 p.27",
+   "text": "The items are designated as Owner Furnished, Contractor Installed on the drawings.",
+   "label": {
+    "party": "none",
+    "systems": [
+     "owner_equipment"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L073",
+   "project": "26.8.7149",
+   "doc_role": "general_note",
+   "ref": "LV1.01 GN7",
+   "text": "CONTRACTOR TO ROUTE ALL CONDUIT AND CABLING TO NEW OWNER PROVIDED CABINET UNDER RAMP SERVING AREA (IDF EGR1).",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "telecom_data"
+    ],
+    "carry": "include",
+    "split": "raceway_by_ec"
+   }
+  },
+  {
+   "id": "L074",
+   "project": "26.8.7149",
+   "doc_role": "general_note",
+   "ref": "LV5.02 GN1",
+   "text": "CONTRACTOR TO INSTALL OWNER PROVIDED CABINET (PART NUMBER GL840E-2436) PROVIDE (2) 208V/30A/3P CIRCUITS. CONTRACTOR TO INSTALL RACK MOUNTED UPS, UNO.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "telecom_data"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L075",
+   "project": "26.8.7159",
+   "doc_role": "sheet_note",
+   "ref": "ED301.01 SN2",
+   "text": "EXISTING FLOOR MOUNTED UPLIGHT IS NOT OPERATING. COORDINATE WITH OWNER TO REPAIR OR REPLACE.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "lighting"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L076",
+   "project": "26.8.7159",
+   "doc_role": "spec",
+   "ref": "Div 01 p.12",
+   "text": "The Work by the General Contractor includes receiving, unloading, handling, storing, protecting, and installing Owner furnished products.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "owner_equipment"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L077",
+   "project": "26.8.7159",
+   "doc_role": "spec",
+   "ref": "Div 01 p.20",
+   "text": "Construction facilities and controls provided by Owner.",
+   "label": {
+    "party": "owner",
+    "systems": [
+     "temporary_protection"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L078",
+   "project": "26.8.7159",
+   "doc_role": "electrical_spec",
+   "ref": "Div 26 p.61",
+   "text": "Wall box dimmers shall be Lutron Diva (or approved equal by others).",
+   "label": {
+    "party": "none",
+    "systems": [
+     "lighting"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L079",
+   "project": "26.8.7151",
+   "doc_role": "general_note",
+   "ref": "E1.00 GN9",
+   "text": "CONTRACTOR SHALL BE RESPONSIBLE FOR INSTALLING JUNCTION BOXES, CONDUIT PATHWAYS, J -HOOK, DEVICES, CABLING BETWEEN DEVICE AND TO DATA RACKS, TERMINATION OF CABLING, AND TESTING FOR ALL CABLES.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "telecom_data"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L080",
+   "project": "26.8.7151",
+   "doc_role": "general_note",
+   "ref": "E1.00 GN10",
+   "text": "LOW VOLTAGE CABLING SHALL BE CAT 6 UNLESS OTHERWISE NOTED. COORDINATE COLOR(S) FOR EACH SERVICE WITH OWNER'S REPRESENTATIVE.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "telecom_data"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L081",
+   "project": "26.8.7151",
+   "doc_role": "legend",
+   "ref": "E0.01 legend",
+   "text": "FIXED CAMERA - FURNISHED BY OTHERS.",
+   "label": {
+    "party": "others",
+    "systems": [
+     "security"
+    ],
+    "carry": "exclude",
+    "split": "devices_by_others"
+   }
+  },
+  {
+   "id": "L082",
+   "project": "26.8.7151",
+   "doc_role": "electrical_spec",
+   "ref": "Div 26 p.2",
+   "text": "Provide switches where not furnished with the starting equipment, at all other points required by and interlock wiring not provided under Division 23.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "mechanical_equipment"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L083",
+   "project": "26.6.7098B",
+   "doc_role": "sheet_note",
+   "ref": "ED1.10 SN1",
+   "text": "THE CONTRACTOR SHALL REMOVE OUTLETS AS INDICATED AND PROVIDE SALVAGE AS DIRECTED BY OWNER'S REPRESENTATIVE. DEMOLITION WILL INCLUDE REMOVAL OF ALL BRANCH CIRCUITS, CONDUIT, JUNCTION BOXES AND CONDUCTORS FROM OUTLETS TO SOURCE.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "demolition"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L084",
+   "project": "26.6.7098B",
+   "doc_role": "keynote",
+   "ref": "E3.10 KN4",
+   "text": "NEW LOCATION FOR RELOCATED THEATRICAL DIMMING CONTROLS. PROVIDE CONDUCTORS, CONTROL WIRING, ETC. AS REQUIRED TO EXTEND EXISTING CONTROLS TO NEW DEVICE LOCATION. COORDINATE WITH ARCHITECT/OWNER'S REPRESENTATIVE FOR FINAL RELOCATED LOCATION PRIOR TO ROUGH-IN.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "lighting"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L085",
+   "project": "26.6.7098B",
+   "doc_role": "general_note",
+   "ref": "E0.00",
+   "text": "CABLING AND DEVICES SHALL BE INSTALLED AND TERMINATED BY OTHERS.",
+   "label": {
+    "party": "others",
+    "systems": [
+     "telecom_data"
+    ],
+    "carry": "exclude",
+    "split": "devices_by_others"
+   }
+  },
+  {
+   "id": "L086",
+   "project": "26.6.7098",
+   "doc_role": "general_note",
+   "ref": "E drawing p.3",
+   "text": "Provide boxes, raceways, and conductors for power and controls, and all final electrical connections for equipment installed by others.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "owner_equipment"
+    ],
+    "carry": "include",
+    "split": "raceway_by_ec"
+   }
+  },
+  {
+   "id": "L087",
+   "project": "26.6.7098",
+   "doc_role": "general_note",
+   "ref": "E drawing p.3",
+   "text": "Door hardware: provide conduit and wire for power and all final electrical connections for equipment installed by others as indicated, including electric door strikes and smoke detectors.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "door_hardware"
+    ],
+    "carry": "include",
+    "split": "raceway_by_ec"
+   }
+  },
+  {
+   "id": "L088",
+   "project": "26.6.7098",
+   "doc_role": "general_note",
+   "ref": "E drawing p.4",
+   "text": "Provide boxes, raceways, cabling and controls, and all final low voltage connections for equipment installed by others.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "low_voltage"
+    ],
+    "carry": "include",
+    "split": "raceway_by_ec"
+   }
+  },
+  {
+   "id": "L089",
+   "project": "26.6.7098",
+   "doc_role": "general_note",
+   "ref": "A drawing p.2",
+   "text": "Drop all overhead and in-wall equipment, ductwork, and piping to the floor for disposal by others.",
+   "label": {
+    "party": "none",
+    "systems": [
+     "demolition"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L090",
+   "project": "26.6.7098",
+   "doc_role": "general_note",
+   "ref": "A drawing p.4",
+   "text": "EQUIPMENT THAT IS BEING REMOVED SHALL BECOME THE PROPERTY OF THE CONTRACTOR AND SHALL BE REMOVED FROM THE JOB SITE, EXCEPT EQUIPMENT SELECTED BY OWNER.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "demolition"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L091",
+   "project": "26.8.7164",
+   "doc_role": "general_note",
+   "ref": "E.001 GN3",
+   "text": "E.C. SHALL VERIFY OPERABLE CONDITION OF EXISTING (E) LIGHTING FIXTURES, REPLACE WITH NEW IF FOUND INOPERABLE. BASE BID ACCORDINGLY.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "lighting"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L092",
+   "project": "26.8.7164",
+   "doc_role": "general_note",
+   "ref": "E.001 GN4",
+   "text": "E.C. SHALL COORDINATE WITH THE LIGHT FIXTURE VENDOR TO CONFIRM EXACT DIMMER COMPATIBILITY AND DIMMING TYPE FOR THE RESPECTIVE LIGHT FIXTURES PRIOR TO BIDDING. BASE BID ACCORDINGLY.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "lighting"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L093",
+   "project": "26.8.7164",
+   "doc_role": "general_note",
+   "ref": "E.101 GN2",
+   "text": "E.C TO COORDINATE THE EXTERIOR SIGNAGE POWER REQUIREMENTS WITH SIGN VENDOR AND EXACT LOCATION OF DISCONNECT FOR SIGNAGE WITH ARCHITECT/OWNER IN FIELD.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "signage"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L094",
+   "project": "26.8.7164",
+   "doc_role": "general_note",
+   "ref": "E.101 GN-D",
+   "text": "E.C. SHALL PROVIDE POWER PACKS AS REQUIRED FOR THE ALL CEILING OCCUPANCY SENSOR.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "lighting"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L095",
+   "project": "26.8.7164",
+   "doc_role": "general_note",
+   "ref": "E.101 GN-I",
+   "text": "CURRENT LIMITERS REQUIRED FOR THE TRACK LIGHTING SHALL BE COORDINATED WITH THE LIGHTING VENDOR. BASE BID ACCORDINGLY.",
+   "label": {
+    "party": "none",
+    "systems": [
+     "lighting"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L096",
+   "project": "26.8.7164",
+   "doc_role": "general_note",
+   "ref": "E.104 GN-A",
+   "text": "E.C. SHALL COORDINATE WITH MECHANICAL AND PLUMBING CONTRACTOR/EQUIPMENT MANUFACTURER FOR THE EXACT ELECTRICAL REQUIREMENTS AND ACCORDINGLY PROVIDE THE BREAKER, CABLE AND CONDUIT ACCORDINGLY. BASE BID ACCORDINGLY.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "mechanical_equipment"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L097",
+   "project": "26.8.7164",
+   "doc_role": "general_note",
+   "ref": "E.104 GN-C",
+   "text": "CONTRACTOR SHALL COORDINATE WITH ARCHITECT/OWNER/LV CONSULTANT FOR POWER AND ELECTRICAL REQUIREMENTS FOR THE LOW VOLTAGE IN FIELD AND ACCORDINGLY PROVIDE THE ELECTRICAL CONNECTIONS/CIRCUITS FROM SPARE CIRCUITS FOR LOW VOLTAGE SYSTEM PER REQUIREMENTS.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "low_voltage"
+    ],
+    "carry": "include",
+    "split": "raceway_by_ec"
+   }
+  },
+  {
+   "id": "L098",
+   "project": "26.8.7164",
+   "doc_role": "general_note",
+   "ref": "E.104 GN-H",
+   "text": "GFI MARKED ON THE PLAN INDICATES THAT THE CIRCUIT SHALL BE GFI PROTECTED. E.C. SHALL PROVIDE A GFCI BREAKER IN THE PANEL FOR THE INDICATED CIRCUIT IF EITHER THE RECEPTACLE IS NOT AVAILABLE OR NOT READILY ACCESSIBLE.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "power"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L099",
+   "project": "26.8.7164",
+   "doc_role": "general_note",
+   "ref": "E.104 GN-R",
+   "text": "E.C. SHALL PROVIDE ISOLATED GROUNDING BY WIRING THE ISOLATED GROUND (IG) CONDUCTOR TO THE ISOLATION GROUND BUS WITHIN THE PANEL.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "power"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L100",
+   "project": "26.8.7164",
+   "doc_role": "general_note",
+   "ref": "E.001 GN23",
+   "text": "ALL WORK SHALL BE PERFORMED BY A LICENSED ELECTRICAL CONTRACTOR IN A FIRST CLASS WORKMANLIKE MANNER. THE COMPLETED SYSTEM SHALL BE FULLY OPERATIVE AND ACCEPTED BY ENGINEER/ARCHITECT.",
+   "label": {
+    "party": "ec",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L101",
+   "project": "26.8.7164",
+   "doc_role": "general_note",
+   "ref": "E.001 GN25",
+   "text": "ELECTRICAL CONTRACTOR SHALL GUARANTEE ALL MATERIALS AND WORKMANSHIP FREE FROM DEFECTS FOR A PERIOD OF NOT LESS THAN ONE YEAR FROM DATE THAT CERTIFICATE OF OCCUPANCY IS ISSUED.",
+   "label": {
+    "party": "ec",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L102",
+   "project": "26.8.7164",
+   "doc_role": "general_note",
+   "ref": "E.001 GN6",
+   "text": "DO NOT SCALE THE ELECTRICAL DRAWINGS. REFER TO ARCHITECTURAL PLANS AND ELEVATIONS FOR EXACT LOCATION FOR ALL EQUIPMENT. CONFIRM WITH OWNER'S REPRESENTATIVE.",
+   "label": {
+    "party": "ec",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L103",
+   "project": "26.8.7164",
+   "doc_role": "general_note",
+   "ref": "E.104 GN-Q",
+   "text": "ALL CIRCUITS MARKED AS EXISTING TO REMAIN ARE SUPPOSED TO REMAIN CONNECTED AS IS. E.C. SHALL ADJUST THE NEW CIRCUITS ACCORDINGLY AND KEEP THE EXISTING CIRCUITS INTACT.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "power"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L104",
+   "project": "26.9.7181",
+   "doc_role": "general_note",
+   "ref": "E0.01",
+   "text": "FIRE SMOKE DAMPER: PROVIDE 120VAC 20A BRANCH CIRCUITS FOR ALL FIRE SMOKE DAMPERS AS REQUIRED (DAMPERS PROVIDED AND INSTALLED BY OTHERS).",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "mechanical_equipment"
+    ],
+    "carry": "include",
+    "split": "raceway_by_ec"
+   }
+  },
+  {
+   "id": "L105",
+   "project": "26.9.7181",
+   "doc_role": "general_note",
+   "ref": "E0.01",
+   "text": "FINAL FURNITURE AND EQUIPMENT LAYOUT PROVIDED BY OTHERS.",
+   "label": {
+    "party": "others",
+    "systems": [
+     "furniture"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L106",
+   "project": "26.9.7181",
+   "doc_role": "spec",
+   "ref": "RFP p.16",
+   "text": "Contractor shall cooperate with Owner on all security matters and shall promptly comply with any project security requirements established by Owner.",
+   "label": {
+    "party": "gc",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L107",
+   "project": "26.9.7181",
+   "doc_role": "spec",
+   "ref": "RFP p.20",
+   "text": "Contractor shall not use any permanently installed equipment unless such use is approved by Owner in writing.",
+   "label": {
+    "party": "gc",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L108",
+   "project": "26.8.7172",
+   "doc_role": "general_note",
+   "ref": "A drawing p.2",
+   "text": "ALL FURNITURE AND FF&E THAT IS NOT SPECIFIED IS BY OTHERS.",
+   "label": {
+    "party": "others",
+    "systems": [
+     "furniture"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L109",
+   "project": "26.8.7172",
+   "doc_role": "mechanical_note",
+   "ref": "M drawing p.3",
+   "text": "UNITS SHALL BE COMPLETELY FACTORY WIRED FOR TERMINAL CONNECTIONS OF THERMOSTAT AND INSTALLED BY THE MECHANICAL CONTRACTOR.",
+   "label": {
+    "party": "other_trade",
+    "systems": [
+     "hvac_controls"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L110",
+   "project": "26.8.7172",
+   "doc_role": "general_note",
+   "ref": "E0.01",
+   "text": "RECEPTACLES SERVING OWNER FURNISHED SERVERS SHALL HAVE CONFIGURATION AS REQUIRED BY THE EQUIPMENT.",
+   "label": {
+    "party": "none",
+    "systems": [
+     "power"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L111",
+   "project": "26.8.7166",
+   "doc_role": "general_note",
+   "ref": "E drawing p.2",
+   "text": "AV SHOP DRAWINGS BY OWNER VENDOR.",
+   "label": {
+    "party": "owner_vendor",
+    "systems": [
+     "av"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L112",
+   "project": "26.8.7166",
+   "doc_role": "general_note",
+   "ref": "E drawing p.2",
+   "text": "PROVIDE PATCH CORDS AS DIRECTED BY OWNER.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "telecom_data"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L113",
+   "project": "26.8.7166",
+   "doc_role": "electrical_spec",
+   "ref": "E spec p.1",
+   "text": "Control conduit and control wires shall be installed by the Contractor.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "hvac_controls"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L114",
+   "project": "26.8.7166",
+   "doc_role": "addendum",
+   "ref": "Addendum p.24",
+   "text": "Concrete footing and feed conduit to be designed and installed by others.",
+   "label": {
+    "party": "others",
+    "systems": [
+     "site"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L115",
+   "project": "26.8.7166",
+   "doc_role": "mechanical_note",
+   "ref": "M drawing p.2",
+   "text": "A FULLY FUNCTIONAL AUTOMATIC TEMPERATURE CONTROLS SYSTEM SHALL BE PROVIDED BY SINGLE MANUFACTURER.",
+   "label": {
+    "party": "none",
+    "systems": [
+     "hvac_controls"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L116",
+   "project": "26.9.7186",
+   "doc_role": "general_note",
+   "ref": "E drawing p.1",
+   "text": "HVAC CONTROLS SCOPE BY MECHANICAL SUBCONTRACTOR.",
+   "label": {
+    "party": "other_trade",
+    "systems": [
+     "hvac_controls"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L117",
+   "project": "26.9.7202",
+   "doc_role": "electrical_spec",
+   "ref": "E spec p.2",
+   "text": "Verify exact location and connection requirements of equipment furnished by others prior to rough-in.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "owner_equipment"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L118",
+   "project": "26.9.7202",
+   "doc_role": "keynote",
+   "ref": "E drawing p.3",
+   "text": "PROVIDE JUNCTION BOX FOR POWER TO CEILING FAN, 120V 60W MAX, BY OTHERS.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "mechanical_equipment"
+    ],
+    "carry": "include",
+    "split": "raceway_by_ec"
+   }
+  },
+  {
+   "id": "L119",
+   "project": "26.9.7213",
+   "doc_role": "general_note",
+   "ref": "G0.001",
+   "text": "OWNER WILL PROVIDE WORK NOTED BY OTHERS OR NIC UNDER SEPARATE CONTRACT.",
+   "label": {
+    "party": "owner",
+    "systems": [],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L120",
+   "project": "26.9.7213",
+   "doc_role": "general_note",
+   "ref": "G0.001",
+   "text": "COORDINATE WORK WITH THE OWNER, INCLUDING SCHEDULING TIME AND LOCATIONS FOR DELIVERIES, BUILDING ACCESS, USE OF BUILDING SERVICES AND FACILITIES, AND USE OF ELEVATORS.",
+   "label": {
+    "party": "gc",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L121",
+   "project": "26.9.7213",
+   "doc_role": "general_note",
+   "ref": "E0.01",
+   "text": "GRAY HATCH DENOTES AREA NOT IN CONTRACT, NO SCOPE.",
+   "label": {
+    "party": "none",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L122",
+   "project": "26.9.7210",
+   "doc_role": "general_note",
+   "ref": "E drawing p.4",
+   "text": "ELECTRICAL CONTRACTOR SHALL PROVIDE REQUIREMENTS OF ANY OWNER FURNISHED OR FUTURE EQUIPMENT SHOWN ON THIS DRAWING.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "owner_equipment"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L123",
+   "project": "26.9.7210",
+   "doc_role": "general_note",
+   "ref": "P drawing p.3",
+   "text": "PLUMBING CONTRACTOR SHALL PROVIDE REQUIREMENTS OF ANY OWNER FURNISHED OR FUTURE EQUIPMENT SHOWN ON THIS DRAWING.",
+   "label": {
+    "party": "other_trade",
+    "systems": [
+     "plumbing"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L124",
+   "project": "26.9.7210",
+   "doc_role": "spec",
+   "ref": "Plumbing spec p.15",
+   "text": "Furnish faucets, rotary handle wastes, basket wastes, open wastes, stand pipe wastes, overflows, and strainers for installation by others.",
+   "label": {
+    "party": "other_trade",
+    "systems": [
+     "plumbing"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L125",
+   "project": "26.8.7169",
+   "doc_role": "general_note",
+   "ref": "E drawing p.8",
+   "text": "ALL LOW VOLTAGE WIRE PROVIDED AND INSTALLED BY DIVISION 26.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "low_voltage"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L126",
+   "project": "26.8.7170",
+   "doc_role": "general_note",
+   "ref": "E drawing p.1",
+   "text": "ALL VOICE, DATA, A.V. & SECURITY COMMUNICATIONS CABLING SHALL BE PER REQUIREMENTS SPECIFIED BY OTHERS, PROVIDED AND INSTALLED BY OTHERS.",
+   "label": {
+    "party": "others",
+    "systems": [
+     "av",
+     "security",
+     "telecom_data"
+    ],
+    "carry": "exclude",
+    "split": "devices_by_others"
+   }
+  },
+  {
+   "id": "L127",
+   "project": "26.8.7170",
+   "doc_role": "general_note",
+   "ref": "E drawing p.3",
+   "text": "ALL VOICE AND DATA CABLING SHALL BE PROVIDED BY OTHERS.",
+   "label": {
+    "party": "others",
+    "systems": [
+     "telecom_data"
+    ],
+    "carry": "exclude",
+    "split": "devices_by_others"
+   }
+  },
+  {
+   "id": "L128",
+   "project": "26.9.7184",
+   "doc_role": "general_note",
+   "ref": "E drawing p.21",
+   "text": "VFD AND OVERLOAD PANEL FURNISHED UNDER DIVISION 23, INSTALLED AND WIRED UNDER DIVISION 26.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "mechanical_equipment"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L129",
+   "project": "26.9.7184",
+   "doc_role": "general_note",
+   "ref": "E drawing p.2",
+   "text": "ALL FIXTURES SPECIFIED IN SCHEDULE BY OTHERS SHALL COMPLY WITH THE VOLTAGE AND WATTAGE LISTED IN SCHEDULE.",
+   "label": {
+    "party": "none",
+    "systems": [
+     "lighting"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L130",
+   "project": "26.9.7209",
+   "doc_role": "general_note",
+   "ref": "E drawing p.6",
+   "text": "UPS TO BE PROVIDED BY OTHERS.",
+   "label": {
+    "party": "others",
+    "systems": [
+     "owner_equipment"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L131",
+   "project": "26.9.7209",
+   "doc_role": "general_note",
+   "ref": "E drawing p.10",
+   "text": "RACK MODEL AND TYPE TO BE SPECIFIED BY OTHERS (LOW VOLTAGE CONSULTANT).",
+   "label": {
+    "party": "others",
+    "systems": [
+     "telecom_data"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L132",
+   "project": "26.9.7225",
+   "doc_role": "spec",
+   "ref": "Div 01 p.78",
+   "text": "Electronic security hardware is furnished under Division 28 unless specifically indicated otherwise.",
+   "label": {
+    "party": "other_trade",
+    "systems": [
+     "security"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L133",
+   "project": "26.9.7215",
+   "doc_role": "spec",
+   "ref": "Div 01 p.45",
+   "text": "Items noted NIC (Not in Contract) will be supplied and installed by Owner during construction or at a future time.",
+   "label": {
+    "party": "owner",
+    "systems": [],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L134",
+   "project": "26.9.7214",
+   "doc_role": "general_note",
+   "ref": "M drawing",
+   "text": "LOW VOLTAGE CONDUCTORS AND WIRING AND FINAL CONNECTION BY THE MECHANICAL CONTRACTOR.",
+   "label": {
+    "party": "other_trade",
+    "systems": [
+     "hvac_controls"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L135",
+   "project": "26.8.7176B",
+   "doc_role": "electrical_spec",
+   "ref": "Div 26 p.35",
+   "text": "VFDs furnished under Division 23 will be installed under Division 26.",
+   "label": {
+    "party": "ec",
+    "systems": [
+     "mechanical_equipment"
+    ],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L136",
+   "project": "26.3.7007B",
+   "doc_role": "general_note",
+   "ref": "E drawing p.6",
+   "text": "FURNISHED, INSTALLED AND CONNECTED UNDER DIVISION 26.",
+   "label": {
+    "party": "ec",
+    "systems": [],
+    "carry": "include",
+    "split": null
+   }
+  },
+  {
+   "id": "L137",
+   "project": "26.8.7152",
+   "doc_role": "owner_exhibit",
+   "ref": "SOW p.2",
+   "text": "Contractor shall be responsible for the transport, storage, and safeguarding of all removed Bus Shelter units at a secure facility approved by the RTC.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "site"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L138",
+   "project": "26.8.7152",
+   "doc_role": "owner_exhibit",
+   "ref": "SOW p.3",
+   "text": "Contractor shall procure and install four (4) metal shrouds per shelter to cover security tamper proof screws at each dedicated bus stop location.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "site"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L139",
+   "project": "26.8.7152",
+   "doc_role": "owner_exhibit",
+   "ref": "SOW p.6",
+   "text": "Contractor shall procure and install safety steel bollards behind and/or both sides of shelter.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "site"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L140",
+   "project": "26.8.7152",
+   "doc_role": "owner_exhibit",
+   "ref": "SOW p.5",
+   "text": "At each proposed bus stop shelter pad location, Contractor shall excavate, haul away and dispose of soils, landscaping, and/or vegetation.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "site"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L141",
+   "project": "26.8.7152",
+   "doc_role": "owner_exhibit",
+   "ref": "SOW p.10",
+   "text": "For materials sampling and testing, RTC shall provide third party special inspections.",
+   "label": {
+    "party": "owner",
+    "systems": [
+     "inspections"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L142",
+   "project": "26.8.7152",
+   "doc_role": "owner_exhibit",
+   "ref": "SOW p.6",
+   "text": "The Contractor shall provide a baseline schedule from project initiation to final acceptance with commencement and completion dates, for review no later than 10 calendar days after Notice of Award.",
+   "label": {
+    "party": "gc",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L143",
+   "project": "26.8.7152",
+   "doc_role": "owner_exhibit",
+   "ref": "SOW p.7",
+   "text": "Contractor shall provide color samples for RTC approval.",
+   "label": {
+    "party": "gc",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L144",
+   "project": "26.8.7152",
+   "doc_role": "owner_exhibit",
+   "ref": "SOW p.4",
+   "text": "Lock keys shall be returned to RTC.",
+   "label": {
+    "party": "none",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L145",
+   "project": "26.8.7152",
+   "doc_role": "owner_exhibit",
+   "ref": "SOW p.8",
+   "text": "Contractor shall coordinate in advance with the RTC field representative all required materials testing and third-party special inspections.",
+   "label": {
+    "party": "gc",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L146",
+   "project": "26.8.7152",
+   "doc_role": "owner_exhibit",
+   "ref": "SOW p.10",
+   "text": "Jurisdictionally required traffic control permits shall be the sole responsibility of the Contractor.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "permits"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L147",
+   "project": "26.8.7152",
+   "doc_role": "owner_exhibit",
+   "ref": "SOW p.3",
+   "text": "Security hardware shall be shipped directly to RTC.",
+   "label": {
+    "party": "none",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L148",
+   "project": "26.8.7152",
+   "doc_role": "owner_exhibit",
+   "ref": "SOW p.6",
+   "text": "Contractor shall reference RTC provided jurisdictional approved RTC Standalone Light Pole plan sheet and provide separate bid line-item cost for removal, temporary storage, and reinstallation upon completion of new bus shelter pad construction.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "site_lighting"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L149",
+   "project": "26.8.7152",
+   "doc_role": "owner_exhibit",
+   "ref": "SOW p.7",
+   "text": "Contractor shall provide RTC all required submittals, including Buy America certifications/certificates.",
+   "label": {
+    "party": "gc",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L150",
+   "project": "26.9.7202",
+   "doc_role": "owner_exhibit",
+   "ref": "SOW p.1",
+   "text": "The Contractor shall perform all Work and provide all labor, equipment, materials, transportation, and supervision necessary to complete the interior renovation of the existing Day Room at Fire Station 95.",
+   "label": {
+    "party": "gc",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L151",
+   "project": "26.9.7202",
+   "doc_role": "owner_exhibit",
+   "ref": "SOW p.2",
+   "text": "The Contractor shall be responsible for protecting existing conditions and all areas affected by performance of the Work.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "temporary_protection"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L152",
+   "project": "26.9.7202",
+   "doc_role": "owner_exhibit",
+   "ref": "SOW p.2",
+   "text": "The Contractor shall be responsible for all cleanup associated with the Project.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "general_conditions"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L153",
+   "project": "26.9.7202",
+   "doc_role": "owner_exhibit",
+   "ref": "SOW p.2",
+   "text": "The Contractor shall be responsible for submitting all required permit applications and supporting documentation necessary to obtain permits associated with the Work.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "permits"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L154",
+   "project": "26.9.7202",
+   "doc_role": "owner_exhibit",
+   "ref": "SOW p.3",
+   "text": "Work shall be performed Monday - Friday between the hours of 7:30am - 5:30pm.",
+   "label": {
+    "party": "none",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L155",
+   "project": "26.9.7202",
+   "doc_role": "owner_exhibit",
+   "ref": "SOW p.4",
+   "text": "Contractor shall submit weekly certified payroll reports in accordance with prevailing wage requirements.",
+   "label": {
+    "party": "gc",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L156",
+   "project": "26.9.7202",
+   "doc_role": "owner_exhibit",
+   "ref": "SOW p.3",
+   "text": "The Contractor shall be required to submit criminal background check forms for approval for all workers scheduled to perform construction activities within or around the facility.",
+   "label": {
+    "party": "gc",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L157",
+   "project": "26.9.7202",
+   "doc_role": "owner_exhibit",
+   "ref": "SOW p.2",
+   "text": "Upon completion of the Work, the Contractor shall remove all remaining trash, debris, and construction waste and leave the affected areas in a clean condition.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "general_conditions"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L158",
+   "project": "26.9.7199",
+   "doc_role": "owner_exhibit",
+   "ref": "104 p.2",
+   "text": "Costs of any temporary lighting shall be included in the amount bid for Traffic Control.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "temporary_power"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L159",
+   "project": "26.9.7199",
+   "doc_role": "owner_exhibit",
+   "ref": "104 p.1",
+   "text": "Contractor shall be responsible to install an 8-inch solid white edge line to establish the edge of travel way before the barriers are installed.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "site"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L160",
+   "project": "26.9.7199",
+   "doc_role": "owner_exhibit",
+   "ref": "104 p.1",
+   "text": "Contractor shall prepare pedestrian detour plans, depicting Contractor's intended temporary walkways, for the Engineer's approval prior to removal of existing sidewalk or existing asphalt sidewalk.",
+   "label": {
+    "party": "gc",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L161",
+   "project": "26.9.7199",
+   "doc_role": "owner_exhibit",
+   "ref": "104 p.2",
+   "text": "Roadway lighting shall be maintained at all times.",
+   "label": {
+    "party": "none",
+    "systems": [
+     "site_lighting"
+    ],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L162",
+   "project": "26.9.7196",
+   "doc_role": "spec",
+   "ref": "Spec p.10",
+   "text": "All pipe and conduit with individual nominal diameters 4-inches or less shall be the responsibility of the Contractor and no additional payment will be made.",
+   "label": {
+    "party": "gc",
+    "systems": [
+     "raceway"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L163",
+   "project": "26.9.7196",
+   "doc_role": "owner_exhibit",
+   "ref": "104 p.1",
+   "text": "Contractor shall stage the work at each intersection to accommodate turning vehicles, including trucks, at all times.",
+   "label": {
+    "party": "gc",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L164",
+   "project": "26.8.7171",
+   "doc_role": "owner_exhibit",
+   "ref": "Exhibit D p.2",
+   "text": "A work plan shall be submitted showing areas of work, durations and days for each work area proposed that will need to be coordinated with the authority based on the current show schedule.",
+   "label": {
+    "party": "none",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L165",
+   "project": "26.8.7158",
+   "doc_role": "general_note",
+   "ref": "A drawing p.2",
+   "text": "THE CONTRACTOR SHALL BE RESPONSIBLE FOR ALL WORK, MATERIALS, AND EQUIPMENT UNTIL FINAL ACCEPTANCE BY THE OWNER.",
+   "label": {
+    "party": "gc",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  },
+  {
+   "id": "L166",
+   "project": "26.8.7156",
+   "doc_role": "spec",
+   "ref": "Bid items p.14",
+   "text": "This bid item excludes all electrical work as shown in the Electrical Drawings to be done by others under a separate contract.",
+   "label": {
+    "party": "others",
+    "systems": [
+     "power"
+    ],
+    "carry": "exclude",
+    "split": null
+   }
+  },
+  {
+   "id": "L167",
+   "project": "26.8.7165",
+   "doc_role": "spec",
+   "ref": "Div 01 p.7",
+   "text": "Protect Owner-furnished items from damage during storage and handling, including damage from exposure to the elements.",
+   "label": {
+    "party": "gc",
+    "systems": [],
+    "carry": "neutral",
+    "split": null
+   }
+  }
+ ]
+}

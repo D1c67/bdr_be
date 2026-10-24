@@ -1,0 +1,4112 @@
+{
+ "runs": [],
+ "pages": [
+  {
+   "page": 1,
+   "tags": [
+    "project manual"
+   ],
+   "notes": [
+    "1800 W. Charleston Blvd., Las Vegas, NV 89102. CDs \u2013 Building Department; August 22, 2025. Other manual pages carry August 29, 2025 dates."
+   ],
+   "scale": null,
+   "title": "PROJECT MANUAL \u2014 University Medical Center Outpatient Pharmacy",
+   "doc_index": 1,
+   "page_role": "cover_index",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": null,
+   "resolution_flags": []
+  },
+  {
+   "page": 2,
+   "tags": [
+    "specification index"
+   ],
+   "notes": [
+    "Lists Division 01 requirements, selective demolition, carpentry, and penetration firestopping. Footer identifies project 2024145."
+   ],
+   "scale": null,
+   "title": "00 01 10 TABLE OF CONTENTS",
+   "doc_index": 1,
+   "page_role": "cover_index",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "00 01 10",
+   "resolution_flags": []
+  },
+  {
+   "page": 3,
+   "tags": [
+    "specification index",
+    "door hardware"
+   ],
+   "notes": [
+    "Door Hardware is identified as included in the drawings. Fire suppression refers to fire protection report; plumbing and HVAC refer to their drawings."
+   ],
+   "scale": null,
+   "title": "00 01 10 TABLE OF CONTENTS",
+   "doc_index": 1,
+   "page_role": "cover_index",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "00 01 10",
+   "resolution_flags": []
+  },
+  {
+   "page": 4,
+   "tags": [
+    "electrical",
+    "telecom",
+    "security"
+   ],
+   "notes": [
+    "\u201cDIVISION 26 \u2013 ELECTRICAL \u2013 REFER TO ELECTRICAL DRAWINGS\u201d; \u201cDIVISIONS 27 \u2013 COMMUNICATION \u2013 REFER TO TELECOMM DRAWINGS\u201d; \u201cDIVISION 28 \u2013 ELECTRONIC SAFTEY AND SECURITY \u2013 NOT USED\u201d."
+   ],
+   "scale": null,
+   "title": "00 01 10 TABLE OF CONTENTS",
+   "doc_index": 1,
+   "page_role": "cover_index",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "00 01 10",
+   "resolution_flags": []
+  },
+  {
+   "page": 5,
+   "tags": [
+    "coordination",
+    "administration"
+   ],
+   "notes": [
+    "Submit subcontract list and key personnel assignments within 15 calendar days of starting construction. Coordinate installations for maintenance access and later work."
+   ],
+   "scale": null,
+   "title": "01 31 00 PROJECT MANAGEMENT AND COORDINATION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 31 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 6,
+   "tags": [
+    "coordination drawings"
+   ],
+   "notes": [
+    "Prepare project-specific coordination drawings for limited spaces and interdisciplinary installations; show service/replacement clearances, access doors, and installation sequences. RCP coordination includes electrical and fire-alarm devices relative to ceiling grid."
+   ],
+   "scale": null,
+   "title": "01 31 00 PROJECT MANAGEMENT AND COORDINATION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 31 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 7,
+   "tags": [
+    "BIM",
+    "coordination drawings"
+   ],
+   "notes": [
+    "Show conduit 1-1/4 inches and larger; lighting, exits, emergency battery packs, smoke detectors and other fire-alarm devices; electrical distribution equipment; and dimensioned pull/junction boxes. Incorporate coordination drawings into project BIM and submit PDF files."
+   ],
+   "scale": null,
+   "title": "01 31 00 PROJECT MANAGEMENT AND COORDINATION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 31 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 8,
+   "tags": [
+    "BIM",
+    "RFI"
+   ],
+   "notes": [
+    "Perform three-dimensional component conflict analysis and resolve conflicts before submittal. RFIs go through Contractor; allow seven calendar days for response, with after-1:00 p.m. receipts treated as next working day."
+   ],
+   "scale": null,
+   "title": "01 31 00 PROJECT MANAGEMENT AND COORDINATION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 31 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 9,
+   "tags": [
+    "RFI",
+    "digital records"
+   ],
+   "notes": [
+    "Notify Architect within seven calendar days if RFI response warrants a change or is disputed. Digital drawing access requires licensing agreements, including subcontractors. Web-based project management required through Final Completion."
+   ],
+   "scale": null,
+   "title": "01 31 00 PROJECT MANAGEMENT AND COORDINATION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 31 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 10,
+   "tags": [
+    "project management",
+    "meetings"
+   ],
+   "notes": [
+    "Project platform includes licenses/training for Owner, Architect and consultants, plus locked PDF archive at completion. Provide indexed PDF submittals. Meeting notices minimum seven calendar days; minutes within three calendar days."
+   ],
+   "scale": null,
+   "title": "01 31 00 PROJECT MANAGEMENT AND COORDINATION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 31 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 11,
+   "tags": [
+    "phasing",
+    "occupied facility",
+    "shutdowns"
+   ],
+   "notes": [
+    "Preconstruction conference addresses working hours, occupancy, shutdowns, phasing, temporary facilities, parking and deliveries; actual restrictions are not defined here. Closeout conference required no later than 90 calendar days before scheduled Substantial Completion."
+   ],
+   "scale": null,
+   "title": "01 31 00 PROJECT MANAGEMENT AND COORDINATION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 31 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 12,
+   "tags": [
+    "meetings",
+    "closeout"
+   ],
+   "notes": [
+    "Weekly progress meetings require representatives of affected subcontractors/suppliers. Closeout coordination includes owner-installed equipment, partial occupancy, spare materials and training."
+   ],
+   "scale": null,
+   "title": "01 31 00 PROJECT MANAGEMENT AND COORDINATION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 31 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 13,
+   "tags": [
+    "schedule coordination"
+   ],
+   "notes": [
+    "Update construction schedule following progress meetings when revisions are recognized."
+   ],
+   "scale": null,
+   "title": "01 31 00 PROJECT MANAGEMENT AND COORDINATION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 31 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 14,
+   "tags": [
+    "documentation"
+   ],
+   "notes": [
+    "Submit keyed digital photos within three working days; minimum 12-megapixel camera and 3200 by 2400 pixel images. Preserve original unedited files and metadata."
+   ],
+   "scale": null,
+   "title": "01 32 33 PHOTOGRAPHIC DOCUMENTATION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 32 33",
+   "resolution_flags": []
+  },
+  {
+   "page": 15,
+   "tags": [
+    "concealed work",
+    "documentation"
+   ],
+   "notes": [
+    "Photograph electrical conduit, underground utilities and underslab services before concealment, with annotated descriptions. General contractor photo minima: 20 adjacent-condition photos, 20 building-condition photos, 20 per payment-period set and 20 final photos; not electrical device quantities."
+   ],
+   "scale": null,
+   "title": "01 32 33 PHOTOGRAPHIC DOCUMENTATION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 32 33",
+   "resolution_flags": []
+  },
+  {
+   "page": 16,
+   "tags": [
+    "documentation"
+   ],
+   "notes": [
+    "Additional photos may include off-site fabrication and completion of major phases/components."
+   ],
+   "scale": null,
+   "title": "01 32 33 PHOTOGRAPHIC DOCUMENTATION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 32 33",
+   "resolution_flags": []
+  },
+  {
+   "page": 17,
+   "tags": [
+    "submittals"
+   ],
+   "notes": [
+    "Initial submittal schedule includes first 60 days of construction and long-lead procurement; include review, revision, manufacture and delivery time."
+   ],
+   "scale": null,
+   "title": "01 33 00 SUBMITTAL PROCEDURES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 33 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 18,
+   "tags": [
+    "submittals"
+   ],
+   "notes": [
+    "Identify deviations explicitly. Submit PDFs by email or project platform; coordinate related sections and submit required items concurrently unless partial submission approved."
+   ],
+   "scale": null,
+   "title": "01 33 00 SUBMITTAL PROCEDURES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 33 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 19,
+   "tags": [
+    "submittals",
+    "procurement"
+   ],
+   "notes": [
+    "Allow 15 calendar days each for initial review and resubmittal; 21 calendar days for sequential review; 15 for concurrent consultant review. Use only approved final action submittals for construction."
+   ],
+   "scale": null,
+   "title": "01 33 00 SUBMITTAL PROCEDURES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 33 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 20,
+   "tags": [
+    "equipment submittals"
+   ],
+   "notes": [
+    "Equipment product data includes factory wiring diagrams, performance curves, operating ranges and clearances. Shop drawings must be project-specific, scaled, and field-dimensioned."
+   ],
+   "scale": null,
+   "title": "01 33 00 SUBMITTAL PROCEDURES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 33 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 21,
+   "tags": [
+    "submittals"
+   ],
+   "notes": [
+    "Verification samples generally three sets where required. Product schedules identify manufacturer, product/model, room and location; qualification and design data required as applicable."
+   ],
+   "scale": null,
+   "title": "01 33 00 SUBMITTAL PROCEDURES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 33 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 22,
+   "tags": [
+    "certifications",
+    "testing"
+   ],
+   "notes": [
+    "Submit installer/manufacturer/product certificates and field, compatibility and product test reports when required by individual sections."
+   ],
+   "scale": null,
+   "title": "01 33 00 SUBMITTAL PROCEDURES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 33 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 23,
+   "tags": [
+    "submittals"
+   ],
+   "notes": [
+    "Contractor review/approval required before Architect submission. Direct submissions from other sources, incomplete submittals and unapproved partial submissions are not accepted."
+   ],
+   "scale": null,
+   "title": "01 33 00 SUBMITTAL PROCEDURES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 33 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 24,
+   "tags": [
+    "temporary power",
+    "occupied facility"
+   ],
+   "notes": [
+    "Owner power available; verify UMC metering, use and payment procedures. Provide construction connections/extensions. Noise/vibration plan must identify disruptive work coordinated for non-standard hours."
+   ],
+   "scale": null,
+   "title": "01 50 00 TEMPORARY FACILITIES AND CONTROLS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 50 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 25,
+   "tags": [
+    "temporary power",
+    "temporary lighting"
+   ],
+   "notes": [
+    "Temporary electric service complies with NECA, NEMA, UL and NFPA 70. Common-use office conference room requires 120V ac duplex receptacles, at least one per wall; lighting average 20 foot-candles at desk height; HVAC maintains 68\u201372 degrees F. No wall count or equipment load provided."
+   ],
+   "scale": null,
+   "title": "01 50 00 TEMPORARY FACILITIES AND CONTROLS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 50 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 26,
+   "tags": [
+    "temporary power",
+    "infection control"
+   ],
+   "notes": [
+    "Four-stage HEPA air-filtration units run continuously and require a single emergency shutoff switch. Maintain negative pressure from temporary-partition construction through removal. Permanent HVAC use requires Owner authorization."
+   ],
+   "scale": null,
+   "title": "01 50 00 TEMPORARY FACILITIES AND CONTROLS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 50 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 27,
+   "tags": [
+    "temporary power",
+    "temporary lighting",
+    "WiFi"
+   ],
+   "notes": [
+    "Connect to Owner's existing electrical service; provide locally switched temporary lighting including security/protection without operating entire system. Secure WiFi for Architect and Owner required. Verify parking/staging and elevator access with UMC."
+   ],
+   "scale": null,
+   "title": "01 50 00 TEMPORARY FACILITIES AND CONTROLS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 50 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 28,
+   "tags": [
+    "temporary egress",
+    "protection"
+   ],
+   "notes": [
+    "Protect existing utilities/equipment; provide barricade warning lights as required by AHJ and maintain temporary egress. Elevator/stair use requires UMC approval."
+   ],
+   "scale": null,
+   "title": "01 50 00 TEMPORARY FACILITIES AND CONTROLS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 50 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 29,
+   "tags": [
+    "temporary facilities",
+    "phasing"
+   ],
+   "notes": [
+    "Maintain required temporary environmental systems 24 hours; no change to permanent security/protection until Substantial Completion. Remove temporary facilities when no longer needed or by Substantial Completion and restore affected work."
+   ],
+   "scale": null,
+   "title": "01 50 00 TEMPORARY FACILITIES AND CONTROLS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 50 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 30,
+   "tags": [
+    "closeout"
+   ],
+   "notes": [
+    "Repair, renovate and clean permanent facilities used during construction."
+   ],
+   "scale": null,
+   "title": "01 50 00 TEMPORARY FACILITIES AND CONTROLS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 50 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 31,
+   "tags": [
+    "substitutions",
+    "owner furnished"
+   ],
+   "notes": [
+    "Protect contract, owner-furnished and separate-contractor equipment within the work. Prior substitutions require written request to Architect and UMC; equivalent-product information must establish equivalence."
+   ],
+   "scale": null,
+   "title": "01 60 00 MATERIALS AND EQUIPMENT",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 60 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 32,
+   "tags": [
+    "substitutions",
+    "warranty"
+   ],
+   "notes": [
+    "Preaward approval issued by addendum. Postaward requests minimum five working days before order date, through Contractor only; substitutions implied on shop drawings not considered. Same warranty and maintenance/parts support required."
+   ],
+   "scale": null,
+   "title": "01 60 00 MATERIALS AND EQUIPMENT",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 60 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 33,
+   "tags": [
+    "substitutions"
+   ],
+   "notes": [
+    "Substitutions must preserve dimensions and functional clearances. Paragraph F.8 ends incompletely in supplied text: \u201cCoordination, installation, and changes in the Work as necessary for accepted\u201d."
+   ],
+   "scale": null,
+   "title": "01 60 00 MATERIALS AND EQUIPMENT",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 60 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 34,
+   "tags": [
+    "penetrations",
+    "cutting and patching"
+   ],
+   "notes": [
+    "Includes routine nonstructural penetrations for electrical conduit and associated excavation/backfill. Obtain advance consent for cuts affecting other trades, structural integrity, moisture protection, operations or visible finishes."
+   ],
+   "scale": null,
+   "title": "01 73 29 CUTTING AND PATCHING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 73 29",
+   "resolution_flags": []
+  },
+  {
+   "page": 35,
+   "tags": [
+    "cutting and patching"
+   ],
+   "notes": [
+    "Inspect concealed conditions after opening; report unsuitable conditions before proceeding. Required shoring/support design by Nevada-registered engineer."
+   ],
+   "scale": null,
+   "title": "01 73 29 CUTTING AND PATCHING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 73 29",
+   "resolution_flags": []
+  },
+  {
+   "page": 36,
+   "tags": [
+    "firestopping",
+    "restoration"
+   ],
+   "notes": [
+    "Fit airtight around conduit/sleeves; maintain rated wall and ceiling integrity. Original installer/fabricator performs cutting/patching of weatherproof and sight-exposed finishes. Refinish painted surfaces to nearest intersection/corner."
+   ],
+   "scale": null,
+   "title": "01 73 29 CUTTING AND PATCHING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 73 29",
+   "resolution_flags": []
+  },
+  {
+   "page": 37,
+   "tags": [
+    "closeout",
+    "permits"
+   ],
+   "notes": [
+    "Closeout submittals due at least 10 working days before requesting Substantial Completion inspection; obtain AHJ releases, occupancy permits and operating certificates."
+   ],
+   "scale": null,
+   "title": "01 77 00 CLOSEOUT PROCEDURES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 77 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 38,
+   "tags": [
+    "testing",
+    "training",
+    "closeout"
+   ],
+   "notes": [
+    "Complete startup/testing, preventive maintenance for previously used equipment, O&M/record submittals, spare materials, training and training video recordings. Notify Owner of utility changeovers; remove temporary facilities."
+   ],
+   "scale": null,
+   "title": "01 77 00 CLOSEOUT PROCEDURES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 77 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 39,
+   "tags": [
+    "warranty",
+    "partial occupancy"
+   ],
+   "notes": [
+    "Final inspection request minimum 10 working days ahead. Partial-occupancy warranties due within 15 working days of completion of portions occupied/used by agreement."
+   ],
+   "scale": null,
+   "title": "01 77 00 CLOSEOUT PROCEDURES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 77 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 40,
+   "tags": [
+    "warranty",
+    "cleaning"
+   ],
+   "notes": [
+    "Provide bookmarked PDF warranties, with additional copies in O&M manuals; media/hardcopy acceptable to UMC. Clean limited-access plenums, trenches and equipment spaces."
+   ],
+   "scale": null,
+   "title": "01 77 00 CLOSEOUT PROCEDURES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 77 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 41,
+   "tags": [
+    "lighting",
+    "cleaning"
+   ],
+   "notes": [
+    "Wipe electrical equipment surfaces and clean luminaires, lamps, globes and reflectors to full efficiency."
+   ],
+   "scale": null,
+   "title": "01 77 00 CLOSEOUT PROCEDURES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 77 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 42,
+   "tags": [
+    "O&M"
+   ],
+   "notes": [
+    "Draft manuals at least 30 calendar days before training; final manuals before Substantial Completion inspection request and at least 15 calendar days before training. Footer incorrectly says Solid Surfacing Fabrications; section heading controls."
+   ],
+   "scale": null,
+   "title": "01 78 23 OPERATION AND MAINTENANCE DATA",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 78 23",
+   "resolution_flags": []
+  },
+  {
+   "page": 43,
+   "tags": [
+    "O&M"
+   ],
+   "notes": [
+    "Organize bookmarked PDFs by system/subsystem/equipment; use contract designations or ASHRAE Guideline 4 designations where absent."
+   ],
+   "scale": null,
+   "title": "01 78 23 OPERATION AND MAINTENANCE DATA",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 78 23",
+   "resolution_flags": []
+  },
+  {
+   "page": 44,
+   "tags": [
+    "O&M",
+    "emergency procedures"
+   ],
+   "notes": [
+    "Include power-failure response, shutdown instructions and electric/electronic sequences. Factory-authorized representative prepares operation information including wiring/control diagrams."
+   ],
+   "scale": null,
+   "title": "01 78 23 OPERATION AND MAINTENANCE DATA",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 78 23",
+   "resolution_flags": []
+  },
+  {
+   "page": 45,
+   "tags": [
+    "O&M"
+   ],
+   "notes": [
+    "Include serial numbers, startup/shutdown procedures, controls as installed and maintenance information prepared by factory-authorized service representative."
+   ],
+   "scale": null,
+   "title": "01 78 23 OPERATION AND MAINTENANCE DATA",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 78 23",
+   "resolution_flags": []
+  },
+  {
+   "page": 46,
+   "tags": [
+    "O&M",
+    "spare parts"
+   ],
+   "notes": [
+    "Include test/troubleshooting procedures, maintenance schedules, replacement parts and local sources, warranty claim procedures and supplemental system/control drawings. Do not insert original project record documents into maintenance manuals."
+   ],
+   "scale": null,
+   "title": "01 78 23 OPERATION AND MAINTENANCE DATA",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 78 23",
+   "resolution_flags": []
+  },
+  {
+   "page": 47,
+   "tags": [
+    "O&M"
+   ],
+   "notes": [
+    "Product manuals include maintenance/repair procedures, suppliers and warranty conditions."
+   ],
+   "scale": null,
+   "title": "01 78 23 OPERATION AND MAINTENANCE DATA",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 78 23",
+   "resolution_flags": []
+  },
+  {
+   "page": 48,
+   "tags": [
+    "as-built"
+   ],
+   "notes": [
+    "Maintain marked-up paper contract/shop drawings; record concealed installations before closing and cross-reference photos. Submit scanned PDFs initially/finally and print every final drawing."
+   ],
+   "scale": null,
+   "title": "01 78 39 PROJECT RECORD DOCUMENTS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 78 39",
+   "resolution_flags": []
+  },
+  {
+   "page": 49,
+   "tags": [
+    "as-built",
+    "underground"
+   ],
+   "notes": [
+    "Record conduit routing, electrical circuitry, equipment locations, concealed utilities and underground locations/depths. Provide annotated PDFs with comment function enabled and marked specifications."
+   ],
+   "scale": null,
+   "title": "01 78 39 PROJECT RECORD DOCUMENTS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 78 39",
+   "resolution_flags": []
+  },
+  {
+   "page": 50,
+   "tags": [
+    "as-built"
+   ],
+   "notes": [
+    "Store record documents separately from construction-use documents; keep legible/protected and available to Architect."
+   ],
+   "scale": null,
+   "title": "01 78 39 PROJECT RECORD DOCUMENTS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 78 39",
+   "resolution_flags": []
+  },
+  {
+   "page": 51,
+   "tags": [
+    "training"
+   ],
+   "notes": [
+    "Submit training program/modules and schedule; instructors must be factory-authorized service representatives experienced in operation, maintenance and training."
+   ],
+   "scale": null,
+   "title": "01 79 00 DEMONSTRATION AND TRAINING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 79 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 52,
+   "tags": [
+    "training"
+   ],
+   "notes": [
+    "Training includes manuals, record documents, identification, warranties, electrical/electronic sequences, emergency shutdown, control procedures and troubleshooting."
+   ],
+   "scale": null,
+   "title": "01 79 00 DEMONSTRATION AND TRAINING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 79 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 53,
+   "tags": [
+    "training"
+   ],
+   "notes": [
+    "Train on site using installed operating equipment and final O&M data; schedule through Architect with seven calendar days' notice. Seasonal equipment requires instruction at start of each applicable season."
+   ],
+   "scale": null,
+   "title": "01 79 00 DEMONSTRATION AND TRAINING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 79 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 54,
+   "tags": [
+    "demolition",
+    "salvage"
+   ],
+   "notes": [
+    "Defines remove, salvage, reinstall and existing-to-remain obligations. Demolition waste belongs to Contractor unless otherwise indicated. Predemolition conference and condition documentation required."
+   ],
+   "scale": null,
+   "title": "02 41 19 SELECTIVE DEMOLITION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "02 41 19",
+   "resolution_flags": []
+  },
+  {
+   "page": 55,
+   "tags": [
+    "occupied facility",
+    "demolition"
+   ],
+   "notes": [
+    "Owner occupies immediately adjacent areas; do not disrupt operations. Owner removes furniture and hazardous materials; suspected hazardous materials require stop/notification. Verify utilities disconnected/capped before demolition."
+   ],
+   "scale": null,
+   "title": "02 41 19 SELECTIVE DEMOLITION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "02 41 19",
+   "resolution_flags": []
+  },
+  {
+   "page": 56,
+   "tags": [
+    "demolition",
+    "existing conditions"
+   ],
+   "notes": [
+    "Owner does not guarantee record drawing accuracy. Use controlled cutting/drilling to protect remaining finishes and maintain safe occupied access and dust containment."
+   ],
+   "scale": null,
+   "title": "02 41 19 SELECTIVE DEMOLITION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "02 41 19",
+   "resolution_flags": []
+  },
+  {
+   "page": 57,
+   "tags": [
+    "salvage",
+    "relocation"
+   ],
+   "notes": [
+    "Verify salvage items with Owner; clean, pack, protect and transport to designated storage. Reinstalled items require functional repair, connections, supports and miscellaneous materials."
+   ],
+   "scale": null,
+   "title": "02 41 19 SELECTIVE DEMOLITION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "02 41 19",
+   "resolution_flags": []
+  },
+  {
+   "page": 58,
+   "tags": [
+    "equipment backing"
+   ],
+   "notes": [
+    "Equipment backing plywood DOC PS 1, Exterior, A-C; indicated thickness or not less than 5/8 inch nominal. Coordinate electrical/telecom backing responsibility."
+   ],
+   "scale": null,
+   "title": "06 10 53 MISCELLANEOUS ROUGHCARPENTRY",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "06 10 53",
+   "resolution_flags": []
+  },
+  {
+   "page": 59,
+   "tags": [
+    "equipment backing",
+    "fire retardant"
+   ],
+   "notes": [
+    "Plywood backing panels and concealed blocking require fire-retardant treatment; flame-spread index 25 or less with extended-test requirements."
+   ],
+   "scale": null,
+   "title": "06 10 53 MISCELLANEOUS ROUGHCARPENTRY",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "06 10 53",
+   "resolution_flags": []
+  },
+  {
+   "page": 60,
+   "tags": [
+    "blocking"
+   ],
+   "notes": [
+    "Coordinate supports and blocking with attaching construction; provide fire blocking in concealed cavities."
+   ],
+   "scale": null,
+   "title": "06 10 53 MISCELLANEOUS ROUGHCARPENTRY",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "06 10 53",
+   "resolution_flags": []
+  },
+  {
+   "page": 61,
+   "tags": [
+    "casework coordination"
+   ],
+   "notes": [
+    "Cabinet shop drawings show locations/sizes of cutouts and holes for installed items."
+   ],
+   "scale": null,
+   "title": "06 41 16 PLASTIC-LAMINATE-FACED ARCHITECTURAL CABINETS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "06 41 16",
+   "resolution_flags": []
+  },
+  {
+   "page": 62,
+   "tags": [
+    "casework coordination"
+   ],
+   "notes": [
+    "Cabinets require operating HVAC and controlled occupancy-level temperature/humidity before delivery/installation; field-verify concealed backing before enclosure."
+   ],
+   "scale": null,
+   "title": "06 41 16 PLASTIC-LAMINATE-FACED ARCHITECTURAL CABINETS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "06 41 16",
+   "resolution_flags": []
+  },
+  {
+   "page": 63,
+   "tags": [
+    "casework"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "06 41 16 PLASTIC-LAMINATE-FACED ARCHITECTURAL CABINETS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "06 41 16",
+   "resolution_flags": []
+  },
+  {
+   "page": 64,
+   "tags": [
+    "casework"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "06 41 16 PLASTIC-LAMINATE-FACED ARCHITECTURAL CABINETS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "06 41 16",
+   "resolution_flags": []
+  },
+  {
+   "page": 65,
+   "tags": [
+    "casework"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "06 41 16 PLASTIC-LAMINATE-FACED ARCHITECTURAL CABINETS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "06 41 16",
+   "resolution_flags": []
+  },
+  {
+   "page": 66,
+   "tags": [
+    "casework"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "06 41 16 PLASTIC-LAMINATE-FACED ARCHITECTURAL CABINETS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "06 41 16",
+   "resolution_flags": []
+  },
+  {
+   "page": 67,
+   "tags": [
+    "cable management",
+    "casework"
+   ],
+   "notes": [
+    "Casework accessories specify Vivo cable-management racks and PC mounts and Doug Mockett desk grommets. Coordinate power/data device and cable routing; these are not electrical outlet quantities."
+   ],
+   "scale": null,
+   "title": "06 41 16 PLASTIC-LAMINATE-FACED ARCHITECTURAL CABINETS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "06 41 16",
+   "resolution_flags": []
+  },
+  {
+   "page": 68,
+   "tags": [
+    "casework"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "06 41 16 PLASTIC-LAMINATE-FACED ARCHITECTURAL CABINETS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "06 41 16",
+   "resolution_flags": []
+  },
+  {
+   "page": 69,
+   "tags": [
+    "electrical cutouts",
+    "casework"
+   ],
+   "notes": [
+    "Shop-cut cabinet openings for electrical work to maximum extent possible; use templates/roughing-in diagrams and locate accurately."
+   ],
+   "scale": null,
+   "title": "06 41 16 PLASTIC-LAMINATE-FACED ARCHITECTURAL CABINETS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "06 41 16",
+   "resolution_flags": []
+  },
+  {
+   "page": 70,
+   "tags": [
+    "casework"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "06 41 16 PLASTIC-LAMINATE-FACED ARCHITECTURAL CABINETS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "06 41 16",
+   "resolution_flags": []
+  },
+  {
+   "page": 71,
+   "tags": [
+    "casework"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "06 41 16 PLASTIC-LAMINATE-FACED ARCHITECTURAL CABINETS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "06 41 16",
+   "resolution_flags": []
+  },
+  {
+   "page": 72,
+   "tags": [
+    "countertop coordination"
+   ],
+   "notes": [
+    "Shop drawings locate holes/cutouts for countertop accessories and other installed items."
+   ],
+   "scale": null,
+   "title": "06 61 16 SOLID SURFACING FABRICATIONS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "06 61 16",
+   "resolution_flags": []
+  },
+  {
+   "page": 73,
+   "tags": [
+    "countertop coordination"
+   ],
+   "notes": [
+    "Fabricator cuts/drills countertop panels for fixtures and accessories; coordinate electrical penetrations if indicated on drawings."
+   ],
+   "scale": null,
+   "title": "06 61 16 SOLID SURFACING FABRICATIONS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "06 61 16",
+   "resolution_flags": []
+  },
+  {
+   "page": 74,
+   "tags": [
+    "countertops"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "06 61 16 SOLID SURFACING FABRICATIONS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "06 61 16",
+   "resolution_flags": []
+  },
+  {
+   "page": 75,
+   "tags": [
+    "firestopping",
+    "inspection"
+   ],
+   "notes": [
+    "Provide tested systems for empty and occupied rated openings. Installer minimum five years' similar experience. Engineering judgments require AHJ approval before Architect submittal. Do not conceal before required inspections."
+   ],
+   "scale": null,
+   "title": "07 84 13 PENETRATION FIRESTOPPING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "07 84 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 76,
+   "tags": [
+    "firestopping"
+   ],
+   "notes": [
+    "ASTM E814 or UL 1479 systems; F-rating at least assembly rating, T-ratings at specified exposed floor conditions, L-ratings in smoke barriers. Exposed systems paintable where required."
+   ],
+   "scale": null,
+   "title": "07 84 13 PENETRATION FIRESTOPPING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "07 84 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 77,
+   "tags": [
+    "firestopping"
+   ],
+   "notes": [
+    "Multiple subcontractors' firestopping must be similar type/color. Use manufacturer-approved tested accessories, backing and forming components; comply with VOC limits."
+   ],
+   "scale": null,
+   "title": "07 84 13 PENETRATION FIRESTOPPING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "07 84 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 78,
+   "tags": [
+    "firestopping",
+    "identification"
+   ],
+   "notes": [
+    "Permanent preprinted metal/plastic labels within 6 inches of firestop edges; metal labels mechanically fastened. Include warning, Contractor/contact, system designation, date, manufacturer and installer. Enclose only after compliant inspection reports."
+   ],
+   "scale": null,
+   "title": "07 84 13 PENETRATION FIRESTOPPING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "07 84 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 79,
+   "tags": [
+    "sealants"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "07 92 00 JOINT SEALANTS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "07 92 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 80,
+   "tags": [
+    "sealants"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "07 92 00 JOINT SEALANTS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "07 92 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 81,
+   "tags": [
+    "sealants"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "07 92 00 JOINT SEALANTS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "07 92 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 82,
+   "tags": [
+    "sealants"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "07 92 00 JOINT SEALANTS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "07 92 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 83,
+   "tags": [
+    "sealants"
+   ],
+   "notes": [
+    "Generic sealant application schedule; no electrical-specific schedule or quantities."
+   ],
+   "scale": null,
+   "title": "07 92 00 JOINT SEALANTS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "07 92 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 84,
+   "tags": [
+    "door coordination"
+   ],
+   "notes": [
+    "Shop drawings include hardware reinforcement/preparation; coordinate electrified hardware before fabrication."
+   ],
+   "scale": null,
+   "title": "08 11 13 HOLLOW METAL DOORS AND FRAMES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 11 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 85,
+   "tags": [
+    "electrified hardware",
+    "raceways"
+   ],
+   "notes": [
+    "\u201cCoordinate locations of conduit and wiring boxes for electrical connections with Division 26 Sections.\u201d"
+   ],
+   "scale": null,
+   "title": "08 11 13 HOLLOW METAL DOORS AND FRAMES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 11 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 86,
+   "tags": [
+    "doors"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "08 11 13 HOLLOW METAL DOORS AND FRAMES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 11 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 87,
+   "tags": [
+    "doors"
+   ],
+   "notes": [
+    "Frame hardware cutouts require grout guards/dust-cover boxes; coordinate electrical hardware preparation."
+   ],
+   "scale": null,
+   "title": "08 11 13 HOLLOW METAL DOORS AND FRAMES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 11 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 88,
+   "tags": [
+    "doors"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "08 11 13 HOLLOW METAL DOORS AND FRAMES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 11 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 89,
+   "tags": [
+    "doors"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "08 11 13 HOLLOW METAL DOORS AND FRAMES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 11 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 90,
+   "tags": [
+    "doors"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "08 11 13 HOLLOW METAL DOORS AND FRAMES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 11 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 91,
+   "tags": [
+    "door coordination"
+   ],
+   "notes": [
+    "Door shop drawings include factory-machined cutouts and hardware blocking."
+   ],
+   "scale": null,
+   "title": "08 14 00 WOOD DOORS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 14 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 92,
+   "tags": [
+    "rated doors"
+   ],
+   "notes": [
+    "Notify Architect before fabrication if hardware or other conditions prevent fire-door labeling."
+   ],
+   "scale": null,
+   "title": "08 14 00 WOOD DOORS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 14 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 93,
+   "tags": [
+    "doors"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "08 14 00 WOOD DOORS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 14 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 94,
+   "tags": [
+    "electric locks",
+    "low voltage raceway"
+   ],
+   "notes": [
+    "Provide built-in 1/4 inch diameter raceway from lockset to nearest hinge for low-voltage wiring at doors scheduled for electric locks."
+   ],
+   "scale": null,
+   "title": "08 14 00 WOOD DOORS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 14 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 95,
+   "tags": [
+    "door hardware"
+   ],
+   "notes": [
+    "Door hardware installation refers to Division 08 hardware section; table of contents locates hardware in drawings."
+   ],
+   "scale": null,
+   "title": "08 14 00 WOOD DOORS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 14 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 96,
+   "tags": [
+    "sliding doors"
+   ],
+   "notes": [
+    "Interior aluminum-framed top-hung sliding doors; no automatic operator specified here."
+   ],
+   "scale": null,
+   "title": "08 34 00 SPECIAL FUNCTION DOORS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 34 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 97,
+   "tags": [
+    "door coordination"
+   ],
+   "notes": [
+    "Single-source sliding doors and hardware; shop drawings show required blocking by others."
+   ],
+   "scale": null,
+   "title": "08 34 00 SPECIAL FUNCTION DOORS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 34 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 98,
+   "tags": [
+    "sliding doors",
+    "no substitutions"
+   ],
+   "notes": [
+    "\u201cExamSlide\u2122 High Performance Barn (Sliding) Door System by AD Systems.\u201d \u201cNo Substitutions\u201d. Doors factory-machined for hardware."
+   ],
+   "scale": null,
+   "title": "08 34 00 SPECIAL FUNCTION DOORS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 34 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 99,
+   "tags": [
+    "magnetic locks",
+    "access control"
+   ],
+   "notes": [
+    "\u201cDoor Locks (Optional):\u201d \u201cMagnetic Lock by AD Systems\u201d. No selection, quantity, voltage, power supply or release/control sequence provided."
+   ],
+   "scale": null,
+   "title": "08 34 00 SPECIAL FUNCTION DOORS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 34 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 100,
+   "tags": [
+    "doors"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "08 34 00 SPECIAL FUNCTION DOORS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 34 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 101,
+   "tags": [
+    "windows"
+   ],
+   "notes": [
+    "Section number printed is 08 51 13, unlike 08 51 20 in contents. No powered window operation specified."
+   ],
+   "scale": null,
+   "title": "08 51 13 ALUMINUM WINDOWS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 51 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 102,
+   "tags": [
+    "windows"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "08 51 13 ALUMINUM WINDOWS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 51 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 103,
+   "tags": [
+    "windows"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "08 51 13 ALUMINUM WINDOWS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 51 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 104,
+   "tags": [
+    "windows"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "08 51 13 ALUMINUM WINDOWS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 51 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 105,
+   "tags": [
+    "windows"
+   ],
+   "notes": [
+    "Standard auto lock is listed as window hardware; no electrical requirement stated."
+   ],
+   "scale": null,
+   "title": "08 51 13 ALUMINUM WINDOWS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 51 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 106,
+   "tags": [
+    "windows"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "08 51 13 ALUMINUM WINDOWS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 51 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 107,
+   "tags": [
+    "windows"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "08 51 13 ALUMINUM WINDOWS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 51 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 108,
+   "tags": [
+    "glazing"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "08 80 00 GLAZING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 80 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 109,
+   "tags": [
+    "glazing"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "08 80 00 GLAZING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 80 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 110,
+   "tags": [
+    "flooring coordination"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "09 05 61 MOISTURE VAPOR EMISSION CONTROL",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 05 61",
+   "resolution_flags": []
+  },
+  {
+   "page": 111,
+   "tags": [
+    "access restrictions"
+   ],
+   "notes": [
+    "Close spaces to traffic during application and manufacturer's required cure period; sequence floor-level electrical work accordingly."
+   ],
+   "scale": null,
+   "title": "09 05 61 MOISTURE VAPOR EMISSION CONTROL",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 05 61",
+   "resolution_flags": []
+  },
+  {
+   "page": 112,
+   "tags": [
+    "flooring"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "09 05 61 MOISTURE VAPOR EMISSION CONTROL",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 05 61",
+   "resolution_flags": []
+  },
+  {
+   "page": 113,
+   "tags": [
+    "electrical openings",
+    "protection"
+   ],
+   "notes": [
+    "Protect electrical openings during membrane installation; subsequent work must not damage/puncture moisture-control membrane."
+   ],
+   "scale": null,
+   "title": "09 05 61 MOISTURE VAPOR EMISSION CONTROL",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 05 61",
+   "resolution_flags": []
+  },
+  {
+   "page": 114,
+   "tags": [
+    "rated assemblies"
+   ],
+   "notes": [
+    "Fire/sound assembly design documentation required; coordinate electrical penetrations with selected assemblies."
+   ],
+   "scale": null,
+   "title": "09 29 00 GYPSUM BOARD",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 29 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 115,
+   "tags": [
+    "rated assemblies"
+   ],
+   "notes": [
+    "Rated assemblies must match tested constructions; coordinate electrical box/penetration details."
+   ],
+   "scale": null,
+   "title": "09 29 00 GYPSUM BOARD",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 29 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 116,
+   "tags": [
+    "gypsum board"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "09 29 00 GYPSUM BOARD",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 29 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 117,
+   "tags": [
+    "gypsum board"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "09 29 00 GYPSUM BOARD",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 29 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 118,
+   "tags": [
+    "gypsum board"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "09 29 00 GYPSUM BOARD",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 29 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 119,
+   "tags": [
+    "gypsum board"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "09 29 00 GYPSUM BOARD",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 29 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 120,
+   "tags": [
+    "rated wall identification"
+   ],
+   "notes": [
+    "Fire/smoke partitions with protected penetrations require permanent wall labels; coordinate visible locations above ceilings."
+   ],
+   "scale": null,
+   "title": "09 29 00 GYPSUM BOARD",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 29 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 121,
+   "tags": [
+    "acoustical sealant"
+   ],
+   "notes": [
+    "Lists acoustical sealants applicable to electrical penetrations in sound-rated assemblies."
+   ],
+   "scale": null,
+   "title": "09 29 00 GYPSUM BOARD",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 29 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 122,
+   "tags": [
+    "putty pads",
+    "electrical boxes"
+   ],
+   "notes": [
+    "Electrical-box putty pads: fire-rated partitions \u201cTremco; TREMstop MP.\u201d Non-fire-rated partitions \u201cSpecified Technologies, Inc.; Firestop Putty Pads.\u201d or \u201cHilti; CP-617.\u201d"
+   ],
+   "scale": null,
+   "title": "09 29 00 GYPSUM BOARD",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 29 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 123,
+   "tags": [
+    "firestopping coordination"
+   ],
+   "notes": [
+    "Form openings suitable for required penetration firestopping."
+   ],
+   "scale": null,
+   "title": "09 29 00 GYPSUM BOARD",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 29 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 124,
+   "tags": [
+    "penetrations"
+   ],
+   "notes": [
+    "Cut/fit wallboard around conduit and other penetrations with proper annular joint for firestopping."
+   ],
+   "scale": null,
+   "title": "09 29 00 GYPSUM BOARD",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 29 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 125,
+   "tags": [
+    "acoustical penetrations"
+   ],
+   "notes": [
+    "At insulated wall/ceiling construction, conduit/piping 3 inches diameter and less requires 1/4 inch clearance +/- 1/8 inch unless shown otherwise. Minimize and seal penetrations airtight."
+   ],
+   "scale": null,
+   "title": "09 29 00 GYPSUM BOARD",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 29 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 126,
+   "tags": [
+    "putty pads",
+    "acoustical sealant"
+   ],
+   "notes": [
+    "Seal wiring, cable and junction-box penetrations airtight with acoustical sealant; seal box backs/sides in sound-rated assemblies with putty pads and seal perimeter face. Large clearances may need sheet-metal sleeves, safing or backing rod. Hot patching not acceptable."
+   ],
+   "scale": null,
+   "title": "09 29 00 GYPSUM BOARD",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 29 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 127,
+   "tags": [
+    "wallboard schedule"
+   ],
+   "notes": [
+    "Wallboard location schedule only; no electrical device schedule."
+   ],
+   "scale": null,
+   "title": "09 29 00 GYPSUM BOARD",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 29 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 128,
+   "tags": [
+    "ceiling coordination"
+   ],
+   "notes": [
+    "Ceiling products based on drawings; coordinate electrical fixture/device fit with selected ceiling system."
+   ],
+   "scale": null,
+   "title": "09 51 00 ACOUSTICAL CEILING TILES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 51 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 129,
+   "tags": [
+    "ceiling grid"
+   ],
+   "notes": [
+    "Heavy-duty suspension system, painted white, 15/16 inch width; coordinate fixture compatibility."
+   ],
+   "scale": null,
+   "title": "09 51 00 ACOUSTICAL CEILING TILES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 51 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 130,
+   "tags": [
+    "ceiling coordination",
+    "supports"
+   ],
+   "notes": [
+    "Ceiling hangers/bracing attach to structure, not steel roof deck; keep clear of other plenum objects. Coordinate conduit/fixture supports and obstructions with ceiling installer."
+   ],
+   "scale": null,
+   "title": "09 51 00 ACOUSTICAL CEILING TILES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 51 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 131,
+   "tags": [
+    "ceiling penetrations"
+   ],
+   "notes": [
+    "Precisely cut ceiling panels at penetrations; remove/replace damaged components that cannot be repaired."
+   ],
+   "scale": null,
+   "title": "09 51 00 ACOUSTICAL CEILING TILES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 51 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 132,
+   "tags": [
+    "flooring"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "09 65 00 RESILIENT FLOORING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 65 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 133,
+   "tags": [
+    "ICRA",
+    "access restrictions"
+   ],
+   "notes": [
+    "Close spaces to traffic during sheet-vinyl installation and per facility-provided ICRA document; ICRA document is not included in this group."
+   ],
+   "scale": null,
+   "title": "09 65 00 RESILIENT FLOORING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 65 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 134,
+   "tags": [
+    "flooring"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "09 65 00 RESILIENT FLOORING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 65 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 135,
+   "tags": [
+    "flooring coordination"
+   ],
+   "notes": [
+    "Flooring scribed tightly to penetrations; coordinate floor boxes/penetrations before finished floor work."
+   ],
+   "scale": null,
+   "title": "09 65 00 RESILIENT FLOORING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 65 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 136,
+   "tags": [
+    "flooring"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "09 65 00 RESILIENT FLOORING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 65 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 137,
+   "tags": [
+    "acoustical insulation"
+   ],
+   "notes": [
+    "Insulation above ceilings and within partitions as indicated; no electrical quantities stated."
+   ],
+   "scale": null,
+   "title": "09 81 00 ACOUSTICAL INSULATION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 81 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 138,
+   "tags": [
+    "concealed work coordination"
+   ],
+   "notes": [
+    "Coordinate work to be concealed by insulation; batts may occur above lay-in ceilings. Check fixture clearances with actual ceiling details."
+   ],
+   "scale": null,
+   "title": "09 81 00 ACOUSTICAL INSULATION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 81 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 139,
+   "tags": [
+    "painting"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "09 91 00 PAINTING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 91 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 140,
+   "tags": [
+    "painting"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "09 91 00 PAINTING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 91 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 141,
+   "tags": [
+    "device protection",
+    "remove and reinstall"
+   ],
+   "notes": [
+    "Remove plates, lighting fixtures and similar items not to be painted, or protect where removal impractical; reinstall using workers skilled in affected trades."
+   ],
+   "scale": null,
+   "title": "09 91 00 PAINTING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 91 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 142,
+   "tags": [
+    "painting coordination"
+   ],
+   "notes": [
+    "Do not paint prefinished items, concealed surfaces, finished metal, operating parts or labels."
+   ],
+   "scale": null,
+   "title": "09 91 00 PAINTING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 91 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 143,
+   "tags": [
+    "equipment protection"
+   ],
+   "notes": [
+    "Do not paint finished electrical operating equipment or UL/FM/code labels and nameplates. Prime behind permanently fixed equipment before final installation."
+   ],
+   "scale": null,
+   "title": "09 91 00 PAINTING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 91 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 144,
+   "tags": [
+    "painting"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "09 91 00 PAINTING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 91 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 145,
+   "tags": [
+    "painting"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "09 91 00 PAINTING",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 91 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 146,
+   "tags": [
+    "signage"
+   ],
+   "notes": [
+    "Interior wall-mounted room identification signs; no illuminated signage specified."
+   ],
+   "scale": null,
+   "title": "10 14 23 ROOM IDENTIFICATION SIGNAGE",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "10 14 23",
+   "resolution_flags": []
+  },
+  {
+   "page": 147,
+   "tags": [
+    "signage"
+   ],
+   "notes": [
+    "Tape-mounted acrylic signs with raised characters/Braille, not powered signs."
+   ],
+   "scale": null,
+   "title": "10 14 23 ROOM IDENTIFICATION SIGNAGE",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "10 14 23",
+   "resolution_flags": []
+  },
+  {
+   "page": 148,
+   "tags": [
+    "signage"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "10 14 23 ROOM IDENTIFICATION SIGNAGE",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "10 14 23",
+   "resolution_flags": []
+  },
+  {
+   "page": 149,
+   "tags": [
+    "wall protection"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "10 26 00 WALL PROTECTION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "10 26 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 150,
+   "tags": [
+    "wall protection"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "10 26 00 WALL PROTECTION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "10 26 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 151,
+   "tags": [
+    "wall protection"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "10 26 00 WALL PROTECTION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "10 26 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 152,
+   "tags": [
+    "wall protection"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "10 26 00 WALL PROTECTION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "10 26 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 153,
+   "tags": [
+    "wall protection"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "10 26 00 WALL PROTECTION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "10 26 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 154,
+   "tags": [
+    "wall finish coordination"
+   ],
+   "notes": [
+    "Wall-protection locations/heights per drawings; coordinate finish thickness and device face locations where protection overlaps electrical devices."
+   ],
+   "scale": null,
+   "title": "10 26 00 WALL PROTECTION",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "10 26 00",
+   "resolution_flags": []
+  },
+  {
+   "page": 155,
+   "tags": [
+    "electrical accessories"
+   ],
+   "notes": [
+    "Electrical components/devices/accessories must be listed/labeled per NFPA 70 for application. Specific accessories are on drawings; no powered accessory load or quantity given here."
+   ],
+   "scale": null,
+   "title": "10 28 13 TOILET ACCESSORIES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "10 28 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 156,
+   "tags": [
+    "toilet accessories"
+   ],
+   "notes": [
+    "Lists acceptable accessory manufacturers but no electrical connection schedule."
+   ],
+   "scale": null,
+   "title": "10 28 13 TOILET ACCESSORIES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "10 28 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 157,
+   "tags": [
+    "toilet accessories"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "10 28 13 TOILET ACCESSORIES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "10 28 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 158,
+   "tags": [
+    "shades",
+    "scope conflict"
+   ],
+   "notes": [
+    "Summary specifies manually operated single-roller shades, although shop-drawing requirements mention wiring diagrams."
+   ],
+   "scale": null,
+   "title": "12 24 13 ROLLER WINDOW SHADES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "12 24 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 159,
+   "tags": [
+    "manual shades"
+   ],
+   "notes": [
+    "Product article expressly specifies chain-and-clutch manually operated single rollers; no motor selected."
+   ],
+   "scale": null,
+   "title": "12 24 13 ROLLER WINDOW SHADES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "12 24 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 160,
+   "tags": [
+    "shade coordination"
+   ],
+   "notes": [
+    "Recessed shade pockets may support ceiling panel edges; coordinate nearby electrical ceiling devices. No electrical load data."
+   ],
+   "scale": null,
+   "title": "12 24 13 ROLLER WINDOW SHADES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "12 24 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 161,
+   "tags": [
+    "motorized shades",
+    "scope conflict"
+   ],
+   "notes": [
+    "\u201cElectrical Connections: Connect motor-operated roller shades to building electrical system.\u201d Conflicts with manual-shade summary/products; no motor, control, voltage or circuit details."
+   ],
+   "scale": null,
+   "title": "12 24 13 ROLLER WINDOW SHADES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "12 24 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 162,
+   "tags": [
+    "shade training"
+   ],
+   "notes": [
+    "Factory-authorized representative trains Owner to adjust, operate and maintain shades."
+   ],
+   "scale": null,
+   "title": "12 24 13 ROLLER WINDOW SHADES",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "12 24 13",
+   "resolution_flags": []
+  },
+  {
+   "page": 163,
+   "tags": [
+    "countertop coordination"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "12 36 61 SOLID SURFACING COUNTERTOPS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "12 36 61",
+   "resolution_flags": []
+  },
+  {
+   "page": 164,
+   "tags": [
+    "countertop coordination"
+   ],
+   "notes": [
+    "Full-height backsplashes where indicated; coordinate receptacle cutouts and finished device depths with elevations."
+   ],
+   "scale": null,
+   "title": "12 36 61 SOLID SURFACING COUNTERTOPS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "12 36 61",
+   "resolution_flags": []
+  },
+  {
+   "page": 165,
+   "tags": [
+    "countertops"
+   ],
+   "notes": [],
+   "scale": null,
+   "title": "12 36 61 SOLID SURFACING COUNTERTOPS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "12 36 61",
+   "resolution_flags": []
+  },
+  {
+   "page": 166,
+   "tags": [
+    "countertop cutouts"
+   ],
+   "notes": [
+    "Countertop installer completes cutouts unfinished in shop; coordinate any electrical cutouts required by drawings."
+   ],
+   "scale": null,
+   "title": "12 36 61 SOLID SURFACING COUNTERTOPS",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "12 36 61",
+   "resolution_flags": []
+  },
+  {
+   "page": 1,
+   "tags": [
+    "Uniweb",
+    "prewired casework",
+    "sample configurations"
+   ],
+   "notes": [
+    "\u201cSAMPLE panel configurations shown. Uniweb manufactures electrical configurations to your specifications.\u201d Photos are examples, not countable project devices. No project-selected model, panel quantity or branch-circuit schedule."
+   ],
+   "scale": null,
+   "title": "Uniweb Pre-Wired Panel Advantage",
+   "doc_index": 2,
+   "page_role": "other",
+   "document_id": "49386a84-a15d-4fb1-a568-9dece878d298",
+   "sheet_number": null,
+   "resolution_flags": []
+  },
+  {
+   "page": 2,
+   "tags": [
+    "Uniweb",
+    "prewired casework",
+    "sample configurations",
+    "receptacle color code"
+   ],
+   "notes": [
+    "Three sample configuration tables for 2-, 4- and 6-hole welded power panels; not project equipment selections or quantities.",
+    "Data conduit stated as 1 inch diameter. Brochure color code: red Special Purpose ISO; orange ISO; grey UPS Backup (J-Run); white General Purpose. Do not equate red automatically with hospital emergency power.",
+    "Starred configurations used on double-face panels for pass-through. Wildcard panel names are catalog configuration identifiers, not completed order numbers.",
+    "\u201cYou provide this:\u201d and \u201cUniweb provides this:\u201d label comparative photos, not a project-specific furnishing/installing responsibility schedule."
+   ],
+   "scale": null,
+   "title": "Sample panel configurations listed below:",
+   "doc_index": 2,
+   "page_role": "schedule",
+   "document_id": "49386a84-a15d-4fb1-a568-9dece878d298",
+   "sheet_number": null,
+   "resolution_flags": []
+  },
+  {
+   "page": 1,
+   "tags": [
+    "owner standard",
+    "access control",
+    "automatic operators",
+    "delayed egress"
+   ],
+   "notes": [
+    "Owner standard for Section 08710 applies to new construction, renovations and tenant improvements; no opening-specific quantities.",
+    "UMC standard includes Schlage CO electronic locks, LCN Sentronics electrified fire/life-safety closers, LCN Sr. Swing operators and 1511S delayed-egress locks.",
+    "Coordinate hardware specifications with Carri Holmes, Allegion Plc. SSC- Southern California, 702-499-3869; verify standards with Mike Campanale, Locksmith, 702-383-2301.",
+    "Owner states hospital is standardized and not prepared to adopt an additional standard. Explicit equal provisions shown only for specified padlocks and continuous hinges, with locksmith prior approval."
+   ],
+   "scale": null,
+   "title": "UNIVERSITY MEDICAL CENTER DOOR HARDWARE STANDARD \u2014 Attachment 1",
+   "doc_index": 3,
+   "page_role": "spec_text",
+   "document_id": "43ca786f-4982-44ba-b31c-42054c359858",
+   "sheet_number": null,
+   "resolution_flags": []
+  },
+  {
+   "page": 2,
+   "tags": [
+    "owner standard",
+    "revision"
+   ],
+   "notes": [
+    "Address: 1800 W. Charleston Blvd., Las Vegas NV 89102. Revision text says \u201c(Revised 12-15)\u201d despite filename referring to 2025; confirm current standard."
+   ],
+   "scale": null,
+   "title": "UMC of Southern Nevada \u2014 (Revised 12-15)",
+   "doc_index": 3,
+   "page_role": "other",
+   "document_id": "43ca786f-4982-44ba-b31c-42054c359858",
+   "sheet_number": null,
+   "resolution_flags": []
+  }
+ ],
+ "scope": [
+  {
+   "page": 4,
+   "quote": "DIVISION 26 \u2013 ELECTRICAL \u2013 REFER TO ELECTRICAL DRAWINGS",
+   "section": "Table of Contents",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Division 26 and 27 technical requirements must be obtained from the referenced electrical and telecommunications drawings; this manual contains no dedicated sections for those divisions. Division 28 is listed not used, which does not resolve drawing-based fire-alarm or security work.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "00 01 10"
+  },
+  {
+   "page": 7,
+   "quote": "Runs of vertical and horizontal conduit 1-1/4 inches in diameter and larger.",
+   "section": "1.4.B.7",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Prepare interdisciplinary coordination drawings showing electrical device/equipment locations, conduit 1-1/4 inches and larger, and dimensioned pull/junction boxes. Coordinate plenum space, access and structural penetrations.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 31 00"
+  },
+  {
+   "page": 8,
+   "quote": "Perform three-dimensional component conflict analysis as part of preparation of coordination drawings.",
+   "section": "1.4.C.3.a",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Carry BIM coordination and three-dimensional conflict analysis; resolve conflicts before submission.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 31 00"
+  },
+  {
+   "page": 15,
+   "quote": "Before proceeding with installing work that will conceal other work, take photographs sufficient in number, with annotated descriptions, to record nature and location of concealed Work",
+   "section": "1.4.E",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Photograph electrical conduit and other concealed electrical services with annotated descriptions before concealment; coordinate this with general contractor documentation.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 32 33"
+  },
+  {
+   "page": 24,
+   "quote": "Provide connections and extensions of services as required for construction operations.",
+   "section": "1.2.B",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Provide construction power connections/extensions from Owner's existing system, subject to UMC procedures for metering and use; allocation between general contractor and electrical subcontractor is not specified.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 50 00"
+  },
+  {
+   "page": 25,
+   "quote": "Provide electrical power service and 120V ac duplex receptacles, with no fewer than one receptacle on each wall.",
+   "section": "2.2.B",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Temporary common-use office needs 120V ac duplex receptacles at least one per wall, electrical power service, lighting averaging 20 foot-candles at desk height and conditioned space. Wall count, HVAC load and service capacity are not stated.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 50 00"
+  },
+  {
+   "page": 26,
+   "quote": "Provide single switch for emergency shut off. Configure to run continuously.",
+   "section": "2.3.C; 3.2.A",
+   "doc_index": 1,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "Coordinate continuous power for temporary HEPA negative-air equipment and its single emergency shutoff switch. No unit count, voltage or amperage is provided.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 50 00"
+  },
+  {
+   "page": 27,
+   "quote": "Install and operate temporary lighting that fulfills security and protection requirements without operating entire system.",
+   "section": "3.3.D-E",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Provide locally switched temporary construction/security lighting and maintain temporary electrical equipment in Owner-acceptable condition.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 50 00"
+  },
+  {
+   "page": 27,
+   "quote": "Provide secure WiFi wireless connection to internet with provisions for access by Architect and Owner.",
+   "section": "3.3.F",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Secure construction WiFi for Architect and Owner is required; confirm whether furnished by general contractor or low-voltage subcontractor.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 50 00"
+  },
+  {
+   "page": 28,
+   "quote": "Barricades, Warning Signs, and Lights: Comply with requirements of authorities having jurisdiction",
+   "section": "3.5.A-C",
+   "doc_index": 1,
+   "relevance": "other",
+   "statement": "Maintain access/egress and barricade warning lights as required; protect existing utilities. Coordinate elevator, stair, parking and staging permissions with UMC.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 50 00"
+  },
+  {
+   "page": 29,
+   "quote": "Do not change over from using temporary security and protection facilities to permanent facilities until Substantial Completion.",
+   "section": "3.6.B-D",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Maintain required temporary environmental facilities continuously and remove temporary electrical facilities when authorized, restoring affected permanent work.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 50 00"
+  },
+  {
+   "page": 31,
+   "quote": "including materials and equipment furnished by the Owner for the Contractor to install",
+   "section": "1.1.C",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Protect owner-furnished equipment to be installed and equipment furnished/installed by Owner's separate contractors within the work; this is not evidence that any particular electrical equipment is owner-furnished.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 60 00"
+  },
+  {
+   "page": 34,
+   "quote": "Providing routine penetrations of non-structural surfaces for installation of piping electrical conduit, and similar items.",
+   "section": "1.1.A; 1.2",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Include routine conduit penetrations and coordinated cutting/patching; obtain consent for cuts affecting other trades, structures, waterproofing, operations or finished appearance.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 73 29"
+  },
+  {
+   "page": 36,
+   "quote": "Fit Work airtight to pipes, sleeves, ducts, conduit and other penetrations through surfaces.",
+   "section": "3.3.B-F",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Seal penetrations airtight and preserve fire ratings; restoration may extend to whole finish surfaces or nearest corner/intersection. Coordinate original installers for exposed/weatherproof finish repairs.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 73 29"
+  },
+  {
+   "page": 38,
+   "quote": "Complete startup and testing of systems and equipment.",
+   "section": "1.4.B-C",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Complete electrical startup/testing, preventive maintenance for equipment used before completion, required AHJ releases, records, O&M, spare-material delivery, owner training and demonstration recordings before closeout.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 77 00"
+  },
+  {
+   "page": 41,
+   "quote": "Clean luminaires, lamps, globes, and reflectors to function with full efficiency.",
+   "section": "3.1.B.1.m,q",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Clean electrical equipment and all luminaire optical surfaces for final turnover.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 77 00"
+  },
+  {
+   "page": 49,
+   "quote": "Revisions to electrical circuitry.",
+   "section": "1.3.A.2",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Maintain actual electrical routing/circuitry and concealed-condition record drawings, including underground depths/locations; record before concealment.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 78 39"
+  },
+  {
+   "page": 55,
+   "quote": "Conduct selective demolition so Owner's operations will not be disrupted.",
+   "section": "1.6.A,D; 3.1.A",
+   "doc_index": 1,
+   "relevance": "other",
+   "statement": "Owner occupies immediately adjacent areas throughout demolition; protect ongoing operations and verify disconnections before starting. Owner handles hazardous-material removal under separate contract.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "02 41 19"
+  },
+  {
+   "page": 57,
+   "quote": "Provide connections, supports, and miscellaneous materials necessary to make item functional for use indicated.",
+   "section": "3.4.B-D",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "For relocated/reinstalled electrical items identified elsewhere, provide cleaning/repair, secure storage, new connections and supports necessary for functional reuse. Confirm salvage inventory with Owner.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "02 41 19"
+  },
+  {
+   "page": 58,
+   "quote": "Equipment Backing Panels: Plywood, DOC PS 1, Exterior, A-C",
+   "section": "2.2.A",
+   "doc_index": 1,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "Coordinate electrical/telecom equipment backing with carpentry; minimum plywood thickness 5/8 inch nominal where not otherwise indicated, with fire-retardant treatment required by following page.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "06 10 53"
+  },
+  {
+   "page": 69,
+   "quote": "Shop-cut openings to maximum extent possible to receive hardware, appliances, plumbing fixtures, electrical work, and similar items.",
+   "section": "2.10.B.4",
+   "doc_index": 1,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "Supply electrical rough-in diagrams/templates to cabinet fabricator before shop cutouts; coordinate receptacles and data routing with cable-management accessories.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "06 41 16"
+  },
+  {
+   "page": 75,
+   "quote": "Do not cover up firestop system installations that will become concealed behind other construction until each installation has been examined by Owner's inspecting agency and building inspector",
+   "section": "1.1; 1.2; 1.3",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Coordinate rated electrical penetrations with tested firestop systems, qualified installer and inspections before concealment. Trade assignment is not expressly divided.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "07 84 13"
+  },
+  {
+   "page": 78,
+   "quote": "Attach labels permanently to surfaces adjacent to and within 6 inches of edge of the firestop systems",
+   "section": "3.2.D; 3.3",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Provide permanent identification labels at firestop systems and repair failed installations before concealment.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "07 84 13"
+  },
+  {
+   "page": 85,
+   "quote": "Coordinate locations of conduit and wiring boxes for electrical connections with Division 26 Sections.",
+   "section": "2.4.D.4",
+   "doc_index": 1,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "Coordinate electrical conduit and box locations with hollow-metal door/frame manufacturer and electrified hardware provider.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 11 13"
+  },
+  {
+   "page": 94,
+   "quote": "Provide built-in 1/4 inch diameter raceway through doors, from lockset location to nearest hinge location, for low voltage wiring for doors scheduled to have electric locks.",
+   "section": "2.3.A.2.b",
+   "doc_index": 1,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "Wood door fabricator must provide internal wiring raceway for doors scheduled for electric locks; field wiring and connections require coordination with hardware sets.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 14 00"
+  },
+  {
+   "page": 99,
+   "quote": "Door Locks (Optional):",
+   "section": "2.02.F",
+   "doc_index": 1,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "AD Systems magnetic lock appears as an optional sliding-door component. Confirm selection and furnishing/installation split before including power supply, raceways, controls and release interfaces; electrical ratings are absent.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 34 00"
+  },
+  {
+   "page": 126,
+   "quote": "Seal back and sides of electrical boxes in sound-rated assemblies airtight with putty pads.",
+   "section": "3.5.J.7-9",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Seal electrical penetrations in sound-rated gypsum assemblies and provide box putty pads on backs/sides plus acoustical perimeter sealant. Coordinate trade assignment before wall closure.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 29 00"
+  },
+  {
+   "page": 133,
+   "quote": "Close spaces to traffic while installing sheet vinyl floor covering and per requirements on ICRA document provided by the facility.",
+   "section": "1.5.H",
+   "doc_index": 1,
+   "relevance": "other",
+   "statement": "Coordinate electrical installation sequence with floor closures and facility ICRA restrictions.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 65 00"
+  },
+  {
+   "page": 141,
+   "quote": "After completing painting operations in each space or area, reinstall items removed using workers skilled in the trades involved.",
+   "section": "3.2.A",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Coordinate removal/protection/reinstallation of plates and luminaires for painting using skilled electrical workers where necessary; no quantities established by this clause.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 91 00"
+  },
+  {
+   "page": 155,
+   "quote": "Electrical Components, Devices, and Accessories: Listed and labeled as defined in NFPA 70",
+   "section": "1.3.A",
+   "doc_index": 1,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "Electrical toilet accessories, if selected on drawings, require listed/labeled components for intended use. This section does not identify a powered device or its load.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "10 28 13"
+  },
+  {
+   "page": 161,
+   "quote": "Electrical Connections: Connect motor-operated roller shades to building electrical system.",
+   "section": "3.2.B",
+   "doc_index": 1,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "Shade installation includes an electrical-connection instruction despite manual-shade products. Do not infer motorized shade quantities or loads without clarification.",
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "12 24 13"
+  },
+  {
+   "page": 1,
+   "quote": "SAMPLE panel configurations shown. Uniweb manufactures electrical configurations to your specifications.",
+   "section": null,
+   "doc_index": 2,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "Uniweb brochure establishes custom factory-prewired assembly options only; coordinate selected panels, external branch connections, grounding, UPS/ISO circuits and data pathways using project drawings and vendor shop drawings.",
+   "document_id": "49386a84-a15d-4fb1-a568-9dece878d298",
+   "sheet_number": null
+  },
+  {
+   "page": 2,
+   "quote": "Blank conduit and communication boxes = easy communication and data transmission",
+   "section": null,
+   "doc_index": 2,
+   "relevance": "electrical",
+   "statement": "Uniweb brochure calls for 1-inch data conduit and describes blank conduit/communication boxes; data cabling, terminations and external power-feed responsibilities are not assigned.",
+   "document_id": "49386a84-a15d-4fb1-a568-9dece878d298",
+   "sheet_number": null
+  },
+  {
+   "page": 1,
+   "quote": "The hospital is standardized and is not prepared at this time to accommodate the adoption of an additional standard.",
+   "section": "Specification Section 08710",
+   "doc_index": 3,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "Coordinate owner-standard electronic locks, automatic operators, electrified fire/life-safety closers and delayed-egress locks with hardware consultant/locksmith. No opening-specific selection, voltage, load, control wiring or release sequence is provided.",
+   "document_id": "43ca786f-4982-44ba-b31c-42054c359858",
+   "sheet_number": null
+  }
+ ],
+ "specs": [
+  {
+   "item": "Electrical and telecommunications technical specifications",
+   "page": 4,
+   "section": "00 01 10",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "00 01 10",
+   "approved_equals": [],
+   "basis_of_design": null,
+   "substitution_rule": null,
+   "material_category_hint": "General Material",
+   "vendor_or_organization_requirements": "\u201cDIVISION 26 \u2013 ELECTRICAL \u2013 REFER TO ELECTRICAL DRAWINGS\u201d; \u201cDIVISIONS 27 \u2013 COMMUNICATION \u2013 REFER TO TELECOMM DRAWINGS\u201d; \u201cDIVISION 28 \u2013 ELECTRONIC SAFTEY AND SECURITY \u2013 NOT USED\u201d. No dedicated Division 26, 27 or 28 section is present in this manual."
+  },
+  {
+   "item": "Coordination drawings and BIM",
+   "page": 7,
+   "section": "01 31 00 1.4",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "01 31 00",
+   "approved_equals": [],
+   "basis_of_design": null,
+   "substitution_rule": null,
+   "material_category_hint": "Other",
+   "vendor_or_organization_requirements": "Show electrical conduit 1-1/4 inches and larger, devices, equipment, and dimensioned pull/junction boxes; use original drawing software/version/OS for preparation, submit PDFs and incorporate into BIM. Three-dimensional conflict analysis continues on page 8."
+  },
+  {
+   "item": "Project software and digital files",
+   "page": 9,
+   "section": "01 31 00 1.6",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "01 31 00",
+   "approved_equals": [],
+   "basis_of_design": null,
+   "substitution_rule": null,
+   "material_category_hint": "Other",
+   "vendor_or_organization_requirements": "Contractor administers web-based project management through Final Completion. Subcontractor access to Architect digital files requires licensing agreement. Owner/Architect/consultant licenses, training and final locked PDF archive required by page 10; confirm subcontract allocation."
+  },
+  {
+   "item": "Photographic documentation of concealed electrical work",
+   "page": 15,
+   "section": "01 32 33 1.4.E",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "01 32 33",
+   "approved_equals": [],
+   "basis_of_design": null,
+   "substitution_rule": null,
+   "material_category_hint": "Other",
+   "vendor_or_organization_requirements": "Photograph electrical conduit, underground utilities and underslab services before concealment, with annotated descriptions and keyed locations. Submit within three working days per page 14; original JPG files minimum 3200 by 2400 pixels."
+  },
+  {
+   "item": "Submittal review and procurement lead time",
+   "page": 19,
+   "section": "01 33 00 1.4.C-F",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "01 33 00",
+   "approved_equals": [],
+   "basis_of_design": null,
+   "substitution_rule": "Submittal approval is not a substitute for formal substitution approval.",
+   "material_category_hint": "Other",
+   "vendor_or_organization_requirements": "15 calendar days initial review; 15 calendar days each resubmittal; 21 calendar days sequential review; 15 calendar days concurrent consultant review. Only approved final action submittals used for construction."
+  },
+  {
+   "item": "Equipment product data and shop drawings",
+   "page": 20,
+   "section": "01 33 00 1.5",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "01 33 00",
+   "approved_equals": [],
+   "basis_of_design": null,
+   "substitution_rule": null,
+   "material_category_hint": "General Material",
+   "vendor_or_organization_requirements": "Submit factory wiring diagrams, operating/performance data, clearances and project-specific shop drawings with field measurements and coordination information. Contractor must review/approve before submission."
+  },
+  {
+   "item": "Temporary electric service",
+   "page": 25,
+   "section": "01 50 00 1.4.A",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "01 50 00",
+   "approved_equals": [],
+   "basis_of_design": null,
+   "substitution_rule": null,
+   "material_category_hint": "General Material",
+   "vendor_or_organization_requirements": "\u201cComply with NECA, NEMA, and UL standards and regulations for temporary electric service. Install service to comply with NFPA 70.\u201d UMC metering/use procedures to be verified per page 24."
+  },
+  {
+   "item": "Temporary lighting and communications",
+   "page": 27,
+   "section": "01 50 00 3.3.E-F",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "01 50 00",
+   "approved_equals": [],
+   "basis_of_design": null,
+   "substitution_rule": null,
+   "material_category_hint": "Lighting",
+   "vendor_or_organization_requirements": "Temporary lighting must have local switching and support construction, observations, inspections, traffic and security without operating entire system. Secure WiFi access for Architect and Owner required."
+  },
+  {
+   "item": "General product equivalency and prior approval",
+   "page": 31,
+   "section": "01 60 00 1.2.A-C",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "01 60 00",
+   "approved_equals": [],
+   "basis_of_design": "Named proprietary products establish type, function, dimension, appearance and quality.",
+   "substitution_rule": "\u201cSubstitutions will be considered when written request has been submitted to the Architect and UMC for approval.\u201d Provide sufficient equivalency data; preaward approval by addendum per page 32.",
+   "material_category_hint": "General Material",
+   "vendor_or_organization_requirements": "Submit through Contractor; Architect determines equivalence. Project-specific no-substitution or owner-standard clauses must also be observed."
+  },
+  {
+   "item": "Postaward substitutions",
+   "page": 32,
+   "section": "01 60 00 1.2.D-F",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "01 60 00",
+   "approved_equals": [],
+   "basis_of_design": null,
+   "substitution_rule": "\u201cRequests shall be submitted to the Architect a minimum of 5 working days prior to date Contractor is required to place an order for the product.\u201d Requests only under listed qualifying conditions; written Contractor request required; shop-drawing implications not accepted.",
+   "material_category_hint": "General Material",
+   "vendor_or_organization_requirements": "Equivalent or superior performance, same warranty and maintenance/parts support; no adverse trade or schedule effects; dimensions and functional clearances maintained per page 33."
+  },
+  {
+   "item": "Cutting, patching and penetration restoration",
+   "page": 36,
+   "section": "01 73 29 3.3",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "01 73 29",
+   "approved_equals": [],
+   "basis_of_design": null,
+   "substitution_rule": null,
+   "material_category_hint": "General Material",
+   "vendor_or_organization_requirements": "Airtight fit at conduit/sleeves and maintenance of fire-wall/ceiling integrity. Use original installer/fabricator for exposed and weatherproof finish cuts/patches; restore finishes to prescribed boundaries."
+  },
+  {
+   "item": "Startup, testing and turnover",
+   "page": 38,
+   "section": "01 77 00 1.4",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "01 77 00",
+   "approved_equals": [],
+   "basis_of_design": null,
+   "substitution_rule": null,
+   "material_category_hint": "Other",
+   "vendor_or_organization_requirements": "Complete startup/testing and preventive maintenance, submit records/O&M/warranties and specified spares, provide owner instruction and demonstration/training video recordings before Substantial Completion procedures. Specific electrical test methods are not provided in this manual."
+  },
+  {
+   "item": "Warranty submittals",
+   "page": 39,
+   "section": "01 77 00 1.7",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "01 77 00",
+   "approved_equals": [],
+   "basis_of_design": null,
+   "substitution_rule": null,
+   "material_category_hint": "Other",
+   "vendor_or_organization_requirements": "Partial-occupancy warranties within 15 working days of completion of designated portions; bookmarked PDF warranty package and additional O&M copies per page 40. No general electrical warranty duration is established here."
+  },
+  {
+   "item": "O&M manual delivery",
+   "page": 42,
+   "section": "01 78 23 1.2-1.3",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "01 78 23",
+   "approved_equals": [],
+   "basis_of_design": null,
+   "substitution_rule": null,
+   "material_category_hint": "Other",
+   "vendor_or_organization_requirements": "Draft at least 30 calendar days before training; final before Substantial Completion inspection request and at least 15 calendar days before training. Correct within 15 calendar days of comments and before training. Digital/hardcopy format acceptable to UMC, with bookmarked electronic PDFs."
+  },
+  {
+   "item": "Operation and maintenance technical content",
+   "page": 44,
+   "section": "01 78 23 1.5-1.8",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "01 78 23",
+   "approved_equals": [],
+   "basis_of_design": null,
+   "substitution_rule": null,
+   "material_category_hint": "Other",
+   "vendor_or_organization_requirements": "Factory-authorized service representative prepares system/equipment information. Include emergency power-failure procedures, electric/electronic sequences, wiring/control diagrams, operating data, installed-control sequences, maintenance/testing procedures, spare parts/local sources and warranty procedures; requirements continue through page 47."
+  },
+  {
+   "item": "Project record documents",
+   "page": 48,
+   "section": "01 78 39 1.2-1.4",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "01 78 39",
+   "approved_equals": [],
+   "basis_of_design": null,
+   "substitution_rule": null,
+   "material_category_hint": "Other",
+   "vendor_or_organization_requirements": "Maintain marked paper drawings before concealment; initial/final scanned PDF record drawings, final printed drawings including unchanged sheets, and annotated PDF specifications. Record actual conduit/circuit/equipment locations and underground depths per page 49."
+  },
+  {
+   "item": "Owner demonstration and training",
+   "page": 51,
+   "section": "01 79 00",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "01 79 00",
+   "approved_equals": [],
+   "basis_of_design": null,
+   "substitution_rule": null,
+   "material_category_hint": "Other",
+   "vendor_or_organization_requirements": "Factory-authorized qualified instructors; submit training modules/schedule. Train on site with actual fully operational equipment and final O&M manuals; seven calendar days' advance notice through Architect; seasonal instruction where applicable per page 53."
+  },
+  {
+   "item": "Equipment backing panels",
+   "page": 58,
+   "section": "06 10 53 2.2; 2.4",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "06 10 53",
+   "approved_equals": [],
+   "basis_of_design": "\u201cPlywood, DOC PS 1, Exterior, A-C\u201d",
+   "substitution_rule": null,
+   "material_category_hint": "General Material",
+   "vendor_or_organization_requirements": "Thickness as indicated or minimum 5/8 inch nominal. Fire-retardant-treated plywood backing and concealed blocking per page 59; coordinate carpenter/electrical furnishing split."
+  },
+  {
+   "item": "Casework cable-management accessories",
+   "page": 67,
+   "section": "06 41 16 2.7.K-N",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": "Vivo; Doug Mockett and Company, Inc.",
+   "sheet_number": "06 41 16",
+   "approved_equals": [],
+   "basis_of_design": "\u201cCable Management Racks Basis of Design: Vivo; DESK-AC06-1B; black.\u201d \u201cUnder Desk PC Mount Basis of Design: Vivo; Mount-PC01D.\u201d \u201cDesk Grommet Basis of Design: Doug Mockett and Company, Inc.; MM5A; black.\u201d \u201cDesk Grommet Basis of Design: Doug Mockett and Company, Inc.; MM5A; polished chrome.\u201d",
+   "substitution_rule": null,
+   "material_category_hint": "Other",
+   "vendor_or_organization_requirements": "Specified in cabinet section; coordinate electrical/data routing without duplicating cabinet supply. No quantities stated."
+  },
+  {
+   "item": "Penetration firestop installer and submittals",
+   "page": 75,
+   "section": "07 84 13 1.2-1.3",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "07 84 13",
+   "approved_equals": [],
+   "basis_of_design": null,
+   "substitution_rule": null,
+   "material_category_hint": "General Material",
+   "vendor_or_organization_requirements": "Installer minimum five years similar experience. Qualified test agencies include UL, OPL, ITS or AHJ-acceptable agency. Provide tested-system illustrations; modified systems require manufacturer fire-protection engineer judgment and AHJ approval before Architect submittal. Inspection before concealment."
+  },
+  {
+   "item": "Penetration firestopping systems",
+   "page": 76,
+   "section": "07 84 13 2.1-2.2",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "07 84 13",
+   "approved_equals": [
+    "A/D Fire Protection Systems, Inc.",
+    "Grace, W. R. & Co., Construction Products Div.",
+    "Hilti, Inc.",
+    "Johns Manville.",
+    "Specified Technologies Inc.",
+    "3M; Fire Protection Products Division.",
+    "Tremco; Sealant/Weatherproofing Division.",
+    "USG Corporation."
+   ],
+   "basis_of_design": null,
+   "substitution_rule": "\u201cIf not listed, submit as substitution according to Division 01 Section \u2018Substitution Procedures.\u2019\u201d Referenced section is not included under that title; 01 60 00 contains substitution rules.",
+   "material_category_hint": "General Material",
+   "vendor_or_organization_requirements": "ASTM E814 or UL 1479; F-rating at least penetrated construction rating; applicable T/L ratings. Smoke-barrier L-rating at ambient and 400 degrees F. Paintable exposed systems where required; exposed flame-spread/smoke-developed indexes less than 25/450."
+  },
+  {
+   "item": "Firestop compatibility and accessories",
+   "page": 77,
+   "section": "07 84 13 2.3-2.4",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "07 84 13",
+   "approved_equals": [],
+   "basis_of_design": null,
+   "substitution_rule": null,
+   "material_category_hint": "General Material",
+   "vendor_or_organization_requirements": "\u201cFirestopping installed by multiple sub-contractors must be of similar type and color to allow for consistent observation and verification.\u201d Use only manufacturer/test-agency-approved accessories. VOC limits: sealants 250 g/L; nonporous primers 250 g/L; porous primers 775 g/L."
+  },
+  {
+   "item": "Firestop labels",
+   "page": 78,
+   "section": "07 84 13 3.2.D",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "07 84 13",
+   "approved_equals": [],
+   "basis_of_design": "\u201cpreprinted metal or plastic labels\u201d",
+   "substitution_rule": null,
+   "material_category_hint": "General Material",
+   "vendor_or_organization_requirements": "Permanent visible labels within 6 inches of firestop edge; metal labels mechanically fastened. Required wording: \u201cWarning - Through-Penetration Firestop System - Do Not Disturb. Notify Building Management of Any Damage.\u201d Include Contractor/contact, system designation, date, manufacturer and installer."
+  },
+  {
+   "item": "Electric-lock door raceway",
+   "page": 94,
+   "section": "08 14 00 2.3.A.2.b",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "08 14 00",
+   "approved_equals": [],
+   "basis_of_design": "\u201cbuilt-in 1/4 inch diameter raceway\u201d",
+   "substitution_rule": null,
+   "material_category_hint": "Low Voltage",
+   "vendor_or_organization_requirements": "Wood door fabrication from lockset location to nearest hinge for low-voltage wiring on doors scheduled with electric locks; coordinate with hardware and electrical installers."
+  },
+  {
+   "item": "Sliding-door system interfacing with optional magnetic lock",
+   "page": 98,
+   "section": "08 34 00 2.01-2.02",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": "AD SYSTEMS",
+   "sheet_number": "08 34 00",
+   "approved_equals": [],
+   "basis_of_design": "\u201cExamSlide\u2122 High Performance Barn (Sliding) Door System by AD Systems.\u201d",
+   "substitution_rule": "\u201cNo Substitutions\u201d",
+   "material_category_hint": "Other",
+   "vendor_or_organization_requirements": "Door/hardware single source. Manufacturer contact: ADSystems.Estimating@allegion.com; 425-740-6011. Optional magnetic lock appears on page 99; do not assume installed on every sliding door."
+  },
+  {
+   "item": "Optional sliding-door magnetic lock",
+   "page": 99,
+   "section": "08 34 00 2.02.F",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": "AD Systems",
+   "sheet_number": "08 34 00",
+   "approved_equals": [],
+   "basis_of_design": "\u201cMagnetic Lock by AD Systems\u201d",
+   "substitution_rule": null,
+   "material_category_hint": "Low Voltage",
+   "vendor_or_organization_requirements": "Listed under \u201cDoor Locks (Optional)\u201d. No electrical characteristics or project selection provided; coordinate with UMC standard and hardware schedule."
+  },
+  {
+   "item": "Acoustical sealant at electrical penetrations",
+   "page": 121,
+   "section": "09 29 00 2.8.E",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "09 29 00",
+   "approved_equals": [
+    "Accumetric LLC; BOSS 824 Acoustical Sound Sealant.",
+    "Certainteed Saint-Gobain; SilentFX Noiseproofing Sealant.",
+    "Franklin International; Titebond GreenChoice Professional Acoustical Smoke and Sound Sealant.",
+    "Grabber Construction Products; Acoustical Sealant GSC",
+    "Pecora Corp.; AC-20 FTR Acoustical and Insulation Sealant.",
+    "Pecora Corp.; BA-98.",
+    "Specified Technologies, Inc.; Smoke N Sound Acoustical Sealant.",
+    "USG Corp.; Sheetrock Brand Acoustical Sealant."
+   ],
+   "basis_of_design": "\u201cNon-skinning, non-hardening, permanently flexible, gun-grade sealant\u201d",
+   "substitution_rule": "Unlisted products subject to section substitution requirements.",
+   "material_category_hint": "General Material",
+   "vendor_or_organization_requirements": "ASTM E90 demonstrated sound reduction. Pecora AC-20 FTR listed for fire-rated joints; BA-98 for non-fire-rated joints. Installation requirements on pages 125-126 include airtight wiring/cable/box penetrations."
+  },
+  {
+   "item": "Electrical-box putty pads in fire-rated partitions",
+   "page": 122,
+   "section": "09 29 00 2.8.I.1.a",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": "Tremco",
+   "sheet_number": "09 29 00",
+   "approved_equals": [],
+   "basis_of_design": "\u201cTremco; TREMstop MP.\u201d",
+   "substitution_rule": "Unlisted products subject to section substitution requirements.",
+   "material_category_hint": "General Material",
+   "vendor_or_organization_requirements": "Coordinate with tested fire-rated assembly and firestop systems. Box backs/sides in sound-rated assemblies also require putty pads per page 126."
+  },
+  {
+   "item": "Electrical-box putty pads in non-fire-rated partitions",
+   "page": 122,
+   "section": "09 29 00 2.8.I.1.b; 3.5.J",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "09 29 00",
+   "approved_equals": [
+    "Specified Technologies, Inc.; Firestop Putty Pads.",
+    "Hilti; CP-617."
+   ],
+   "basis_of_design": null,
+   "substitution_rule": "Unlisted products subject to section substitution requirements.",
+   "material_category_hint": "General Material",
+   "vendor_or_organization_requirements": "Seal electrical box backs and sides airtight in sound-rated assemblies; perimeter face receives acoustical sealant."
+  },
+  {
+   "item": "Electrical toilet-accessory certification",
+   "page": 155,
+   "section": "10 28 13 1.3.A",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "10 28 13",
+   "approved_equals": [],
+   "basis_of_design": null,
+   "substitution_rule": null,
+   "material_category_hint": "General Material",
+   "vendor_or_organization_requirements": "\u201cListed and labeled as defined in NFPA 70, by a qualified testing agency, and marked for intended location and application.\u201d Specific equipment is selected on drawings, not here."
+  },
+  {
+   "item": "Roller-shade electrical connection requirement \u2014 unresolved",
+   "page": 161,
+   "section": "12 24 13 1.1; 2.2; 3.2.B",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "manufacturer": null,
+   "sheet_number": "12 24 13",
+   "approved_equals": [],
+   "basis_of_design": "\u201cManually operated shades with single rollers.\u201d on page 158; \u201cConnect motor-operated roller shades to building electrical system.\u201d on page 161.",
+   "substitution_rule": null,
+   "material_category_hint": "General Material",
+   "vendor_or_organization_requirements": "Manual chain-and-clutch products specified on page 159; obtain clarification before selecting motors, controls or circuits. No motor voltage/load or project count provided."
+  },
+  {
+   "item": "Factory-prewired pharmacy panels",
+   "page": 1,
+   "section": null,
+   "doc_index": 2,
+   "document_id": "49386a84-a15d-4fb1-a568-9dece878d298",
+   "manufacturer": "Uniweb",
+   "sheet_number": null,
+   "approved_equals": [],
+   "basis_of_design": "\u201cUniweb Pre-Wired Panel Advantage\u201d",
+   "substitution_rule": null,
+   "material_category_hint": "General Material",
+   "vendor_or_organization_requirements": "\u201cSAMPLE panel configurations shown. Uniweb manufactures electrical configurations to your specifications.\u201d This is reference literature, not proof of project-selected assemblies or furnishing assignment."
+  },
+  {
+   "item": "Uniweb panel construction and connection options",
+   "page": 2,
+   "section": null,
+   "doc_index": 2,
+   "document_id": "49386a84-a15d-4fb1-a568-9dece878d298",
+   "manufacturer": "Uniweb",
+   "sheet_number": null,
+   "approved_equals": [],
+   "basis_of_design": "\u201cUL Listed pre-engineered and factory built\u201d",
+   "substitution_rule": null,
+   "material_category_hint": "General Material",
+   "vendor_or_organization_requirements": "\u201cElectrical outlets per your specification; regular, utility, ISO, clean, dedicated\u201d; \u201cData Conduit 1\" Diameter\u201d. Catalog sample configurations only. Contact 800.486.4932, Corona, CA."
+  },
+  {
+   "item": "Owner-standard electronic access-control locks",
+   "page": 1,
+   "section": "08710 \u2014 Access Control",
+   "doc_index": 3,
+   "document_id": "43ca786f-4982-44ba-b31c-42054c359858",
+   "manufacturer": "Schlage Electronics",
+   "sheet_number": null,
+   "approved_equals": [],
+   "basis_of_design": "\u201cSchlage Electronics CO series electronics locks.\u201d",
+   "substitution_rule": "No equal provision stated for this item; owner says it is not prepared to adopt an additional standard.",
+   "material_category_hint": "Low Voltage",
+   "vendor_or_organization_requirements": "UMC door hardware standard for Section 08710. Coordinate with Mike Campanale, Locksmith, 702-383-2301, and Carri Holmes, Allegion Plc. SSC- Southern California, 702-499-3869. Power architecture and opening-specific models not specified."
+  },
+  {
+   "item": "Owner-standard electrified fire/life-safety closers",
+   "page": 1,
+   "section": "08710 \u2014 Surface Closers",
+   "doc_index": 3,
+   "document_id": "43ca786f-4982-44ba-b31c-42054c359858",
+   "manufacturer": "LCN",
+   "sheet_number": null,
+   "approved_equals": [],
+   "basis_of_design": "\u201cLCN Sentronics Electrified Fire/Life Safety closers\u201d",
+   "substitution_rule": "No equal provision stated for this item.",
+   "material_category_hint": "Low Voltage",
+   "vendor_or_organization_requirements": "\u201cConsult with Locksmith, Mike Campanale\u201d. Confirm required openings, voltage, power supply and fire-alarm release interface; generic surface closer standards also listed but do not establish electrified quantities."
+  },
+  {
+   "item": "Owner-standard low-energy automatic door operators",
+   "page": 1,
+   "section": "08710 \u2014 Low Energy Auto Operators",
+   "doc_index": 3,
+   "document_id": "43ca786f-4982-44ba-b31c-42054c359858",
+   "manufacturer": "LCN",
+   "sheet_number": null,
+   "approved_equals": [],
+   "basis_of_design": "\u201cLCN Sr. Swing operators\u201d; \u201cPair \u2013 9550 Series\u201d; \u201cSingle \u2013 9530/9540 Series\u201d",
+   "substitution_rule": "No equal provision stated for this item.",
+   "material_category_hint": "Generator & Equipment",
+   "vendor_or_organization_requirements": "UMC standardized hardware; coordinate consultant and locksmith. No operator quantities, voltages, loads, actuators, sensors or circuit assignments stated."
+  },
+  {
+   "item": "Owner-standard electromagnetic delayed-egress locks",
+   "page": 1,
+   "section": "08710 \u2014 Electromagnetic delayed egress locks",
+   "doc_index": 3,
+   "document_id": "43ca786f-4982-44ba-b31c-42054c359858",
+   "manufacturer": null,
+   "sheet_number": null,
+   "approved_equals": [],
+   "basis_of_design": "\u201c1511S Series Single Integrated Delayed Egress Locks- 1511S NFPA 15 K 628\u201d",
+   "substitution_rule": "No equal provision stated for this item.",
+   "material_category_hint": "Low Voltage",
+   "vendor_or_organization_requirements": "Manufacturer is not printed in this row; do not infer it. Confirm opening selection, power supplies, emergency release, fire-alarm interface and furnish/install split with UMC hardware consultant."
+  }
+ ],
+ "counts": [],
+ "source": {
+  "groups": 1,
+  "rolled_up": false,
+  "failed_groups": 0
+ },
+ "details": [],
+ "summary": "This group contains the 166-page architectural project manual, a two-page Uniweb prewired-panel brochure, and a two-page UMC door hardware standard. The manual does not contain Division 26 or 27 specifications; it directs the reader to electrical and telecommunications drawings and lists Division 28 as not used. Electrical bid requirements include temporary power and lighting, occupied-facility protection, coordination drawings and BIM conflict analysis, submittals, concealed-work documentation, testing/startup, record documents, O&M manuals, and owner training. Architectural sections add electrical penetration firestopping, acoustical seals and box putty pads, equipment backing, casework coordination, and electrified-door interfaces. Uniweb configurations are explicitly samples, not project quantities or selected assemblies. Door hardware requirements identify owner-standard electronic locks, automatic operators, electrified closers, and delayed-egress locks, but do not establish opening quantities or electrical connection data. The roller-shade specification conflicts between manual operation and an instruction to connect motor-operated shades, requiring clarification.",
+ "category": "specifications",
+ "questions": [
+  {
+   "why": "The manual refers Divisions 26 and 27 to drawings and lists Division 28 not used; it does not supply electrical product standards, testing details or a communications design.",
+   "page": 4,
+   "question": "Provide the complete electrical and telecommunications drawing specifications and confirm whether any supplemental Division 26/27/28 sections govern this bid.",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "00 01 10"
+  },
+  {
+   "why": "Electrified fire/life-safety and delayed-egress hardware may require interfaces even though no Division 28 section is included.",
+   "page": 4,
+   "question": "Does the Division 28 'NOT USED' entry exclude any work, or are fire-alarm, access-control and security interfaces still required by the drawings and door hardware sets?",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "00 01 10"
+  },
+  {
+   "why": "Adjacent areas remain occupied; disruptive work may require non-standard hours, but this manual does not define the actual restrictions.",
+   "page": 11,
+   "question": "Provide UMC-approved phasing, working hours, shutdown procedures/notice periods, access limits, infection-control requirements and the facility ICRA document.",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 31 00"
+  },
+  {
+   "why": "Division 01 requires these facilities without allocating them among trades or giving temporary equipment loads/layouts.",
+   "page": 24,
+   "question": "Confirm electrical subcontract responsibility for temporary office power, temporary lighting, HEPA equipment power/shutoff, secure WiFi and metering, and identify available source capacity.",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 50 00"
+  },
+  {
+   "why": "The specifications require BIM integration and 3D conflict analysis, but do not define model deliverables beyond general coordination requirements.",
+   "page": 7,
+   "question": "Confirm project BIM platform, required model detail, existing-condition survey expectations and electrical participation in clash detection.",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 31 00"
+  },
+  {
+   "why": "This manual gives warranty administration and startup obligations but no electrical-specific warranty term, commissioning protocol or complete permit allocation.",
+   "page": 38,
+   "question": "Confirm applicable electrical warranty duration, permit/inspection responsibility and any owner-specific testing/commissioning requirements beyond these general closeout provisions.",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "01 77 00"
+  },
+  {
+   "why": "Requirements appear in architectural sections and permit multiple subcontractors; scope allocation is not expressly established.",
+   "page": 122,
+   "question": "Confirm which trade furnishes and installs penetration firestopping, firestop labels, acoustical sealant and electrical-box putty pads.",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "09 29 00"
+  },
+  {
+   "why": "Selective demolition requires verification of salvage items and uninterrupted Owner operations without an itemized electrical inventory.",
+   "page": 57,
+   "question": "Identify existing electrical devices/equipment to salvage, reinstall or retain, and provide Owner's salvage destination and shutdown plan.",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "02 41 19"
+  },
+  {
+   "why": "The magnetic lock is listed only as optional and must be coordinated with UMC owner-standard hardware.",
+   "page": 99,
+   "question": "Are any AD Systems sliding doors furnished with the optional magnetic lock, and which openings require it? Provide voltage, current, power supply, release sequence and furnish/install responsibilities.",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "08 34 00"
+  },
+  {
+   "why": "Manual chain-and-clutch products conflict with the installation instruction to connect motor-operated shades to building power.",
+   "page": 161,
+   "question": "Are roller shades manual or motor-operated? If motor-operated, provide locations, quantities, motor ratings, controls, power supplies and circuit assignments.",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "12 24 13"
+  },
+  {
+   "why": "Both brochure pages explicitly show samples; catalog options cannot establish a bill of quantities.",
+   "page": 2,
+   "question": "Provide project-specific Uniweb shop drawings and selected configurations, including panel quantities, receptacle ratings, normal/UPS/ISO circuit assignments, grounding requirements and connection points.",
+   "doc_index": 2,
+   "document_id": "49386a84-a15d-4fb1-a568-9dece878d298",
+   "sheet_number": null
+  },
+  {
+   "why": "Brochure comparison photos labeled 'You provide this' and 'Uniweb provides this' do not constitute a project responsibility matrix.",
+   "page": 2,
+   "question": "Who purchases/installs Uniweb panels, factory harnesses and external power feeds, and who provides data conduit, cabling, outlets and testing?",
+   "doc_index": 2,
+   "document_id": "49386a84-a15d-4fb1-a568-9dece878d298",
+   "sheet_number": null
+  },
+  {
+   "why": "The owner standard lists product families but no quantities, loads, controls or installation allocation.",
+   "page": 1,
+   "question": "Provide opening-specific UMC-approved hardware sets and wiring diagrams, including operator actuators/sensors, electronic lock power, delayed-egress release and fire-alarm interfaces.",
+   "doc_index": 3,
+   "document_id": "43ca786f-4982-44ba-b31c-42054c359858",
+   "sheet_number": null
+  },
+  {
+   "why": "The file is identified as a 2025 guide but page 2 says '(Revised 12-15)'; the manual also includes an optional AD Systems magnetic lock not explicitly identified in the owner table.",
+   "page": 2,
+   "question": "Confirm the current approved UMC door hardware standard and whether project-specific exceptions are authorized.",
+   "doc_index": 3,
+   "document_id": "43ca786f-4982-44ba-b31c-42054c359858",
+   "sheet_number": null
+  },
+  {
+   "why": "No project-specific provisions for these items are established in the supplied specification group; absence here is not a basis to exclude requirements from other bid documents.",
+   "page": 2,
+   "question": "Confirm whether owner procurement/program requirements such as prevailing wage, Buy American, approved installers, alternates or allowances are defined in separate contract documents.",
+   "doc_index": 1,
+   "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+   "sheet_number": "00 01 10"
+  }
+ ],
+ "schedules": [
+  {
+   "name": "Welded Power Panels - 2 Holes",
+   "page": 2,
+   "rows": [
+    [
+     "1WPP********2A",
+     "TCA-REG-REG-5",
+     "J-BOX-COM-4"
+    ],
+    [
+     "1WPP********2B",
+     "TCA-ISO-6",
+     "J-BOX-COM-4"
+    ],
+    [
+     "1WPP********2C",
+     "TCA-REG-5",
+     "J-BOX-COM-4"
+    ],
+    [
+     "1WPP********2D",
+     "TCA-ISO-ISO-6",
+     "TCA-REG-5"
+    ],
+    [
+     "1WPP********2E",
+     "TCA-ISO-6",
+     "J-BOX-UPS"
+    ],
+    [
+     "1WPP********2G",
+     "TCA-GFCI-5",
+     "J-BOX-COM-4"
+    ],
+    [
+     "1WPP********2H",
+     "OPEN",
+     "OPEN"
+    ],
+    [
+     "1WPP********2J",
+     "J-BOX-ASSY-4X4",
+     "J-BOX-ASSY-4X4"
+    ],
+    [
+     "1WPP********2L",
+     "J-BOX-ASSY-4X4",
+     "J-BOX-COM-4"
+    ]
+   ],
+   "notes": "Sample catalog configurations only; no project selection or quantity. No individual column headings printed. Shared heading: \u201cElectrical call outs Top to Bottom - Left to Right\u201d. Asterisks within panel identifiers are printed wildcard characters, not completed model numbers.",
+   "columns": [
+    "",
+    "",
+    ""
+   ],
+   "doc_index": 2,
+   "document_id": "49386a84-a15d-4fb1-a568-9dece878d298",
+   "sheet_number": null,
+   "schedule_type": "other"
+  },
+  {
+   "name": "Welded Power Panels - 4 Holes",
+   "page": 2,
+   "rows": [
+    [
+     "1WPP********4A",
+     "TCA-J-RUN-6",
+     "TCA-REG-5",
+     "J-BOX-COM-4",
+     "TCA-REG-5"
+    ],
+    [
+     "1WPP********4B",
+     "TCA-ISO-6",
+     "TCA-J-RUN-6",
+     "J-BOX-COM-4",
+     "TCA-REG-5"
+    ],
+    [
+     "1WPP********4C",
+     "TCA-ISO-6",
+     "J-BOX-COM-4",
+     "J-BOX-COM-4",
+     "TCA-REG-5"
+    ],
+    [
+     "1WPP********4D",
+     "TCA-ISO-6",
+     "TCA-REG-5",
+     "J-BOX-COM-4",
+     "TCA-REG-5"
+    ],
+    [
+     "1WPP********4E",
+     "TCA-ISO-6",
+     "J-BOX-UPS",
+     "J-BOX-COM-4",
+     "TCA-REG-5"
+    ],
+    [
+     "1WPP********4F",
+     "TCA-ISO-6",
+     "TCA-J-RUN-6",
+     "J-BOX-COM-4",
+     "TCA-REG-5"
+    ],
+    [
+     "1WPP********4G",
+     "TCA-ISO-6",
+     "TCA-J-RUN-6",
+     "J-BOX-COM-4",
+     "J-BOX-UPS"
+    ],
+    [
+     "1WPP********4H",
+     "OPEN",
+     "OPEN",
+     "OPEN",
+     "OPEN"
+    ],
+    [
+     "1WPP********4J",
+     "J-BOX-ASSY-4X4",
+     "J-BOX-ASSY-4X4",
+     "J-BOX-ASSY-4X4",
+     "J-BOX-ASSY-4X4"
+    ],
+    [
+     "1WPP********4K*",
+     "J-BOX-ASSY-4X4",
+     "J-BOX-ASSY-4X4",
+     "J-BOX-EXT-4X4-WING",
+     "J-BOX-ASSY-4X4"
+    ],
+    [
+     "1WPP********4L*",
+     "TCA-ISO-6",
+     "J-BOX-COM-4",
+     "J-BOX-EXT-4X4-WING",
+     "TCA-REG-5"
+    ],
+    [
+     "1WPP********4M",
+     "TCA-ISO-6",
+     "J-BOX-COM-4",
+     "J-BOX-COM-4",
+     "TCA-ISO-6"
+    ],
+    [
+     "1WPP********4N*",
+     "TCA-REG-5",
+     "J-BOX-COM-4",
+     "J-BOX-EXT-4X4-WING",
+     "J-BOX-UPS"
+    ],
+    [
+     "1WPP********4O",
+     "TCA-REG-5",
+     "J-BOX-COM-4",
+     "J-BOX-COM-4",
+     "TCA-REG-5"
+    ],
+    [
+     "1WPP********4P",
+     "TCA-J-RUN-6",
+     "TCA-REG-5",
+     "J-BOX-COM-4",
+     "TCA-REG-5"
+    ],
+    [
+     "1WPP********4Q*",
+     "TCA-J-RUN-6",
+     "J-BOX-COM-4",
+     "J-BOX-EXT-4X4-WING",
+     "TCA-REG-5"
+    ],
+    [
+     "1WPP********4R",
+     "TCA-J-RUN-6",
+     "J-BOX-COM-4",
+     "J-BOX-COM-4",
+     "TCA-GFCI-5"
+    ],
+    [
+     "1WPP********4S",
+     "TCA-J-RUN-6",
+     "J-BOX-COM-4",
+     "J-BOX-COM-4",
+     "TCA-REG-5"
+    ],
+    [
+     "1WPP********4T",
+     "TCA-J-RUN-6",
+     "TCA-GFCI-5",
+     "J-BOX-COM-4",
+     "TCA-GFCI-5"
+    ],
+    [
+     "1WPP********4U",
+     "TCA-GFCI-5",
+     "J-BOX-COM-4",
+     "J-BOX-COM-4",
+     "TCA-GFCI-5"
+    ],
+    [
+     "1WPP********4V",
+     "TCA-J-RUN-6",
+     "J-BOX-COM-4",
+     "TCA-ISO-6",
+     "J-BOX-UPS"
+    ]
+   ],
+   "notes": "Sample configurations, not project quantities. No individual column headings printed. Shared heading: \u201cElectrical call outs Top to Bottom - Left to Right\u201d. Trailing asterisk note: \u201c*Used on double face panels (Pass through)\u201d. Internal asterisks are printed wildcards.",
+   "columns": [
+    "",
+    "",
+    "",
+    "",
+    ""
+   ],
+   "doc_index": 2,
+   "document_id": "49386a84-a15d-4fb1-a568-9dece878d298",
+   "sheet_number": null,
+   "schedule_type": "other"
+  },
+  {
+   "name": "Welded Power Panels - 6 Holes",
+   "page": 2,
+   "rows": [
+    [
+     "1WPP********6B",
+     "TCA-ISO-6",
+     "J-BOX-COM-4",
+     "J-BOX-COM-4",
+     "J-BOX-EXT-4X4-WING",
+     "TCA-J-RUN-6",
+     "TCA-REG-5"
+    ],
+    [
+     "1WPP********6G",
+     "TCA-ISO-6",
+     "J-BOX-UPS",
+     "J-BOX-COM-4",
+     "J-BOX-EXT-4X4-WING",
+     "TCA-J-RUN-6",
+     "TCA-REG-5"
+    ],
+    [
+     "1WPP********6H",
+     "OPEN",
+     "OPEN",
+     "OPEN",
+     "OPEN",
+     "OPEN",
+     "OPEN"
+    ],
+    [
+     "1WPP********6J",
+     "J-BOX-ASSY-4X4",
+     "J-BOX-ASSY-4X4",
+     "J-BOX-ASSY-4X4",
+     "J-BOX-ASSY-4X4",
+     "J-BOX-ASSY-4X4",
+     "J-BOX-ASSY-4X4"
+    ],
+    [
+     "1WPP********6K*",
+     "J-BOX-ASSY-4X4",
+     "J-BOX-ASSY-4X4",
+     "J-BOX-ASSY-4X4",
+     "J-BOX-EXT-4X4-WING",
+     "J-BOX-ASSY-4X4",
+     "J-BOX-ASSY-4X4"
+    ]
+   ],
+   "notes": "Sample configurations only; no individual column headings. Shared heading: \u201cElectrical call outs Top to Bottom - Left to Right\u201d. Trailing asterisk denotes double-face pass-through use; internal asterisks are printed wildcards.",
+   "columns": [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+   ],
+   "doc_index": 2,
+   "document_id": "49386a84-a15d-4fb1-a568-9dece878d298",
+   "sheet_number": null,
+   "schedule_type": "other"
+  },
+  {
+   "name": "RECEPTACLE COLOR CODE",
+   "page": 2,
+   "rows": [
+    [
+     "RED",
+     "Special Purpose ISO"
+    ],
+    [
+     "ORANGE",
+     "ISO"
+    ],
+    [
+     "GREY",
+     "UPS Backup (J-Run)"
+    ],
+    [
+     "WHITE",
+     "General Purpose"
+    ]
+   ],
+   "notes": "Uniweb brochure color code only, not a project circuit assignment. No column headings printed. Adjacent note: \u201cData Conduit 1\" Diameter\u201d.",
+   "columns": [
+    "",
+    ""
+   ],
+   "doc_index": 2,
+   "document_id": "49386a84-a15d-4fb1-a568-9dece878d298",
+   "sheet_number": null,
+   "schedule_type": "other"
+  },
+  {
+   "name": "UNIVERSITY MEDICAL CENTER DOOR HARDWARE STANDARD",
+   "page": 1,
+   "rows": [
+    [
+     "Key System",
+     "Schlage large format interchangeable core - Consult with Locksmith Mike Campanale, for specific information & instructions on keying and keyway"
+    ],
+    [
+     "Locksets",
+     "Cylindrical locksets: Schlage ND series prepped for large format interchangeable core, Rhodes lever 626 finish."
+    ],
+    [
+     "Rim Cyls",
+     "Schlage large format interchangeable core"
+    ],
+    [
+     "Deadbolts",
+     "N/A"
+    ],
+    [
+     "Padlocks",
+     "Schlage or equal*\nSubmit equal to Locksmith Mike Campanale for prior approval."
+    ],
+    [
+     "Exit Devices",
+     "Von Duprin 99 Series--rim panics on single doors, concealed vertical cable panics less bottom latch on pairs. (no surface rods) Von Duprin XP99 rim device as indicated. Inpact panics where indicated. 33 series on narrow stile glass doors."
+    ],
+    [
+     "Mullions",
+     "Von Duprin KR series with MT54 storage bracket kits"
+    ],
+    [
+     "Access Control",
+     "Schlage Electronics CO series electronics locks."
+    ],
+    [
+     "Surface Closers",
+     "In-swinging: LCN 4040XP. At medium & light duty applications use LCN 1461 series\nOut-swinging: LCN 4040XP. At medium duty applications use LCN 1461 series, EDA as req\u2019d.\nLCN4040XP Device as indicated by Facilities. LCN Sentronics Electrified Fire/Life Safety closers \u2013 Consult with Locksmith, Mike Campanale"
+    ],
+    [
+     "Push/pull Hardware",
+     "HL Series- Tubular backset 2 (3/4\u201d backset) - 626 Finish (US26D)\nPassage (HL6Q-2 US26D)"
+    ],
+    [
+     "Hinges",
+     "Conventional: 5 knuckle ball bearing\nContinuous: Select SL1183 or equal*\nSubmit equal to Locksmith Mike Campanale for prior approval."
+    ],
+    [
+     "Low Energy Auto Operators",
+     "LCN Sr. Swing operators\nPair \u2013 9550 Series\nSingle \u2013 9530/9540 Series"
+    ],
+    [
+     "Hollow Metal Doors & Frames",
+     "Steelcraft F Series flush hollow metal frames\nSteelcraft L Series Honeycomb Core\nSteelcraft B Series Steel stiffened doors where indicated"
+    ],
+    [
+     "Electromagnetic delayed egress locks",
+     "1511S Series Single Integrated Delayed Egress Locks- 1511S NFPA 15 K 628"
+    ]
+   ],
+   "notes": "Owner product standard, not opening-specific hardware sets or a quantity schedule. No column headings printed. Attachment 1 references Specification Section 08710. Electrical voltage/load/control data absent.",
+   "columns": [
+    "",
+    ""
+   ],
+   "doc_index": 3,
+   "document_id": "43ca786f-4982-44ba-b31c-42054c359858",
+   "sheet_number": null,
+   "schedule_type": "other"
+  }
+ ],
+ "unresolved_flags": [],
+ "escalation_patches": []
+}

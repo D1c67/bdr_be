@@ -69,6 +69,10 @@ ROLE_GATES = {
     deps.require_pm_write,
     deps.require_cp_read,
     deps.require_cp_write,
+    # AI Estimating pricing (spec 5.5): view roles and write roles, 404 while
+    # AI_PRICING_ENABLED is off, 403 for a role outside the state's set.
+    deps.require_pricing_view,
+    deps.require_pricing_write,
     rfp_emails.require_block_admin,
     rfp_testing.require_dev_it_admin,
     # IT Admin role OR a dev account (live AI box switch).

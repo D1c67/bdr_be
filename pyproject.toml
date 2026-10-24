@@ -40,6 +40,7 @@ dependencies = [
     # AES-GCM secrets and Ed25519 release signatures (browser agents). Was
     # only transitive through pyjwt[crypto]; now direct.
     "cryptography>=48.0",
+    "jsonschema>=4.26.0",
 ]
 
 [dependency-groups]
@@ -56,6 +57,9 @@ target-version = "py312"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+  "golden: needs EVAL_ROOT or the production backup on disk; skipped elsewhere",
+]
 
 [tool.uv]
 package = false

@@ -1,0 +1,967 @@
+{
+ "bands": {
+  "awg10_share_source": "constant (estimate books, holdout excluded, not LOPO)",
+  "bands_case_id": "7172",
+  "bands_source": "hb1-20261021-bbd6157d",
+  "branch_wire_ft_per_device": {
+   "metric": "branch_wire_ft_per_device",
+   "n": 40,
+   "p10": 10.7386,
+   "p25": 26.9121,
+   "p50": 42.0325,
+   "p75": 55.8467,
+   "p90": 97.2035,
+   "position": "below",
+   "value": 6.25
+  },
+  "emt_ft_per_device": {
+   "metric": "emt_ft_per_device",
+   "n": 34,
+   "p10": 2.0349,
+   "p25": 7.1518,
+   "p50": 14.9982,
+   "p75": 18.6395,
+   "p90": 29.5141,
+   "position": "in_band",
+   "value": 2.08
+  },
+  "excluded_count": 5,
+  "excluded_project_ids_sha256": "6edacfe13b8118bbc08401000efa854504bcb099e2f356cc975698e9ad3277f6",
+  "from_file": true,
+  "status": "in_band",
+  "stratum": "all",
+  "warning": null,
+  "wire_to_conduit": 3.0,
+  "wire_to_conduit_band": [
+   2.6,
+   3.4
+  ]
+ },
+ "built_at": "2026-10-22T19:28:54-07:00",
+ "circuits": [
+  {
+   "amps": null,
+   "description": "",
+   "devices": [],
+   "gfci": false,
+   "id": "AND-1",
+   "keynotes": [],
+   "lighting": false,
+   "load_va": null,
+   "numbers": [
+    1
+   ],
+   "panel": "AND",
+   "poles": null,
+   "reasons": [
+    "no load named, no tags"
+   ],
+   "schedule_awg": null,
+   "status": "unknown",
+   "wiring": "none"
+  },
+  {
+   "amps": null,
+   "description": "",
+   "devices": [],
+   "gfci": false,
+   "id": "AND-1",
+   "keynotes": [],
+   "lighting": false,
+   "load_va": null,
+   "numbers": [
+    1
+   ],
+   "panel": "AND",
+   "poles": null,
+   "reasons": [
+    "no load named, no tags"
+   ],
+   "schedule_awg": null,
+   "status": "unknown",
+   "wiring": "none"
+  },
+  {
+   "amps": null,
+   "description": "",
+   "devices": [],
+   "gfci": false,
+   "id": "AND-1",
+   "keynotes": [],
+   "lighting": false,
+   "load_va": null,
+   "numbers": [
+    1
+   ],
+   "panel": "AND",
+   "poles": null,
+   "reasons": [
+    "no load named, no tags"
+   ],
+   "schedule_awg": null,
+   "status": "unknown",
+   "wiring": "none"
+  },
+  {
+   "amps": null,
+   "description": "",
+   "devices": [],
+   "gfci": false,
+   "id": "AND-1",
+   "keynotes": [],
+   "lighting": false,
+   "load_va": null,
+   "numbers": [
+    1
+   ],
+   "panel": "AND",
+   "poles": null,
+   "reasons": [
+    "no load named, no tags"
+   ],
+   "schedule_awg": null,
+   "status": "unknown",
+   "wiring": "none"
+  }
+ ],
+ "conventions": {
+  "branch_conduit": "3/4\"C EMT",
+  "control_cable_ft_per_device": 25.0,
+  "drop_ft_per_device": 0.0,
+  "existing_tie_in_ft": 25.0,
+  "floor_to_floor_ft": 15.0,
+  "homerun_default_ft": 150.0,
+  "min_branch_awg": "#12",
+  "panel_rise_ft": 0.0,
+  "receptacles_per_circuit": 6,
+  "route_factor": 1.0,
+  "vd_max_pct": 3.0,
+  "version": "g3-branch-2026-10-a",
+  "wiring_method": "emt"
+ },
+ "linear_items": [],
+ "overrides": [],
+ "panels": [
+  {
+   "existing": false,
+   "location": null,
+   "name": "AND",
+   "phase": null,
+   "schedule_id": "s1",
+   "volts": null
+  }
+ ],
+ "quantities": [
+  {
+   "basis": "assumed_route_untagged",
+   "caveat": "(ASSUMED)",
+   "derivation": {
+    "conventions": "g3-branch-2026-10-a",
+    "route_factor": 1.0,
+    "terms": [
+     {
+      "basis": "assumed_route_untagged",
+      "circuit_id": "U-1",
+      "count": 3,
+      "length_ft": 79.36,
+      "route_id": "r5",
+      "segment": "collector"
+     }
+    ]
+   },
+   "description": "#12 THHN/THWN Cu",
+   "group": "WIRING",
+   "line_hint": {
+    "area": "NEW WORK",
+    "group": "WIRING",
+    "subgroup": "CONDUCTORS (AWG)"
+   },
+   "material_category": "General Material",
+   "quantity": 238.1,
+   "refs": [
+    "r:r5"
+   ],
+   "row_id": "M1",
+   "sheet_refs": [
+    "M1.00"
+   ],
+   "subgroup": "CONDUCTORS (AWG)",
+   "unit": "FT",
+   "wastage_applies": true
+  },
+  {
+   "basis": "assumed_allowance",
+   "caveat": "(ASSUMED)",
+   "derivation": {
+    "conventions": "g3-branch-2026-10-a",
+    "route_factor": 1.0,
+    "terms": [
+     {
+      "basis": "assumed_allowance",
+      "circuit_id": "EQ-1",
+      "count": 3,
+      "length_ft": 150.0,
+      "route_id": "r1",
+      "segment": "allowance"
+     },
+     {
+      "basis": "assumed_allowance",
+      "circuit_id": "EQ-2",
+      "count": 3,
+      "length_ft": 150.0,
+      "route_id": "r2",
+      "segment": "allowance"
+     },
+     {
+      "basis": "assumed_allowance",
+      "circuit_id": "EQ-3",
+      "count": 3,
+      "length_ft": 150.0,
+      "route_id": "r3",
+      "segment": "allowance"
+     },
+     {
+      "basis": "assumed_allowance",
+      "circuit_id": "EQ-4",
+      "count": 3,
+      "length_ft": 150.0,
+      "route_id": "r4",
+      "segment": "allowance"
+     },
+     {
+      "basis": "assumed_allowance",
+      "circuit_id": "U-1",
+      "count": 3,
+      "length_ft": 150.0,
+      "route_id": "r5",
+      "segment": "allowance"
+     }
+    ]
+   },
+   "description": "#10 THHN/THWN Cu",
+   "group": "WIRING",
+   "line_hint": {
+    "area": "NEW WORK",
+    "group": "WIRING",
+    "subgroup": "CONDUCTORS (AWG)"
+   },
+   "material_category": "General Material",
+   "quantity": 2250.0,
+   "refs": [
+    "r:r1",
+    "r:r2",
+    "r:r3",
+    "r:r4",
+    "r:r5"
+   ],
+   "row_id": "M2",
+   "sheet_refs": [
+    "E1.01",
+    "M1.00"
+   ],
+   "subgroup": "CONDUCTORS (AWG)",
+   "unit": "FT",
+   "wastage_applies": true
+  },
+  {
+   "basis": "assumed_allowance",
+   "caveat": "(ASSUMED)",
+   "derivation": {
+    "conventions": "g3-branch-2026-10-a",
+    "route_factor": 1.0,
+    "terms": [
+     {
+      "basis": "assumed_allowance",
+      "circuit_id": "EQ-1",
+      "count": 1,
+      "length_ft": 150.0,
+      "route_id": "r1",
+      "segment": "allowance"
+     },
+     {
+      "basis": "assumed_allowance",
+      "circuit_id": "EQ-2",
+      "count": 1,
+      "length_ft": 150.0,
+      "route_id": "r2",
+      "segment": "allowance"
+     },
+     {
+      "basis": "assumed_allowance",
+      "circuit_id": "EQ-3",
+      "count": 1,
+      "length_ft": 150.0,
+      "route_id": "r3",
+      "segment": "allowance"
+     },
+     {
+      "basis": "assumed_allowance",
+      "circuit_id": "EQ-4",
+      "count": 1,
+      "length_ft": 150.0,
+      "route_id": "r4",
+      "segment": "allowance"
+     },
+     {
+      "basis": "assumed_route_untagged",
+      "circuit_id": "U-1",
+      "count": 1,
+      "length_ft": 79.36,
+      "route_id": "r5",
+      "segment": "collector"
+     },
+     {
+      "basis": "assumed_allowance",
+      "circuit_id": "U-1",
+      "count": 1,
+      "length_ft": 150.0,
+      "route_id": "r5",
+      "segment": "allowance"
+     }
+    ]
+   },
+   "description": "3/4\"C EMT",
+   "group": "WIRING",
+   "line_hint": {
+    "area": "NEW WORK",
+    "group": "WIRING",
+    "subgroup": "CONDUITS"
+   },
+   "material_category": "General Material",
+   "quantity": 829.4,
+   "refs": [
+    "r:r1",
+    "r:r2",
+    "r:r3",
+    "r:r4",
+    "r:r5"
+   ],
+   "row_id": "M3",
+   "sheet_refs": [
+    "E1.01",
+    "M1.00"
+   ],
+   "subgroup": "CONDUITS",
+   "unit": "FT",
+   "wastage_applies": true
+  }
+ ],
+ "retired_ids": [],
+ "route_seq": 5,
+ "row_seq": 3,
+ "run_id": "785ae29e-5781-4b99-8146-e5afd2ec969d",
+ "scales": [
+  {
+   "conflict": false,
+   "doc_index": 1,
+   "document_id": "3107f9ac-a983-47a5-9087-d18355a9e33e",
+   "ft_per_in": null,
+   "h_in": 30.0,
+   "new_work": true,
+   "notes": [],
+   "nts": true,
+   "page": 1,
+   "reduced_print": false,
+   "sheet_key": "D1P1",
+   "sheet_number": null,
+   "status": "nts",
+   "title": "SITE PLAN",
+   "vectors": true,
+   "viewports": [
+    {
+     "anchor": [
+      0.0524,
+      0.5566,
+      0.0582,
+      0.561
+     ],
+     "example": false,
+     "ft_per_in": null,
+     "kind": "plan",
+     "nts": true,
+     "region": null,
+     "scale_text": "NTS",
+     "skipped": null,
+     "source": "none",
+     "title": "SITE PLAN",
+     "view_id": "v1"
+    },
+    {
+     "anchor": [
+      0.7981,
+      0.4957,
+      0.811,
+      0.499
+     ],
+     "example": false,
+     "ft_per_in": null,
+     "kind": "other",
+     "nts": true,
+     "region": null,
+     "scale_text": "AS SHOWN",
+     "skipped": null,
+     "source": "none",
+     "title": null,
+     "view_id": "v2"
+    },
+    {
+     "anchor": [
+      0.8261,
+      0.4957,
+      0.8389,
+      0.499
+     ],
+     "example": false,
+     "ft_per_in": null,
+     "kind": "other",
+     "nts": true,
+     "region": null,
+     "scale_text": "AS SHOWN",
+     "skipped": null,
+     "source": "none",
+     "title": null,
+     "view_id": "v3"
+    },
+    {
+     "anchor": [
+      0.7927,
+      0.5013,
+      0.8055,
+      0.5046
+     ],
+     "example": false,
+     "ft_per_in": null,
+     "kind": "other",
+     "nts": true,
+     "region": null,
+     "scale_text": "AS SHOWN",
+     "skipped": null,
+     "source": "none",
+     "title": null,
+     "view_id": "v4"
+    }
+   ],
+   "w_in": 42.0
+  },
+  {
+   "conflict": true,
+   "doc_index": 1,
+   "document_id": "3107f9ac-a983-47a5-9087-d18355a9e33e",
+   "ft_per_in": null,
+   "h_in": 30.0,
+   "new_work": true,
+   "notes": [
+    "scale_conflict: 3/16\" = 1'-0\" (FLOOR PLAN), 1/2\" = 1'-0\" (ENLARGED FLOOR PLAN), 1/2\" = 1'-0\" (ENLARGED FLOOR PLAN); measure only inside a framed viewport"
+   ],
+   "nts": false,
+   "page": 2,
+   "reduced_print": false,
+   "sheet_key": "TI-1",
+   "sheet_number": "TI-1",
+   "status": "conflict",
+   "title": "TI-1 - Floor Plan and Enlarged Floor Plan",
+   "vectors": true,
+   "viewports": [
+    {
+     "anchor": [
+      0.7812,
+      0.9759,
+      0.8014,
+      0.9808
+     ],
+     "example": false,
+     "ft_per_in": 5.3333,
+     "kind": "plan",
+     "nts": false,
+     "region": [
+      0.2692,
+      0.7769,
+      0.8788,
+      0.9428
+     ],
+     "scale_text": "3/16\" = 1'-0\"",
+     "skipped": null,
+     "source": "frame",
+     "title": "FLOOR PLAN",
+     "view_id": "v1"
+    },
+    {
+     "anchor": [
+      0.8305,
+      0.2912,
+      0.8476,
+      0.2956
+     ],
+     "example": false,
+     "ft_per_in": null,
+     "kind": "other",
+     "nts": true,
+     "region": null,
+     "scale_text": "AS SHOWN",
+     "skipped": null,
+     "source": "none",
+     "title": null,
+     "view_id": "v2"
+    },
+    {
+     "anchor": [
+      0.0373,
+      0.5209,
+      0.0554,
+      0.5257
+     ],
+     "example": false,
+     "ft_per_in": 2.0,
+     "kind": "enlarged_plan",
+     "nts": false,
+     "region": [
+      0.0246,
+      0.3623,
+      0.2042,
+      0.4846
+     ],
+     "scale_text": "1/2\" = 1'-0\"",
+     "skipped": null,
+     "source": "frame",
+     "title": "ENLARGED FLOOR PLAN",
+     "view_id": "v3"
+    },
+    {
+     "anchor": [
+      0.0373,
+      0.3255,
+      0.0554,
+      0.3303
+     ],
+     "example": false,
+     "ft_per_in": 2.0,
+     "kind": "enlarged_plan",
+     "nts": false,
+     "region": null,
+     "scale_text": "1/2\" = 1'-0\"",
+     "skipped": null,
+     "source": "none",
+     "title": "ENLARGED FLOOR PLAN",
+     "view_id": "v4"
+    }
+   ],
+   "w_in": 42.0
+  },
+  {
+   "conflict": false,
+   "doc_index": 1,
+   "document_id": "3107f9ac-a983-47a5-9087-d18355a9e33e",
+   "ft_per_in": 5.3333,
+   "h_in": 30.0,
+   "new_work": true,
+   "notes": [],
+   "nts": false,
+   "page": 3,
+   "reduced_print": false,
+   "sheet_key": "TI-1.1",
+   "sheet_number": "TI-1.1",
+   "status": "selected",
+   "title": "TI-1.1 - Egress Plan",
+   "vectors": true,
+   "viewports": [
+    {
+     "anchor": [
+      0.7812,
+      0.9759,
+      0.8014,
+      0.9808
+     ],
+     "example": false,
+     "ft_per_in": 5.3333,
+     "kind": "plan",
+     "nts": false,
+     "region": [
+      0.0,
+      0.0,
+      1.0,
+      1.0
+     ],
+     "scale_text": "3/16\" = 1'-0\"",
+     "skipped": null,
+     "source": "plan_area",
+     "title": "EGRESS PLAN",
+     "view_id": "v1"
+    }
+   ],
+   "w_in": 42.0
+  },
+  {
+   "conflict": false,
+   "doc_index": 1,
+   "document_id": "3107f9ac-a983-47a5-9087-d18355a9e33e",
+   "ft_per_in": 5.3333,
+   "h_in": 30.0,
+   "new_work": true,
+   "notes": [],
+   "nts": false,
+   "page": 4,
+   "reduced_print": false,
+   "sheet_key": "TI-2",
+   "sheet_number": "TI-2",
+   "status": "selected",
+   "title": "TI-2 - Reflected Ceiling Plan",
+   "vectors": true,
+   "viewports": [
+    {
+     "anchor": [
+      0.7812,
+      0.9759,
+      0.8014,
+      0.9808
+     ],
+     "example": false,
+     "ft_per_in": 5.3333,
+     "kind": "plan",
+     "nts": false,
+     "region": [
+      0.0,
+      0.0,
+      1.0,
+      1.0
+     ],
+     "scale_text": "3/16\" = 1'-0\"",
+     "skipped": null,
+     "source": "plan_area",
+     "title": "REFLECTED CEILING PLAN",
+     "view_id": "v1"
+    }
+   ],
+   "w_in": 42.0
+  },
+  {
+   "conflict": false,
+   "doc_index": 2,
+   "document_id": "8f69d0e5-0594-4052-8ed7-06eecb9dee57",
+   "ft_per_in": null,
+   "h_in": 30.0,
+   "new_work": true,
+   "notes": [],
+   "nts": true,
+   "page": 1,
+   "reduced_print": false,
+   "sheet_key": "A117",
+   "sheet_number": "A117",
+   "status": "nts",
+   "title": "TI-0 - Project Information and Site Plan",
+   "vectors": false,
+   "viewports": [
+    {
+     "anchor": [
+      0.0524,
+      0.5566,
+      0.0582,
+      0.561
+     ],
+     "example": false,
+     "ft_per_in": null,
+     "kind": "plan",
+     "nts": true,
+     "region": null,
+     "scale_text": "NTS",
+     "skipped": null,
+     "source": "none",
+     "title": "SITE PLAN",
+     "view_id": "v1"
+    },
+    {
+     "anchor": [
+      0.7981,
+      0.4957,
+      0.811,
+      0.499
+     ],
+     "example": false,
+     "ft_per_in": null,
+     "kind": "other",
+     "nts": true,
+     "region": null,
+     "scale_text": "AS SHOWN",
+     "skipped": null,
+     "source": "none",
+     "title": null,
+     "view_id": "v2"
+    },
+    {
+     "anchor": [
+      0.8261,
+      0.4957,
+      0.8389,
+      0.499
+     ],
+     "example": false,
+     "ft_per_in": null,
+     "kind": "other",
+     "nts": true,
+     "region": null,
+     "scale_text": "AS SHOWN",
+     "skipped": null,
+     "source": "none",
+     "title": null,
+     "view_id": "v3"
+    },
+    {
+     "anchor": [
+      0.7927,
+      0.5013,
+      0.8055,
+      0.5046
+     ],
+     "example": false,
+     "ft_per_in": null,
+     "kind": "other",
+     "nts": true,
+     "region": null,
+     "scale_text": "AS SHOWN",
+     "skipped": null,
+     "source": "none",
+     "title": null,
+     "view_id": "v4"
+    }
+   ],
+   "w_in": 42.0
+  },
+  {
+   "conflict": false,
+   "doc_index": 3,
+   "document_id": "32c19c76-1bea-4c7b-99df-3cf1e65f0654",
+   "ft_per_in": 5.3333,
+   "h_in": 30.0,
+   "new_work": true,
+   "notes": [],
+   "nts": false,
+   "page": 10,
+   "reduced_print": false,
+   "sheet_key": "M1.00",
+   "sheet_number": "M1.00",
+   "status": "selected",
+   "title": "MECHANICAL PLAN",
+   "vectors": false,
+   "viewports": [
+    {
+     "anchor": [
+      0.1842,
+      0.8564,
+      0.2046,
+      0.8612
+     ],
+     "example": false,
+     "ft_per_in": 5.3333,
+     "kind": "plan",
+     "nts": false,
+     "region": [
+      0.0,
+      0.0,
+      0.8942,
+      1.0
+     ],
+     "scale_text": "3/16\" = 1'-0\"",
+     "skipped": null,
+     "source": "plan_area",
+     "title": "HVAC PLAN",
+     "view_id": "v1"
+    }
+   ],
+   "w_in": 42.0
+  },
+  {
+   "conflict": false,
+   "doc_index": 4,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "ft_per_in": 21.3333,
+   "h_in": 30.0,
+   "new_work": true,
+   "notes": [],
+   "nts": false,
+   "page": 5,
+   "reduced_print": false,
+   "sheet_key": "E1.00",
+   "sheet_number": "E1.00",
+   "status": "selected",
+   "title": "SITE PLAN",
+   "vectors": true,
+   "viewports": [
+    {
+     "anchor": [
+      0.1081,
+      0.8527,
+      0.1285,
+      0.8575
+     ],
+     "example": false,
+     "ft_per_in": 21.3333,
+     "kind": "other",
+     "nts": false,
+     "region": [
+      0.0,
+      0.0,
+      0.894,
+      1.0
+     ],
+     "scale_text": "3/64\" = 1' -0\"",
+     "skipped": null,
+     "source": "plan_area",
+     "title": null,
+     "view_id": "v1"
+    }
+   ],
+   "w_in": 42.0
+  },
+  {
+   "conflict": false,
+   "doc_index": 4,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "ft_per_in": 5.3333,
+   "h_in": 30.0,
+   "new_work": true,
+   "notes": [],
+   "nts": false,
+   "page": 6,
+   "reduced_print": false,
+   "sheet_key": "E1.01",
+   "sheet_number": "E1.01",
+   "status": "selected",
+   "title": "HVAC PLAN",
+   "vectors": true,
+   "viewports": [
+    {
+     "anchor": [
+      0.0884,
+      0.7041,
+      0.1088,
+      0.7089
+     ],
+     "example": false,
+     "ft_per_in": 5.3333,
+     "kind": "other",
+     "nts": false,
+     "region": [
+      0.0,
+      0.0,
+      0.8933,
+      1.0
+     ],
+     "scale_text": "3/16\" = 1'-0\"",
+     "skipped": null,
+     "source": "plan_area",
+     "title": null,
+     "view_id": "v1"
+    }
+   ],
+   "w_in": 42.0
+  },
+  {
+   "conflict": false,
+   "doc_index": 4,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "ft_per_in": 5.3333,
+   "h_in": 30.0,
+   "new_work": true,
+   "notes": [],
+   "nts": false,
+   "page": 7,
+   "reduced_print": false,
+   "sheet_key": "E2.00",
+   "sheet_number": "E2.00",
+   "status": "selected",
+   "title": "ELECTRICAL PLAN",
+   "vectors": true,
+   "viewports": [
+    {
+     "anchor": [
+      0.0884,
+      0.4912,
+      0.1088,
+      0.496
+     ],
+     "example": false,
+     "ft_per_in": 5.3333,
+     "kind": "plan",
+     "nts": false,
+     "region": [
+      0.0924,
+      0.3292,
+      0.8409,
+      0.6982
+     ],
+     "scale_text": "3/16\" = 1'-0\"",
+     "skipped": null,
+     "source": "frame",
+     "title": "PROPOSED LIGHTING PLAN",
+     "view_id": "v1"
+    },
+    {
+     "anchor": [
+      0.0884,
+      0.917,
+      0.1088,
+      0.9218
+     ],
+     "example": false,
+     "ft_per_in": 5.3333,
+     "kind": "plan",
+     "nts": false,
+     "region": [
+      0.0,
+      0.0,
+      0.894,
+      1.0
+     ],
+     "scale_text": "3/16\" = 1'-0\"",
+     "skipped": null,
+     "source": "plan_area",
+     "title": "PROPOSED POWER PLAN",
+     "view_id": "v2"
+    }
+   ],
+   "w_in": 42.0
+  }
+ ],
+ "scope": {
+  "control_cable_devices": 0,
+  "thermostats_included": false,
+  "wiring_method": "emt"
+ },
+ "stage_version": "ws3-measure-1",
+ "stats": {
+  "circuits": 4,
+  "circuits_with_devices": 0,
+  "device_sheets": [],
+  "elapsed_ms": 6491,
+  "linear_items": 0,
+  "new_devices": 398,
+  "panel_sheets": [],
+  "quantities": 3,
+  "registrations": 0,
+  "routes": 5,
+  "sheets": 9,
+  "tags": 0
+ },
+ "totals": {
+  "by_basis": {
+   "assumed_allowance": 750.0,
+   "assumed_route_untagged": 79.4
+  },
+  "by_tier": {
+   "equipment": 4,
+   "untagged": 1
+  },
+  "cable": {},
+  "circuits": 5,
+  "collector_ft": 79.4,
+  "conductors": {
+   "#10": 2250.0,
+   "#12": 238.1
+  },
+  "home_run_ft": 750.0,
+  "raceway": {
+   "3/4\"C EMT": 829.4
+  }
+ },
+ "version": 1,
+ "wiring_method": "emt"
+}

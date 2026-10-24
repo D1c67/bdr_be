@@ -1287,3 +1287,131 @@ def test_modify_refused_until_the_run_has_finished(monkeypatch, spend):
     assert json.loads(out)["error"] == chat.MODIFY_NOT_FINISHED_MESSAGE
     assert summary["result_summary"] == "run not finished"
     assert called == [] and ctx.modifies == 0
+
+
+# -- Wave 3 fix pass (D2): flags-off prompt identity, inline modify hooks ------
+
+# sha256 of the chat system prompt built by the pre-wave module (git HEAD
+# app/services/plans_reader_chat.py, before the WS8 pricing clause), per
+# (pro_max, modify_allowed) with page_cap 12. With every pricing flag off the
+# prompt must stay byte-identical (T-INT-1).
+_HEAD_PROMPT_SHA256 = {
+    (False, False): "d3aba563e37ca0f21953e9a1f10ba395354383ff069177244d428cc456edc352",
+    (False, True): "90ac9a673fc445847cfcc0033a14c77315d7b365bcc49ca71d1ec9915d95b5e3",
+    (True, False): "e3107f182d0ad0ac768c9ce28c2e13a84cabdd0e5e9d31910b36505310112935",
+    (True, True): "d36b27b1b0513ea5741d86a40d5f3addc3da2b20ad31bc81eb829b21c35b9e17",
+}
+
+
+def _prompt_ctx(db, s, *, pro_max: bool, modify_allowed: bool, sender_role: str | None = None):
+    thread = db.rows("plans_reader_chat_threads")[0]
+    answer = next(m for m in db.rows("plans_reader_chat_messages") if m["role"] == "assistant")
+    message = dict(answer, pro_max=pro_max)
+    if sender_role:
+        message["sender_role"] = sender_role
+    ctx = chat._Context(db, s, db.rows("plans_reader_runs")[0], thread, message)
+    ctx.page_cap = 12
+    ctx.modify_allowed = modify_allowed
+    return ctx
+
+
+def test_flags_off_system_prompt_is_the_pre_wave_text_byte_for_byte():
+    import hashlib
+
+    from app.core.config import Settings
+
+    db = _db()
+    _pending(db)
+    s = Settings(_env_file=None)  # every pricing flag off
+    for (pro_max, modify_allowed), want in _HEAD_PROMPT_SHA256.items():
+        # An Executive sender changes nothing while pricing is off.
+        for role in (None, "executive"):
+            prompt = chat.build_system_prompt(_prompt_ctx(db, s, pro_max=pro_max, modify_allowed=modify_allowed, sender_role=role))
+            assert hashlib.sha256(prompt.encode("utf-8")).hexdigest() == want, (pro_max, modify_allowed, role)
+
+
+def test_pricing_clause_sits_between_the_missing_answer_and_modify_rules(monkeypatch):
+    from app.core.config import Settings
+    from app.services import plans_reader_chat_adapter as adapter
+
+    db = _db()
+    _pending(db)
+    s = Settings(_env_file=None)
+    ctx = _prompt_ctx(db, s, pro_max=False, modify_allowed=False)
+    for allowed, clause in ((False, chat._PRICING_RULE_RESTRICTED), (True, chat._PRICING_RULE_ALLOWED)):
+        monkeypatch.setattr(adapter, "pricing_allowed_for_message", lambda c, a=allowed: a)
+        lines = chat.build_system_prompt(ctx).split("\n")
+        i = lines.index(clause)
+        assert lines[i - 1].startswith("- If the stored outputs do not answer the question")
+        assert lines[i + 1].startswith("- Use modify_deliverable only")
+        assert lines.count(clause) == 1
+
+
+def test_inline_chat_modify_runs_the_after_change_hook_and_marks_spec_edits(monkeypatch, spend):
+    """The chat modify_deliverable tool goes through plans_reader_agents
+    .modify_deliverable, which marks the spec edits (scope policy enforced)
+    and calls plans_reader_runs.after_deliverable_change once (pricing
+    re-queue for a BOQ, autonomy recompute); the chat module adds no second
+    call."""
+    from app.core.config import Settings
+    from app.services import plans_reader_agents as agents
+    from app.services import plans_reader_runs as runs
+    from app.services import scope_engine
+
+    db = _db()
+    _t, _u, answer = _pending(db, content="Add 4 receptacles to the BOQ")
+    new_spec = json.loads(json.dumps(MAIN_OUTPUT["boq"]))
+    new_spec["areas"][0]["sections"][0]["groups"][0]["subgroups"][0]["items"][0]["quantity"] = 46
+    monkeypatch.setattr(agents, "_call_model", lambda sb, **kw: SimpleNamespace(parsed=new_spec))
+    monkeypatch.setattr(agents, "get_settings", lambda: Settings(_env_file=None, ai_scope_policy_enforce=True))
+    monkeypatch.setattr(runs, "recompute_totals", lambda sb, run_id: {})
+    rendered, hooks, marks = [], [], []
+
+    def render(sb, run, kind, spec, *, version, instruction=None, user=None, documents=None):
+        rendered.append((kind, version, instruction))
+        return {"id": "d2", "run_id": run["id"], "kind": kind, "version": version, "filename": "BOQ - COUNTS.xlsx"}
+
+    monkeypatch.setattr(runs, "render_deliverable", render)
+    monkeypatch.setattr(runs, "after_deliverable_change", lambda sb, run, row, *, kind=None: hooks.append((run["id"], row["version"], kind)))
+    monkeypatch.setattr(scope_engine, "mark_spec_edits", lambda boq, prev: marks.append((boq, prev)) or 1)
+
+    ctx = chat._Context(db, get_settings(), db.rows("plans_reader_runs")[0],
+                        db.rows("plans_reader_chat_threads")[0], answer)
+    ctx.question = "Add 4 receptacles to the BOQ"
+    ctx.modify_allowed = True
+    out, summary = chat.serve_tool(ctx, "modify_deliverable", {"kind": "boq", "instruction": "Add 4 receptacles"})
+    assert json.loads(out) == {"kind": "boq", "version": 2, "filename": "BOQ - COUNTS.xlsx"}
+    assert summary["deliverable"]["version"] == 2
+    assert rendered == [("boq", 2, "Add 4 receptacles")]
+    assert hooks == [(RUN_ID, 2, "boq")]
+    (marked,) = marks
+    assert marked[0]["areas"][0]["sections"][0]["groups"][0]["subgroups"][0]["items"][0]["quantity"] == 46
+    assert marked[1] == MAIN_OUTPUT["boq"]
+    (slot,) = db.rows("plans_reader_groups")
+    assert slot["status"] == "done" and slot["output"]["version"] == 2
+
+
+def test_inline_chat_modify_hook_failure_never_breaks_the_answer(monkeypatch, spend):
+    """after_deliverable_change never raises (pricing and autonomy are
+    guarded inside it), so a failing pricing hook leaves the chat answer
+    and the new version intact."""
+    from app.services import plans_reader_agents as agents
+    from app.services import plans_reader_runs as runs
+    from app.services import pricing_run
+
+    db = _db()
+    _t, _u, answer = _pending(db, content="Add 4 receptacles to the BOQ")
+    monkeypatch.setattr(agents, "_call_model", lambda sb, **kw: SimpleNamespace(parsed=json.loads(json.dumps(MAIN_OUTPUT["boq"]))))
+    monkeypatch.setattr(runs, "recompute_totals", lambda sb, run_id: {})
+    monkeypatch.setattr(runs, "render_deliverable", lambda sb, run, kind, spec, **kw: {"id": "d2", "kind": kind, "version": kw["version"], "filename": "BOQ.xlsx"})
+
+    def pricing_boom(*_a, **_k):
+        raise RuntimeError("pricing queue down")
+
+    monkeypatch.setattr(pricing_run, "on_new_boq_version", pricing_boom)
+    monkeypatch.setattr(runs, "recompute_autonomy", lambda sb, run_id, **kw: None)
+    ctx = chat._Context(db, get_settings(), db.rows("plans_reader_runs")[0],
+                        db.rows("plans_reader_chat_threads")[0], answer)
+    ctx.modify_allowed = True
+    out, _summary = chat.serve_tool(ctx, "modify_deliverable", {"kind": "boq", "instruction": "Add 4 receptacles"})
+    assert json.loads(out)["version"] == 2

@@ -2,9 +2,11 @@
 
 import base64
 import binascii
+import json
 import logging
 import math
 import re
+import uuid
 from typing import Literal
 from functools import lru_cache
 
@@ -2155,6 +2157,374 @@ class Settings(BaseSettings):
     def supabase_jwks_url(self) -> str:
         # Supabase exposes JWKS for asymmetric (RS256/ES256) verification.
         return f"{self.supabase_url}/auth/v1/.well-known/jwks.json"
+
+    # ── AI Estimating autonomous build (docs/AI_ESTIMATING_BUILD_SPEC.md 5.7) ─
+    # Every PARENT flag (one that turns a behavior on) is off here; the few
+    # CHILD settings that default true are inert while their parent is off,
+    # so none of these changes prod behavior on deploy. Each line names its
+    # owning workstream; the spec table is the source of truth.
+    # WS1 page facts (text layer, schedules, legends, scales per page).
+    plans_reader_page_facts_enabled: bool = False
+    plans_reader_page_facts_in_subs: bool = True  # child of page_facts_enabled
+    plans_reader_spec_select: bool = True  # child of page_facts_enabled
+    plans_reader_facts_relabel: bool = False  # child of page_facts_enabled
+    plans_reader_facts_title_vision: bool = False  # vision title fallback, deferred
+    plans_reader_facts_page_budget_s: float = 4.0
+    plans_reader_facts_doc_budget_s: float = 240.0
+    plans_reader_facts_block_max_tokens: int = 2500
+    plans_reader_ledger_legend_max_tokens: int = 6000  # < PLANS_READER_LEDGER_MAX_TOKENS
+    plans_reader_ledger_schedule_max_tokens: int = 1500  # panels and luminaires, each
+    plans_reader_ledger_scales_max_tokens: int = 300
+    # WS2 routes: JSON object of step -> partial route merged over the code
+    # defaults (plans_reader_route_map; empty = the defaults, all on OpenAI).
+    plans_reader_routes: str = ""
+    plans_reader_run_ceiling_factor: float = 1.25
+    # Inert unless a call runs on an Anthropic route (no default route does).
+    anthropic_plans_refusal_fallback: bool = True
+    # WS3 derive and measure conventions.
+    plans_reader_derive_enabled: bool = False
+    plans_reader_branch_conduit: str = '3/4"C EMT'
+    plans_reader_min_branch_awg: int = 12
+    plans_reader_vd_max_pct: float = 3.0
+    plans_reader_route_factor: float = 1.00
+    plans_reader_drop_ft_per_device: float = 0.0
+    plans_reader_panel_rise_ft: float = 0.0
+    plans_reader_existing_tie_in_ft: float = 25.0
+    plans_reader_homerun_default_ft: float = 150.0
+    plans_reader_floor_to_floor_ft: float = 15.0
+    plans_reader_receptacles_per_circuit: int = 6
+    plans_reader_control_cable_ft_per_device: float = 25.0
+    plans_reader_measure_conventions_version: str = "g3-branch-2026-10-a"
+    plans_reader_measure_assist_enabled: bool = False
+    plans_reader_measure_assist_max_items: int = 8  # child of measure_assist_enabled
+    plans_reader_measure_assist_max_usd: float = 0.75  # child, per run
+    # WS4 consolidation, regions and integrity gates.
+    plans_reader_consolidator_mode: str = "legacy"  # tools | legacy
+    plans_reader_consolidator_max_rounds: int = 20
+    plans_reader_consolidator_max_tool_calls: int = 400
+    plans_reader_consolidator_max_usd: float = 6.00
+    plans_reader_llm_rollup: bool = False
+    plans_reader_code_regions: bool = False
+    plans_reader_region_pad: float = 0.03  # child of code_regions, page fraction
+    plans_reader_cluster_gap: float = 0.06  # child of code_regions, page fraction
+    plans_reader_census_tol_strong: float = 0.05  # applied with a minimum of 1
+    plans_reader_census_tol_weak: float = 0.10  # applied with a minimum of 1
+    plans_reader_gates_blocking: bool = False
+    plans_reader_demo_two_line_style: bool = False
+    # WS7 blind recount and independent review.
+    plans_reader_recount_enabled: bool = False
+    plans_reader_recount_max_targets: int = 12
+    plans_reader_recount_max_sheets: int = 6
+    plans_reader_recount_budget_usd: float = 2.00
+    plans_reader_review_mode: str = "off"  # off | shadow | apply
+    plans_reader_review_budget_usd: float = 4.00  # at most 6.00
+    plans_reader_review_local_rules_fallback: bool = False
+    # WS5 scope policy and bid conditions.
+    ai_scope_policy_enforce: bool = False
+    ai_scope_attrib_llm: bool = False
+    ai_scope_attrib_max_statements: int = 40
+    ai_scope_digest_max_tokens: int = 3500
+    # WS6 pricing. AI_PRICING_STATE decides who sees prices
+    # (core/features.ai_pricing_allowed): test = Executive and IT Admin,
+    # live = every pricing viewer (never the accountant or the estimator).
+    ai_pricing_enabled: bool = False
+    ai_pricing_state: str = "test"  # test | live
+    ai_pricing_autorun: bool = False
+    ai_pricing_chat_tools_enabled: bool = False
+    ai_pricing_agent_tools_enabled: bool = False
+    quote_lines_llm_fallback_enabled: bool = False
+    # WS8 evidence and deliverables.
+    plans_reader_marked_plans_mode: str = "model"  # code | model
+    plans_reader_annotated_plans_enabled: bool = False
+    # WS0 eval harness, live spend ledger and cassettes. The ledger, the
+    # cassette mode, the sweep id and the claim filter are per process: set
+    # them on the sweep backend and live scripts only, never in a shared .env.
+    eval_root: str = "/Users/thomasmoore/Desktop/BDR/backups/eval"
+    ai_eval_ledger_enforce: bool = False
+    llm_cassette_mode: str = "off"  # off | record | replay | record_missing
+    llm_cassette_dir: str = ""
+    eval_sweep_id: str = ""  # stamped into llm_call_log by llm_gate.log_call
+    # Comma list of llm_jobs job types this worker may claim; empty = all.
+    llm_queue_claim_types: str = ""
+
+    @property
+    def plans_reader_route_map(self) -> dict[str, dict]:
+        """PLANS_READER_ROUTES merged over PLANS_READER_DEFAULT_ROUTES: one
+        {provider, model, effort, budget_usd, tools} dict per step, a fresh
+        copy per call. A null effort inherits PLANS_READER_REASONING_EFFORT."""
+        routes = _parse_plans_reader_routes(self.plans_reader_routes)
+        for route in routes.values():
+            if route["effort"] is None:
+                route["effort"] = self.plans_reader_reasoning_effort
+        return routes
+
+    @property
+    def llm_queue_claim_job_types(self) -> tuple[str, ...]:
+        """Parsed LLM_QUEUE_CLAIM_TYPES. An empty tuple means every type."""
+        return _parse_claim_types(self.llm_queue_claim_types)
+
+    @model_validator(mode="after")
+    def _validate_ai_estimating_build(self) -> "Settings":
+        """The section 5.7 knobs: a typo'd mode, a malformed route table or a
+        budget past its cap refuses to boot instead of failing a run later.
+        Always enforced (the defaults satisfy every rule)."""
+        modes = (
+            ("plans_reader_consolidator_mode", PLANS_READER_CONSOLIDATOR_MODES),
+            ("plans_reader_review_mode", PLANS_READER_REVIEW_MODES),
+            ("plans_reader_marked_plans_mode", PLANS_READER_MARKED_PLANS_MODES),
+            ("ai_pricing_state", AI_PRICING_STATES),
+            ("llm_cassette_mode", LLM_CASSETTE_MODES),
+        )
+        for field, allowed in modes:
+            value = (getattr(self, field) or "").strip().lower()
+            if value not in allowed:
+                raise ValueError(
+                    f"{field.upper()} must be one of {', '.join(allowed)} "
+                    f"(got {getattr(self, field)!r})."
+                )
+            setattr(self, field, value)
+        # WS1 page facts budgets.
+        if not 0 < self.plans_reader_facts_page_budget_s <= self.plans_reader_facts_doc_budget_s:
+            raise ValueError(
+                "PLANS_READER_FACTS_PAGE_BUDGET_S must be positive and at most "
+                "PLANS_READER_FACTS_DOC_BUDGET_S."
+            )
+        if not 100 <= self.plans_reader_facts_block_max_tokens <= self.plans_reader_group_input_tokens:
+            raise ValueError(
+                "PLANS_READER_FACTS_BLOCK_MAX_TOKENS must be between 100 and "
+                "PLANS_READER_GROUP_INPUT_TOKENS."
+            )
+        if not 0 < self.plans_reader_ledger_legend_max_tokens < self.plans_reader_ledger_max_tokens:
+            raise ValueError(
+                "PLANS_READER_LEDGER_LEGEND_MAX_TOKENS must be positive and below "
+                "PLANS_READER_LEDGER_MAX_TOKENS (the legends ride inside the ledger)."
+            )
+        for name, value in (
+            ("PLANS_READER_LEDGER_SCHEDULE_MAX_TOKENS", self.plans_reader_ledger_schedule_max_tokens),
+            ("PLANS_READER_LEDGER_SCALES_MAX_TOKENS", self.plans_reader_ledger_scales_max_tokens),
+        ):
+            if not 0 <= value < self.plans_reader_ledger_max_tokens:
+                raise ValueError(
+                    f"{name} must be between 0 and PLANS_READER_LEDGER_MAX_TOKENS (exclusive)."
+                )
+        # WS2 routes and the run ceiling.
+        try:
+            parsed_routes = _parse_plans_reader_routes(self.plans_reader_routes)
+        except ValueError as exc:
+            raise ValueError(f"PLANS_READER_ROUTES is invalid: {exc}") from exc
+        # Steps still served by llm.complete_parts (OpenAI only) cannot route
+        # to Anthropic until complete_turn serves them: refuse at boot rather
+        # than fail every call of a run.
+        parts_steps = list(PLANS_READER_OPENAI_ONLY_STEPS)
+        if self.plans_reader_consolidator_mode == "legacy":
+            parts_steps.append("main")
+        anthropic_steps = [step for step in parts_steps if parsed_routes[step]["provider"] == "anthropic"]
+        if anthropic_steps:
+            raise ValueError(
+                "PLANS_READER_ROUTES is invalid: step(s) "
+                f"{', '.join(anthropic_steps)} cannot use provider 'anthropic' yet (they run on "
+                "the OpenAI-only complete_parts transport"
+                + ("; main does while PLANS_READER_CONSOLIDATOR_MODE is legacy" if "main" in anthropic_steps else "")
+                + ")."
+            )
+        if not 1.0 <= self.plans_reader_run_ceiling_factor <= 5.0:
+            raise ValueError("PLANS_READER_RUN_CEILING_FACTOR must be between 1 and 5.")
+        # WS3 conventions.
+        if not (self.plans_reader_branch_conduit or "").strip():
+            raise ValueError("PLANS_READER_BRANCH_CONDUIT must not be empty.")
+        if not (self.plans_reader_measure_conventions_version or "").strip():
+            raise ValueError("PLANS_READER_MEASURE_CONVENTIONS_VERSION must not be empty.")
+        if self.plans_reader_min_branch_awg not in (14, 12, 10, 8, 6, 4):
+            raise ValueError("PLANS_READER_MIN_BRANCH_AWG must be one of 14, 12, 10, 8, 6, 4.")
+        if not 0 < self.plans_reader_vd_max_pct <= 10:
+            raise ValueError("PLANS_READER_VD_MAX_PCT must be above 0 and at most 10.")
+        if not 0.5 <= self.plans_reader_route_factor <= 2.0:
+            raise ValueError("PLANS_READER_ROUTE_FACTOR must be between 0.5 and 2.")
+        for name, value in (
+            ("PLANS_READER_DROP_FT_PER_DEVICE", self.plans_reader_drop_ft_per_device),
+            ("PLANS_READER_PANEL_RISE_FT", self.plans_reader_panel_rise_ft),
+            ("PLANS_READER_EXISTING_TIE_IN_FT", self.plans_reader_existing_tie_in_ft),
+            ("PLANS_READER_CONTROL_CABLE_FT_PER_DEVICE", self.plans_reader_control_cable_ft_per_device),
+            ("PLANS_READER_MEASURE_ASSIST_MAX_USD", self.plans_reader_measure_assist_max_usd),
+        ):
+            if value < 0:
+                raise ValueError(f"{name} must not be negative.")
+        if self.plans_reader_homerun_default_ft <= 0 or self.plans_reader_floor_to_floor_ft <= 0:
+            raise ValueError(
+                "PLANS_READER_HOMERUN_DEFAULT_FT and PLANS_READER_FLOOR_TO_FLOOR_FT must be positive."
+            )
+        if not 1 <= self.plans_reader_receptacles_per_circuit <= 20:
+            raise ValueError("PLANS_READER_RECEPTACLES_PER_CIRCUIT must be between 1 and 20.")
+        if not 0 <= self.plans_reader_measure_assist_max_items <= 100:
+            raise ValueError("PLANS_READER_MEASURE_ASSIST_MAX_ITEMS must be between 0 and 100.")
+        # WS4 consolidator, regions and census tolerances.
+        if not 1 <= self.plans_reader_consolidator_max_rounds <= 100:
+            raise ValueError("PLANS_READER_CONSOLIDATOR_MAX_ROUNDS must be between 1 and 100.")
+        if not 1 <= self.plans_reader_consolidator_max_tool_calls <= 5000:
+            raise ValueError("PLANS_READER_CONSOLIDATOR_MAX_TOOL_CALLS must be between 1 and 5000.")
+        if self.plans_reader_consolidator_max_usd <= 0:
+            raise ValueError("PLANS_READER_CONSOLIDATOR_MAX_USD must be positive.")
+        if not 0 <= self.plans_reader_region_pad <= 0.5:
+            raise ValueError("PLANS_READER_REGION_PAD must be a page fraction between 0 and 0.5.")
+        if not 0 < self.plans_reader_cluster_gap <= 0.5:
+            raise ValueError(
+                "PLANS_READER_CLUSTER_GAP must be a page fraction above 0 and at most 0.5."
+            )
+        if not 0 <= self.plans_reader_census_tol_strong <= self.plans_reader_census_tol_weak <= 1:
+            raise ValueError(
+                "PLANS_READER_CENSUS_TOL_STRONG and PLANS_READER_CENSUS_TOL_WEAK must be "
+                "fractions between 0 and 1 with STRONG at most WEAK."
+            )
+        # WS7 recount and review.
+        if self.plans_reader_recount_max_targets < 1 or self.plans_reader_recount_max_sheets < 1:
+            raise ValueError(
+                "PLANS_READER_RECOUNT_MAX_TARGETS and PLANS_READER_RECOUNT_MAX_SHEETS "
+                "must be at least 1."
+            )
+        if self.plans_reader_recount_budget_usd <= 0:
+            raise ValueError("PLANS_READER_RECOUNT_BUDGET_USD must be positive.")
+        if not 0 < self.plans_reader_review_budget_usd <= PLANS_READER_REVIEW_BUDGET_MAX_USD:
+            raise ValueError(
+                "PLANS_READER_REVIEW_BUDGET_USD must be above 0 and at most "
+                f"{PLANS_READER_REVIEW_BUDGET_MAX_USD:.2f}."
+            )
+        # WS5 scope policy.
+        if self.ai_scope_attrib_max_statements < 1:
+            raise ValueError("AI_SCOPE_ATTRIB_MAX_STATEMENTS must be at least 1.")
+        if self.ai_scope_digest_max_tokens < 100:
+            raise ValueError("AI_SCOPE_DIGEST_MAX_TOKENS must be at least 100.")
+        # WS0 eval harness.
+        if self.llm_cassette_mode != "off" and not (self.llm_cassette_dir or "").strip():
+            raise ValueError("LLM_CASSETTE_DIR must be set when LLM_CASSETTE_MODE is not off.")
+        sweep = (self.eval_sweep_id or "").strip()
+        if sweep:
+            try:
+                sweep = str(uuid.UUID(sweep))
+            except ValueError as exc:
+                raise ValueError("EVAL_SWEEP_ID must be empty or one uuid.") from exc
+        self.eval_sweep_id = sweep
+        try:
+            _parse_claim_types(self.llm_queue_claim_types)
+        except ValueError as exc:
+            raise ValueError(f"LLM_QUEUE_CLAIM_TYPES is invalid: {exc}") from exc
+        return self
+
+
+# ── AI Estimating autonomous build: section 5.7 vocabularies and parsers ────
+PLANS_READER_CONSOLIDATOR_MODES: tuple[str, ...] = ("tools", "legacy")
+PLANS_READER_REVIEW_MODES: tuple[str, ...] = ("off", "shadow", "apply")
+PLANS_READER_MARKED_PLANS_MODES: tuple[str, ...] = ("code", "model")
+AI_PRICING_STATES: tuple[str, ...] = ("test", "live")
+LLM_CASSETTE_MODES: tuple[str, ...] = ("off", "record", "replay", "record_missing")
+PLANS_READER_REVIEW_BUDGET_MAX_USD = 6.00
+PLANS_READER_ROUTE_PROVIDERS: tuple[str, ...] = ("openai", "anthropic")
+PLANS_READER_ROUTE_FIELDS: tuple[str, ...] = ("provider", "model", "effort", "budget_usd", "tools")
+# Steps that run on llm.complete_parts (OpenAI only) in this build; main joins
+# them while PLANS_READER_CONSOLIDATOR_MODE is legacy.
+PLANS_READER_OPENAI_ONLY_STEPS: tuple[str, ...] = ("sub", "escalation", "chat")
+
+# Section 8.3 default routes, every one on OpenAI by owner decision
+# (2026-10-21: all live spend on OpenAI). Sub and escalation stay single calls
+# with no tools; a budget of None means the step is capped by its own setting
+# or the run estimate; an effort of None inherits PLANS_READER_REASONING_EFFORT.
+PLANS_READER_DEFAULT_ROUTES: dict[str, dict] = {
+    "sub": {"provider": "openai", "model": "gpt-6-astra", "effort": "medium",
+            "budget_usd": None, "tools": False},
+    "escalation": {"provider": "openai", "model": "gpt-6-astra", "effort": "medium",
+                   "budget_usd": None, "tools": False},
+    "recount": {"provider": "openai", "model": "gpt-6-astra", "effort": "medium",
+                "budget_usd": 2.00, "tools": True},
+    "main": {"provider": "openai", "model": "gpt-6-astra", "effort": "medium",
+             "budget_usd": 6.00, "tools": True},
+    "review": {"provider": "openai", "model": "gpt-6-astra", "effort": "medium",
+               "budget_usd": 4.00, "tools": True},
+    "revise": {"provider": "openai", "model": "gpt-6-astra", "effort": "medium",
+               "budget_usd": None, "tools": True},
+    # Provider and model are derived from the main route unless
+    # PLANS_READER_ROUTES names scope_attrib (spec 8.3; see
+    # plans_reader_model_routes.DERIVED_FROM); this row's model is only the
+    # fallback shape. Effort stays low.
+    "scope_attrib": {"provider": "openai", "model": "gpt-6-astra", "effort": "low",
+                     "budget_usd": None, "tools": False},
+    "quote": {"provider": "openai", "model": "gpt-6-astra", "effort": None,
+              "budget_usd": None, "tools": False},
+    "derive": {"provider": "openai", "model": "gpt-6-astra", "effort": None,
+               "budget_usd": 0.75, "tools": True},
+    "chat": {"provider": "openai", "model": "gpt-6-astra", "effort": None,
+             "budget_usd": None, "tools": True},
+}
+
+_CLAIM_TYPE_RE = re.compile(r"[a-z][a-z0-9_]{0,63}")
+
+
+def _parse_plans_reader_routes(raw: str) -> dict[str, dict]:
+    """PLANS_READER_ROUTES as {step: {provider, model, effort, budget_usd,
+    tools}}. Empty = a deep copy of PLANS_READER_DEFAULT_ROUTES; otherwise a
+    JSON object of step -> partial route whose fields replace the default's.
+    An unknown step or field, a bad provider, an empty model, an effort
+    outside PLANS_READER_REASONING_EFFORTS, a non-positive budget or a
+    non-boolean tools flag raises a ValueError naming it."""
+    routes = {step: dict(route) for step, route in PLANS_READER_DEFAULT_ROUTES.items()}
+    text = (raw or "").strip()
+    if not text:
+        return routes
+    try:
+        overrides = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"not valid JSON ({exc.msg})") from exc
+    if not isinstance(overrides, dict):
+        raise ValueError("must be a JSON object of step -> route")
+    for step, override in overrides.items():
+        if step not in routes:
+            raise ValueError(
+                f"unknown step {step!r} (steps: {', '.join(PLANS_READER_DEFAULT_ROUTES)})"
+            )
+        if not isinstance(override, dict):
+            raise ValueError(f"step {step!r} must be an object")
+        unknown = sorted(set(override) - set(PLANS_READER_ROUTE_FIELDS))
+        if unknown:
+            raise ValueError(f"step {step!r} has unknown fields {', '.join(unknown)}")
+        routes[step].update(override)
+    for step, route in routes.items():
+        if route["provider"] not in PLANS_READER_ROUTE_PROVIDERS:
+            raise ValueError(
+                f"step {step!r} provider must be one of {', '.join(PLANS_READER_ROUTE_PROVIDERS)}"
+            )
+        if not isinstance(route["model"], str) or not route["model"].strip():
+            raise ValueError(f"step {step!r} model must be a non-empty string")
+        route["model"] = route["model"].strip()
+        effort = route["effort"]
+        if effort is not None:
+            if not isinstance(effort, str) or effort.strip().lower() not in PLANS_READER_REASONING_EFFORTS:
+                raise ValueError(
+                    f"step {step!r} effort must be null or one of "
+                    f"{', '.join(PLANS_READER_REASONING_EFFORTS)}"
+                )
+            route["effort"] = effort.strip().lower()
+        budget = route["budget_usd"]
+        if budget is not None and (
+            isinstance(budget, bool) or not isinstance(budget, (int, float)) or not budget > 0
+        ):
+            raise ValueError(f"step {step!r} budget_usd must be null or a positive number")
+        if not isinstance(route["tools"], bool):
+            raise ValueError(f"step {step!r} tools must be true or false")
+    return routes
+
+
+def _parse_claim_types(raw: str) -> tuple[str, ...]:
+    """LLM_QUEUE_CLAIM_TYPES ("plans_reader_agent,ai_pricing") as a tuple of
+    job type names, de-duplicated in order. Empty = every type. A name that
+    is not lower-case snake case raises a ValueError naming it."""
+    out: list[str] = []
+    for part in (raw or "").split(","):
+        name = part.strip().lower()
+        if not name:
+            continue
+        if not _CLAIM_TYPE_RE.fullmatch(name):
+            raise ValueError(f"{part.strip()!r} is not a job type name")
+        if name not in out:
+            out.append(name)
+    return tuple(out)
 
 
 @lru_cache

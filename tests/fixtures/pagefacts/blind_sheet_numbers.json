@@ -1,0 +1,1115 @@
+{
+ "schema": "bdr.pagefacts_blind/1",
+ "labeled_at": "2026-10-22",
+ "method": "Blind labels written BEFORE the page-facts extractor ran on any of these pages: each page was rendered with pypdfium2 at low ppi (a 10 ppi thumbnail plus title-block crops at 40 to 80 ppi, rotated where the title runs vertically) and the sheet number and sheet title were read by eye from the title block as printed (not from a sheet index). The label file was hashed before the measurement script was written.",
+ "label_file": "/private/tmp/claude-501/-Users-thomasmoore-Desktop-BDR/1bd4e3b9-fe85-402e-88ab-30b7590da629/scratchpad/blind/labels.tsv",
+ "label_sha256": "532d64d7b424bbd95eefd8ae3e71276ecdd7888bd03f99edeac62d319e933d6a",
+ "population": "electrical drawing PDFs (category electrical_drawing) of golden projects, holdout and 7154 excluded; first up to 12 pages of each document",
+ "documents": [
+  {
+   "doc": "d00",
+   "project_number": "26.8.7166",
+   "project8": "895cd2d5",
+   "filename": "08-ELECTRICAL.pdf",
+   "backup_path": "895cd2d5-bf9a-4b50-ac04-aee64a535943/electrical_drawing/3b7f9cb8a494406782db6b62e910d072-08-ELECTRICAL.pdf",
+   "sha256": "4f02b9961a83993094f6ae720a1b0d2a6d04466753241dadd358cb87465363b7",
+   "page_count": 16,
+   "pages_labeled": 12
+  },
+  {
+   "doc": "d01",
+   "project_number": "26.8.7169",
+   "project8": "ff059866",
+   "filename": "Electrical 260810 CHAC 100_ DD DRAWINGS.pdf",
+   "backup_path": "ff059866-b011-4878-b90f-634b42f4e88e/electrical_drawing/e12ef1f778b24835bab2e1c5a43dc38b-Electrical 260810 CHAC 100_ DD DRAWINGS.pdf",
+   "sha256": "907df2fd702fe5e152a70c78c199deaf866325181e193a727f840529648aabeb",
+   "page_count": 18,
+   "pages_labeled": 12
+  },
+  {
+   "doc": "d02",
+   "project_number": "26.8.7170",
+   "project8": "026b2dc5",
+   "filename": "26-0044_Edikted_Las_Vegas_E.pdf",
+   "backup_path": "026b2dc5-676f-4ebd-b9a2-b744238b4049/electrical_drawing/fbf7e139738649babfbb4a8d18b46b65-26-0044_Edikted_Las_Vegas_E.pdf",
+   "sha256": "39190aca6a0a7e6af1c9dc4384f7033b8b9fface89b16b9076bc44a19a1114ea",
+   "page_count": 8,
+   "pages_labeled": 8
+  },
+  {
+   "doc": "d03",
+   "project_number": "26.8.7172",
+   "project8": "dc0cb2f0",
+   "filename": "26-141 Five Star Tax Resolution Elec_permit.pdf",
+   "backup_path": "dc0cb2f0-bc93-4bb5-9a17-79adf151a5fb/electrical_drawing/d1858bb20e0d4d12887acef0869420e0-26-141 Five Star Tax Resolution Elec_permit.pdf",
+   "sha256": "ea81b290ae581c1791f776dd227d287856f6505725324b18df485cfcfca58d9a",
+   "page_count": 7,
+   "pages_labeled": 7
+  },
+  {
+   "doc": "d04",
+   "project_number": "26.8.7180",
+   "project8": "cfeb91fc",
+   "filename": "Electrical from CMAR FIRE ADMINISTRATION RESTROOMS & CENTRAL PLANT MODERNIZATION.pdf",
+   "backup_path": "cfeb91fc-691f-4efd-bc8c-312bb7c51a66/electrical_drawing/7a9177b7af1e45bbb200626f5b2a064b-Electrical from CMAR FIRE ADMINISTRATION RESTROOMS & CENTRAL PLANT MODERNIZATION.pdf",
+   "sha256": "eb0e62723270cd96c75e11663048408f61e9f13210196c3e4872977e4f269bf4",
+   "page_count": 7,
+   "pages_labeled": 7
+  },
+  {
+   "doc": "d05",
+   "project_number": "26.9.7184",
+   "project8": "b17205ef",
+   "filename": "AN_07_ELECTRICAL_BID.pdf",
+   "backup_path": "b17205ef-0fe8-4994-9c47-092d7a14d6b4/electrical_drawing/9e1272b26f4147b385c86e616a64576a-AN_07_ELECTRICAL_BID.pdf",
+   "sha256": "14cb31d5fbc20c1ae57cd505387af758b1838c7c4abcc6879cc538292e46960c",
+   "page_count": 25,
+   "pages_labeled": 12
+  },
+  {
+   "doc": "d06",
+   "project_number": "26.9.7185",
+   "project8": "7589a596",
+   "filename": "Electrical from vu plans (25-M15).pdf",
+   "backup_path": "7589a596-6785-40a3-bb05-92760c941a52/electrical_drawing/7929f6eeb98b4a1c99eaeae5d15f471e-Electrical from vu plans (25-M15).pdf",
+   "sha256": "43598c7679cbbf61f9c51e21a74bb86abbcceb348129e0ba26d66e30e3900bbe",
+   "page_count": 28,
+   "pages_labeled": 12
+  },
+  {
+   "doc": "d07",
+   "project_number": "26.9.7186",
+   "project8": "114e2536",
+   "filename": "ELECTR~1.PDF",
+   "backup_path": "114e2536-c3f7-43cd-9eb8-1e88a98a988a/electrical_drawing/86a79d2f8ea54a168ae475b648691e58-ELECTR_1.PDF",
+   "sha256": "c6b0525fd5434dad2a25d4b1dc828d373c88aa75563ab31ab1c5e7fddfc8bdee",
+   "page_count": 9,
+   "pages_labeled": 9
+  },
+  {
+   "doc": "d08",
+   "project_number": "26.9.7198",
+   "project8": "84f0771e",
+   "filename": "Electrical from 20260729_Child_Haven_Permit Submission Set.pdf",
+   "backup_path": "84f0771e-597b-41e2-a6ac-91399dbffdbd/electrical_drawing/3379a0b7c3ee4023ba0bf2a0de3b313f-Electrical from 20260729_Child_Haven_Permit Submission Set.pdf",
+   "sha256": "5cc261cfd0f634b873037f84e2283804f4c4f08af847d8418e3a49fde447618d",
+   "page_count": 17,
+   "pages_labeled": 12
+  },
+  {
+   "doc": "d09",
+   "project_number": "26.9.7200",
+   "project8": "aec676fa",
+   "filename": "Electrical from 2026-06-05 NVARNG ACC Gate Replacement  Bid Set.pdf",
+   "backup_path": "aec676fa-55b0-4253-83cd-151482ed34fe/electrical_drawing/54fc764204324f71aa76b3d6a2b5805d-Electrical from 2026-06-05 NVARNG ACC Gate Replacement  Bid Set.pdf",
+   "sha256": "b8c1b1d124ef93a201fb9f48d848f03f05d9ad5e84b012273a7a65cae6835363",
+   "page_count": 6,
+   "pages_labeled": 6
+  },
+  {
+   "doc": "d10",
+   "project_number": "26.9.7204",
+   "project8": "8c08ff60",
+   "filename": "2026-09-02 FBLV KYU Demo Permit Set - E.pdf",
+   "backup_path": "8c08ff60-f9cc-43de-932e-03362f641033/electrical_drawing/a33af8635e4f41899e4e88026f4d5bc6-2026-09-02 FBLV KYU Demo Permit Set - E.pdf",
+   "sha256": "c7aaa89e9d9e6486d9a703fe954c6ba1b912d80161e726da69141ffa7b087ac6",
+   "page_count": 8,
+   "pages_labeled": 8
+  },
+  {
+   "doc": "d11",
+   "project_number": "26.9.7206",
+   "project8": "4a382f4b",
+   "filename": "(DS) 2025-07-02 WESTSIDE APARTMENTS PERMIT E-SET.pdf",
+   "backup_path": "4a382f4b-237d-4a33-be1d-6daa902a2521/electrical_drawing/9aecf062dd994f68b0300bff5f608d01-(DS) 2025-07-02 WESTSIDE APARTMENTS PERMIT E-SET.pdf",
+   "sha256": "ceb719c0213c721d5b7ad8e0a8673c697236707eb24a0cb6c528db2b60af5283",
+   "page_count": 22,
+   "pages_labeled": 12
+  },
+  {
+   "doc": "d12",
+   "project_number": "26.9.7209",
+   "project8": "0b68e4f9",
+   "filename": "E-2026-09-09_NSU_at_NLV_TI_Bid_Set.pdf",
+   "backup_path": "0b68e4f9-7950-42fb-abc4-04a451e41236/electrical_drawing/0ff04bd5196945e1bc0e6ad6f23c18fd-E-2026-09-09_NSU_at_NLV_TI_Bid_Set.pdf",
+   "sha256": "9a26476043f0b8dd7a45086ed7e852ebd426711a109424aceac388a7710c8e2d",
+   "page_count": 14,
+   "pages_labeled": 12
+  },
+  {
+   "doc": "d13",
+   "project_number": "26.9.7210",
+   "project8": "39b6ed51",
+   "filename": "2026-08-13_-_New_F_B_Venue_49_-_Permit_Set_-_Electrical_-_Stamped.pdf",
+   "backup_path": "39b6ed51-4d3d-4d82-95a0-ed857b1c0fff/electrical_drawing/bba148d93d6e4c02930e69c032e00acb-2026-08-13_-_New_F_B_Venue_49_-_Permit_Set_-_Electrical_-_Stamped.pdf",
+   "sha256": "419f85c2ba63b6b854a569a594cf04a5d1203238b4a991fe01427a2b30aca6a5",
+   "page_count": 9,
+   "pages_labeled": 9
+  },
+  {
+   "doc": "d14",
+   "project_number": "26.9.7212",
+   "project8": "27789224",
+   "filename": "20260915_Atlas Crane Warehouse and Yard_Pricing_Elec.pdf",
+   "backup_path": "27789224-5aee-43e1-ac6e-9559bc8f9ff1/electrical_drawing/e65efa72280148bbbd748b184d591807-20260915_Atlas Crane Warehouse and Yard_Pricing_Elec.pdf",
+   "sha256": "430e6882eafcdfe13b10d1ac6039041a23079576432ae38e9eb294972830ed74",
+   "page_count": 10,
+   "pages_labeled": 10
+  },
+  {
+   "doc": "d15",
+   "project_number": "26.9.7211",
+   "project8": "e858f05a",
+   "filename": "Electrical Pages from Zao Henderson NV - BID Set.pdf",
+   "backup_path": "e858f05a-e763-48f2-9f75-5b4bc8e3ffc2/electrical_drawing/d879aff780b440448e5701484e6cc19b-Electrical Pages from Zao Henderson NV - BID Set.pdf",
+   "sha256": "ae070fc06335e3a1d1f4469f13b6b1d507125dab60b30b19b8aa61e8b707de9e",
+   "page_count": 9,
+   "pages_labeled": 9
+  }
+ ],
+ "pages": [
+  {
+   "doc": "d00",
+   "page": 1,
+   "sheet_number": "E-000",
+   "title": "SYMBOLS LIST, ABBREVIATIONS AND DRAWING INDEX"
+  },
+  {
+   "doc": "d00",
+   "page": 2,
+   "sheet_number": "E-001",
+   "title": "SPECIFICATIONS"
+  },
+  {
+   "doc": "d00",
+   "page": 3,
+   "sheet_number": "E-010",
+   "title": "IECC COMPLIANCE CERTIFICATE"
+  },
+  {
+   "doc": "d00",
+   "page": 4,
+   "sheet_number": "E-011",
+   "title": "IECC COMPLIANCE CERTIFICATE"
+  },
+  {
+   "doc": "d00",
+   "page": 5,
+   "sheet_number": "E-012",
+   "title": "LIGHTING FIXTURE SCHEDULES"
+  },
+  {
+   "doc": "d00",
+   "page": 6,
+   "sheet_number": "E-020",
+   "title": "PANEL SCHEDULES AND SINGLE LINE DIAGRAM"
+  },
+  {
+   "doc": "d00",
+   "page": 7,
+   "sheet_number": "ED-050",
+   "title": "DEMO SITE ELECTRICAL PLAN - OVERALL"
+  },
+  {
+   "doc": "d00",
+   "page": 8,
+   "sheet_number": "E-050.1",
+   "title": "SITE ELECTRICAL PLAN - OVERALL"
+  },
+  {
+   "doc": "d00",
+   "page": 9,
+   "sheet_number": "E-051.1",
+   "title": "SITE ELECTRICAL PLAN - ENLARGED"
+  },
+  {
+   "doc": "d00",
+   "page": 10,
+   "sheet_number": "E-052.1",
+   "title": "SITE ELECTRICAL PLAN - ENLARGED"
+  },
+  {
+   "doc": "d00",
+   "page": 11,
+   "sheet_number": "E-053.1",
+   "title": "SITE ELECTRICAL PLAN - ENLARGED"
+  },
+  {
+   "doc": "d00",
+   "page": 12,
+   "sheet_number": "E-060.1",
+   "title": "SITE LIGHTING PLAN - OVERALL"
+  },
+  {
+   "doc": "d01",
+   "page": 1,
+   "sheet_number": "E0.01",
+   "title": "GENERAL INFORMATION"
+  },
+  {
+   "doc": "d01",
+   "page": 2,
+   "sheet_number": "E0.10",
+   "title": "IECC"
+  },
+  {
+   "doc": "d01",
+   "page": 3,
+   "sheet_number": "ED1.01",
+   "title": "LEVEL 1 DEMOLITION PLAN - OVERALL"
+  },
+  {
+   "doc": "d01",
+   "page": 4,
+   "sheet_number": "ED1.01A",
+   "title": "LEVEL 1 DEMOLITION PLAN - THEATER"
+  },
+  {
+   "doc": "d01",
+   "page": 5,
+   "sheet_number": "ED1.01B",
+   "title": "LEVEL 1 DEMOLITION PLAN & RCP - LOBBY (ADDITIVE ALTERNATE)"
+  },
+  {
+   "doc": "d01",
+   "page": 6,
+   "sheet_number": "ED1.02A",
+   "title": "LEVEL 2 DEMOLITION PLAN & RCP - THEATER"
+  },
+  {
+   "doc": "d01",
+   "page": 7,
+   "sheet_number": "ED3.01",
+   "title": "LEVEL 1 LIGHTING PLAN - OVERALL"
+  },
+  {
+   "doc": "d01",
+   "page": 8,
+   "sheet_number": "ED3.01A",
+   "title": "LEVEL 1 DEMOLITION LIGHTING PLAN - THEATER"
+  },
+  {
+   "doc": "d01",
+   "page": 9,
+   "sheet_number": "E1.01",
+   "title": "LEVEL 1 FLOOR PLAN - OVERALL"
+  },
+  {
+   "doc": "d01",
+   "page": 10,
+   "sheet_number": "E1.01A",
+   "title": "LEVEL 1 FLOOR PLAN - THEATER"
+  },
+  {
+   "doc": "d01",
+   "page": 11,
+   "sheet_number": "E1.01B",
+   "title": "LEVEL 1 FLOOR PLAN & RCP - THEATER (ADDITIVE ALTERNATE)"
+  },
+  {
+   "doc": "d01",
+   "page": 12,
+   "sheet_number": "E1.02A",
+   "title": "LEVEL 2 FLOOR PLAN & RCP - THEATER"
+  },
+  {
+   "doc": "d02",
+   "page": 1,
+   "sheet_number": "E-001",
+   "title": "ELECTRICAL SYMBOLS, ABBREVIATIONS, DETAILS AND NOTES"
+  },
+  {
+   "doc": "d02",
+   "page": 2,
+   "sheet_number": "E-002",
+   "title": "ELECTRICAL SPECIFICATIONS"
+  },
+  {
+   "doc": "d02",
+   "page": 3,
+   "sheet_number": "E-101",
+   "title": "POWER FIRST FLOOR CONSTRUCTION PLAN"
+  },
+  {
+   "doc": "d02",
+   "page": 4,
+   "sheet_number": "E-201",
+   "title": "LIGHTING FIRST FLOOR PLAN"
+  },
+  {
+   "doc": "d02",
+   "page": 5,
+   "sheet_number": "E-501",
+   "title": "ELECTRICAL LIGHTING DETAILS"
+  },
+  {
+   "doc": "d02",
+   "page": 6,
+   "sheet_number": "E-601",
+   "title": "ELECTRICAL SINGLE LINE AND PANEL SCHEDULES"
+  },
+  {
+   "doc": "d02",
+   "page": 7,
+   "sheet_number": "ED-101",
+   "title": "POWER FIRST FLOOR DEMOLITION PLAN"
+  },
+  {
+   "doc": "d02",
+   "page": 8,
+   "sheet_number": "ED-201",
+   "title": "LIGHTING FIRST FLOOR DEMOLITION PLAN"
+  },
+  {
+   "doc": "d03",
+   "page": 1,
+   "sheet_number": "E0.00",
+   "title": "ELECTRICAL COVER SHEET"
+  },
+  {
+   "doc": "d03",
+   "page": 2,
+   "sheet_number": "E0.01",
+   "title": "ELECTRICAL SPECIFICATION"
+  },
+  {
+   "doc": "d03",
+   "page": 3,
+   "sheet_number": "E0.02",
+   "title": "ELECTRICAL SCHEDULES"
+  },
+  {
+   "doc": "d03",
+   "page": 4,
+   "sheet_number": "E0.03",
+   "title": "INTERIOR LIGHTING COMPLIANCE CHECK"
+  },
+  {
+   "doc": "d03",
+   "page": 5,
+   "sheet_number": "E1.00",
+   "title": "SITE PLAN"
+  },
+  {
+   "doc": "d03",
+   "page": 6,
+   "sheet_number": "E1.01",
+   "title": "HVAC PLAN"
+  },
+  {
+   "doc": "d03",
+   "page": 7,
+   "sheet_number": "E2.00",
+   "title": "ELECTRICAL PLAN"
+  },
+  {
+   "doc": "d04",
+   "page": 1,
+   "sheet_number": "ED1.00",
+   "title": "ELECTRICAL POWER PLAN - BASEMENT DEMO"
+  },
+  {
+   "doc": "d04",
+   "page": 2,
+   "sheet_number": "ED1.01",
+   "title": "ELECTRICAL POWER PLAN - FIRST FLOOR DEMO"
+  },
+  {
+   "doc": "d04",
+   "page": 3,
+   "sheet_number": "ED1.02",
+   "title": "ELECTRICAL POWER PLAN - SECOND FLOOR DEMO"
+  },
+  {
+   "doc": "d04",
+   "page": 4,
+   "sheet_number": "E1.00",
+   "title": "ELECTRICAL POWER PLAN - BASEMENT"
+  },
+  {
+   "doc": "d04",
+   "page": 5,
+   "sheet_number": "E1.01",
+   "title": "ELECTRICAL POWER PLAN - FIRST FLOOR"
+  },
+  {
+   "doc": "d04",
+   "page": 6,
+   "sheet_number": "E1.02",
+   "title": "ELECTRICAL POWER PLAN - SECOND FLOOR"
+  },
+  {
+   "doc": "d04",
+   "page": 7,
+   "sheet_number": "E5.01",
+   "title": "SINGLE-LINE DIAGRAMS"
+  },
+  {
+   "doc": "d05",
+   "page": 1,
+   "sheet_number": "AN-E0-000",
+   "title": "ELECTRICAL COVER SHEET"
+  },
+  {
+   "doc": "d05",
+   "page": 2,
+   "sheet_number": "AN-E0-001",
+   "title": "LIGHTING FIXTURE SCHEDULES & IECC"
+  },
+  {
+   "doc": "d05",
+   "page": 3,
+   "sheet_number": "AN-ED1-101",
+   "title": "ANNEX LEVEL 01 - OVERALL ELECTRICAL DEMOLITION PLAN"
+  },
+  {
+   "doc": "d05",
+   "page": 4,
+   "sheet_number": "AN-ED1-201",
+   "title": "ANNEX LEVEL 02 - OVERALL ELECTRICAL DEMOLITION PLAN"
+  },
+  {
+   "doc": "d05",
+   "page": 5,
+   "sheet_number": "AN-E1-101",
+   "title": "ANNEX LEVEL 01 - OVERALL ELECTRICAL PLAN"
+  },
+  {
+   "doc": "d05",
+   "page": 6,
+   "sheet_number": "AN-E1-201",
+   "title": "ANNEX LEVEL 02 - OVERALL ELECTRICAL PLAN"
+  },
+  {
+   "doc": "d05",
+   "page": 7,
+   "sheet_number": "AN-E1-1BF",
+   "title": "LEVEL 01 ELECTRICAL PLAN - ZONE BF"
+  },
+  {
+   "doc": "d05",
+   "page": 8,
+   "sheet_number": "AN-E1-1BG",
+   "title": "LEVEL 01 ELECTRICAL PLAN - ZONE BG"
+  },
+  {
+   "doc": "d05",
+   "page": 9,
+   "sheet_number": "AN-E1-1BS",
+   "title": "LEVEL 01 ELECTRICAL PLAN - ZONE BS"
+  },
+  {
+   "doc": "d05",
+   "page": 10,
+   "sheet_number": "AN-E1-1BT",
+   "title": "LEVEL 01 ELECTRICAL PLAN - ZONE BT"
+  },
+  {
+   "doc": "d05",
+   "page": 11,
+   "sheet_number": "AN-E1-2BF",
+   "title": "LEVEL 02 ELECTRICAL PLAN - ZONE BF"
+  },
+  {
+   "doc": "d05",
+   "page": 12,
+   "sheet_number": "AN-E1-2BG",
+   "title": "LEVEL 02 ELECTRICAL PLAN - ZONE BG"
+  },
+  {
+   "doc": "d06",
+   "page": 1,
+   "sheet_number": "E-0.1",
+   "title": "GENERAL REQUIREMENTS AND SYMBOL LEGEND"
+  },
+  {
+   "doc": "d06",
+   "page": 2,
+   "sheet_number": "E-0.2",
+   "title": "OVERALL FIBER LAYOUT"
+  },
+  {
+   "doc": "d06",
+   "page": 3,
+   "sheet_number": "E-0.3",
+   "title": "FIBER LAYOUT ENLARGEMENT"
+  },
+  {
+   "doc": "d06",
+   "page": 4,
+   "sheet_number": "E-1.1",
+   "title": "SITE PLAN - FIBER PLAN"
+  },
+  {
+   "doc": "d06",
+   "page": 5,
+   "sheet_number": "E-2.1",
+   "title": "OPERATIONS - SECURITY ELECTRONICS"
+  },
+  {
+   "doc": "d06",
+   "page": 6,
+   "sheet_number": "E-3.1",
+   "title": "HOUSING UNIT 9 - 1ST FLOOR SECURITY ELECTRONICS PLAN"
+  },
+  {
+   "doc": "d06",
+   "page": 7,
+   "sheet_number": "E-3.2",
+   "title": "HOUSING UNIT 9 - BALCONY FLOOR SECURITY ELECTRONICS PLAN"
+  },
+  {
+   "doc": "d06",
+   "page": 8,
+   "sheet_number": "E-3.3",
+   "title": "HOUSING UNIT 9 - ENLARGEMENT ELECTRICAL PLANS"
+  },
+  {
+   "doc": "d06",
+   "page": 9,
+   "sheet_number": "E-3.4",
+   "title": "HOUSING UNIT 9 - ENLARGEMENT ELECTRICAL PLANS 2"
+  },
+  {
+   "doc": "d06",
+   "page": 10,
+   "sheet_number": "E-3.5",
+   "title": "HOUSING UNIT 10 - 1ST FLOOR SECURITY ELECTRONICS PLAN"
+  },
+  {
+   "doc": "d06",
+   "page": 11,
+   "sheet_number": "E-3.6",
+   "title": "HOUSING UNIT 10 - BALCONY FLOOR SECURITY ELECTRONICS PLAN"
+  },
+  {
+   "doc": "d06",
+   "page": 12,
+   "sheet_number": "E-3.7",
+   "title": "HOUSING UNIT 10 - ENLARGEMENT ELECTRICAL PLANS"
+  },
+  {
+   "doc": "d07",
+   "page": 1,
+   "sheet_number": "E0.01",
+   "title": "ELECTRICAL LEGEND, ABBREVIATIONS, & SHEET INDEX"
+  },
+  {
+   "doc": "d07",
+   "page": 2,
+   "sheet_number": "E0.03",
+   "title": "ELECTRICAL SCHEDULES"
+  },
+  {
+   "doc": "d07",
+   "page": 3,
+   "sheet_number": "E1.00",
+   "title": "ELECTRICAL SITE PLAN"
+  },
+  {
+   "doc": "d07",
+   "page": 4,
+   "sheet_number": "E2.01",
+   "title": "ELECTRICAL POWER PLAN - BUILDING A LEVEL 1"
+  },
+  {
+   "doc": "d07",
+   "page": 5,
+   "sheet_number": "E2.12",
+   "title": "ELECTRICAL POWER PLAN - BUILDING T LEVEL 1"
+  },
+  {
+   "doc": "d07",
+   "page": 6,
+   "sheet_number": "E2.16",
+   "title": "ELECTRICAL POWER PLAN - BUILDING A ROOF"
+  },
+  {
+   "doc": "d07",
+   "page": 7,
+   "sheet_number": "E2.18",
+   "title": "ELECTRICAL POWER PLAN - BUILDING T ROOF"
+  },
+  {
+   "doc": "d07",
+   "page": 8,
+   "sheet_number": "E5.01",
+   "title": "ELECTRICAL SINGLE LINE DIAGRAM"
+  },
+  {
+   "doc": "d07",
+   "page": 9,
+   "sheet_number": "E5.02",
+   "title": "ELECTRICAL SINGLE LINE DIAGRAM"
+  },
+  {
+   "doc": "d08",
+   "page": 1,
+   "sheet_number": "E0.01",
+   "title": "ELECTRICAL NOTES AND LEGEND"
+  },
+  {
+   "doc": "d08",
+   "page": 2,
+   "sheet_number": "E0.02",
+   "title": "SPECIFICATIONS"
+  },
+  {
+   "doc": "d08",
+   "page": 3,
+   "sheet_number": "E0.03",
+   "title": "IECC"
+  },
+  {
+   "doc": "d08",
+   "page": 4,
+   "sheet_number": "ES1.01",
+   "title": "SITE PLAN"
+  },
+  {
+   "doc": "d08",
+   "page": 5,
+   "sheet_number": "E1.01",
+   "title": "POWER PLANS - A"
+  },
+  {
+   "doc": "d08",
+   "page": 6,
+   "sheet_number": "E1.02",
+   "title": "LIGHTING PLANS - A"
+  },
+  {
+   "doc": "d08",
+   "page": 7,
+   "sheet_number": "E1.03",
+   "title": "POWER PLANS - B"
+  },
+  {
+   "doc": "d08",
+   "page": 8,
+   "sheet_number": "E1.04",
+   "title": "LIGHTING PLANS - B"
+  },
+  {
+   "doc": "d08",
+   "page": 9,
+   "sheet_number": "E1.05",
+   "title": "ELECTRICAL PLANS - C"
+  },
+  {
+   "doc": "d08",
+   "page": 10,
+   "sheet_number": "E1.06",
+   "title": "ELECTRICAL PLANS - D"
+  },
+  {
+   "doc": "d08",
+   "page": 11,
+   "sheet_number": "E1.07",
+   "title": "ELECTRICAL PLANS - E"
+  },
+  {
+   "doc": "d08",
+   "page": 12,
+   "sheet_number": "E1.08",
+   "title": "ELECTRICAL PLANS - F"
+  },
+  {
+   "doc": "d09",
+   "page": 1,
+   "sheet_number": "E0.01",
+   "title": "GENERAL INFORMATION"
+  },
+  {
+   "doc": "d09",
+   "page": 2,
+   "sheet_number": "E0.10",
+   "title": "IECC"
+  },
+  {
+   "doc": "d09",
+   "page": 3,
+   "sheet_number": "E0.30",
+   "title": "SITE PLAN"
+  },
+  {
+   "doc": "d09",
+   "page": 4,
+   "sheet_number": "E1.01",
+   "title": "ELECTRICAL PLANS"
+  },
+  {
+   "doc": "d09",
+   "page": 5,
+   "sheet_number": "E5.01",
+   "title": "ONE-LINE DIAGRAM AND SCHEDULES"
+  },
+  {
+   "doc": "d09",
+   "page": 6,
+   "sheet_number": "E7.01",
+   "title": "DIAGRAMS"
+  },
+  {
+   "doc": "d10",
+   "page": 1,
+   "sheet_number": "E0.000",
+   "title": "ELECTRICAL COVER SHEET"
+  },
+  {
+   "doc": "d10",
+   "page": 2,
+   "sheet_number": "E0.001",
+   "title": "ELECTRICAL SPECIFICATIONS"
+  },
+  {
+   "doc": "d10",
+   "page": 3,
+   "sheet_number": "ES1.101",
+   "title": "ELECTRICAL SITE PLAN"
+  },
+  {
+   "doc": "d10",
+   "page": 4,
+   "sheet_number": "E1.101",
+   "title": "ELECTRICAL MASTER FLOOR PLAN"
+  },
+  {
+   "doc": "d10",
+   "page": 5,
+   "sheet_number": "ED2.101",
+   "title": "ELECTRICAL CEILING DEMO PLANS"
+  },
+  {
+   "doc": "d10",
+   "page": 6,
+   "sheet_number": "ED2.201",
+   "title": "ELECTRICAL DEMO ROOF PLAN"
+  },
+  {
+   "doc": "d10",
+   "page": 7,
+   "sheet_number": "ED3.101",
+   "title": "ELECTRICAL POWER DEMO PLANS"
+  },
+  {
+   "doc": "d10",
+   "page": 8,
+   "sheet_number": "E5.101",
+   "title": "SINGLE-LINE DIAGRAMS AND SCHEDULES"
+  },
+  {
+   "doc": "d11",
+   "page": 1,
+   "sheet_number": "E0.00",
+   "title": "ELECTRICAL LEGEND, ABBR. AND INDEX"
+  },
+  {
+   "doc": "d11",
+   "page": 2,
+   "sheet_number": "E0.01",
+   "title": "ELECTRICAL SPECIFICATIONS"
+  },
+  {
+   "doc": "d11",
+   "page": 3,
+   "sheet_number": "E0.02",
+   "title": "ELECTRICAL LIGHTING DETAILS"
+  },
+  {
+   "doc": "d11",
+   "page": 4,
+   "sheet_number": "ES.01",
+   "title": "SITE PLAN"
+  },
+  {
+   "doc": "d11",
+   "page": 5,
+   "sheet_number": "E1.10",
+   "title": "LIGHTING PLAN - LEVEL 1"
+  },
+  {
+   "doc": "d11",
+   "page": 6,
+   "sheet_number": "E1.20",
+   "title": "LIGHTING PLAN - LEVEL 2"
+  },
+  {
+   "doc": "d11",
+   "page": 7,
+   "sheet_number": "E1.30",
+   "title": "LIGHTING PLAN - LEVEL 3"
+  },
+  {
+   "doc": "d11",
+   "page": 8,
+   "sheet_number": "E1.40",
+   "title": "LIGHTING PLAN - LEVEL 4"
+  },
+  {
+   "doc": "d11",
+   "page": 9,
+   "sheet_number": "E2.10",
+   "title": "POWER PLAN - LEVEL 1"
+  },
+  {
+   "doc": "d11",
+   "page": 10,
+   "sheet_number": "E2.20",
+   "title": "POWER PLAN - LEVEL 2"
+  },
+  {
+   "doc": "d11",
+   "page": 11,
+   "sheet_number": "E2.30",
+   "title": "POWER PLAN - LEVEL 3"
+  },
+  {
+   "doc": "d11",
+   "page": 12,
+   "sheet_number": "E2.40",
+   "title": "POWER PLAN - LEVEL 4"
+  },
+  {
+   "doc": "d12",
+   "page": 1,
+   "sheet_number": "E0.0",
+   "title": "ELECTRICAL COVER SHEET"
+  },
+  {
+   "doc": "d12",
+   "page": 2,
+   "sheet_number": "ES1.0",
+   "title": "ELECTRICAL SITE PLAN"
+  },
+  {
+   "doc": "d12",
+   "page": 3,
+   "sheet_number": "E1.1",
+   "title": "ELECTRICAL FIRST FLOOR LIGHTING PLAN"
+  },
+  {
+   "doc": "d12",
+   "page": 4,
+   "sheet_number": "E1.2",
+   "title": "ELECTRICAL SECOND FLOOR LIGHTING PLAN"
+  },
+  {
+   "doc": "d12",
+   "page": 5,
+   "sheet_number": "E1.3",
+   "title": "ELECTRICAL THIRD FLOOR LIGHTING PLAN"
+  },
+  {
+   "doc": "d12",
+   "page": 6,
+   "sheet_number": "E2.1",
+   "title": "ELECTRICAL FIRST FLOOR POWER PLAN"
+  },
+  {
+   "doc": "d12",
+   "page": 7,
+   "sheet_number": "E2.2",
+   "title": "ELECTRICAL SECOND FLOOR POWER PLAN"
+  },
+  {
+   "doc": "d12",
+   "page": 8,
+   "sheet_number": "E2.3",
+   "title": "ELECTRICAL THIRD FLOOR POWER PLAN"
+  },
+  {
+   "doc": "d12",
+   "page": 9,
+   "sheet_number": "E2.4",
+   "title": "ELECTRICAL ROOF POWER PLAN"
+  },
+  {
+   "doc": "d12",
+   "page": 10,
+   "sheet_number": "E5.0",
+   "title": "ELECTRICAL SINGLE-LINE DIAGRAMS"
+  },
+  {
+   "doc": "d12",
+   "page": 11,
+   "sheet_number": "E6.0",
+   "title": "ELECTRICAL SCHEDULES"
+  },
+  {
+   "doc": "d12",
+   "page": 12,
+   "sheet_number": "T2.1",
+   "title": "TECHNOLOGY FIRST FLOOR POWER PLAN"
+  },
+  {
+   "doc": "d13",
+   "page": 1,
+   "sheet_number": "E49.000",
+   "title": "COVER SHEET"
+  },
+  {
+   "doc": "d13",
+   "page": 2,
+   "sheet_number": "E49.001",
+   "title": "ELECTRICAL SPECIFICATIONS"
+  },
+  {
+   "doc": "d13",
+   "page": 3,
+   "sheet_number": "E49.100",
+   "title": "OVERALL FIRST FLOOR ELECTRICAL PLAN"
+  },
+  {
+   "doc": "d13",
+   "page": 4,
+   "sheet_number": "E49.200",
+   "title": "ENLARGED FIRST FLOOR DEMOLITION ELECTRICAL PLAN"
+  },
+  {
+   "doc": "d13",
+   "page": 5,
+   "sheet_number": "E49.230",
+   "title": "ENLARGED FIRST FLOOR POWER PLAN"
+  },
+  {
+   "doc": "d13",
+   "page": 6,
+   "sheet_number": "E49.330",
+   "title": "ENLARGED FIRST FLOOR LIGHTING PLAN"
+  },
+  {
+   "doc": "d13",
+   "page": 7,
+   "sheet_number": "E49.331",
+   "title": "ENLARGED FIRST FLOOR LIGHTING FLOOR PLAN"
+  },
+  {
+   "doc": "d13",
+   "page": 8,
+   "sheet_number": "E49.400",
+   "title": "ENLARGED FOOD SERVICE ELECTRICAL PLANS"
+  },
+  {
+   "doc": "d13",
+   "page": 9,
+   "sheet_number": "E49.600",
+   "title": "PANEL SCHEDULES"
+  },
+  {
+   "doc": "d14",
+   "page": 1,
+   "sheet_number": "E0.00",
+   "title": "ELECTRICAL COVER SHEET"
+  },
+  {
+   "doc": "d14",
+   "page": 2,
+   "sheet_number": "E0.01",
+   "title": "ELECTRICAL SPECIFICATIONS"
+  },
+  {
+   "doc": "d14",
+   "page": 3,
+   "sheet_number": "E0.02",
+   "title": "LIGHTING FIXTURE SCHEDULE"
+  },
+  {
+   "doc": "d14",
+   "page": 4,
+   "sheet_number": "E0.03",
+   "title": "SINGLE LINE DIAGRAM"
+  },
+  {
+   "doc": "d14",
+   "page": 5,
+   "sheet_number": "E0.04",
+   "title": "PANEL SCHEDULES"
+  },
+  {
+   "doc": "d14",
+   "page": 6,
+   "sheet_number": "ES1.01",
+   "title": "ELECTRICAL SITE PLANS"
+  },
+  {
+   "doc": "d14",
+   "page": 7,
+   "sheet_number": "ES1.02",
+   "title": "VISUAL SITE PLAN"
+  },
+  {
+   "doc": "d14",
+   "page": 8,
+   "sheet_number": "E1.01",
+   "title": "ELECTRICAL PLANS"
+  },
+  {
+   "doc": "d14",
+   "page": 9,
+   "sheet_number": "E1.02",
+   "title": "LIGHTING PLANS"
+  },
+  {
+   "doc": "d14",
+   "page": 10,
+   "sheet_number": "E1.02B",
+   "title": "ELECTRICAL PLAN - ROOF"
+  },
+  {
+   "doc": "d15",
+   "page": 1,
+   "sheet_number": "E000",
+   "title": "ELECTRICAL GENERAL SHEET"
+  },
+  {
+   "doc": "d15",
+   "page": 2,
+   "sheet_number": "E100",
+   "title": "LIGHTING PLAN"
+  },
+  {
+   "doc": "d15",
+   "page": 3,
+   "sheet_number": "E200",
+   "title": "POWER PLAN"
+  },
+  {
+   "doc": "d15",
+   "page": 4,
+   "sheet_number": "E201",
+   "title": "ROOF POWER PLAN"
+  },
+  {
+   "doc": "d15",
+   "page": 5,
+   "sheet_number": "E300",
+   "title": "PANEL SCHEDULES"
+  },
+  {
+   "doc": "d15",
+   "page": 6,
+   "sheet_number": "E400",
+   "title": "ELECTRICAL DETAILS"
+  },
+  {
+   "doc": "d15",
+   "page": 7,
+   "sheet_number": "E801",
+   "title": "ELECTRICAL SPECIFICATIONS"
+  },
+  {
+   "doc": "d15",
+   "page": 8,
+   "sheet_number": "E802",
+   "title": "ELECTRICAL SPECIFICATIONS"
+  },
+  {
+   "doc": "d15",
+   "page": 9,
+   "sheet_number": "E803",
+   "title": "ELECTRICAL SPECIFICATIONS"
+  }
+ ],
+ "pages_sha256": "4abba68bb151d33183dcd742236309613e18133a6397d580b42240c51993ec95"
+}

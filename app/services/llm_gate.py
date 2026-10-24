@@ -24,6 +24,13 @@ Two jobs, both provider-wide (they cover the self-hosted pool AND the
   those columns, so the row is retried once without them and a WARNING is
   logged once per process: the call log keeps working, only the spend
   numbers are missing until the migration is applied.
+- eval_sweep_id (AI Estimating eval ledger, migration MC): stamped when
+  the process runs inside an eval sweep (EVAL_SWEEP_ID, or the sweep
+  services/eval_ledger admitted the call under) and OMITTED otherwise, so
+  a database without the column never sees the key. A database without the
+  column rejects a stamped row; it is retried once without the key and a
+  WARNING is logged once per process (the ledger then counts only what the
+  process committed itself).
 
 Tiers ride a contextvar instead of a parameter threaded through every call
 site: the queue worker and the ingest loops wrap their work in
@@ -44,7 +51,7 @@ import logging
 import threading
 import time
 from decimal import Decimal
-from typing import Iterator
+from typing import Callable, Iterator
 
 from app.core.config import Settings, get_settings
 
@@ -177,13 +184,29 @@ _USAGE_COLUMNS = ("input_tokens", "cached_tokens", "output_tokens", "reasoning_t
 # PostgREST's "column not found in the schema cache" error code.
 _PGRST_UNKNOWN_COLUMN = "PGRST204"
 _usage_columns_warned = False
+_SWEEP_COLUMN = "eval_sweep_id"
+_sweep_column_warned = False
 
 
-def _is_missing_usage_column(exc: Exception, keys: list[str]) -> bool:
-    """True when the insert failed because the database has no 0152 usage
-    columns (PostgREST names the unknown column, or returns PGRST204)."""
-    text = f"{getattr(exc, 'code', '')} {getattr(exc, 'message', '')} {exc}"
-    return _PGRST_UNKNOWN_COLUMN in text or any(f"'{k}'" in text for k in keys)
+def _eval_sweep_id() -> str | None:
+    """The eval sweep to stamp on this call's row, or None (key omitted)."""
+    try:
+        from app.services import eval_ledger
+
+        return eval_ledger.sweep_id_for_log(get_settings())
+    except Exception:  # noqa: BLE001 - accounting must never break the call
+        return None
+
+
+def _warn_sweep_column_missing() -> None:
+    global _sweep_column_warned
+    if _sweep_column_warned:
+        return
+    _sweep_column_warned = True
+    logger.warning(
+        "llm_call_log has no eval_sweep_id column (migration MC not applied); "
+        "logging eval calls without the sweep stamp until it is."
+    )
 
 
 def _warn_usage_columns_missing() -> None:
@@ -196,6 +219,34 @@ def _warn_usage_columns_missing() -> None:
         "llm_call_log has no token/cost columns (migration 0152 not applied); "
         "logging calls without usage until it is."
     )
+
+
+def _insert_with_fallback(sb, row: dict) -> None:
+    """Insert one llm_call_log row. A database that predates a migration
+    rejects that migration's optional columns: the row is retried without
+    the column group the error names (the MC sweep stamp, then the 0152
+    usage columns), at most once per group, with one WARNING per process.
+    A bare PGRST204 that names no column drops the sweep stamp first."""
+    groups: list[tuple[list[str], Callable[[], None]]] = [
+        ([_SWEEP_COLUMN], _warn_sweep_column_missing),
+        (list(_USAGE_COLUMNS), _warn_usage_columns_missing),
+    ]
+    while True:
+        try:
+            sb.table("llm_call_log").insert(row).execute()
+            return
+        except Exception as exc:  # noqa: BLE001 - retried below or re-raised
+            text = f"{getattr(exc, 'code', '')} {getattr(exc, 'message', '')} {exc}"
+            present = [(keys, warn) for keys, warn in groups if any(k in row for k in keys)]
+            named = [(keys, warn) for keys, warn in present if any(f"'{k}'" in text for k in keys)]
+            pick = named[0] if named else (present[0] if present and _PGRST_UNKNOWN_COLUMN in text else None)
+            if pick is None:
+                raise
+            keys, warn = pick
+            for k in keys:
+                row.pop(k, None)
+            groups = [g for g in groups if g[0] is not keys]
+            warn()
 
 
 def log_call(
@@ -249,15 +300,9 @@ def log_call(
             # and Decimal is not JSON serializable. numeric(12, 6) keeps the
             # 6 decimals cost_for rounds to.
             row["cost_usd"] = float(cost_usd)
-        try:
-            get_supabase().table("llm_call_log").insert(row).execute()
-        except Exception as exc:  # noqa: BLE001 - retried below or re-raised
-            usage_keys = [k for k in _USAGE_COLUMNS if k in row]
-            if not usage_keys or not _is_missing_usage_column(exc, usage_keys):
-                raise
-            for key in usage_keys:
-                row.pop(key)
-            get_supabase().table("llm_call_log").insert(row).execute()
-            _warn_usage_columns_missing()
+        sweep_id = _eval_sweep_id()
+        if sweep_id:
+            row[_SWEEP_COLUMN] = sweep_id
+        _insert_with_fallback(get_supabase(), row)
     except Exception:  # noqa: BLE001 - accounting must never break the call
         logger.debug("llm_call_log write failed", exc_info=True)

@@ -1,0 +1,613 @@
+{
+ "runs": [],
+ "pages": [
+  {
+   "page": 1,
+   "tags": [
+    "electrical demolition",
+    "furniture connections",
+    "Honeywell",
+    "occupied hospital",
+    "infection control",
+    "work hours"
+   ],
+   "notes": [
+    "Project name is 2026-05 UMC Outpatient Pharmacy (1800 W Charleston) Remodel; location is 1800 W Charleston Blvd, Las Vegas, NV 89102, 1st Floor Main Lobby.",
+    "New pharmacy within the existing main-campus structure; removal of electrical elements and new electrical/technology work are included. Surrounding existing walls remain.",
+    "Bottom of deck is approximately 20\u2019-0\u201d; consider access for above-ceiling electrical work without treating this height as a stated conduit rise.",
+    "Maintain facility access for 24-hour services. Coordinate demolition and construction in operating/patient-treatment areas at least 72 hours in advance.",
+    "Connections may extend beyond construction limits; patch and repair affected finishes to match existing.",
+    "GC provides electrical, data, and plumbing connections from infrastructure to pre-manufactured furniture systems; coordinate with UMC and reference furniture drawings/elevations.",
+    "GC must coordinate with Honeywell before demolition to disarm the existing system; Honeywell scope is referenced but not included in this group.",
+    "Permit-set construction documents and UMC standard specification sheets are incorporated into scope.",
+    "Wording says work will be 'after business hours (6:00 am \u2013 3:30 pm) Monday through Friday'; this conflicts with daytime work requirements on pages 4 and 5."
+   ],
+   "scale": null,
+   "title": "EXHIBIT A SCOPE OF WORK",
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null,
+   "resolution_flags": []
+  },
+  {
+   "page": 2,
+   "tags": [
+    "Honeywell",
+    "access control",
+    "fire detection",
+    "device relocation",
+    "licensing",
+    "schedule"
+   ],
+   "notes": [
+    "Project duration is 90 days from notice to proceed.",
+    "Honeywell provides building access controls and fire detection systems; additional/new card readers must integrate with the Honeywell access-control system.",
+    "Before demolition, deliver a marked-up floor plan identifying exact telemetry antenna, Centrak device, and wireless access point locations to the engineering representative.",
+    "Successful bidder is responsible for removal, storage, and reinstallation of those devices; no quantities are stated.",
+    "Successful bidder must demonstrate operational-hospital experience and present a schedule minimizing impact to owner operations.",
+    "Contractor must furnish labor, services, insurance, permits, licenses, materials, equipment, tools, transportation, and supplies needed for complete work.",
+    "NRS Chapters 338 and 624 apply; subcontractors require appropriate valid specialty licenses. No explicit wage determination is provided.",
+    "Daily cleanup and removal of refuse are required; transport refuse through the facility in covered containers."
+   ],
+   "scale": null,
+   "title": null,
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null,
+   "resolution_flags": []
+  },
+  {
+   "page": 3,
+   "tags": [
+    "infection control",
+    "negative air",
+    "firestopping",
+    "permits",
+    "badging",
+    "safety"
+   ],
+   "notes": [
+    "Protect existing floors and walls; contractor supplies a dumpster when the project is determined to generate more than 3 yards of refuse, at UMC's designated location. This is a threshold, not a stated project waste quantity.",
+    "Contractor provides full containment and negative-air filtration systems.",
+    "Comply with Infection Control Department permits and applicable ILSM plans; referenced sample ICRA determines barrier, ventilation, sticky-mat, bootie, and HEPA-vacuum requirements.",
+    "Provide current Safety Manual to UMC Safety Department; engineering/plant-operations badges must be worn at all times.",
+    "Workers without flu vaccination must follow the Infection Control Department masking policy.",
+    "Secure HVAC ducting against contamination during dust- or smoke-producing work.",
+    "Seal every disturbed or new penetration using contractor-provided UL penetration details. Mixing sealant types within a penetration is prohibited.",
+    "Obtain required permits and associated fees; engineering-issued hot-work permits are required for cutting, grinding, or open-flame work."
+   ],
+   "scale": null,
+   "title": null,
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null,
+   "resolution_flags": []
+  },
+  {
+   "page": 4,
+   "tags": [
+    "smoke detector protection",
+    "work hours",
+    "phasing",
+    "long lead materials",
+    "exclusions"
+   ],
+   "notes": [
+    "Secure/cover construction-area fire-alarm smoke detectors to avoid false alarms; coordinate impairment protection with Honeywell and UMC.",
+    "Sections 5.2.6 and 7.1.1 specify Monday\u2013Friday, 6:00 am\u20133:30 pm work; section 7.1.1 permits changes by written agreement of both parties.",
+    "Contractor is responsible for replacement, patching, and repair of damaged building materials and adjacent surfaces, tool/material security while present, and required third-party inspections.",
+    "Section 5.3 excludes salvage/storage of contents and site security during work. The storage exclusion conflicts with the specific device-storage obligation on page 2.",
+    "Contractor furnishes containment equipment, PPE, and all other materials needed for complete work.",
+    "Owner-furnished standard dispenser/accessory language is followed by '6.1.1 Not applicable.' No owner-furnished electrical equipment is identified here.",
+    "Agree on schedule and phasing in writing before on-site work. Order long-lead materials within two weeks after the associated purchase order."
+   ],
+   "scale": null,
+   "title": null,
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null,
+   "resolution_flags": []
+  },
+  {
+   "page": 5,
+   "tags": [
+    "completion deadline",
+    "utility outages",
+    "badging",
+    "acceptance",
+    "electrified door hardware"
+   ],
+   "notes": [
+    "Complete all project work within 90 days after UMC issues notice to proceed.",
+    "Schedule all utility disruptions with UMC Engineering at least 48 hours in advance; alternate working hours may be required to reduce disruption.",
+    "Arrange access and badging through Plant Operations/Engineering; badges must be worn at all times.",
+    "UMC Engineering reviews all work; correct deficiencies before final acceptance.",
+    "Contractor obtains and places the dumpster at the owner-designated staging area and secures it during non-working hours.",
+    "Door-hardware standards include 'LCN Sentronics Electrified Fire/Life Safety closers'; quantities, locations, electrical ratings, and connection responsibilities are not stated."
+   ],
+   "scale": null,
+   "title": null,
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null,
+   "resolution_flags": []
+  },
+  {
+   "page": 6,
+   "tags": [
+    "automatic door operators",
+    "door power supplies",
+    "owner standards",
+    "patch and repair"
+   ],
+   "notes": [
+    "Low-energy automatic-operator standard identifies LCN Senior Swing operators: pair 9550 Series; single 9530/9540 series; power supply Von Duprin PS 914 or equal.",
+    "Operator and power-supply quantities, door locations, voltage, load, controls, and furnishing/installation assignments are not given.",
+    "Door/frame and wall/ceiling paint standards prohibit substitutions for brand and sheen; applicable to restoration caused by electrical work.",
+    "Referenced documents and their specifications are incorporated by reference and must be met by the lowest responsive and responsible bidder."
+   ],
+   "scale": null,
+   "title": null,
+   "doc_index": 1,
+   "page_role": "spec_text",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null,
+   "resolution_flags": []
+  }
+ ],
+ "scope": [
+  {
+   "page": 1,
+   "quote": "The work includes the removal of walls, mechanical systems, plumbing fixtures, and electrical elements.",
+   "section": "1.0 Scope",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Include electrical demolition and new electrical/technology work for the new pharmacy within the existing structure. Preserve surrounding existing walls and repair damaged areas outside the immediate construction scope.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 1,
+   "quote": "Access to the facility shall be maintained for 24-hour services.",
+   "section": "1.0 Scope",
+   "doc_index": 1,
+   "relevance": "other",
+   "statement": "Maintain continuous hospital access and coordinate demolition/construction in areas remaining operational or treating patients at least 72 hours before work.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 1,
+   "quote": "All patch and repair work done outside the limit of the new construction shall be included as part of the scope of work.",
+   "section": "1.0 Scope",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Allow for utility connections outside the construction limits and patch/repair all affected finishes to match the existing building. Confirm allocation of restoration between GC and electrical subcontractor.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 1,
+   "quote": "The general contractor shall furnish, install, and maintain suitable barriers (fire-rated where required)",
+   "section": "1.0 Scope",
+   "doc_index": 1,
+   "relevance": "other",
+   "statement": "GC furnishes, installs, maintains, and removes suitable infection-control barriers, fire-rated where required, to prevent public entry and transfer of dust, odor, debris, and infectious material into adjacent patient/treatment areas.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 1,
+   "quote": "The general contractor shall provide electrical, data, and plumbing connections from infrastructure to pre-manufactured furniture systems.",
+   "section": "1.0 Scope",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Include electrical and data infrastructure connections to pre-manufactured furniture systems under the GC's contract. Coordinate requirements with UMC before starting and obtain furniture drawings/elevations for connection quantities and loads.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 1,
+   "quote": "The general contractor is responsible for contacting and coordinating with Honeywell prior to demolition to disarm the existing system.",
+   "section": "1.0 Scope",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "GC must contact and coordinate with Honeywell to disarm the existing system before demolition; use the referenced Honeywell scope to establish subcontract boundaries.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 1,
+   "quote": "That is in addition to UMC\u2019s standard specification sheets.",
+   "section": "1.0 Scope",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Electrical demolition and new installations must comply with applicable codes; GC and subcontractors must include permit-set scope, specifications, notes, indexes, legends, and UMC standard specification sheets.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 1,
+   "quote": "Time of work will be after business hours (6:00 am \u2013 3:30 pm) Monday through Friday.",
+   "section": "1.0 Scope",
+   "doc_index": 1,
+   "relevance": "other",
+   "statement": "Page 1 describes after-business-hours work and requires major utility disruptions to be scheduled 48 hours ahead and performed off hours. Resolve conflict with the daytime hours stated later.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 2,
+   "quote": "Access controls and all Fire detection systems for the building are provided by Honeywell.",
+   "section": "1.0 Scope, continued",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Coordinate fire detection and access-control modifications with Honeywell. Integrate any new/additional card readers with the existing Honeywell access-control system; this statement does not define payment or installation boundaries.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 2,
+   "quote": "Removal, storage, and re-installation of these devices shall be the responsibility of the SUCCESSFUL BIDDER.",
+   "section": "1.0 Scope, continued",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Survey exact locations of telemetry antennas, Centrak devices, and wireless access points; deliver a marked-up floor plan to the engineering representative before demolition. Successful bidder removes, stores, and reinstalls these devices.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 2,
+   "quote": "SUCCESSFUL BIDDER must be able to demonstrate experience working in an operational hospital.",
+   "section": "1.1\u20131.3",
+   "doc_index": 1,
+   "relevance": "other",
+   "statement": "Demonstrate operational-hospital experience, coordinate the work approach with UMC, and submit a schedule minimizing impact to owner operations.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 2,
+   "quote": "The specifications herein describe the work necessary to meet the performance requirements of UMC, and shall be considered the minimum requirements expected of the contractor.",
+   "section": "2.0; 5.1.1",
+   "doc_index": 1,
+   "relevance": "other",
+   "statement": "Provide complete work including labor, services, insurance, permits, licenses, materials, equipment, tools, transportation, supplies, management, supervision, and disposal containers. Insurance limits and coverage types are not specified here.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 2,
+   "quote": "All subcontractors shall possess the appropriate valid specialty license(s), in accordance with NRS, Chapter 624.",
+   "section": "3.1; 4.1\u20134.2",
+   "doc_index": 1,
+   "relevance": "other",
+   "statement": "Comply with applicable NRS Chapter 338 Public Works and Chapter 624 Contractors requirements. GC requires a valid B\u2013General Building license; subcontractors require appropriate valid specialty licenses.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 3,
+   "quote": "Contractor will furnish and install proper floor and wall protection for existing finishes.",
+   "section": "5.1.1\u20135.1.3",
+   "doc_index": 1,
+   "relevance": "other",
+   "statement": "Provide daily cleanup, covered-container refuse transport through the facility, and protection of existing floors/walls. Coordinate dumpster requirements and location with GC/UMC.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 3,
+   "quote": "Contractor is responsible to set up full containment area(s), and negative air filtration systems for the scope of work.",
+   "section": "5.1.4; 5.1.7\u20135.1.9",
+   "doc_index": 1,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "Provide full containment and negative-air filtration; comply with infection-control permits, applicable ILSM plans, and protection of HVAC ducts during dust/smoke-producing work. Coordinate any temporary electrical supply for containment equipment; supply requirements are not stated.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 3,
+   "quote": "Contractor will provide a copy of their current Safety Manual to UMC\u2019s Safety Department.",
+   "section": "5.1.5\u20135.1.6; 5.1.10",
+   "doc_index": 1,
+   "relevance": "other",
+   "statement": "Submit current Safety Manual to UMC Safety Department, follow masking rules for workers without flu vaccination, and wear Engineering/Plant Operations badges at all times.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 3,
+   "quote": "No mixing of sealant types is allowed in any penetration location.",
+   "section": "5.1.11",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Seal all penetrations disturbed or created by electrical work; provide and follow UL penetration details and do not mix sealant types at a penetration.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 3,
+   "quote": "Hot work permits issued at the Engineering Department are required when cutting or grinding, or when performing any work that requires an open flame.",
+   "section": "5.2.1\u20135.2.2",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Obtain required permits and carry associated fees. Obtain Engineering Department hot-work permits for cutting, grinding, or any open-flame work.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 4,
+   "quote": "Secure/cover fire alarm smoke detectors in areas of construction to avoid false alarms.",
+   "section": "5.2.5",
+   "doc_index": 1,
+   "relevance": "electrical",
+   "statement": "Protect fire-alarm smoke detectors in construction areas against false alarms; coordinate approved protection and impairment procedures with UMC/Honeywell.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 4,
+   "quote": "Salvage or storage of any kind of contents from the Location.",
+   "section": "5.2.7\u20135.3.2",
+   "doc_index": 1,
+   "relevance": "other",
+   "statement": "Carry required third-party inspections, repair/replacement of damaged building materials and adjacent surfaces, and security of tools/materials while physically present. General exclusions identify contents salvage/storage and site security during work.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 4,
+   "quote": "All other materials necessary to successfully complete the project in its entirety.",
+   "section": "6.2.1",
+   "doc_index": 1,
+   "relevance": "other",
+   "statement": "Contractor provides containment materials/equipment, PPE, and all other materials necessary for a complete project; this page identifies no owner-furnished electrical devices.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 4,
+   "quote": "All work to take place during hours of (6 am \u2013 3:30 pm), Monday \u2013 Friday. Unless otherwise agreed upon in writing by both parties.",
+   "section": "5.2.6; 7.1.1\u20137.1.3",
+   "doc_index": 1,
+   "relevance": "other",
+   "statement": "Sections 5.2.6 and 7.1.1 establish weekday daytime work unless otherwise agreed in writing. Agree on schedule/phasing in writing before starting and order long-lead materials within two weeks of the associated purchase order.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 5,
+   "quote": "All utility disruptions must be scheduled with UMC\u2019s Engineering Department at least 48 hours in advance.",
+   "section": "7.1.4\u20137.1.5",
+   "doc_index": 1,
+   "relevance": "other",
+   "statement": "Complete all project work within 90 days of UMC notice to proceed. Schedule all utility disruptions with UMC Engineering at least 48 hours ahead; work outside established hours may be required to minimize impacts.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 5,
+   "quote": "Any deficiencies found must be corrected by contractor before final acceptance.",
+   "section": "7.2.1; 7.3.1",
+   "doc_index": 1,
+   "relevance": "other",
+   "statement": "Arrange access and badges through Plant Operations/Engineering. UMC Engineering reviews completed work, and deficiencies must be corrected before final acceptance.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 5,
+   "quote": "Contractor shall secure the dumpster during non-working hours.",
+   "section": "8.1.1",
+   "doc_index": 1,
+   "relevance": "other",
+   "statement": "Owner identifies dumpster staging location; contractor obtains, places, and secures dumpster during non-working hours. Coordinate electrical-demolition disposal with the GC.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 5,
+   "quote": "LCN Sentronics Electrified Fire/Life Safety closers",
+   "section": "General Performance Standards and Brand or an Approved Equal / Surface closers",
+   "doc_index": 1,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "Coordinate electrical/fire-alarm interfaces for specified electrified fire/life-safety door closers. Door locations, quantities, loads, and trade assignment are absent.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "page": 6,
+   "quote": "LCN Senior Swing operators. Pair \u2013 9550 Series. Single \u2013 9530/9540 series. Power Supply \u2013 Von Duprin PS 914 or equal",
+   "section": "General Performance Standards and Brand or an Approved Equal / Low Energy Auto Operators",
+   "doc_index": 1,
+   "relevance": "other_trade_affecting_electrical",
+   "statement": "Coordinate power and controls for low-energy automatic door operators and their power supplies. Electrical ratings, quantities, and furnishing/installation boundaries are not stated.",
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  }
+ ],
+ "specs": [
+  {
+   "item": "Building access controls and fire detection systems",
+   "page": 2,
+   "section": "1.0 Scope, continued",
+   "doc_index": 1,
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "manufacturer": "Honeywell",
+   "sheet_number": null,
+   "approved_equals": [],
+   "basis_of_design": "Access controls and all Fire detection systems for the building are provided by Honeywell.",
+   "substitution_rule": null,
+   "material_category_hint": "Low Voltage",
+   "vendor_or_organization_requirements": "Any additional or new card readers will need to be integrated with the Honeywell access controls system."
+  },
+  {
+   "item": "Penetration sealing",
+   "page": 3,
+   "section": "5.1.11",
+   "doc_index": 1,
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "manufacturer": null,
+   "sheet_number": null,
+   "approved_equals": [],
+   "basis_of_design": "UL penetration details will be provided by contractor and followed when performing this work.",
+   "substitution_rule": "No mixing of sealant types is allowed in any penetration location.",
+   "material_category_hint": "General Material",
+   "vendor_or_organization_requirements": "Contractor is responsible for sealing of all penetrations disturbed or created in performance of contract covered work."
+  },
+  {
+   "item": "Electrified fire/life-safety door closers",
+   "page": 5,
+   "section": "Surface closers",
+   "doc_index": 1,
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "manufacturer": "LCN",
+   "sheet_number": null,
+   "approved_equals": [],
+   "basis_of_design": "LCN Sentronics Electrified Fire/Life Safety closers",
+   "substitution_rule": "General Performance Standards and Brand or an Approved Equal",
+   "material_category_hint": "Other",
+   "vendor_or_organization_requirements": "Coordinate with door-hardware scope; no quantities or electrical ratings provided."
+  },
+  {
+   "item": "Low Energy Auto Operators",
+   "page": 6,
+   "section": "Low Energy Auto Operators",
+   "doc_index": 1,
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "manufacturer": "LCN",
+   "sheet_number": null,
+   "approved_equals": [],
+   "basis_of_design": "LCN Senior Swing operators. Pair \u2013 9550 Series. Single \u2013 9530/9540 series.",
+   "substitution_rule": "General Performance Standards and Brand or an Approved Equal",
+   "material_category_hint": "Other",
+   "vendor_or_organization_requirements": "UMC door-hardware standard; electrical connection requirements and trade assignment require confirmation."
+  },
+  {
+   "item": "Automatic door operator power supply",
+   "page": 6,
+   "section": "Low Energy Auto Operators",
+   "doc_index": 1,
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "manufacturer": "Von Duprin",
+   "sheet_number": null,
+   "approved_equals": [],
+   "basis_of_design": "Power Supply \u2013 Von Duprin PS 914 or equal",
+   "substitution_rule": "or equal",
+   "material_category_hint": "Low Voltage",
+   "vendor_or_organization_requirements": "UMC door-hardware standard; confirm furnishing, installation, and circuiting responsibilities."
+  },
+  {
+   "item": "Door/frame paint for restoration of electrical-work damage",
+   "page": 6,
+   "section": "Door and Frame Paint Spec",
+   "doc_index": 1,
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "manufacturer": "Sherwin-Williams",
+   "sheet_number": null,
+   "approved_equals": [],
+   "basis_of_design": "Pro Industrial; Waterborne ALKYD; Gloss; FM 8000DE; Slate 209; Custom Manual Match; B53W01053; 650891740",
+   "substitution_rule": "Substitutes for paint brand and sheen are not acceptable.",
+   "material_category_hint": "Other",
+   "vendor_or_organization_requirements": "Coordinate restoration with GC and UMC; paint formulation shown on page 6."
+  },
+  {
+   "item": "Wall/ceiling paint for restoration of electrical-work damage",
+   "page": 6,
+   "section": "UMC Paint Standards for walls/ceilings",
+   "doc_index": 1,
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "manufacturer": "Dunn Edwards",
+   "sheet_number": null,
+   "approved_equals": [],
+   "basis_of_design": "UMC Paint Standards for walls/ceilings Dunn Edwards Versasatin",
+   "substitution_rule": "Substitutes for paint brand and sheen are not acceptable.",
+   "material_category_hint": "Other",
+   "vendor_or_organization_requirements": "Coordinate applicable UMC standard color and matching existing finishes with GC/owner."
+  }
+ ],
+ "counts": [],
+ "source": {
+  "groups": 1,
+  "rolled_up": false,
+  "failed_groups": 0
+ },
+ "details": [],
+ "summary": "Exhibit A defines the scope and execution requirements for the 2026-05 UMC Outpatient Pharmacy Remodel at 1800 W Charleston Blvd, first-floor main lobby. Electrical work includes demolition and new installations, infrastructure connections to pre-manufactured furniture, Honeywell system coordination, and removal, storage, and reinstallation of existing telemetry, Centrak, and wireless access devices. Work occurs in an operational hospital with continuous facility access, infection-control containment, advance coordination, and scheduled utility outages. Completion is required within 90 days of notice to proceed, and long-lead materials must be ordered within two weeks of the associated purchase order. The document conflicts on normal working hours and on device storage versus the general storage exclusion. No electrical device quantities, circuit lengths, bid deadline, bonding requirements, or explicit prevailing-wage provisions are stated in these pages.",
+ "category": "rfp",
+ "questions": [
+  {
+   "why": "Page 1 requires after-business-hours work, while sections 5.2.6 and 7.1.1 on page 4 specify daytime hours. Confirm the controlling requirement and required outage windows.",
+   "page": 1,
+   "question": "Are normal construction hours 6:00 am\u20133:30 pm Monday\u2013Friday or after those business hours?",
+   "doc_index": 1,
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "why": "The exhibit assigns coordination to the GC and identifies Honeywell as system provider but does not establish the electrical subcontractor's installation or vendor boundary.",
+   "page": 1,
+   "question": "Provide Honeywell's referenced scope and clarify who contracts and pays for disarming, fire detection modifications, access-control integration, programming, testing, and restoration.",
+   "doc_index": 1,
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "why": "Infrastructure connections are required, but there are no quantities, ratings, or connection details in this exhibit.",
+   "page": 1,
+   "question": "Provide pre-manufactured furniture drawings/elevations, electrical and data connection schedules, loads, and demarcation points.",
+   "doc_index": 1,
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "why": "Page 2 explicitly requires removal, storage, and reinstallation, but page 4 excludes contents salvage/storage. No device quantities are stated.",
+   "page": 2,
+   "question": "Provide an inventory and relocation requirements for telemetry antennas, Centrak devices, and wireless access points, including storage conditions and reinstatement/testing responsibilities.",
+   "doc_index": 1,
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "why": "Hospital containment and life-safety requirements affect work methods and temporary electrical scope, but only general obligations and a referenced sample assessment are provided.",
+   "page": 3,
+   "question": "Provide the project-specific ICRA, applicable ILSM plans, containment phasing, and temporary-power requirements for negative-air filtration equipment.",
+   "doc_index": 1,
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "why": "Pages 5\u20136 list product standards but no device quantities, locations, voltages, loads, or wiring requirements.",
+   "page": 6,
+   "question": "Provide door schedules and interface details identifying electrified closers, automatic operators, power supplies, access-control hardware, and required fire-alarm interlocks; clarify furnishing and installation by trade.",
+   "doc_index": 1,
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "why": "These requirements are not stated in Exhibit A. NRS Chapter 338 is referenced, but no specific wage schedule or reporting requirements are supplied here.",
+   "page": 2,
+   "question": "Provide remaining bid/contract instructions, including bid deadline and form, bonding and insurance requirements, applicable prevailing-wage determination, and any alternates, allowances, unit-price requirements, or owner workforce programs.",
+   "doc_index": 1,
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  },
+  {
+   "why": "The exhibit generally assigns these obligations to the contractor without defining subcontract boundaries; they can materially affect the electrical bid.",
+   "page": 4,
+   "question": "Confirm responsibility between GC and electrical subcontractor for patching/painting, penetration sealing, permits, third-party inspections, and detector protection.",
+   "doc_index": 1,
+   "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+   "sheet_number": null
+  }
+ ],
+ "schedules": [],
+ "unresolved_flags": [],
+ "escalation_patches": []
+}

@@ -86,12 +86,18 @@ class PackDoc:
     chunks: list[FileChunk] = field(default_factory=list)
     page_count: int = 0
     file_bytes: int = 0
+    # Page facts (docs/AI_ESTIMATING_BUILD_SPEC.md 6 WS1): the tier B spec
+    # snippets of a text document, printed once with the document's first
+    # group; `spec_snippet_tokens` is their explicit token cost, added to
+    # that group's estimate. None and 0 without facts.
+    spec_snippets: str | None = None
+    spec_snippet_tokens: int = 0
 
     @property
     def est_tokens(self) -> int:
         """Estimated input tokens of the whole document (no ledger or prompt)."""
         if self.kind == "file":
-            return sum(c.est_tokens for c in self.chunks)
+            return sum(c.est_tokens for c in self.chunks) + int(self.spec_snippet_tokens or 0)
         return sum(p.est_tokens for p in self.pages)
 
 
@@ -178,6 +184,8 @@ def plan_file_document(
     max_bytes: int = images.FILE_MAX_BYTES,
     max_pages: int = images.FILE_MAX_PAGES,
     tokens_per_page: int = FILE_TOKENS_PER_PAGE,
+    spec_snippets: str | None = None,
+    spec_snippet_tokens: int = 0,
 ) -> PackDoc:
     """Plan a PDF sent as `input_file`. `chunks` are the (start_page,
     end_page, data) tuples plans_reader_images.pdf_chunks returns when the
@@ -185,7 +193,8 @@ def plan_file_document(
     length. Otherwise spans are estimated by pages and pro-rated bytes under
     the same caps (the cost preview runs before any cutting). Chunk
     boundaries do not change the group count: pack_groups fills each
-    group's remaining room from the next chunk."""
+    group's remaining room from the next chunk. `spec_snippets` (page
+    facts) ride with the document's first group at `spec_snippet_tokens`."""
     if page_count <= 0:
         raise ValueError("The document has no pages.")
     if chunks is None:
@@ -215,6 +224,8 @@ def plan_file_document(
         chunks=planned,
         page_count=page_count,
         file_bytes=file_bytes,
+        spec_snippets=spec_snippets,
+        spec_snippet_tokens=int(spec_snippet_tokens or 0),
     )
 
 
@@ -366,6 +377,9 @@ def pack_groups(
                     g.images += n_img
                     page_tokens += plan.est_tokens
                 continue
+            # The document's spec snippets (page facts) ride with its first
+            # piece: their tokens count against that group's room.
+            snippet_tokens = int(doc.spec_snippet_tokens or 0)
             for raw in doc.chunks:
                 if raw.bytes > file_max_bytes:
                     mb = file_max_bytes / (1024 * 1024)
@@ -377,14 +391,14 @@ def pack_groups(
                 done = 0  # pages of this chunk already placed
                 while done < n_pages:
                     used_bytes = current.file_bytes if current is not None else 0
-                    tok_left = room - page_tokens
+                    tok_left = room - page_tokens - snippet_tokens
                     bytes_left = file_max_bytes - used_bytes
                     left = n_pages - done
                     n = left
                     if (
                         current is not None
                         and not _span_fits(raw, done, left, tok_left, bytes_left)
-                        and _span_fits(raw, done, left, room, file_max_bytes)
+                        and _span_fits(raw, done, left, room - snippet_tokens, file_max_bytes)
                     ):
                         # The rest fits a fresh group whole: keep it in one
                         # piece rather than spreading a short document.
@@ -420,7 +434,8 @@ def pack_groups(
                     g.items.extend(_file_items(doc.document_id, s_page, e_page))
                     g.file_ranges.append((doc.document_id, s_page, e_page, piece_bytes))
                     g.file_bytes += piece_bytes
-                    page_tokens += piece_tokens
+                    page_tokens += piece_tokens + snippet_tokens
+                    snippet_tokens = 0
                     done += n
                     if oversize:
                         g.oversize = True

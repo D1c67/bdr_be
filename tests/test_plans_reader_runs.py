@@ -839,6 +839,9 @@ def _sub(env, run, doc, category, index, status="done", output=None, pages=None,
 
 
 def test_rollup_is_added_once_when_a_categorys_groups_are_done(env):
+    # Spec 4.2: the roll-up model call exists only behind plans_reader_llm_rollup
+    # (the code merge replaces it by default).
+    env.settings = make_settings(plans_reader_llm_rollup=True)
     run = _reading_run(env)
     doc = seed_document(env, run)
     _sub(env, run, doc, "electrical_drawings", 0)
@@ -871,7 +874,10 @@ def test_reading_to_consolidating_writes_outputs_and_enqueues_main_once(env):
     assert sorted(o["category"] for o in outputs) == ["electrical_drawings", "specifications"]
     assert all(o["version"] == 1 and o["source_group_ids"] for o in outputs)
     ele = next(o for o in outputs if o["category"] == "electrical_drawings")["output"]
-    assert ele["escalation_patches"] == [] and ele["source"] == {"groups": 1, "failed_groups": 0, "rolled_up": False}
+    # The stored category output is v2 (the WS4 code merge, spec 4.2): the
+    # patches are applied into the rows, so there is no escalation_patches list.
+    assert ele["rows_version"] == 2 and not ele.get("escalation_patches")
+    assert {k: ele["source"][k] for k in ("groups", "failed_groups", "rolled_up")} == {"groups": 1, "failed_groups": 0, "rolled_up": False}
     mains = env.db.rows("plans_reader_groups", kind="main")
     assert len(mains) == 1 and mains[0]["est_input_tokens"] > 0
     assert [(j["job_type"], j["target_id"]) for j in env.enqueued] == [("plans_reader_main", mains[0]["id"])]
@@ -890,6 +896,7 @@ def test_stale_advance_loses_the_stage_cas(env):
 
 
 def test_concurrent_workers_enqueue_the_rollup_and_the_main_group_exactly_once(env):
+    env.settings = make_settings(plans_reader_llm_rollup=True)
     run = _reading_run(env)
     doc = seed_document(env, run)
     _sub(env, run, doc, "electrical_drawings", 0)
@@ -988,7 +995,8 @@ def test_flagged_sheet_gets_an_escalation_group_within_budget(env):
     ).eq("id", esc[0]["id"]).execute()
     runs.advance(env.db, run["id"])
     out = env.db.rows("plans_reader_outputs", category="electrical_drawings")[0]["output"]
-    assert [p["summary"] for p in out["escalation_patches"]] == ["patch"] and out["unresolved_flags"] == []
+    # v2 (the WS4 code merge): the patch is applied into the rows and named in the sources.
+    assert out["rows_version"] == 2 and esc[0]["id"] in out["source"]["group_ids"] and out["unresolved_flags"] == []
 
 
 def test_escalation_respects_the_budget_and_records_unresolved_flags(env):

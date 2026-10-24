@@ -191,7 +191,11 @@ def test_build_ledger_uses_the_project_name_and_address(env):
     run = runs.create_run(env.db, name="R", source="project", project_id=project["id"], render_mode=None,
                           user=user())
     ledger = agents.build_ledger(env.db, run, [])
-    assert ledger["project"] == {"name": "YMCA Torrey Pines", "number": "26.10.7", "address": "1 Main St"}
+    # WS5 (spec 5.4): the project record's bid conditions ride beside the three printed fields.
+    assert {k: ledger["project"][k] for k in ("name", "number", "address")} == {
+        "name": "YMCA Torrey Pines", "number": "26.10.7", "address": "1 Main St"
+    }
+    assert set(ledger["project"]) == {"name", "number", "address", "wage_type", "owner_type", "labor_time", "labor_needed", "project_type"}
 
 
 def _ledger_with(n_legends, w_in, h_in):

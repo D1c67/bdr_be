@@ -1,0 +1,74 @@
+[
+ {
+  "id": "06f712a6-f243-4bab-b334-12b3906cae66",
+  "filename": "Reference Material - Architectural - ELEC_RESPONSE_TO_CLV_COMMENTS D1.pdf",
+  "label": "electrical_drawings",
+  "status": "labeled",
+  "mime_type": "application/pdf",
+  "page_count": 10,
+  "size_bytes": 3132314,
+  "source_project_file_id": "4668f7bc-8726-433e-a2bc-7783462ad1db",
+  "split_file_id": null,
+  "created_at": "2026-10-18T18:32:33.487828+00:00"
+ },
+ {
+  "id": "08df80a2-3447-4862-aacf-03c8f7cbc070",
+  "filename": "Reference Material - Architectural - MECH_RESPONSE_TO_CLV_COMMENTS D1.pdf",
+  "label": "electrical_drawings",
+  "status": "labeled",
+  "mime_type": "application/pdf",
+  "page_count": 8,
+  "size_bytes": 2604511,
+  "source_project_file_id": "dc0f91cb-dc10-4d5e-b476-75a13aa0d0ad",
+  "split_file_id": null,
+  "created_at": "2026-10-18T18:32:34.343299+00:00"
+ },
+ {
+  "id": "6b017d0e-aa60-4d7c-a668-383acc851c83",
+  "filename": "Exhibit A - Scope of Work.pdf",
+  "label": null,
+  "status": "split",
+  "mime_type": "application/pdf",
+  "page_count": 6,
+  "size_bytes": 356622,
+  "source_project_file_id": "1e1d5dae-1251-47cc-af18-68292ec63511",
+  "split_file_id": "8411460d-ae79-4a56-b635-ac4433e96baa",
+  "created_at": "2026-10-18T18:32:34.852392+00:00"
+ },
+ {
+  "id": "94899f18-d8ad-46e6-b184-9cd3ed0418bd",
+  "filename": "Reference Material - Architectural - SPECS.pdf",
+  "label": "specifications",
+  "status": "labeled",
+  "mime_type": "application/pdf",
+  "page_count": 166,
+  "size_bytes": 3054678,
+  "source_project_file_id": "f3877f3f-e773-4cf6-a5c8-731cdb927e8f",
+  "split_file_id": null,
+  "created_at": "2026-10-18T18:32:35.809449+00:00"
+ },
+ {
+  "id": "9f92cd3f-a793-48e9-a8eb-6612ca5fc322",
+  "filename": "Reference Material - Tech Specs 1.pdf",
+  "label": "specifications",
+  "status": "labeled",
+  "mime_type": "application/pdf",
+  "page_count": 2,
+  "size_bytes": 3228361,
+  "source_project_file_id": "e15b6c00-3720-4822-bd19-d5601c4a466e",
+  "split_file_id": null,
+  "created_at": "2026-10-18T18:32:36.416833+00:00"
+ },
+ {
+  "id": "4a1d17bc-630d-4635-ad2f-ad6cc317589c",
+  "filename": "Reference Material - UMC Door Spec Guide 2025.pdf",
+  "label": "specifications",
+  "status": "labeled",
+  "mime_type": "application/pdf",
+  "page_count": 2,
+  "size_bytes": 149498,
+  "source_project_file_id": "d851c581-9968-4578-9683-39a0e4a1dcb9",
+  "split_file_id": null,
+  "created_at": "2026-10-18T18:32:37.028318+00:00"
+ }
+]

@@ -1,0 +1,70 @@
+{
+ "runs": [],
+ "pages": [
+  {
+   "page": 7,
+   "tags": [
+    "demolition",
+    "receptacles",
+    "hatched receptacle symbols",
+    "existing to remain",
+    "keyed notes"
+   ],
+   "notes": [
+    "The enlarged view distinguishes open receptacle graphics from diagonally hatched graphics. Several hatched graphics have additional transverse bars; a uniform duplex classification is not supported.",
+    "Do not infer normal, emergency, or other circuit-system assignments from symbol shading without the electrical legend.",
+    "Retain first-pass quantities for devices extending outside the supplied view. The seven floor assemblies and lower receptacle groups cannot be completely rechecked here.",
+    "The roll-up door keynote 3 is visible; its first-pass retain/protect scope is unchanged.",
+    "Title block and printed scale are outside the tile; sheet identification and scale are carried forward from the first pass."
+   ],
+   "scale": "1/4\" = 1'-0\"",
+   "title": "OVERALL POWER PLAN - DEMOLITION WORK",
+   "doc_index": 1,
+   "page_role": "plan",
+   "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+   "sheet_number": "ED2.01",
+   "resolution_flags": [
+    {
+     "page": 7,
+     "reason": "The supplied view cuts through a square device symbol at its lower edge and does not expose all seven previously reported floor assemblies or the complete lower receptacle groups. A complete lower-plan view is needed to verify those quantities.",
+     "region": "Lower edge of supplied region 0.160,0.370,0.630,0.590 and continuation below it",
+     "doc_index": 1,
+     "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20"
+    }
+   ]
+  }
+ ],
+ "scope": [],
+ "specs": [],
+ "counts": [
+  {
+   "page": 7,
+   "unit": "EA",
+   "basis": "counted_symbols",
+   "notes": "corrects first pass: Remove existing duplex receptacle, filled symbol. The enlarged graphics are diagonally hatched, and several have additional transverse bars unlike the simpler duplex graphic. Do not classify all nine as duplex or assign a circuit-system meaning without the legend. Quantity 9 is retained from the first pass, not independently recounted in full: part of this group lies outside the supplied view. This row replaces, rather than adds to, the first-pass filled-symbol row.",
+   "location": "Demolition work area; first-pass locations retained pending a complete lower-plan view",
+   "quantity": 9,
+   "doc_index": 1,
+   "confidence": 0.75,
+   "description": "Remove existing receptacles, hatched symbols with differing bar configurations",
+   "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+   "sheet_number": "ED2.01",
+   "symbol_or_tag": "(X)",
+   "material_category_hint": "Demolition"
+  }
+ ],
+ "details": [],
+ "summary": "Higher resolution shows that the dark receptacle symbols are hatched and include differing bar configurations; they should not all be classified as duplex receptacles. Quantities are retained because the supplied view does not fully expose the lower devices or seven floor assemblies.",
+ "category": "electrical_drawings",
+ "questions": [
+  {
+   "why": "Higher resolution reveals different configurations within the first-pass filled-symbol group. The legend is needed before allocating those assemblies by receptacle type or electrical system.",
+   "page": 7,
+   "question": "Confirm the legend definitions for the hatched receptacle graphics with and without transverse bars, including duplex versus multiple-receptacle configurations.",
+   "doc_index": 1,
+   "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+   "sheet_number": "ED2.01"
+  }
+ ],
+ "schedules": []
+}

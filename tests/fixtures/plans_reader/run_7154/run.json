@@ -1,0 +1,461 @@
+{
+ "id": "ff8fad25-ee33-4a0e-b817-09f5ee5f562f",
+ "name": "7154 Test",
+ "status": "done",
+ "source": "project",
+ "project_id": "7dfc64e6-36ef-4c67-9d02-0d7942015011",
+ "model": "gpt-6-astra",
+ "reasoning_effort": "medium",
+ "render_mode": "adaptive",
+ "ledger": {
+  "images": [],
+  "project": {
+   "name": "UMC Outpatient Pharmacy Remodel",
+   "number": "26.8.7154",
+   "address": "1800 W. Charleston Blvd."
+  },
+  "spec_toc": [
+   {
+    "title": "TABLE OF CONTENTS",
+    "section": "00 01 10",
+    "page_end": 4,
+    "page_start": 2,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "PROJECT MANAGEMENT AND COORDINATION",
+    "section": "01 31 00",
+    "page_end": 13,
+    "page_start": 5,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "PHOTOGRAPHIC DOCUMENTATION",
+    "section": "01 32 33",
+    "page_end": 16,
+    "page_start": 14,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "SUBMITTAL PROCEDURES",
+    "section": "01 33 00",
+    "page_end": 23,
+    "page_start": 17,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "TEMPORARY FACILITIES AND CONTROLS",
+    "section": "01 50 00",
+    "page_end": 30,
+    "page_start": 24,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "MATERIALS AND EQUIPMENT",
+    "section": "01 60 00",
+    "page_end": 33,
+    "page_start": 31,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "CUTTING AND PATCHING",
+    "section": "01 73 29",
+    "page_end": 36,
+    "page_start": 34,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "CLOSEOUT PROCEDURES",
+    "section": "01 77 00",
+    "page_end": 41,
+    "page_start": 37,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "OPERATION AND MAINTENANCE DATA",
+    "section": "01 78 23",
+    "page_end": 47,
+    "page_start": 42,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "PROJECT RECORD DOCUMENTS",
+    "section": "01 78 39",
+    "page_end": 50,
+    "page_start": 48,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "DEMONSTRATION AND TRAINING",
+    "section": "01 79 00",
+    "page_end": 53,
+    "page_start": 51,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "SELECTIVE DEMOLITION",
+    "section": "02 41 19",
+    "page_end": 57,
+    "page_start": 54,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "MISCELLANEOUS ROUGHCARPENTRY",
+    "section": "06 10 53",
+    "page_end": 60,
+    "page_start": 58,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "PLASTIC-LAMINATE-FACED ARCHITECTURAL CABINETS",
+    "section": "06 41 16",
+    "page_end": 71,
+    "page_start": 61,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "SOLID SURFACING FABRICATIONS",
+    "section": "06 61 16",
+    "page_end": 74,
+    "page_start": 72,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "PENETRATION FIRESTOPPING",
+    "section": "07 84 13",
+    "page_end": 78,
+    "page_start": 75,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "JOINT SEALANTS",
+    "section": "07 92 00",
+    "page_end": 83,
+    "page_start": 79,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "HOLLOW METAL DOORS AND FRAMES",
+    "section": "08 11 13",
+    "page_end": 90,
+    "page_start": 84,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "WOOD DOORS",
+    "section": "08 14 00",
+    "page_end": 95,
+    "page_start": 91,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "SPECIAL FUNCTION DOORS",
+    "section": "08 34 00",
+    "page_end": 100,
+    "page_start": 96,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "ALUMINUM WINDOWS",
+    "section": "08 51 13",
+    "page_end": 107,
+    "page_start": 101,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "GLAZING",
+    "section": "08 80 00",
+    "page_end": 109,
+    "page_start": 108,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "MOISTURE VAPOR EMISSION CONTROL",
+    "section": "09 05 61",
+    "page_end": 113,
+    "page_start": 110,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "GYPSUM BOARD",
+    "section": "09 29 00",
+    "page_end": 127,
+    "page_start": 114,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "ACOUSTICAL CEILING TILES",
+    "section": "09 51 00",
+    "page_end": 131,
+    "page_start": 128,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "RESILIENT FLOORING",
+    "section": "09 65 00",
+    "page_end": 136,
+    "page_start": 132,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "ACOUSTICAL INSULATION",
+    "section": "09 81 00",
+    "page_end": 138,
+    "page_start": 137,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "PAINTING",
+    "section": "09 91 00",
+    "page_end": 145,
+    "page_start": 139,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "ROOM IDENTIFICATION SIGNAGE",
+    "section": "10 14 23",
+    "page_end": 148,
+    "page_start": 146,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "WALL PROTECTION",
+    "section": "10 26 00",
+    "page_end": 154,
+    "page_start": 149,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "TOILET ACCESSORIES",
+    "section": "10 28 13",
+    "page_end": 157,
+    "page_start": 155,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "ROLLER WINDOW SHADES",
+    "section": "12 24 13",
+    "page_end": 162,
+    "page_start": 158,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "title": "SOLID SURFACING COUNTERTOPS",
+    "section": "12 36 61",
+    "page_end": 166,
+    "page_start": 163,
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   }
+  ],
+  "documents": [
+   {
+    "name": "Reference Material - Architectural - ELEC_RESPONSE_TO_CLV_COMMENTS D1.pdf",
+    "pages": 10,
+    "category": "electrical_drawings",
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20"
+   },
+   {
+    "name": "Reference Material - Architectural - MECH_RESPONSE_TO_CLV_COMMENTS D1.pdf",
+    "pages": 8,
+    "category": "electrical_drawings",
+    "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1"
+   },
+   {
+    "name": "Reference Material - Architectural - SPECS.pdf",
+    "pages": 166,
+    "category": "specifications",
+    "document_id": "d05754bb-b12b-4cbd-860d-52fff11d0762"
+   },
+   {
+    "name": "Reference Material - Tech Specs 1.pdf",
+    "pages": 2,
+    "category": "specifications",
+    "document_id": "49386a84-a15d-4fb1-a568-9dece878d298"
+   },
+   {
+    "name": "Reference Material - UMC Door Spec Guide 2025.pdf",
+    "pages": 2,
+    "category": "specifications",
+    "document_id": "43ca786f-4982-44ba-b31c-42054c359858"
+   },
+   {
+    "name": "Exhibit A - Scope of Work",
+    "pages": 6,
+    "category": "rfp",
+    "document_id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0"
+   }
+  ],
+  "est_images": 0,
+  "est_tokens": 1039,
+  "sheet_index": [
+   {
+    "page": 1,
+    "title": null,
+    "category": "electrical_drawings",
+    "page_role": "other",
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+    "sheet_number": null
+   },
+   {
+    "page": 2,
+    "title": null,
+    "category": "electrical_drawings",
+    "page_role": "other",
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+    "sheet_number": null
+   },
+   {
+    "page": 3,
+    "title": null,
+    "category": "electrical_drawings",
+    "page_role": "other",
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+    "sheet_number": null
+   },
+   {
+    "page": 4,
+    "title": null,
+    "category": "electrical_drawings",
+    "page_role": "other",
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+    "sheet_number": null
+   },
+   {
+    "page": 5,
+    "title": null,
+    "category": "electrical_drawings",
+    "page_role": "other",
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+    "sheet_number": null
+   },
+   {
+    "page": 6,
+    "title": null,
+    "category": "electrical_drawings",
+    "page_role": "other",
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+    "sheet_number": null
+   },
+   {
+    "page": 7,
+    "title": null,
+    "category": "electrical_drawings",
+    "page_role": "other",
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+    "sheet_number": null
+   },
+   {
+    "page": 8,
+    "title": null,
+    "category": "electrical_drawings",
+    "page_role": "other",
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+    "sheet_number": null
+   },
+   {
+    "page": 9,
+    "title": null,
+    "category": "electrical_drawings",
+    "page_role": "other",
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+    "sheet_number": null
+   },
+   {
+    "page": 10,
+    "title": null,
+    "category": "electrical_drawings",
+    "page_role": "other",
+    "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+    "sheet_number": null
+   },
+   {
+    "page": 1,
+    "title": null,
+    "category": "electrical_drawings",
+    "page_role": "other",
+    "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+    "sheet_number": null
+   },
+   {
+    "page": 2,
+    "title": null,
+    "category": "electrical_drawings",
+    "page_role": "other",
+    "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+    "sheet_number": null
+   },
+   {
+    "page": 3,
+    "title": null,
+    "category": "electrical_drawings",
+    "page_role": "other",
+    "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+    "sheet_number": null
+   },
+   {
+    "page": 4,
+    "title": null,
+    "category": "electrical_drawings",
+    "page_role": "other",
+    "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+    "sheet_number": null
+   },
+   {
+    "page": 5,
+    "title": null,
+    "category": "electrical_drawings",
+    "page_role": "other",
+    "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+    "sheet_number": null
+   },
+   {
+    "page": 6,
+    "title": null,
+    "category": "electrical_drawings",
+    "page_role": "other",
+    "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+    "sheet_number": null
+   },
+   {
+    "page": 7,
+    "title": null,
+    "category": "electrical_drawings",
+    "page_role": "other",
+    "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+    "sheet_number": null
+   },
+   {
+    "page": 8,
+    "title": null,
+    "category": "electrical_drawings",
+    "page_role": "other",
+    "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+    "sheet_number": null
+   }
+  ],
+  "text_tokens": 1039,
+  "image_detail": "original",
+  "legend_pages": [],
+  "general_notes_pages": []
+ },
+ "settings_snapshot": {
+  "openai_plans_model": "gpt-6-astra",
+  "plans_reader_tile_ppi": 260,
+  "plans_reader_file_max_bytes": 52428800,
+  "plans_reader_reasoning_effort": "medium",
+  "plans_reader_ledger_max_tokens": 40000,
+  "plans_reader_group_input_tokens": 240000,
+  "plans_reader_native_max_patches": 30000,
+  "plans_reader_call_timeout_seconds": 600,
+  "plans_reader_escalation_max_fraction": 0.5,
+  "plans_reader_max_input_tokens_per_run": 10000000,
+  "plans_reader_promax_max_pages_per_message": 12
+ },
+ "documents_total": 6,
+ "groups_total": 10,
+ "groups_done": 10,
+ "groups_failed": 0,
+ "created_at": "2026-10-18T18:32:31.716176+00:00",
+ "started_at": "2026-10-18T18:43:48.261671+00:00",
+ "finished_at": "2026-10-18T19:07:51.943911+00:00"
+}

@@ -493,6 +493,47 @@ def pdf_chunks(
     return out
 
 
+def pdf_chunks_for_pages(
+    pdf_bytes: bytes,
+    pages: list[int],
+    *,
+    max_bytes: int = FILE_MAX_BYTES,
+    max_pages: int = FILE_MAX_PAGES,
+    breaks: list[int] | None = None,
+) -> list[tuple[int, int, bytes]]:
+    """`pdf_chunks` over a SUBSET of a PDF's pages (the spec page selection
+    of the page facts, docs/AI_ESTIMATING_BUILD_SPEC.md 6 WS1): the sorted
+    page set is split into its consecutive runs, each run is cut from the
+    source once and chunked with the same caps and `breaks` rules as
+    `pdf_chunks` (`breaks` are 1-based pages of the SOURCE, such as the
+    pages where the text class changes), and every chunk is returned as
+    (start_page1, end_page1, bytes) in SOURCE page numbers. `pdf_chunks`
+    itself is unchanged; a full page list gives the same spans it would.
+    An empty page list returns no chunks; a page outside the document
+    raises ValueError."""
+    wanted = sorted({int(p) for p in pages})
+    if not wanted:
+        return []
+    total = pdf_split.page_count(pdf_bytes)
+    if wanted[0] < 1 or wanted[-1] > total:
+        raise ValueError(f"Pages {wanted[0]}-{wanted[-1]} are outside the document (1-{total}).")
+    if wanted == list(range(1, total + 1)):
+        return pdf_chunks(pdf_bytes, max_bytes=max_bytes, max_pages=max_pages, breaks=breaks)
+    runs: list[tuple[int, int]] = []
+    for p in wanted:
+        if runs and p == runs[-1][1] + 1:
+            runs[-1] = (runs[-1][0], p)
+        else:
+            runs.append((p, p))
+    out: list[tuple[int, int, bytes]] = []
+    for a, b in runs:
+        data = pdf_split.extract_range(pdf_bytes, a, b)
+        local_breaks = [br - a + 1 for br in (breaks or []) if a < br <= b]
+        for s, e, chunk in pdf_chunks(data, max_bytes=max_bytes, max_pages=max_pages, breaks=local_breaks):
+            out.append((s + a - 1, e + a - 1, chunk))
+    return out
+
+
 # Request parts ----------------------------------------------------------------
 
 

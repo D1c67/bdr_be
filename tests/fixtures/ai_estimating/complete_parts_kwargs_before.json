@@ -1,0 +1,281 @@
+{
+ "json_sub": [
+  {
+   "__with_options__": {
+    "max_retries": 0,
+    "timeout": 600.0
+   }
+  },
+  {
+   "input": [
+    {
+     "content": [
+      {
+       "text": "Ledger",
+       "type": "input_text"
+      },
+      {
+       "detail": "original",
+       "image_url": "data:image/png;base64,AAAA",
+       "type": "input_image"
+      },
+      {
+       "file_data": "data:application/pdf;base64,BB",
+       "filename": "spec.pdf",
+       "type": "input_file"
+      }
+     ],
+     "role": "user"
+    }
+   ],
+   "instructions": "You read plans.",
+   "model": "gpt-6-astra",
+   "reasoning": {
+    "effort": "medium"
+   },
+   "text": {
+    "format": {
+     "name": "sub_output",
+     "schema": {
+      "additionalProperties": false,
+      "properties": {
+       "ok": {
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "ok"
+      ],
+      "type": "object"
+     },
+     "strict": true,
+     "type": "json_schema"
+    }
+   }
+  }
+ ],
+ "modify_continue": [
+  {
+   "__with_options__": {
+    "max_retries": 0,
+    "timeout": 600.0
+   }
+  },
+  {
+   "input": [
+    {
+     "content": [
+      {
+       "text": "Ledger",
+       "type": "input_text"
+      }
+     ],
+     "role": "user"
+    }
+   ],
+   "instructions": "m",
+   "model": "gpt-6-astra",
+   "previous_response_id": "resp_9",
+   "reasoning": {
+    "effort": "medium"
+   },
+   "text": {
+    "format": {
+     "name": "response",
+     "schema": {
+      "additionalProperties": false,
+      "properties": {
+       "ok": {
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "ok"
+      ],
+      "type": "object"
+     },
+     "strict": true,
+     "type": "json_schema"
+    }
+   }
+  }
+ ],
+ "text_no_schema_effort": [
+  {
+   "__with_options__": {
+    "max_retries": 0,
+    "timeout": 33.0
+   }
+  },
+  {
+   "input": [
+    {
+     "content": [
+      {
+       "text": "Ledger",
+       "type": "input_text"
+      }
+     ],
+     "role": "user"
+    }
+   ],
+   "instructions": "sys",
+   "max_output_tokens": 1234,
+   "model": "gpt-6-astra",
+   "reasoning": {
+    "effort": "high"
+   }
+  }
+ ],
+ "tool_outputs_only": [
+  {
+   "__with_options__": {
+    "max_retries": 0,
+    "timeout": 600.0
+   }
+  },
+  {
+   "input": [
+    {
+     "call_id": "c1",
+     "output": "x",
+     "type": "function_call_output"
+    }
+   ],
+   "instructions": "chat",
+   "max_output_tokens": 50,
+   "model": "gpt-6-astra",
+   "previous_response_id": "resp_0",
+   "reasoning": {
+    "effort": "medium"
+   }
+  }
+ ],
+ "tool_outputs_with_parts": [
+  {
+   "__with_options__": {
+    "max_retries": 0,
+    "timeout": 600.0
+   }
+  },
+  {
+   "input": [
+    {
+     "call_id": "c1",
+     "output": "{\"a\": 1}",
+     "type": "function_call_output"
+    },
+    {
+     "call_id": "c2",
+     "output": "plain",
+     "type": "function_call_output"
+    },
+    {
+     "content": [
+      {
+       "text": "Ledger",
+       "type": "input_text"
+      },
+      {
+       "detail": "original",
+       "image_url": "data:image/png;base64,AAAA",
+       "type": "input_image"
+      }
+     ],
+     "role": "user"
+    }
+   ],
+   "instructions": "chat",
+   "model": "gpt-6-astra",
+   "previous_response_id": "resp_0",
+   "reasoning": {
+    "effort": "medium"
+   },
+   "tools": [
+    {
+     "description": "d",
+     "name": "get_brief",
+     "parameters": {
+      "additionalProperties": false,
+      "properties": {
+       "ok": {
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "ok"
+      ],
+      "type": "object"
+     },
+     "strict": true,
+     "type": "function"
+    }
+   ]
+  }
+ ],
+ "tools_first_round": [
+  {
+   "__with_options__": {
+    "max_retries": 0,
+    "timeout": 600.0
+   }
+  },
+  {
+   "input": [
+    {
+     "content": [
+      {
+       "text": "Ledger",
+       "type": "input_text"
+      }
+     ],
+     "role": "user"
+    }
+   ],
+   "instructions": "chat",
+   "model": "gpt-6-astra",
+   "reasoning": {
+    "effort": "medium"
+   },
+   "text": {
+    "format": {
+     "name": "chat",
+     "schema": {
+      "additionalProperties": false,
+      "properties": {
+       "ok": {
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "ok"
+      ],
+      "type": "object"
+     },
+     "strict": true,
+     "type": "json_schema"
+    }
+   },
+   "tools": [
+    {
+     "description": "d",
+     "name": "get_brief",
+     "parameters": {
+      "additionalProperties": false,
+      "properties": {
+       "ok": {
+        "type": "boolean"
+       }
+      },
+      "required": [
+       "ok"
+      ],
+      "type": "object"
+     },
+     "strict": true,
+     "type": "function"
+    }
+   ]
+  }
+ ]
+}

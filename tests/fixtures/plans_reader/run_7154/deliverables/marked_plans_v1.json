@@ -1,0 +1,2885 @@
+{
+ "sheets": [
+  {
+   "area": "UMC Outpatient Pharmacy Remodel",
+   "page": 6,
+   "marks": [
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.49,
+       0.64
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.49,
+       0.65
+      ]
+     ],
+     "legend_index": 1
+    }
+   ],
+   "legend": [
+    {
+     "unit": "EA",
+     "prefix": "EXF",
+     "quantity": 1,
+     "description": "Existing XF-18, 30kVA, remain; reference only"
+    },
+    {
+     "unit": "EA",
+     "prefix": "EP",
+     "quantity": 1,
+     "description": "Existing 1ECLB, remain; reference only"
+    }
+   ],
+   "doc_index": 1,
+   "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+   "sheet_number": "E1.00"
+  },
+  {
+   "area": "UMC Outpatient Pharmacy Remodel",
+   "page": 7,
+   "marks": [
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.3,
+       0.39
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.39,
+       0.4
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.22,
+       0.44
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.17,
+       0.47
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.17,
+       0.48
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.31,
+       0.47
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.38,
+       0.47
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.41,
+       0.46
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.33,
+       0.53
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.37,
+       0.58
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.27,
+       0.42
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.27,
+       0.44
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.27,
+       0.45
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.23,
+       0.45
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.34,
+       0.47
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.35,
+       0.47
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.2,
+       0.58
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.28,
+       0.58
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.31,
+       0.58
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.34,
+       0.43
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.34,
+       0.56
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.41,
+       0.55
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.56
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.47,
+       0.56
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.57,
+       0.54
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.57,
+       0.56
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.62,
+       0.53
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.23,
+       0.52
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.25,
+       0.52
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.26,
+       0.52
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.28,
+       0.52
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.45,
+       0.51
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.49,
+       0.48
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.55,
+       0.5
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.5,
+       0.38
+      ]
+     ],
+     "legend_index": 4
+    }
+   ],
+   "legend": [
+    {
+     "unit": "EA",
+     "prefix": "DR",
+     "quantity": 10,
+     "description": "Remove open-symbol duplex receptacle"
+    },
+    {
+     "unit": "EA",
+     "prefix": "DH",
+     "quantity": 9,
+     "description": "Remove hatched receptacle assembly; type and retained first-pass positions provisional"
+    },
+    {
+     "unit": "EA",
+     "prefix": "DQ",
+     "quantity": 8,
+     "description": "Remove multiple-receptacle assembly; verify type"
+    },
+    {
+     "unit": "EA",
+     "prefix": "DF",
+     "quantity": 7,
+     "description": "Remove floor outlet assembly; verify contents"
+    },
+    {
+     "unit": "EA",
+     "prefix": "ERD",
+     "quantity": 1,
+     "description": "Existing roll-up-door connections remain; reference only"
+    }
+   ],
+   "doc_index": 1,
+   "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+   "sheet_number": "ED2.01"
+  },
+  {
+   "area": "UMC Outpatient Pharmacy Remodel",
+   "page": 8,
+   "marks": [
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.26,
+       0.42
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.26,
+       0.45
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.28,
+       0.42
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.29,
+       0.45
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.32,
+       0.45
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.32,
+       0.47
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.37,
+       0.45
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.37,
+       0.47
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.4,
+       0.47
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.62,
+       0.4
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.62,
+       0.41
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.62,
+       0.43
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.62,
+       0.44
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.47,
+       0.47
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.52,
+       0.47
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.57,
+       0.47
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.17,
+       0.52
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.6,
+       0.56
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.224,
+       0.511
+      ]
+     ],
+     "legend_index": 4
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.367,
+       0.494
+      ]
+     ],
+     "legend_index": 4
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.319,
+       0.527
+      ]
+     ],
+     "legend_index": 4
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.367,
+       0.527
+      ]
+     ],
+     "legend_index": 4
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.224,
+       0.561
+      ]
+     ],
+     "legend_index": 4
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.269,
+       0.518
+      ]
+     ],
+     "legend_index": 5
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.308,
+       0.558
+      ]
+     ],
+     "legend_index": 5
+    }
+   ],
+   "legend": [
+    {
+     "unit": "EA",
+     "prefix": "DDL",
+     "quantity": 13,
+     "description": "Remove round downlight"
+    },
+    {
+     "unit": "EA",
+     "prefix": "DTR",
+     "quantity": 3,
+     "description": "Remove lighting track row; lengths unknown"
+    },
+    {
+     "unit": "EA",
+     "prefix": "DTH",
+     "quantity": 12,
+     "description": "Remove track-head assembly; provisional total, patch does not verify full-row positions (positions not marked)"
+    },
+    {
+     "unit": "EA",
+     "prefix": "DS",
+     "quantity": 2,
+     "description": "Remove light switch"
+    },
+    {
+     "unit": "EA",
+     "prefix": "DRF",
+     "quantity": 5,
+     "description": "Remove rectangular fixture; enlarged-tile subtotal only"
+    },
+    {
+     "unit": "EA",
+     "prefix": "DLF",
+     "quantity": 2,
+     "description": "Remove narrow linear fixture; enlarged-tile subtotal only"
+    }
+   ],
+   "doc_index": 1,
+   "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+   "sheet_number": "ED3.01"
+  },
+  {
+   "area": "UMC Outpatient Pharmacy Remodel",
+   "page": 9,
+   "marks": [
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.29,
+       0.39
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.29,
+       0.39
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.3,
+       0.39
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.3,
+       0.39
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.32,
+       0.39
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.32,
+       0.39
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.32,
+       0.39
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.33,
+       0.39
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.25,
+       0.58
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.25,
+       0.58
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.26,
+       0.58
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.26,
+       0.58
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.31,
+       0.58
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.31,
+       0.58
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.32,
+       0.58
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.32,
+       0.58
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.34,
+       0.58
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.35,
+       0.58
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.35,
+       0.58
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.35,
+       0.58
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.53
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.52,
+       0.53
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.54,
+       0.56
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.61,
+       0.39
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.53,
+       0.45
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.59,
+       0.49
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.54,
+       0.46
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.53,
+       0.52
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.62,
+       0.53
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.6,
+       0.56
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.18,
+       0.41
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.17,
+       0.45
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.17,
+       0.46
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.21,
+       0.45
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.21,
+       0.45
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.21,
+       0.45
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.22,
+       0.45
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.57,
+       0.5
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.58,
+       0.5
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.55,
+       0.52
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.54,
+       0.49
+      ]
+     ],
+     "legend_index": 4
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.58,
+       0.49
+      ]
+     ],
+     "legend_index": 5
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.39,
+       0.43
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.39,
+       0.44
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.39,
+       0.44
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.39,
+       0.44
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.39,
+       0.46
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.39,
+       0.46
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.39,
+       0.47
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.39,
+       0.47
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.39,
+       0.49
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.39,
+       0.49
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.39,
+       0.49
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.39,
+       0.5
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.4
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.41
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.41
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.42
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.43
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.44
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.44
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.44
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.46
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.46
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.47
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.47
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.5
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.5
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.5
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.51
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.34,
+       0.39
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.36,
+       0.39
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.37,
+       0.58
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.59,
+       0.5
+      ]
+     ],
+     "legend_index": 7
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.17,
+       0.43
+      ]
+     ],
+     "legend_index": 8
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.23,
+       0.59
+      ]
+     ],
+     "legend_index": 8
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.27,
+       0.59
+      ]
+     ],
+     "legend_index": 8
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.28,
+       0.58
+      ]
+     ],
+     "legend_index": 8
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.4,
+       0.57
+      ]
+     ],
+     "legend_index": 8
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.47,
+       0.57
+      ]
+     ],
+     "legend_index": 8
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.26,
+       0.65
+      ]
+     ],
+     "legend_index": 9
+    }
+   ],
+   "legend": [
+    {
+     "unit": "EA",
+     "prefix": "R",
+     "quantity": 26,
+     "description": "Duplex, open symbol, without G/O"
+    },
+    {
+     "unit": "EA",
+     "prefix": "RO",
+     "quantity": 4,
+     "description": "Occupancy-controlled duplex"
+    },
+    {
+     "unit": "EA",
+     "prefix": "GFI",
+     "quantity": 9,
+     "description": "GFCI duplex, non-O; includes one dedicated microwave outlet"
+    },
+    {
+     "unit": "EA",
+     "prefix": "GFO",
+     "quantity": 1,
+     "description": "Occupancy-controlled GFCI duplex"
+    },
+    {
+     "unit": "EA",
+     "prefix": "QO",
+     "quantity": 1,
+     "description": "Occupancy-controlled quad assembly"
+    },
+    {
+     "unit": "EA",
+     "prefix": "QTV",
+     "quantity": 1,
+     "description": "TV quad assembly"
+    },
+    {
+     "unit": "EA",
+     "prefix": "RE",
+     "quantity": 31,
+     "description": "Filled 1EELC duplex; includes three dedicated medical refrigerators"
+    },
+    {
+     "unit": "EA",
+     "prefix": "GE",
+     "quantity": 1,
+     "description": "Filled GFCI refrigerator duplex, 1EELC-7"
+    },
+    {
+     "unit": "EA",
+     "prefix": "FSD",
+     "quantity": 6,
+     "description": "New damper electrical connection; not damper purchase"
+    },
+    {
+     "unit": "EA",
+     "prefix": "VAV",
+     "quantity": 1,
+     "description": "VV-2-N electrical connection"
+    }
+   ],
+   "doc_index": 1,
+   "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+   "sheet_number": "E2.01"
+  },
+  {
+   "area": "UMC Outpatient Pharmacy Remodel",
+   "page": 10,
+   "marks": [
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.36,
+       0.41
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.54,
+       0.41
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.59,
+       0.41
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.28,
+       0.45
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.36,
+       0.45
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.54,
+       0.44
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.49,
+       0.45
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.21,
+       0.47
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.21,
+       0.49
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.28,
+       0.49
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.36,
+       0.49
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.53,
+       0.48
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.51,
+       0.5
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.28,
+       0.53
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.44,
+       0.53
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.59,
+       0.53
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.49,
+       0.41
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.59,
+       0.45
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.21,
+       0.53
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.36,
+       0.53
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.51,
+       0.53
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.29,
+       0.41
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.19,
+       0.41
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.21,
+       0.41
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.41
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.45,
+       0.41
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.47
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.45,
+       0.47
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.5
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.45,
+       0.5
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.46,
+       0.5
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.56,
+       0.52
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.61,
+       0.52
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.56,
+       0.55
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.61,
+       0.55
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.44
+      ]
+     ],
+     "legend_index": 4
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.45,
+       0.44
+      ]
+     ],
+     "legend_index": 4
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.48,
+       0.5
+      ]
+     ],
+     "legend_index": 4
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.39,
+       0.45
+      ]
+     ],
+     "legend_index": 5
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.39,
+       0.48
+      ]
+     ],
+     "legend_index": 5
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.39,
+       0.51
+      ]
+     ],
+     "legend_index": 5
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.31,
+       0.4
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.2,
+       0.45
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.18,
+       0.47
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.23,
+       0.57
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.31,
+       0.57
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.35,
+       0.57
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.56,
+       0.5
+      ]
+     ],
+     "legend_index": 6
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.49,
+       0.4
+      ]
+     ],
+     "legend_index": 7
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.17,
+       0.53
+      ]
+     ],
+     "legend_index": 7
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.26,
+       0.45
+      ]
+     ],
+     "legend_index": 8
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.39,
+       0.54
+      ]
+     ],
+     "legend_index": 8
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.53,
+       0.43
+      ]
+     ],
+     "legend_index": 8
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.17,
+       0.52
+      ]
+     ],
+     "legend_index": 9
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.17,
+       0.52
+      ]
+     ],
+     "legend_index": 9
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.42,
+       0.42
+      ]
+     ],
+     "legend_index": 9
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.42
+      ]
+     ],
+     "legend_index": 9
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.42,
+       0.45
+      ]
+     ],
+     "legend_index": 9
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.45
+      ]
+     ],
+     "legend_index": 9
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.42,
+       0.48
+      ]
+     ],
+     "legend_index": 9
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.48
+      ]
+     ],
+     "legend_index": 9
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.42,
+       0.52
+      ]
+     ],
+     "legend_index": 9
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.43,
+       0.52
+      ]
+     ],
+     "legend_index": 9
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.49,
+       0.48
+      ]
+     ],
+     "legend_index": 10
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.52,
+       0.52
+      ]
+     ],
+     "legend_index": 11
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.55,
+       0.53
+      ]
+     ],
+     "legend_index": 11
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.22,
+       0.41
+      ]
+     ],
+     "legend_index": 12
+    }
+   ],
+   "legend": [
+    {
+     "unit": "EA",
+     "prefix": "L1",
+     "quantity": 16,
+     "description": "L1 unshaded troffer"
+    },
+    {
+     "unit": "EA",
+     "prefix": "L1E",
+     "quantity": 5,
+     "description": "L1 shaded/life-safety arrangement; confirm circuit"
+    },
+    {
+     "unit": "EA",
+     "prefix": "L2",
+     "quantity": 1,
+     "description": "L2 troffer"
+    },
+    {
+     "unit": "EA",
+     "prefix": "L3",
+     "quantity": 13,
+     "description": "L3 unshaded downlight"
+    },
+    {
+     "unit": "EA",
+     "prefix": "L3S",
+     "quantity": 3,
+     "description": "L3 shaded downlight; confirm circuit"
+    },
+    {
+     "unit": "EA",
+     "prefix": "L4",
+     "quantity": 3,
+     "description": "L4 task light"
+    },
+    {
+     "unit": "EA",
+     "prefix": "L5",
+     "quantity": 7,
+     "description": "L5 variable-length run; dot is run location, not measured length"
+    },
+    {
+     "unit": "EA",
+     "prefix": "X1",
+     "quantity": 2,
+     "description": "X1 exit sign"
+    },
+    {
+     "unit": "EA",
+     "prefix": "OC",
+     "quantity": 3,
+     "description": "Ceiling dual-technology occupancy sensor"
+    },
+    {
+     "unit": "EA",
+     "prefix": "D",
+     "quantity": 10,
+     "description": "Wall dimmer"
+    },
+    {
+     "unit": "EA",
+     "prefix": "DL",
+     "quantity": 1,
+     "description": "Wall dimmer with lockable cover"
+    },
+    {
+     "unit": "EA",
+     "prefix": "DO",
+     "quantity": 2,
+     "description": "Wall occupancy-sensor dimmer"
+    },
+    {
+     "unit": "EA",
+     "prefix": "SO",
+     "quantity": 1,
+     "description": "Wall occupancy-sensor switch"
+    }
+   ],
+   "doc_index": 1,
+   "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+   "sheet_number": "E3.01"
+  },
+  {
+   "area": "UMC Outpatient Pharmacy Remodel",
+   "page": 5,
+   "marks": [
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.26,
+       0.5
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.18,
+       0.61
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.58,
+       0.68
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.4,
+       0.81
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.53,
+       0.82
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.56,
+       0.69
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.2,
+       0.47
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.17,
+       0.5
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.38,
+       0.47
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.62,
+       0.51
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.17,
+       0.58
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.17,
+       0.62
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.5,
+       0.69
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.54,
+       0.69
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.54,
+       0.73
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.62,
+       0.74
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.62,
+       0.78
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.09,
+       0.85
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.17,
+       0.85
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.19,
+       0.85
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.27,
+       0.85
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.37,
+       0.85
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.4,
+       0.85
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.61,
+       0.85
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.62,
+       0.91
+      ]
+     ],
+     "legend_index": 2
+    }
+   ],
+   "legend": [
+    {
+     "unit": "EA",
+     "prefix": "TSR",
+     "quantity": 5,
+     "description": "Sensor relocation demolition phase; controls coordination, not G3 device purchase"
+    },
+    {
+     "unit": "EA",
+     "prefix": "DSFD",
+     "quantity": 1,
+     "description": "Removed mechanical SFD requiring electrical/FA isolation"
+    },
+    {
+     "unit": "EA",
+     "prefix": "ESFD",
+     "quantity": 19,
+     "description": "Existing SFD remains; reference only"
+    }
+   ],
+   "doc_index": 2,
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "MD2.01"
+  },
+  {
+   "area": "UMC Outpatient Pharmacy Remodel",
+   "page": 7,
+   "marks": [
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.17,
+       0.52
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.23,
+       0.71
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.28,
+       0.71
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.29,
+       0.72
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.4,
+       0.7
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.47,
+       0.69
+      ]
+     ],
+     "legend_index": 0
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.31,
+       0.48
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.17,
+       0.7
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.52,
+       0.63
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.41,
+       0.84
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.58,
+       0.84
+      ]
+     ],
+     "legend_index": 1
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.16,
+       0.82
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.62,
+       0.73
+      ]
+     ],
+     "legend_index": 2
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.35,
+       0.5
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.57,
+       0.66
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.29,
+       0.74
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.48,
+       0.83
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.54,
+       0.82
+      ]
+     ],
+     "legend_index": 3
+    },
+    {
+     "kind": "dot",
+     "points": [
+      [
+       0.37,
+       0.57
+      ]
+     ],
+     "legend_index": 4
+    }
+   ],
+   "legend": [
+    {
+     "unit": "EA",
+     "prefix": "SFD",
+     "quantity": 6,
+     "description": "New mechanical SFD; same six E2.01 connections, not additive"
+    },
+    {
+     "unit": "EA",
+     "prefix": "TSR",
+     "quantity": 5,
+     "description": "Relocated sensor; same five MD2.01 relocations, controls scope"
+    },
+    {
+     "unit": "EA",
+     "prefix": "TSN",
+     "quantity": 2,
+     "description": "New sensor location; mechanical/controls furnishing to confirm"
+    },
+    {
+     "unit": "EA",
+     "prefix": "EVV",
+     "quantity": 5,
+     "description": "Existing terminal box recommission/maintain; coordination only"
+    },
+    {
+     "unit": "EA",
+     "prefix": "VV2E",
+     "quantity": 1,
+     "description": "Existing VV-2-E remains; confirm remedial controls scope"
+    }
+   ],
+   "doc_index": 2,
+   "document_id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+   "sheet_number": "M2.01"
+  }
+ ]
+}

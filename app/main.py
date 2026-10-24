@@ -27,6 +27,36 @@ async def lifespan(_: FastAPI):
     from app.core.redact import install_httpx_filter
 
     install_httpx_filter()
+    # AI Estimating eval ledger (spec 0.4): the tool-loop round gate reserves
+    # each round's estimate with the ledger; inert unless AI_EVAL_LEDGER_ENFORCE.
+    from app.services import ai_spend as _ai_spend
+    from app.services import eval_ledger as _eval_ledger
+
+    _ai_spend.set_ledger_hook(_eval_ledger.gate_round_hook)
+    # Tool registry (spec 5.2): the handler modules register their tools in
+    # plans_reader_tools.REGISTRY (and the prompt hash) once at startup, and
+    # the page-facts adapters fill the service slots.
+    from app.services import plans_reader_review_tools, plans_reader_tool_handlers  # noqa: F401
+    # WS6 consolidator (its tools and prompt parts), the chat explain_row tool,
+    # the WS8 pricing tools (price_lookup, get_price_summary) and the WS7
+    # reviewer prompt parts (ws7.*) also register on import.
+    from app.services import plans_reader_chat_tools as _chat_tools  # noqa: F401
+    from app.services import plans_reader_consolidator as _consolidator  # noqa: F401
+    from app.services import plans_reader_reviewer as _reviewer  # noqa: F401
+    from app.services import pricing_tools as _pricing_tools  # noqa: F401
+    from app.services import scope_engine as _scope_engine
+    from app.services import scope_policy as _scope_policy
+    from app.services import scope_tools as _scope_tools  # noqa: F401
+    from app.services.pagefacts import services as _pagefacts_services
+
+    _pagefacts_services.register_services()
+    # WS3 MeasureService (spec 5.3): the six measure tools read the stored
+    # measure output through the DB store (sync client, worker threads only).
+    from app.core.supabase_client import get_supabase as _get_supabase
+    from app.services import plans_reader_measure as _measure
+
+    _measure.install_service(_measure.MeasureService(_measure.DbMeasureStore(_get_supabase)))
+    _scope_policy.set_active_policy_loader(_scope_engine.table_policy_loader())
     # Live self-hosted box override (Settings > AI model server): each worker
     # re-reads the one-row llm_runtime_settings table so a switch made through
     # either worker reaches both within seconds (services/llm_target).
@@ -585,6 +615,8 @@ from app.routers import (  # noqa: E402
     agent_worker_help,
     agent_worker_rfi,
     agent_worker_turns,
+    ai_estimating_evidence,
+    ai_pricing,
     ai_spend,
     analytics,
     auto_send,
@@ -616,6 +648,8 @@ from app.routers import (  # noqa: E402
     payroll_reports,
     payroll_settings,
     plans_reader,
+    plans_reader_checks,
+    scope_policy as scope_policy_router,
     pm,
     pm_documents,
     pm_field,
@@ -714,6 +748,14 @@ app.include_router(bid_splitter.router)
 # require_internal on the router itself. Not connected to the bidding
 # pipeline, so it must not ride the BIDDING flag (splitter precedent).
 app.include_router(plans_reader.router)
+# Same gates as plans_reader: the evidence (crop, review) and checks routes
+# carry PLANS_READER_ENABLED and the role gates on each route.
+app.include_router(ai_estimating_evidence.router)
+app.include_router(plans_reader_checks.router)
+# AI Estimating autonomous build: pricing (require_pricing_view gate inside;
+# 404 while AI_PRICING_ENABLED is off) and the scope policy routes.
+app.include_router(ai_pricing.router)
+app.include_router(scope_policy_router.router)
 # RFP Ingestion sandbox: the out-of-process PDF sanitizer's dev-only bench,
 # gated by its OWN env flag (RFP_INGEST_ENABLED, default off: every route
 # 404s) on the router itself, plus require_dev on every endpoint. Not a

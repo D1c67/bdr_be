@@ -51,16 +51,28 @@ Spend is summed by keyset paging over (created_at, id), which neither skips
 nor double counts rows inserted while the sum runs. At the cap's scale (a
 few hundred calls a day under a $10,000 ceiling) a window is a handful of
 pages; a SQL sum function would make it one round trip if volume ever grows.
+
+Tool-loop gate (AI Estimating autonomous build, WS2): `gate_round(ctx)`
+runs before every round of a tool loop and checks, in this order, the
+group's own dollar budget, the run ceiling (PLANS_READER_RUN_CEILING_FACTOR x
+the run's estimated_cost_usd_max, which create_run writes with the loop
+budgets included; chat and modify are exempt), the daily cap above, and a
+pluggable eval-ledger hook (WS0 fills it on the sweep backend). A group
+budget or run ceiling hit raises its own error (GroupBudgetReached,
+RunCeilingReached): the loop finalizes or fails THAT group with the message,
+it never pauses the run the way the daily cap does.
 """
 
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime, time
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
+from app.core.config import get_settings
 from app.core.roles import Role
 from app.services import notifications
 
@@ -553,3 +565,214 @@ def reset_window(sb, *, actor_id: str | None, now: datetime | None = None) -> di
         notifications.audit, actor_id, "ai_spend.cap_reset", "ai_spend_settings", "1", details,
     )
     return status(sb, now)
+
+
+# ── Tool-loop gate: group budget, run ceiling, daily cap, ledger (WS2) ──────
+
+# Kinds the run ceiling never applies to (a user talking to a done run).
+CEILING_EXEMPT_KINDS = frozenset({"chat", "modify"})
+_SCOPE_PAGE = 1000
+_SCOPE_MAX_PAGES = 50
+
+
+class GroupBudgetReached(RuntimeError):
+    """The group's own dollar budget cannot cover the next round. The loop
+    finalizes with what it has (or fails the group when even the final
+    round is unaffordable); the run is never paused."""
+
+    def __init__(self, message: str, *, max_usd: Decimal, spent_usd: Decimal, estimated_usd: Decimal) -> None:
+        super().__init__(message)
+        self.max_usd = max_usd
+        self.spent_usd = spent_usd
+        self.estimated_usd = estimated_usd
+
+
+class RunCeilingReached(RuntimeError):
+    """The run's spend plus the next round would pass its ceiling (factor x
+    estimated_cost_usd_max). Finalizes or fails the group with this
+    message; never the daily-cap pause (a different error class on
+    purpose, so the over_cap handling does not catch it)."""
+
+    def __init__(self, message: str, *, ceiling_usd: Decimal, spent_usd: Decimal, estimated_usd: Decimal) -> None:
+        super().__init__(message)
+        self.ceiling_usd = ceiling_usd
+        self.spent_usd = spent_usd
+        self.estimated_usd = estimated_usd
+
+
+@dataclass
+class GateContext:
+    """What gate_round needs. `run` is the plans_reader_runs row (or None
+    for a chat without a run); `kind` the group kind; exactly one of
+    group_id / message_id keys the budget (message_id is the chat message
+    id, summed on plans_reader_calls.message_id, never a thread id: chat
+    budgets are per message). The spent figures may be passed
+    by a loop that already knows them (it keeps a LoopState); otherwise
+    they are summed from plans_reader_calls. `factor` overrides
+    PLANS_READER_RUN_CEILING_FACTOR (tests)."""
+
+    sb: Any
+    kind: str
+    estimated_usd: Decimal | float | int = 0
+    run: dict | None = None
+    group_id: str | None = None
+    message_id: str | None = None
+    max_group_usd: Decimal | float | int | None = None
+    group_spent_usd: Decimal | float | int | None = None
+    run_spent_usd: Decimal | float | int | None = None
+    factor: Decimal | float | int | None = None
+    now: datetime | None = None
+
+
+LedgerHook = Callable[[GateContext], None]
+_LEDGER_HOOK: LedgerHook | None = None
+
+
+def set_ledger_hook(hook: LedgerHook | None) -> None:
+    """Install the eval-ledger check (WS0 eval_ledger) that runs last in
+    gate_round; None removes it. The hook raises its own refusal."""
+    global _LEDGER_HOOK
+    _LEDGER_HOOK = hook
+
+
+def ledger_hook() -> LedgerHook | None:
+    return _LEDGER_HOOK
+
+
+def _scope_spent(sb, column: str, value: str) -> Decimal:
+    """Sum plans_reader_calls.cost_usd where `column` = value (range
+    paged; rows of one group or run are few)."""
+    total = Decimal("0")
+    for page in range(_SCOPE_MAX_PAGES):
+        start = page * _SCOPE_PAGE
+        chunk = (
+            sb.table(CALLS_TABLE)
+            .select("id, cost_usd")
+            .eq(column, value)
+            .order("id")
+            .range(start, start + _SCOPE_PAGE - 1)
+            .execute()
+        ).data or []
+        for row in chunk:
+            total += _dec(row.get("cost_usd"))
+        if len(chunk) < _SCOPE_PAGE:
+            return total
+    logger.error("ai_spend: more than %d calls for %s=%s; sum truncated", _SCOPE_PAGE * _SCOPE_MAX_PAGES, column, value)
+    return total
+
+
+def group_spent_usd(sb, group_id: str) -> Decimal:
+    """Dollars already billed to one group (sum of its call rows)."""
+    return _scope_spent(sb, "group_id", group_id)
+
+
+def thread_spent_usd(sb, thread_id: str) -> Decimal:
+    """Dollars already billed to one chat thread."""
+    return _scope_spent(sb, "thread_id", thread_id)
+
+
+def message_spent_usd(sb, message_id: str) -> Decimal:
+    """Dollars already billed to one chat message (the chat loop's budget
+    key, spec WS2). Sums plans_reader_calls.message_id, the column
+    migration 0165 (MC) adds; rows written before it carry no message id
+    and are not counted."""
+    return _scope_spent(sb, "message_id", message_id)
+
+
+def run_spent_usd(sb, run_id: str) -> Decimal:
+    """Dollars already billed to one run (every kind, chat included)."""
+    return _scope_spent(sb, "run_id", run_id)
+
+
+def run_ceiling_usd(run: dict | None, factor: Decimal | float | int | None = None) -> Decimal | None:
+    """factor x max(estimated_cost_usd_max, estimated_cost_usd) of a run,
+    None when the run has no estimate yet (an unknown estimate never
+    blocks; create_run writes it before the first group runs)."""
+    if not run:
+        return None
+    f = _dec(factor) if factor is not None else Decimal(str(get_settings().plans_reader_run_ceiling_factor))
+    if f <= 0:
+        return None
+    est = max(_dec(run.get("estimated_cost_usd_max")), _dec(run.get("estimated_cost_usd")))
+    if est <= 0:
+        return None
+    return (est * f).quantize(_CENT)
+
+
+def check_group_budget(
+    *, max_usd: Decimal | float | int | None, spent_usd: Decimal | float | int, estimated_usd: Decimal | float | int
+) -> Decimal | None:
+    """Raise GroupBudgetReached when spent + estimate passes the group
+    budget; return what is left (None without a budget)."""
+    if max_usd is None:
+        return None
+    cap = max(_dec(max_usd), Decimal("0"))
+    spent = max(_dec(spent_usd), Decimal("0"))
+    estimate = max(_dec(estimated_usd), Decimal("0"))
+    if spent + estimate > cap:
+        raise GroupBudgetReached(
+            f"This AI Estimating step reached its own budget of {_money(cap)} "
+            f"({_money(spent)} spent; the next round needs about {_money(estimate)}). "
+            "It finishes with what it has.",
+            max_usd=cap, spent_usd=spent, estimated_usd=estimate,
+        )
+    return cap - spent - estimate
+
+
+def check_run_ceiling(
+    *,
+    run: dict | None,
+    kind: str,
+    spent_usd: Decimal | float | int,
+    estimated_usd: Decimal | float | int,
+    factor: Decimal | float | int | None = None,
+) -> Decimal | None:
+    """Raise RunCeilingReached when the run's spend plus the estimate
+    passes its ceiling; chat and modify are exempt. Returns what is left
+    (None when no ceiling applies)."""
+    if kind in CEILING_EXEMPT_KINDS:
+        return None
+    ceiling = run_ceiling_usd(run, factor)
+    if ceiling is None:
+        return None
+    spent = max(_dec(spent_usd), Decimal("0"))
+    estimate = max(_dec(estimated_usd), Decimal("0"))
+    if spent + estimate > ceiling:
+        raise RunCeilingReached(
+            f"This AI Estimating run reached its cost ceiling of {_money(ceiling)} "
+            f"(the pre-run estimate times the safety factor; {_money(spent)} spent, the next "
+            f"round needs about {_money(estimate)}). The step finishes with what it has; "
+            "raise PLANS_READER_RUN_CEILING_FACTOR or start a new run to go further.",
+            ceiling_usd=ceiling, spent_usd=spent, estimated_usd=estimate,
+        )
+    return ceiling - spent - estimate
+
+
+def gate_round(ctx: GateContext) -> Decimal:
+    """Admit one tool-loop round or raise the first check that fails, in
+    this order: GroupBudgetReached, RunCeilingReached, SpendCapReached
+    (daily cap, with its once-per-window notice), then the eval-ledger
+    hook's own error. Returns the dollars left in the daily window."""
+    estimate = max(_dec(ctx.estimated_usd), Decimal("0"))
+    if ctx.max_group_usd is not None:
+        if ctx.group_spent_usd is not None:
+            group_spent = _dec(ctx.group_spent_usd)
+        elif ctx.group_id:
+            group_spent = group_spent_usd(ctx.sb, ctx.group_id)
+        elif ctx.message_id:
+            group_spent = message_spent_usd(ctx.sb, ctx.message_id)
+        else:
+            group_spent = Decimal("0")
+        check_group_budget(max_usd=ctx.max_group_usd, spent_usd=group_spent, estimated_usd=estimate)
+    if ctx.run and ctx.kind not in CEILING_EXEMPT_KINDS and run_ceiling_usd(ctx.run, ctx.factor) is not None:
+        run_spent = (
+            _dec(ctx.run_spent_usd)
+            if ctx.run_spent_usd is not None
+            else run_spent_usd(ctx.sb, str(ctx.run.get("id")))
+        )
+        check_run_ceiling(run=ctx.run, kind=ctx.kind, spent_usd=run_spent, estimated_usd=estimate, factor=ctx.factor)
+    remaining = check_cap(ctx.sb, estimated_usd=estimate, now=ctx.now)
+    hook = _LEDGER_HOOK
+    if hook is not None:
+        hook(ctx)
+    return remaining

@@ -1,0 +1,1710 @@
+[
+ {
+  "id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+  "file_id": "06f712a6-f243-4bab-b334-12b3906cae66",
+  "segment_id": null,
+  "category": "electrical_drawings",
+  "other_type": null,
+  "name": "Reference Material - Architectural - ELEC_RESPONSE_TO_CLV_COMMENTS D1.pdf",
+  "page_start": 1,
+  "page_end": 10,
+  "page_count": 10,
+  "page_meta": [
+   {
+    "h_in": 30.0,
+    "page": 1,
+    "w_in": 42.0,
+    "title": null,
+    "derived": true,
+    "pdf_page": 1,
+    "page_role": "other",
+    "prepended": false,
+    "confidence": null
+   },
+   {
+    "h_in": 30.0,
+    "page": 2,
+    "w_in": 42.0,
+    "title": null,
+    "derived": true,
+    "pdf_page": 2,
+    "page_role": "other",
+    "prepended": false,
+    "confidence": null
+   },
+   {
+    "h_in": 30.0,
+    "page": 3,
+    "w_in": 42.0,
+    "title": null,
+    "derived": true,
+    "pdf_page": 3,
+    "page_role": "other",
+    "prepended": false,
+    "confidence": null
+   },
+   {
+    "h_in": 30.0,
+    "page": 4,
+    "w_in": 42.0,
+    "title": null,
+    "derived": true,
+    "pdf_page": 4,
+    "page_role": "other",
+    "prepended": false,
+    "confidence": null
+   },
+   {
+    "h_in": 30.0,
+    "page": 5,
+    "w_in": 42.0,
+    "title": null,
+    "derived": true,
+    "pdf_page": 5,
+    "page_role": "other",
+    "prepended": false,
+    "confidence": null
+   },
+   {
+    "h_in": 30.0,
+    "page": 6,
+    "w_in": 42.0,
+    "title": null,
+    "derived": true,
+    "pdf_page": 6,
+    "page_role": "other",
+    "prepended": false,
+    "confidence": null
+   },
+   {
+    "h_in": 30.0,
+    "page": 7,
+    "w_in": 42.0,
+    "title": null,
+    "derived": true,
+    "pdf_page": 7,
+    "page_role": "other",
+    "prepended": false,
+    "confidence": null
+   },
+   {
+    "h_in": 30.0,
+    "page": 8,
+    "w_in": 42.0,
+    "title": null,
+    "derived": true,
+    "pdf_page": 8,
+    "page_role": "other",
+    "prepended": false,
+    "confidence": null
+   },
+   {
+    "h_in": 30.0,
+    "page": 9,
+    "w_in": 42.0,
+    "title": null,
+    "derived": true,
+    "pdf_page": 9,
+    "page_role": "other",
+    "prepended": false,
+    "confidence": null
+   },
+   {
+    "h_in": 30.0,
+    "page": 10,
+    "w_in": 42.0,
+    "title": null,
+    "derived": true,
+    "pdf_page": 10,
+    "page_role": "other",
+    "prepended": false,
+    "confidence": null
+   }
+  ],
+  "sheet_width_in": 42.0,
+  "sheet_height_in": 30.0,
+  "status": "done",
+  "created_at": "2026-10-18T18:43:48.513862+00:00"
+ },
+ {
+  "id": "a9720d0e-6c74-4d06-b23f-3071a6f661a1",
+  "file_id": "08df80a2-3447-4862-aacf-03c8f7cbc070",
+  "segment_id": null,
+  "category": "electrical_drawings",
+  "other_type": null,
+  "name": "Reference Material - Architectural - MECH_RESPONSE_TO_CLV_COMMENTS D1.pdf",
+  "page_start": 1,
+  "page_end": 8,
+  "page_count": 8,
+  "page_meta": [
+   {
+    "h_in": 30.0,
+    "page": 1,
+    "w_in": 42.0,
+    "title": null,
+    "derived": true,
+    "pdf_page": 1,
+    "page_role": "other",
+    "prepended": false,
+    "confidence": null
+   },
+   {
+    "h_in": 30.0,
+    "page": 2,
+    "w_in": 42.0,
+    "title": null,
+    "derived": true,
+    "pdf_page": 2,
+    "page_role": "other",
+    "prepended": false,
+    "confidence": null
+   },
+   {
+    "h_in": 30.0,
+    "page": 3,
+    "w_in": 42.0,
+    "title": null,
+    "derived": true,
+    "pdf_page": 3,
+    "page_role": "other",
+    "prepended": false,
+    "confidence": null
+   },
+   {
+    "h_in": 30.0,
+    "page": 4,
+    "w_in": 42.0,
+    "title": null,
+    "derived": true,
+    "pdf_page": 4,
+    "page_role": "other",
+    "prepended": false,
+    "confidence": null
+   },
+   {
+    "h_in": 30.0,
+    "page": 5,
+    "w_in": 42.0,
+    "title": null,
+    "derived": true,
+    "pdf_page": 5,
+    "page_role": "other",
+    "prepended": false,
+    "confidence": null
+   },
+   {
+    "h_in": 30.0,
+    "page": 6,
+    "w_in": 42.0,
+    "title": null,
+    "derived": true,
+    "pdf_page": 6,
+    "page_role": "other",
+    "prepended": false,
+    "confidence": null
+   },
+   {
+    "h_in": 30.0,
+    "page": 7,
+    "w_in": 42.0,
+    "title": null,
+    "derived": true,
+    "pdf_page": 7,
+    "page_role": "other",
+    "prepended": false,
+    "confidence": null
+   },
+   {
+    "h_in": 30.0,
+    "page": 8,
+    "w_in": 42.0,
+    "title": null,
+    "derived": true,
+    "pdf_page": 8,
+    "page_role": "other",
+    "prepended": false,
+    "confidence": null
+   }
+  ],
+  "sheet_width_in": 42.0,
+  "sheet_height_in": 30.0,
+  "status": "done",
+  "created_at": "2026-10-18T18:43:48.752758+00:00"
+ },
+ {
+  "id": "d05754bb-b12b-4cbd-860d-52fff11d0762",
+  "file_id": "94899f18-d8ad-46e6-b184-9cd3ed0418bd",
+  "segment_id": null,
+  "category": "specifications",
+  "other_type": null,
+  "name": "Reference Material - Architectural - SPECS.pdf",
+  "page_start": 1,
+  "page_end": 166,
+  "page_count": 166,
+  "page_meta": [
+   {
+    "page": 1,
+    "title": null,
+    "pdf_page": 1,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 2,
+    "title": null,
+    "pdf_page": 2,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 3,
+    "title": null,
+    "pdf_page": 3,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 4,
+    "title": null,
+    "pdf_page": 4,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 5,
+    "title": null,
+    "pdf_page": 5,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 6,
+    "title": null,
+    "pdf_page": 6,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 7,
+    "title": null,
+    "pdf_page": 7,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 8,
+    "title": null,
+    "pdf_page": 8,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 9,
+    "title": null,
+    "pdf_page": 9,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 10,
+    "title": null,
+    "pdf_page": 10,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 11,
+    "title": null,
+    "pdf_page": 11,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 12,
+    "title": null,
+    "pdf_page": 12,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 13,
+    "title": null,
+    "pdf_page": 13,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 14,
+    "title": null,
+    "pdf_page": 14,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 15,
+    "title": null,
+    "pdf_page": 15,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 16,
+    "title": null,
+    "pdf_page": 16,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 17,
+    "title": null,
+    "pdf_page": 17,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 18,
+    "title": null,
+    "pdf_page": 18,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 19,
+    "title": null,
+    "pdf_page": 19,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 20,
+    "title": null,
+    "pdf_page": 20,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 21,
+    "title": null,
+    "pdf_page": 21,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 22,
+    "title": null,
+    "pdf_page": 22,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 23,
+    "title": null,
+    "pdf_page": 23,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 24,
+    "title": null,
+    "pdf_page": 24,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 25,
+    "title": null,
+    "pdf_page": 25,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 26,
+    "title": null,
+    "pdf_page": 26,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 27,
+    "title": null,
+    "pdf_page": 27,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 28,
+    "title": null,
+    "pdf_page": 28,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 29,
+    "title": null,
+    "pdf_page": 29,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 30,
+    "title": null,
+    "pdf_page": 30,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 31,
+    "title": null,
+    "pdf_page": 31,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 32,
+    "title": null,
+    "pdf_page": 32,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 33,
+    "title": null,
+    "pdf_page": 33,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 34,
+    "title": null,
+    "pdf_page": 34,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 35,
+    "title": null,
+    "pdf_page": 35,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 36,
+    "title": null,
+    "pdf_page": 36,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 37,
+    "title": null,
+    "pdf_page": 37,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 38,
+    "title": null,
+    "pdf_page": 38,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 39,
+    "title": null,
+    "pdf_page": 39,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 40,
+    "title": null,
+    "pdf_page": 40,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 41,
+    "title": null,
+    "pdf_page": 41,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 42,
+    "title": null,
+    "pdf_page": 42,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 43,
+    "title": null,
+    "pdf_page": 43,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 44,
+    "title": null,
+    "pdf_page": 44,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 45,
+    "title": null,
+    "pdf_page": 45,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 46,
+    "title": null,
+    "pdf_page": 46,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 47,
+    "title": null,
+    "pdf_page": 47,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 48,
+    "title": null,
+    "pdf_page": 48,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 49,
+    "title": null,
+    "pdf_page": 49,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 50,
+    "title": null,
+    "pdf_page": 50,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 51,
+    "title": null,
+    "pdf_page": 51,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 52,
+    "title": null,
+    "pdf_page": 52,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 53,
+    "title": null,
+    "pdf_page": 53,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 54,
+    "title": null,
+    "pdf_page": 54,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 55,
+    "title": null,
+    "pdf_page": 55,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 56,
+    "title": null,
+    "pdf_page": 56,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 57,
+    "title": null,
+    "pdf_page": 57,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 58,
+    "title": null,
+    "pdf_page": 58,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 59,
+    "title": null,
+    "pdf_page": 59,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 60,
+    "title": null,
+    "pdf_page": 60,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 61,
+    "title": null,
+    "pdf_page": 61,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 62,
+    "title": null,
+    "pdf_page": 62,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 63,
+    "title": null,
+    "pdf_page": 63,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 64,
+    "title": null,
+    "pdf_page": 64,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 65,
+    "title": null,
+    "pdf_page": 65,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 66,
+    "title": null,
+    "pdf_page": 66,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 67,
+    "title": null,
+    "pdf_page": 67,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 68,
+    "title": null,
+    "pdf_page": 68,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 69,
+    "title": null,
+    "pdf_page": 69,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 70,
+    "title": null,
+    "pdf_page": 70,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 71,
+    "title": null,
+    "pdf_page": 71,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 72,
+    "title": null,
+    "pdf_page": 72,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 73,
+    "title": null,
+    "pdf_page": 73,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 74,
+    "title": null,
+    "pdf_page": 74,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 75,
+    "title": null,
+    "pdf_page": 75,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 76,
+    "title": null,
+    "pdf_page": 76,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 77,
+    "title": null,
+    "pdf_page": 77,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 78,
+    "title": null,
+    "pdf_page": 78,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 79,
+    "title": null,
+    "pdf_page": 79,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 80,
+    "title": null,
+    "pdf_page": 80,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 81,
+    "title": null,
+    "pdf_page": 81,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 82,
+    "title": null,
+    "pdf_page": 82,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 83,
+    "title": null,
+    "pdf_page": 83,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 84,
+    "title": null,
+    "pdf_page": 84,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 85,
+    "title": null,
+    "pdf_page": 85,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 86,
+    "title": null,
+    "pdf_page": 86,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 87,
+    "title": null,
+    "pdf_page": 87,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 88,
+    "title": null,
+    "pdf_page": 88,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 89,
+    "title": null,
+    "pdf_page": 89,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 90,
+    "title": null,
+    "pdf_page": 90,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 91,
+    "title": null,
+    "pdf_page": 91,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 92,
+    "title": null,
+    "pdf_page": 92,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 93,
+    "title": null,
+    "pdf_page": 93,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 94,
+    "title": null,
+    "pdf_page": 94,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 95,
+    "title": null,
+    "pdf_page": 95,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 96,
+    "title": null,
+    "pdf_page": 96,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 97,
+    "title": null,
+    "pdf_page": 97,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 98,
+    "title": null,
+    "pdf_page": 98,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 99,
+    "title": null,
+    "pdf_page": 99,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 100,
+    "title": null,
+    "pdf_page": 100,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 101,
+    "title": null,
+    "pdf_page": 101,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 102,
+    "title": null,
+    "pdf_page": 102,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 103,
+    "title": null,
+    "pdf_page": 103,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 104,
+    "title": null,
+    "pdf_page": 104,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 105,
+    "title": null,
+    "pdf_page": 105,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 106,
+    "title": null,
+    "pdf_page": 106,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 107,
+    "title": null,
+    "pdf_page": 107,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 108,
+    "title": null,
+    "pdf_page": 108,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 109,
+    "title": null,
+    "pdf_page": 109,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 110,
+    "title": null,
+    "pdf_page": 110,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 111,
+    "title": null,
+    "pdf_page": 111,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 112,
+    "title": null,
+    "pdf_page": 112,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 113,
+    "title": null,
+    "pdf_page": 113,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 114,
+    "title": null,
+    "pdf_page": 114,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 115,
+    "title": null,
+    "pdf_page": 115,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 116,
+    "title": null,
+    "pdf_page": 116,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 117,
+    "title": null,
+    "pdf_page": 117,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 118,
+    "title": null,
+    "pdf_page": 118,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 119,
+    "title": null,
+    "pdf_page": 119,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 120,
+    "title": null,
+    "pdf_page": 120,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 121,
+    "title": null,
+    "pdf_page": 121,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 122,
+    "title": null,
+    "pdf_page": 122,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 123,
+    "title": null,
+    "pdf_page": 123,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 124,
+    "title": null,
+    "pdf_page": 124,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 125,
+    "title": null,
+    "pdf_page": 125,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 126,
+    "title": null,
+    "pdf_page": 126,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 127,
+    "title": null,
+    "pdf_page": 127,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 128,
+    "title": null,
+    "pdf_page": 128,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 129,
+    "title": null,
+    "pdf_page": 129,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 130,
+    "title": null,
+    "pdf_page": 130,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 131,
+    "title": null,
+    "pdf_page": 131,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 132,
+    "title": null,
+    "pdf_page": 132,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 133,
+    "title": null,
+    "pdf_page": 133,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 134,
+    "title": null,
+    "pdf_page": 134,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 135,
+    "title": null,
+    "pdf_page": 135,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 136,
+    "title": null,
+    "pdf_page": 136,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 137,
+    "title": null,
+    "pdf_page": 137,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 138,
+    "title": null,
+    "pdf_page": 138,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 139,
+    "title": null,
+    "pdf_page": 139,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 140,
+    "title": null,
+    "pdf_page": 140,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 141,
+    "title": null,
+    "pdf_page": 141,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 142,
+    "title": null,
+    "pdf_page": 142,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 143,
+    "title": null,
+    "pdf_page": 143,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 144,
+    "title": null,
+    "pdf_page": 144,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 145,
+    "title": null,
+    "pdf_page": 145,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 146,
+    "title": null,
+    "pdf_page": 146,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 147,
+    "title": null,
+    "pdf_page": 147,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 148,
+    "title": null,
+    "pdf_page": 148,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 149,
+    "title": null,
+    "pdf_page": 149,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 150,
+    "title": null,
+    "pdf_page": 150,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 151,
+    "title": null,
+    "pdf_page": 151,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 152,
+    "title": null,
+    "pdf_page": 152,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 153,
+    "title": null,
+    "pdf_page": 153,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 154,
+    "title": null,
+    "pdf_page": 154,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 155,
+    "title": null,
+    "pdf_page": 155,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 156,
+    "title": null,
+    "pdf_page": 156,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 157,
+    "title": null,
+    "pdf_page": 157,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 158,
+    "title": null,
+    "pdf_page": 158,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 159,
+    "title": null,
+    "pdf_page": 159,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 160,
+    "title": null,
+    "pdf_page": 160,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 161,
+    "title": null,
+    "pdf_page": 161,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 162,
+    "title": null,
+    "pdf_page": 162,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 163,
+    "title": null,
+    "pdf_page": 163,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 164,
+    "title": null,
+    "pdf_page": 164,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 165,
+    "title": null,
+    "pdf_page": 165,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 166,
+    "title": null,
+    "pdf_page": 166,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   }
+  ],
+  "sheet_width_in": 8.5,
+  "sheet_height_in": 11.0,
+  "status": "done",
+  "created_at": "2026-10-18T18:43:48.954605+00:00"
+ },
+ {
+  "id": "49386a84-a15d-4fb1-a568-9dece878d298",
+  "file_id": "9f92cd3f-a793-48e9-a8eb-6612ca5fc322",
+  "segment_id": null,
+  "category": "specifications",
+  "other_type": null,
+  "name": "Reference Material - Tech Specs 1.pdf",
+  "page_start": 1,
+  "page_end": 2,
+  "page_count": 2,
+  "page_meta": [
+   {
+    "page": 1,
+    "title": null,
+    "pdf_page": 1,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 2,
+    "title": null,
+    "pdf_page": 2,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   }
+  ],
+  "sheet_width_in": 11.0,
+  "sheet_height_in": 8.5,
+  "status": "done",
+  "created_at": "2026-10-18T18:43:49.139045+00:00"
+ },
+ {
+  "id": "43ca786f-4982-44ba-b31c-42054c359858",
+  "file_id": "4a1d17bc-630d-4635-ad2f-ad6cc317589c",
+  "segment_id": null,
+  "category": "specifications",
+  "other_type": null,
+  "name": "Reference Material - UMC Door Spec Guide 2025.pdf",
+  "page_start": 1,
+  "page_end": 2,
+  "page_count": 2,
+  "page_meta": [
+   {
+    "page": 1,
+    "title": null,
+    "pdf_page": 1,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   },
+   {
+    "page": 2,
+    "title": null,
+    "pdf_page": 2,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 1.0
+   }
+  ],
+  "sheet_width_in": 8.5,
+  "sheet_height_in": 11.0,
+  "status": "done",
+  "created_at": "2026-10-18T18:43:49.345945+00:00"
+ },
+ {
+  "id": "059e95bd-55eb-4d3b-87d4-f2bea2a261d0",
+  "file_id": "6b017d0e-aa60-4d7c-a668-383acc851c83",
+  "segment_id": "7e3b55df-4ce2-4a07-bea7-cc2e26a6eba3",
+  "category": "rfp",
+  "other_type": null,
+  "name": "Exhibit A - Scope of Work",
+  "page_start": 1,
+  "page_end": 6,
+  "page_count": 6,
+  "page_meta": [
+   {
+    "page": 1,
+    "title": null,
+    "pdf_page": 1,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 0.95
+   },
+   {
+    "page": 2,
+    "title": null,
+    "pdf_page": 2,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 0.95
+   },
+   {
+    "page": 3,
+    "title": null,
+    "pdf_page": 3,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 0.95
+   },
+   {
+    "page": 4,
+    "title": null,
+    "pdf_page": 4,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 0.95
+   },
+   {
+    "page": 5,
+    "title": null,
+    "pdf_page": 5,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 0.95
+   },
+   {
+    "page": 6,
+    "title": null,
+    "pdf_page": 6,
+    "page_role": "spec_text",
+    "prepended": false,
+    "confidence": 0.95
+   }
+  ],
+  "sheet_width_in": null,
+  "sheet_height_in": null,
+  "status": "done",
+  "created_at": "2026-10-18T18:44:03.988746+00:00"
+ }
+]

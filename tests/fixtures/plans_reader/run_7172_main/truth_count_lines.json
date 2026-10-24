@@ -1,0 +1,402 @@
+[
+ {
+  "area": "SHEET",
+  "description": "3/4\"X10' LONG COPPER GROUND ROD",
+  "group": "WIRING",
+  "line_id": "Q025",
+  "qty": 1.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "EXOTHERMIC WELD",
+  "group": "WIRING",
+  "line_id": "Q026",
+  "qty": 1.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "PANEL A, 277/480V, 3-PH, 4W, 200A MLO TYPE, 14KAIC, 42 POLES, SURFACE MOUNT, NEMA 1",
+  "group": "SWITCHGEAR",
+  "line_id": "Q027",
+  "qty": 1.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "PANEL B, 120/208V, 3-PH, 4W, 200A MCB TYPE, 10KAIC, 64 POLES, SURFACE MOUNT, NEMA 1",
+  "group": "SWITCHGEAR",
+  "line_id": "Q028",
+  "qty": 1.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "75KVA TRANSFORMER",
+  "group": "SWITCHGEAR",
+  "line_id": "Q029",
+  "qty": 1.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "20A/2P DISCONNECT SWITCH, NEMA 1",
+  "group": "SWITCHGEAR",
+  "line_id": "Q030",
+  "qty": 1.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "30A/2P DISCONNECT SWITCH, NEMA 3R",
+  "group": "SWITCHGEAR",
+  "line_id": "Q031",
+  "qty": 1.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "30A/3P DISCONNECT SWITCH, NEMA 3R",
+  "group": "SWITCHGEAR",
+  "line_id": "Q032",
+  "qty": 6.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "20A/1P CIRCUIT BREAKER",
+  "group": "SWITCHGEAR",
+  "line_id": "Q033",
+  "qty": 58.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "20A/2P CIRCUIT BREAKER",
+  "group": "SWITCHGEAR",
+  "line_id": "Q034",
+  "qty": 1.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "20A/3P CIRCUIT BREAKER",
+  "group": "SWITCHGEAR",
+  "line_id": "Q035",
+  "qty": 1.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "30A/2P CIRCUIT BREAKER",
+  "group": "SWITCHGEAR",
+  "line_id": "Q036",
+  "qty": 1.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "30A/3P CIRCUIT BREAKER",
+  "group": "SWITCHGEAR",
+  "line_id": "Q037",
+  "qty": 5.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "100A/3P CIRCUIT BREAKER",
+  "group": "SWITCHGEAR",
+  "line_id": "Q038",
+  "qty": 1.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "DUPLEX RECEPTACLE",
+  "group": "OTHER ITEMS",
+  "line_id": "Q039",
+  "qty": 19.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "DUPLEX RECEPTACLE, GFCI",
+  "group": "OTHER ITEMS",
+  "line_id": "Q040",
+  "qty": 15.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "DUPLEX RECEPTACLE, GFCI, WP",
+  "group": "OTHER ITEMS",
+  "line_id": "Q041",
+  "qty": 3.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "FLOOR SWITCHED DUPLEX RECEPTACLE",
+  "group": "OTHER ITEMS",
+  "line_id": "Q042",
+  "qty": 2.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "QUADPLEX RECEPTACLE",
+  "group": "OTHER ITEMS",
+  "line_id": "Q043",
+  "qty": 4.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "SWITCHED DUPLEX RECEPTACLE",
+  "group": "OTHER ITEMS",
+  "line_id": "Q044",
+  "qty": 50.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "SWITCHED QUADPLEX RECEPTACLE",
+  "group": "OTHER ITEMS",
+  "line_id": "Q045",
+  "qty": 31.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "THERMOSTAT",
+  "group": "OTHER ITEMS",
+  "line_id": "Q047",
+  "qty": 6.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "4\"S JUNCTION BOX",
+  "group": "OTHER ITEMS",
+  "line_id": "Q048",
+  "qty": 19.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "A, 2' X 4' CEILING LIGHT, LITHONIA LIGHTING, CPX 2X4 3000LM 80CRI 35K SWL MIN10 ZT MVOLT, 25 VA",
+  "group": "LIGHTING FIXTURES",
+  "line_id": "Q049",
+  "qty": 26.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "AE, 2' X 4' CEILING LIGHT, LITHONIA LIGHTING, CPX 2X4 3000LM 80CRI 35K SWL MIN10 ZT MVOLT E10W, 25 VA, PROVIDE 10W EMERGENCY BATTERY PACK",
+  "group": "LIGHTING FIXTURES",
+  "line_id": "Q050",
+  "qty": 29.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "B, SQUARE RECESSED CAN, LITHONIA LIGHTING, LDN4SQ 35/30 LS4 AR LSS TRW MVOLT GZ10, 32 VA",
+  "group": "LIGHTING FIXTURES",
+  "line_id": "Q051",
+  "qty": 14.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "BE, SQUARE RECESSED CAN, LITHONIA LIGHTING, LDN4SQ 35/30 LS4 AR LSS TRW MVOLT GZ10 EL, 32 VA, PROVIDE 10W EMERGENCY BATTERY PACK",
+  "group": "LIGHTING FIXTURES",
+  "line_id": "Q052",
+  "qty": 14.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "C, PENDANT LIGHT, TO BE SELECTED BY OWNER/ARCHITECT, TO BE SELECTED BY OWNER/ARCHITECT, 38 VA, DO NOT EXCEED LISTED WATTAGE (NEED TO CONFIRM SCOPE OF WORK)",
+  "group": "LIGHTING FIXTURES",
+  "line_id": "Q053",
+  "qty": 3.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "CE, PENDANT LIGHT, TO BE SELECTED BY OWNER/ARCHITECT, TO BE SELECTED BY OWNER/ARCHITECT, 38 VA, DO NOT EXCEED LISTED WATTAGE. PROVIDE 10W EMERGENCY BATTERY PACK (NEED TO CONFIRM SCOPE OF WORK)",
+  "group": "LIGHTING FIXTURES",
+  "line_id": "Q054",
+  "qty": 4.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "D, 8FT LINEAR LIGHT FIXTURE, TO BE SELECTED BY OWNER/ARCHITECT, TO BE SELECTED BY OWNER/ARCHITECT, 64 VA, DO NOT EXCEED LISTED WATTAGE (NEED TO CONFIRM SCOPE OF WORK)",
+  "group": "LIGHTING FIXTURES",
+  "line_id": "Q055",
+  "qty": 9.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "DE, 8FT LINEAR LIGHT FIXTURE, TO BE SELECTED BY OWNER/ARCHITECT, TO BE SELECTED BY OWNER/ARCHITECT, 64 VA, DO NOT EXCEED LISTED WATTAGE. PROVIDE 10W EMERGENCY BATTERY PACK (NEED TO CONFIRM SCOPE OF WORK)",
+  "group": "LIGHTING FIXTURES",
+  "line_id": "Q056",
+  "qty": 10.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "E, CEILING LIGHT FIXTURE, TO BE SELECTED BY OWNER/ARCHITECT, TO BE SELECTED BY OWNER/ARCHITECT, 100 VA, DO NOT EXCEED LISTED WATTAGE (NEED TO CONFIRM SCOPE OF WORK)",
+  "group": "LIGHTING FIXTURES",
+  "line_id": "Q057",
+  "qty": 4.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "EX1, EXIT SIGN, LITHONIA LIGHTING, LQM S W RG MVOLT EL HO M6, 5 VA",
+  "group": "LIGHTING FIXTURES",
+  "line_id": "Q058",
+  "qty": 6.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "EX2, EXIT SIGN, LITHONIA LIGHTING, LQM S W RG MVOLT EL HO M6, 5 VA",
+  "group": "LIGHTING FIXTURES",
+  "line_id": "Q059",
+  "qty": 1.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "F, 2FT LINEAR LIGHT FIXTURE, TO BE SELECTED BY OWNER/ARCHITECT, TO BE SELECTED BY OWNER/ARCHITECT, 16 VA, DO NOT EXCEED LISTED WATTAGE (NEED TO CONFIRM SCOPE OF WORK)",
+  "group": "LIGHTING FIXTURES",
+  "line_id": "Q060",
+  "qty": 8.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "FE, 2FT LINEAR LIGHT FIXTURE, TO BE SELECTED BY OWNER/ARCHITECT, TO BE SELECTED BY OWNER/ARCHITECT, 16 VA, DO NOT EXCEED LISTED WATTAGE. PROVIDE 10W EMERGENCY BATTERY PACK (NEED TO CONFIRM SCOPE OF WORK)",
+  "group": "LIGHTING FIXTURES",
+  "line_id": "Q061",
+  "qty": 5.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "CEILING OCCUPANCY SENSOR",
+  "group": "LIGHTING CONTROLS",
+  "line_id": "Q062",
+  "qty": 10.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "OCCUPANCY SENSOR SWITCH",
+  "group": "LIGHTING CONTROLS",
+  "line_id": "Q063",
+  "qty": 28.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "TELE/DATA OUTLET",
+  "group": "LOW VOLTAGE WORK",
+  "line_id": "Q064",
+  "qty": 78.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ },
+ {
+  "area": "SHEET",
+  "description": "TV OUTLET",
+  "group": "LOW VOLTAGE WORK",
+  "line_id": "Q065",
+  "qty": 4.0,
+  "section": "NEW WORK",
+  "subgroup": "",
+  "unit": "EA"
+ }
+]

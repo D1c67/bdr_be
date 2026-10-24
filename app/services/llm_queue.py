@@ -103,9 +103,14 @@ JOB_PLANS_AGENT = "plans_reader_agent"
 JOB_PLANS_MAIN = "plans_reader_main"
 JOB_PLANS_CHAT = "plans_reader_chat"
 JOB_PLANS_MODIFY = "plans_reader_modify"
+# The page facts job (docs/AI_ESTIMATING_BUILD_SPEC.md 4.1, WS1): one per
+# run document, non-LLM, cached by sha256. Claimed in the interactive tier
+# of the AI Estimating pass: a run in `splitting` waits on it, and it costs
+# seconds, so it must never queue behind a batch of group calls.
+JOB_PLANS_FACTS = "plans_reader_facts"
 # Batch: a run's pipeline groups. Interactive: someone is waiting on the page.
 PLANS_BATCH_JOB_TYPES = (JOB_PLANS_AGENT, JOB_PLANS_MAIN)
-PLANS_INTERACTIVE_JOB_TYPES = (JOB_PLANS_CHAT, JOB_PLANS_MODIFY)
+PLANS_INTERACTIVE_JOB_TYPES = (JOB_PLANS_CHAT, JOB_PLANS_MODIFY, JOB_PLANS_FACTS)
 PLANS_JOB_TYPES = PLANS_BATCH_JOB_TYPES + PLANS_INTERACTIVE_JOB_TYPES
 # PM email classification (docs/EMAIL_CLASSIFICATION.md): one job per email
 # (target = ingested email id), self-hosted box only, claimed in its own pass
@@ -138,8 +143,20 @@ HARVEST_JOB_TYPES = (JOB_RFP_HARVEST,) + PORTAL_JOB_TYPES
 CREATE_JOB_TYPES = (JOB_RFP_CREATE_FILES,)
 THIRD_PASS_JOB_TYPES = HARVEST_JOB_TYPES + CREATE_JOB_TYPES
 NON_LLM_JOB_TYPES = (JOB_RFP_INGEST,) + THIRD_PASS_JOB_TYPES
-# Every job type llm_jobs.job_type accepts (the CHECK in migration 0152).
+# Every job type llm_jobs.job_type accepts (the CHECK in migration 0152,
+# plus plans_reader_facts from migration 0165, MC).
 ALL_JOB_TYPES = LLM_JOB_TYPES + PLANS_JOB_TYPES + NON_LLM_JOB_TYPES
+
+# AI Estimating autonomous build (docs/AI_ESTIMATING_BUILD_SPEC.md 4.1):
+# the WS6 pricing job (LLM-capable through its quote fallback), claimed in
+# the plans pass with one slot of its capacity (never on the bidding
+# pipeline's slots). Migration 0165 names it in the llm_jobs.job_type CHECK.
+JOB_AI_PRICING = "ai_pricing"
+PRICING_JOB_TYPES = (JOB_AI_PRICING,)
+ALL_JOB_TYPES = ALL_JOB_TYPES + PRICING_JOB_TYPES
+# Nothing stays pending: every AI Estimating job type is claimable (kept as
+# a name so older tests and scripts can import it).
+PENDING_MC_JOB_TYPES: tuple[str, ...] = ()
 
 # The default of PLANS_READER_CONCURRENCY (core/config.py), AI Estimating
 # jobs per worker process (two uvicorn workers in prod, so twice this).
@@ -150,6 +167,7 @@ SANDBOX_MODEL_LABEL = "sandbox"
 
 _FEATURE_BY_TYPE = {
     JOB_BOQ: "boq",
+    JOB_AI_PRICING: "pricing_quote",
     JOB_GENERAL_MATERIAL: "estimate",
     JOB_PROPOSAL: "proposal",
     JOB_BID_SPLIT: "bid_split",
@@ -162,6 +180,7 @@ _FEATURE_BY_TYPE = {
     JOB_PLANS_MAIN: "plans_main",
     JOB_PLANS_CHAT: "plans_chat",
     JOB_PLANS_MODIFY: "plans_modify",
+    JOB_PLANS_FACTS: "plans_facts",
     JOB_EMAIL_CLASSIFY: "email_classify",
 }
 
@@ -415,6 +434,21 @@ def _spec(job_type: str) -> _JobSpec:
             _mark_plans_group,
             _plans_group_status,
         )
+    if job_type == JOB_PLANS_FACTS:
+        from app.services.pagefacts import job as m
+
+        return _JobSpec(
+            "plans_facts",
+            # One job per plans_reader_documents row (target = document id):
+            # extract or load the cached page facts, relabel, write
+            # facts_status, then advance every run waiting in splitting.
+            # Non-LLM: its own model label and failure sentence.
+            m.execute,
+            m.mark_from_queue,
+            m.current_status,
+            model_label=lambda s: m.MODEL_LABEL,
+            error_message=m.error_message,
+        )
     if job_type == JOB_EMAIL_CLASSIFY:
         from app.services import email_classification as m
 
@@ -427,6 +461,23 @@ def _spec(job_type: str) -> _JobSpec:
                 target, fields.get("status"), fields.get("error")
             ),
             lambda target: m.current_status(target),
+        )
+    if job_type == JOB_AI_PRICING:
+        from app.services import pricing_run as m
+
+        return _JobSpec(
+            "pricing_quote",
+            # One job per RUN (target_id = run id, payload {run_id, reason});
+            # price_run renews the lease between steps and inserts an
+            # idempotent pricing version (WS6, spec 4.1). The spine wrapper
+            # (plans_reader_runs.run_pricing_job) takes the run's change
+            # slot like a modify, never changes the run status, and
+            # recomputes the autonomy state after the step.
+            _run_ai_pricing,
+            lambda target, fields: m.mark_from_queue(target, fields.get("status"), fields.get("error")),
+            lambda target: m.current_status(target),
+            model_label=lambda s: m.MODEL_LABEL,
+            error_message=m.error_message,
         )
     raise KeyError(f"Unknown llm job type: {job_type}")
 
@@ -462,6 +513,14 @@ def _run_plans_group(payload: dict) -> None:
     if not group_id:
         raise ValueError("The AI Estimating job has no group to run.")
     plans_reader_agents.run_group(get_supabase(), str(group_id))
+
+
+def _run_ai_pricing(payload: dict) -> None:
+    """The ai_pricing job (spec 4.1 post-run chain) through the spine
+    wrapper: change slot held, run status untouched, autonomy recomputed."""
+    from app.services import plans_reader_runs
+
+    plans_reader_runs.run_pricing_job(payload)
 
 
 def _run_plans_chat(payload: dict) -> None:
@@ -858,17 +917,23 @@ def _claim_plans(s: Settings, types: list[str]) -> list[dict]:
     if not getattr(s, "plans_reader_enabled", False):
         return []
     total = _plans_concurrency(s)
-    running = [jt for jt in types if jt in PLANS_JOB_TYPES]
+    running = [jt for jt in types if jt in PLANS_JOB_TYPES or jt == JOB_AI_PRICING]
     free = total - len(running)
     if free <= 0:
         return []
-    claimed = _claim(s, free, list(PLANS_INTERACTIVE_JOB_TYPES))
+    claimed = _claim_filtered(s, free, list(PLANS_INTERACTIVE_JOB_TYPES))
     free -= len(claimed)
     batch_slots = total - 1 if total > 1 else total
     running_batch = sum(1 for jt in running if jt in PLANS_BATCH_JOB_TYPES)
     batch_free = min(free, batch_slots - running_batch)
     if batch_free > 0:
-        claimed.extend(_claim(s, batch_free, list(PLANS_BATCH_JOB_TYPES)))
+        claimed.extend(_claim_filtered(s, batch_free, list(PLANS_BATCH_JOB_TYPES)))
+    # The WS6 pricing job rides the plans pass (gated by AI_PRICING_ENABLED,
+    # never an RFP flag) with one slot of the remaining capacity.
+    if getattr(s, "ai_pricing_enabled", False):
+        left = total - len(running) - len(claimed)
+        if left > 0:
+            claimed.extend(_claim_filtered(s, min(left, 1), [JOB_AI_PRICING]))
     return claimed
 
 
@@ -1065,20 +1130,21 @@ def _claim_tick(s: Settings, running_types: Iterable[str]) -> list[dict]:
     `running_types` is the job type of every job still executing in this
     process. The sandbox pass is skipped while the feature flag is off (a
     disabled feature must never spawn a child; its queued jobs wait for the
-    flag or an operator cancel)."""
+    flag or an operator cancel). Every pass honours LLM_QUEUE_CLAIM_TYPES
+    (claim_types_allowed): a restricted worker never claims another type."""
     types = list(running_types)
     claimed: list[dict] = []
     llm_capacity = s.llm_queue_worker_concurrency - sum(
         1 for jt in types if jt in LLM_JOB_TYPES
     )
     if llm_capacity > 0:
-        claimed.extend(_claim(s, llm_capacity, list(LLM_JOB_TYPES)))
+        claimed.extend(_claim_filtered(s, llm_capacity, list(LLM_JOB_TYPES)))
     if s.rfp_ingest_enabled:
         rfp_capacity = s.rfp_ingest_sandbox_concurrency - sum(
             1 for jt in types if jt == JOB_RFP_INGEST
         )
         if rfp_capacity > 0:
-            claimed.extend(_claim(s, rfp_capacity, [JOB_RFP_INGEST]))
+            claimed.extend(_claim_filtered(s, rfp_capacity, [JOB_RFP_INGEST]))
     # Third pass: the harvests (docs/RFP_HARVEST.md 2.2 and
     # docs/RFP_NGEM_PORTAL.md 2.2), one job per worker by default so each
     # platform sees one human-paced session at a time. The Procore harvest,
@@ -1098,7 +1164,7 @@ def _claim_tick(s: Settings, running_types: Iterable[str]) -> list[dict]:
             1 for jt in types if jt in THIRD_PASS_JOB_TYPES
         )
         if harvest_capacity > 0:
-            claimed.extend(_claim(s, harvest_capacity, harvest_types))
+            claimed.extend(_claim_filtered(s, harvest_capacity, harvest_types))
     claimed.extend(_claim_plans(s, types))
     claimed.extend(_claim_email_classify(s, types))
     return claimed

@@ -1,0 +1,112 @@
+{
+ "runs": [],
+ "pages": [
+  {
+   "page": 8,
+   "tags": [
+    "demolition",
+    "lighting",
+    "rectangular fixtures",
+    "linear fixtures",
+    "track lighting",
+    "partial tile coverage"
+   ],
+   "notes": [
+    "Title and scale retained from the first pass; title block is outside the supplied tiles.",
+    "Five complete rectangular fixture outlines are visible in tile 1. Each has internal horizontal lines; these are counted as one fixture symbol per outer outline, not multiple fixtures.",
+    "Two additional rectangular symbols intersect the left tile boundary and are excluded from the new count. The rectangular count is a tile subtotal, not a complete sheet total.",
+    "One vertical and one horizontal narrow linear fixture symbol are completely visible in tile 1.",
+    "Tile 2 shows two directional-head graphics, each with one cone-shaped head. Track rows continue outside the tile, so neither a complete head count nor a complete row recount is possible.",
+    "First-pass quantities of 13 downlights, three track rows and two switches are retained without a whole-sheet recount because coverage is incomplete.",
+    "The first-pass total of 12 track-light assemblies is retained provisionally; the paired-head interpretation is not supported by the visible enlarged graphics.",
+    "One small entry lighting graphic is visible near (0.310,0.495), but its equipment type requires a legend. The other first-pass entry graphic is not visible.",
+    "The first-pass conduit/conductor retention-versus-removal conflict remains unchanged; its source notes are outside these tiles."
+   ],
+   "scale": "1/4\" = 1'-0\"",
+   "title": "OVERALL LIGHTING PLAN - DEMOLITION WORK",
+   "doc_index": 1,
+   "page_role": "plan",
+   "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+   "sheet_number": "ED3.01",
+   "resolution_flags": [
+    {
+     "page": 8,
+     "reason": "Small entry graphic near (0.310,0.495) remains unidentified without a legend. Rectangular symbols at the left boundary are cropped; this tile cannot establish the complete rectangular demolition total.",
+     "region": "0.170,0.380,0.410,0.570",
+     "doc_index": 1,
+     "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20"
+    },
+    {
+     "page": 8,
+     "reason": "Track rows and additional head positions extend outside the tile. Visible head shapes are readable, but the complete assembly count and equipment interpretation require full-row coverage and legend confirmation.",
+     "region": "0.450,0.400,0.620,0.550",
+     "doc_index": 1,
+     "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20"
+    }
+   ]
+  }
+ ],
+ "scope": [],
+ "specs": [],
+ "counts": [
+  {
+   "page": 8,
+   "unit": "EA",
+   "basis": "counted_symbols",
+   "notes": "New tile subtotal only. Each complete outer rectangle is one fixture symbol; internal parallel lines are not counted separately. Two additional symbols clipped at the left edge are excluded. No complete sheet quantity is asserted.",
+   "location": "Approximate whole-sheet centers: (0.224,0.511), (0.367,0.494), (0.319,0.527), (0.367,0.527), (0.224,0.561)",
+   "quantity": 5,
+   "doc_index": 1,
+   "confidence": 0.9,
+   "description": "Remove existing rectangular lighting fixture \u2014 complete symbols within tile 1",
+   "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+   "sheet_number": "ED3.01",
+   "symbol_or_tag": "(X)",
+   "material_category_hint": "Demolition"
+  },
+  {
+   "page": 8,
+   "unit": "EA",
+   "basis": "counted_symbols",
+   "notes": "Two complete continuous outlines counted. No segmentation into additional fixtures or measured length is inferred.",
+   "location": "Tile 1: vertical fixture centered near (0.269,0.518); horizontal fixture centered near (0.308,0.558)",
+   "quantity": 2,
+   "doc_index": 1,
+   "confidence": 0.94,
+   "description": "Remove existing narrow linear lighting fixture",
+   "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+   "sheet_number": "ED3.01",
+   "symbol_or_tag": "(X), keynote 1",
+   "material_category_hint": "Demolition"
+  },
+  {
+   "page": 8,
+   "unit": "EA",
+   "basis": "counted_symbols",
+   "notes": "corrects first pass: Remove existing paired track-light head assembly; twelve paired graphics/assemblies. Visible enlarged graphics each show one directional cone-shaped head, not a clearly paired-head assembly. Quantity 12 is retained from the first pass, not recounted or newly verified: the track assemblies extend outside the tiles. Do not double this quantity to infer 24 heads.",
+   "location": "Eastern track-lighting area; enlarged visible head graphics near (0.487,0.526) and (0.534,0.526)",
+   "quantity": 12,
+   "doc_index": 1,
+   "confidence": 0.55,
+   "description": "Remove existing track-light head assembly",
+   "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+   "sheet_number": "ED3.01",
+   "symbol_or_tag": "(X)",
+   "material_category_hint": "Demolition"
+  }
+ ],
+ "details": [],
+ "summary": "Resolved five complete rectangular fixture symbols and two complete narrow linear fixture symbols within tile 1. Their internal lines are not additional fixtures. Visible track-light graphics show single directional-head shapes rather than clear paired heads, but the tracks are cropped; the first-pass total is retained pending full-row review. Entry-fixture identification remains unresolved.",
+ "category": "electrical_drawings",
+ "questions": [
+  {
+   "why": "The enlargement resolves complete rectangular symbol boundaries and shows single directional-head shapes at the visible track positions. It does not show the entire tracks or both entry graphics. This narrows the first-pass enlargement request; five rectangular fixtures and two narrow linear fixtures can now be counted within tile 1.",
+   "page": 8,
+   "question": "Provide full coverage of the clipped rectangular fixtures and all track rows, plus the lighting-symbol legend, to finalize demolition quantities and identify the entry lighting graphics.",
+   "doc_index": 1,
+   "document_id": "538c95b5-3df0-4d7e-b18b-c01135083d20",
+   "sheet_number": "ED3.01"
+  }
+ ],
+ "schedules": []
+}

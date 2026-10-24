@@ -99,6 +99,37 @@ _QUOTA_MARKERS = (
 )
 
 
+# ── AI Estimating eval harness (WS0) ─────────────────────────────────────
+
+
+class EvalBudgetRefused(RuntimeError):
+    """The eval ledger (services/eval_ledger) refused to send a live call:
+    no open sweep, the sweep budget, the global $400 ceiling, the
+    workstream allocation, an unpriced model or a non-dev database would
+    be passed. Permanent (declared not_configured, so user_message is this
+    app-authored text and the queue never retries it); `code` is one of
+    eval_ledger.REFUSAL_CODES."""
+
+    llm_error_kind = KIND_NOT_CONFIGURED
+
+    def __init__(self, message: str, *, code: str = "unknown") -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class CassetteMiss(RuntimeError):
+    """LLM_CASSETTE_MODE=replay found no recorded response for a request
+    (services/llm_cassette), or a cassette mode is set where cassettes are
+    not allowed. Permanent: replay never goes live, so a retry would miss
+    the same way."""
+
+    llm_error_kind = KIND_NOT_CONFIGURED
+
+    def __init__(self, message: str, *, key: str | None = None) -> None:
+        super().__init__(message)
+        self.key = key
+
+
 def is_out_of_tokens(exc: Exception) -> bool:
     """True if the provider rejected the call because the account has no
     API tokens/credits left (not a transient rate limit)."""

@@ -1,0 +1,247 @@
+{
+ "eval_case_id": "7172",
+ "id": "785ae29e-5781-4b99-8146-e5afd2ec969d",
+ "ledger": {
+  "documents": [
+   {
+    "category": "general_drawings",
+    "document_id": "3107f9ac-a983-47a5-9087-d18355a9e33e",
+    "name": "Architectural Drawings",
+    "pages": 6
+   },
+   {
+    "category": "general_drawings",
+    "document_id": "8f69d0e5-0594-4052-8ed7-06eecb9dee57",
+    "name": "Project Information and Site Plan",
+    "pages": 1
+   },
+   {
+    "category": "mechanical_drawings",
+    "document_id": "32c19c76-1bea-4c7b-99df-3cf1e65f0654",
+    "name": "Mechanical Drawings and Specifications",
+    "pages": 11
+   },
+   {
+    "category": "electrical_drawings",
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "name": "26-141 Five Star Tax Resolution Elec_permit.pdf",
+    "pages": 7
+   }
+  ],
+  "project": {
+   "address": null,
+   "labor_needed": null,
+   "labor_time": null,
+   "name": "EVAL 7172",
+   "number": null,
+   "owner_type": null,
+   "project_type": null,
+   "wage_type": null
+  },
+  "sheet_index": [
+   {
+    "category": "general_drawings",
+    "document_id": "3107f9ac-a983-47a5-9087-d18355a9e33e",
+    "page": 2,
+    "page_role": "plan",
+    "sheet_number": "TI-1",
+    "title": "TI-1 - Floor Plan and Enlarged Floor Plan"
+   },
+   {
+    "category": "general_drawings",
+    "document_id": "3107f9ac-a983-47a5-9087-d18355a9e33e",
+    "page": 3,
+    "page_role": "plan",
+    "sheet_number": "TI-1.1",
+    "title": "TI-1.1 - Egress Plan"
+   },
+   {
+    "category": "general_drawings",
+    "document_id": "3107f9ac-a983-47a5-9087-d18355a9e33e",
+    "page": 4,
+    "page_role": "plan",
+    "sheet_number": "TI-2",
+    "title": "TI-2 - Reflected Ceiling Plan"
+   },
+   {
+    "category": "general_drawings",
+    "document_id": "3107f9ac-a983-47a5-9087-d18355a9e33e",
+    "page": 5,
+    "page_role": "detail",
+    "sheet_number": "TI-3",
+    "title": "TI-3 - Elevations"
+   },
+   {
+    "category": "general_drawings",
+    "document_id": "3107f9ac-a983-47a5-9087-d18355a9e33e",
+    "page": 6,
+    "page_role": "schedule",
+    "sheet_number": "TI-4",
+    "title": "TI-4 - Schedules"
+   },
+   {
+    "category": "general_drawings",
+    "document_id": "3107f9ac-a983-47a5-9087-d18355a9e33e",
+    "page": 7,
+    "page_role": "detail",
+    "sheet_number": "TI-5",
+    "title": "TI-5 - Details"
+   },
+   {
+    "category": "general_drawings",
+    "document_id": "8f69d0e5-0594-4052-8ed7-06eecb9dee57",
+    "page": 1,
+    "page_role": "plan",
+    "sheet_number": "A117",
+    "title": "TI-0 - Project Information and Site Plan"
+   },
+   {
+    "category": "mechanical_drawings",
+    "document_id": "32c19c76-1bea-4c7b-99df-3cf1e65f0654",
+    "page": 1,
+    "page_role": "legend_symbols",
+    "sheet_number": "M0.00",
+    "title": "MECHANICAL COVERSHEET"
+   },
+   {
+    "category": "mechanical_drawings",
+    "document_id": "32c19c76-1bea-4c7b-99df-3cf1e65f0654",
+    "page": 2,
+    "page_role": "general_notes",
+    "sheet_number": "M0.01",
+    "title": "MECHANICAL SPECIFICATIONS"
+   },
+   {
+    "category": "mechanical_drawings",
+    "document_id": "32c19c76-1bea-4c7b-99df-3cf1e65f0654",
+    "page": 3,
+    "page_role": "general_notes",
+    "sheet_number": "M0.02",
+    "title": "MECHANICAL SPECIFICATIONS"
+   },
+   {
+    "category": "mechanical_drawings",
+    "document_id": "32c19c76-1bea-4c7b-99df-3cf1e65f0654",
+    "page": 4,
+    "page_role": "general_notes",
+    "sheet_number": "M0.03",
+    "title": "MECHANICAL SPECIFICATIONS"
+   },
+   {
+    "category": "mechanical_drawings",
+    "document_id": "32c19c76-1bea-4c7b-99df-3cf1e65f0654",
+    "page": 5,
+    "page_role": "diagram",
+    "sheet_number": "M0.04",
+    "title": "MECHANICAL DIAGRAMS"
+   },
+   {
+    "category": "mechanical_drawings",
+    "document_id": "32c19c76-1bea-4c7b-99df-3cf1e65f0654",
+    "page": 6,
+    "page_role": "schedule",
+    "sheet_number": "M0.05",
+    "title": "MECHANICAL SCHEDULES"
+   },
+   {
+    "category": "mechanical_drawings",
+    "document_id": "32c19c76-1bea-4c7b-99df-3cf1e65f0654",
+    "page": 7,
+    "page_role": "schedule",
+    "sheet_number": "M0.06",
+    "title": "MECHANICAL VENT CALCULATIONS"
+   },
+   {
+    "category": "mechanical_drawings",
+    "document_id": "32c19c76-1bea-4c7b-99df-3cf1e65f0654",
+    "page": 8,
+    "page_role": "other",
+    "sheet_number": "M0.07",
+    "title": "MECHANICAL COMCHECK"
+   },
+   {
+    "category": "mechanical_drawings",
+    "document_id": "32c19c76-1bea-4c7b-99df-3cf1e65f0654",
+    "page": 9,
+    "page_role": "general_notes",
+    "sheet_number": "M0.08",
+    "title": "MECHANICAL BMS PACKAGE"
+   },
+   {
+    "category": "mechanical_drawings",
+    "document_id": "32c19c76-1bea-4c7b-99df-3cf1e65f0654",
+    "page": 10,
+    "page_role": "plan",
+    "sheet_number": "M1.00",
+    "title": "MECHANICAL PLAN"
+   },
+   {
+    "category": "mechanical_drawings",
+    "document_id": "32c19c76-1bea-4c7b-99df-3cf1e65f0654",
+    "page": 11,
+    "page_role": "diagram",
+    "sheet_number": "M1.01",
+    "title": "MECHANICAL ISOMETRIC"
+   },
+   {
+    "category": "electrical_drawings",
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 1,
+    "page_role": "schedule",
+    "sheet_number": "E0.00",
+    "title": "ELECTRICAL COVER SHEET"
+   },
+   {
+    "category": "electrical_drawings",
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 2,
+    "page_role": "legend_symbols",
+    "sheet_number": "E0.01",
+    "title": "ELECTRICAL SPECIFICATION"
+   },
+   {
+    "category": "electrical_drawings",
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "page_role": "schedule",
+    "sheet_number": "E0.02",
+    "title": "ELECTRICAL SCHEDULES"
+   },
+   {
+    "category": "electrical_drawings",
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 4,
+    "page_role": "other",
+    "sheet_number": "E0.03",
+    "title": "INTERIOR LIGHTING COMPLIANCE CHECK"
+   },
+   {
+    "category": "electrical_drawings",
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 5,
+    "page_role": "plan",
+    "sheet_number": "E1.00",
+    "title": "SITE PLAN"
+   },
+   {
+    "category": "electrical_drawings",
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 6,
+    "page_role": "plan",
+    "sheet_number": "E1.01",
+    "title": "HVAC PLAN"
+   },
+   {
+    "category": "electrical_drawings",
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "page_role": "plan",
+    "sheet_number": "E2.00",
+    "title": "ELECTRICAL PLAN"
+   }
+  ],
+  "spec_toc": []
+ },
+ "name": "EVAL 7172",
+ "status": "done"
+}

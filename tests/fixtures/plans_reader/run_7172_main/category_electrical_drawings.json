@@ -1,0 +1,5123 @@
+{
+ "category": "electrical_drawings",
+ "counts": [
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 1,
+   "coverage": "schedule",
+   "description": "2x4 LED ceiling light, type A",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "5d39a7fa3e54",
+   "flags": [],
+   "item_key": "luminaire|desc=2x4_led_ceiling_light_type_a|form=2X4",
+   "material_category_hint": "Lighting",
+   "notes": "277 V/1-25 VA; schedule total, not additional to E2.00 symbols.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c1",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 26,
+   "row_id": "C1",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "A",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 1,
+   "coverage": "schedule",
+   "description": "2x4 LED ceiling light with 10W emergency battery pack, type AE",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "198f23d47d2c",
+   "flags": [],
+   "item_key": "luminaire|desc=2x4_led_ceiling_light_with_10w_emergency_battery|form=2X4|mod=EMERGENCY",
+   "material_category_hint": "Lighting",
+   "notes": "277 V/1-25 VA; emergency pack included in description.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c2",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 29,
+   "row_id": "C2",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "AE",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 1,
+   "coverage": "schedule",
+   "description": "Square recessed LED can, type B",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "c49cff302de4",
+   "flags": [],
+   "item_key": "luminaire|desc=square_recessed_led_can_type_b",
+   "material_category_hint": "Lighting",
+   "notes": "277 V/1-32 VA.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c3",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 14,
+   "row_id": "C3",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "B",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 1,
+   "coverage": "schedule",
+   "description": "Square recessed LED can with 10W emergency battery pack, type BE",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "38e60272a4ae",
+   "flags": [],
+   "item_key": "luminaire|desc=square_recessed_led_can_with_10w_emergency_batte|mod=EMERGENCY",
+   "material_category_hint": "Lighting",
+   "notes": "277 V/1-32 VA.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c4",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 14,
+   "row_id": "C4",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "BE",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 1,
+   "coverage": "schedule",
+   "description": "LED pendant light, owner/architect selection, type C",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "2d044c021089",
+   "flags": [],
+   "item_key": "luminaire|desc=led_pendant_light_owner_architect_selection_type",
+   "material_category_hint": "Lighting",
+   "notes": "277 V/1-38 VA; do not exceed listed wattage.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c5",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 3,
+   "row_id": "C5",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "C",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 1,
+   "coverage": "schedule",
+   "description": "LED pendant light with 10W emergency battery pack, type CE",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "09c2e811d90c",
+   "flags": [],
+   "item_key": "luminaire|desc=led_pendant_light_with_10w_emergency_battery_pac|mod=EMERGENCY",
+   "material_category_hint": "Lighting",
+   "notes": "Owner/architect selection; 277 V/1-38 VA.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c6",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 4,
+   "row_id": "C6",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "CE",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 1,
+   "coverage": "schedule",
+   "description": "Linear LED light fixture, type D",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "3cecff2bb692",
+   "flags": [
+    "linear_luminaire_ea"
+   ],
+   "item_key": "luminaire_linear:linear",
+   "material_category_hint": "Lighting",
+   "notes": "Owner/architect selection; 277 V/1-64 VA.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c7",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 9,
+   "row_id": "C7",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "D",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 1,
+   "coverage": "schedule",
+   "description": "Linear LED light fixture with 10W emergency battery pack, type DE",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "4e8f37c85f63",
+   "flags": [
+    "linear_luminaire_ea"
+   ],
+   "item_key": "luminaire_linear:linear|mod=EMERGENCY",
+   "material_category_hint": "Lighting",
+   "notes": "Owner/architect selection; 277 V/1-64 VA.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c8",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 10,
+   "row_id": "C8",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "DE",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 1,
+   "coverage": "schedule",
+   "description": "LED ceiling light fixture, type E",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "006542adbabb",
+   "flags": [],
+   "item_key": "luminaire|desc=led_ceiling_light_fixture_type_e",
+   "material_category_hint": "Lighting",
+   "notes": "Owner/architect selection; 277 V/1-100 VA.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c9",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 4,
+   "row_id": "C9",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "E",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 1,
+   "coverage": "schedule",
+   "description": "LED exit sign, type EX1",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "00f56fa2685f",
+   "flags": [],
+   "item_key": "luminaire|desc=led_exit_sign_type_ex1",
+   "material_category_hint": "Lighting",
+   "notes": "277 V/1-5 VA.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c10",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 6,
+   "row_id": "C10",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "EX1",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 1,
+   "coverage": "schedule",
+   "description": "LED exit sign, type EX2",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "f266e1e83019",
+   "flags": [],
+   "item_key": "luminaire|desc=led_exit_sign_type_ex2",
+   "material_category_hint": "Lighting",
+   "notes": "Same scheduled model as EX1; verify face and arrow configuration on plan.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c11",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 1,
+   "row_id": "C11",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "EX2",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 1,
+   "coverage": "schedule",
+   "description": "Linear LED light fixture, type F",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "467d3f2127fa",
+   "flags": [
+    "linear_luminaire_ea"
+   ],
+   "item_key": "luminaire_linear:linear",
+   "material_category_hint": "Lighting",
+   "notes": "Owner/architect selection; 277 V/1-16 VA.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c12",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 8,
+   "row_id": "C12",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "F",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 1,
+   "coverage": "schedule",
+   "description": "Linear LED light fixture with 10W emergency battery pack, type FE",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "853b517c8a0e",
+   "flags": [
+    "linear_luminaire_ea"
+   ],
+   "item_key": "luminaire_linear:linear|mod=EMERGENCY",
+   "material_category_hint": "Lighting",
+   "notes": "Owner/architect selection; 277 V/1-16 VA.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c13",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 5,
+   "row_id": "C13",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "FE",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.99,
+   "coverage": "sheet_total",
+   "description": "New panel A, 200A, 277/480V, 3-phase, 4-wire, 42 circuits, surface Type 1, 14kAIC",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "9b76de7b5827",
+   "flags": [
+    "linear_in_ea"
+   ],
+   "item_key": "conductor:wire|amps=200|panel=A|volts=277/480",
+   "material_category_hint": "Switchgear",
+   "notes": "MLO schedule conflicts with MCB Rating 200 A; obtain clarification before procurement.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c14",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 1,
+   "row_id": "C14",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "(N) A",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.99,
+   "coverage": "sheet_total",
+   "description": "New panel B, 200A MCB, 120/208V, 3-phase, 4-wire, 64 circuits, surface Type 1, 10kAIC",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "18ad4ace6507",
+   "flags": [
+    "linear_in_ea"
+   ],
+   "item_key": "conductor:wire|amps=200|main=MCB|panel=B|volts=120/208",
+   "material_category_hint": "Switchgear",
+   "notes": "200A main included in panel assembly.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c15",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 1,
+   "row_id": "C15",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "(N) B",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.99,
+   "coverage": "sheet_total",
+   "description": "New 75 kVA dry-type transformer T-B, 480V to 120/208V three-phase",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "625ff7ae2243",
+   "flags": [],
+   "item_key": "panel:transformer|desc=new_75_kva_dry_type_transformer_t_b_480v_to_120|kva=75|volts=120/208",
+   "material_category_hint": "Switchgear",
+   "notes": "75 kVA explicitly shown; voltages derived from connected panel schedules. Delta/wye symbols and #8 GND shown.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c16",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 1,
+   "row_id": "C16",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "(N) T-B",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "stated_quantity",
+   "confidence": 1,
+   "coverage": "stated",
+   "description": "Existing main switchgear MSA, 2000A, 480/277V, 3-phase, 4-wire, 65kAIC, NEMA 1, to remain",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "28192f004096",
+   "flags": [
+    "linear_in_ea"
+   ],
+   "item_key": "conductor:wire|amps=2000|nema=1|volts=277/480",
+   "material_category_hint": "Switchgear",
+   "notes": "Existing 2000A 3P main and existing metered 200A 3P outgoing provisions shown; not new switchgear procurement.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c17",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 1,
+   "row_id": "C17",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "MSA",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.99,
+   "coverage": "sheet_total",
+   "description": "Existing distribution panel DHP to remain",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "7ccbb98b81db",
+   "flags": [],
+   "item_key": "panel:switchboard|desc=existing_distribution_panel_dhp_to_remain|panel=DHP",
+   "material_category_hint": "Switchgear",
+   "notes": "Shown connected to existing MSA; no replacement specified.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c18",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 1,
+   "row_id": "C18",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "(E) DHP",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 1,
+   "coverage": "schedule",
+   "description": "Panel A branch breaker, 20A 1-pole",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "f361d7da0510",
+   "flags": [],
+   "item_key": "breaker|amps=20|panel=A|poles=1",
+   "material_category_hint": "Switchgear",
+   "notes": "New panel branch devices; do not count circuit spaces as breakers.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c19",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 4,
+   "row_id": "C19",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "A",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 1,
+   "coverage": "schedule",
+   "description": "Panel A branch breaker, 100A 3-pole",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "1cc7e753d8fd",
+   "flags": [],
+   "item_key": "breaker|amps=100|panel=A|poles=3",
+   "material_category_hint": "Switchgear",
+   "notes": null,
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c20",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 1,
+   "row_id": "C20",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "A-1,3,5",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 1,
+   "coverage": "schedule",
+   "description": "Panel A branch breaker, 20A 3-pole",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "09be80c5bd80",
+   "flags": [],
+   "item_key": "breaker|amps=20|panel=A|poles=3",
+   "material_category_hint": "Switchgear",
+   "notes": null,
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c21",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 1,
+   "row_id": "C21",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "A-9,11,13",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 1,
+   "coverage": "schedule",
+   "description": "Panel A branch breaker, 30A 3-pole",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "c7877d515aef",
+   "flags": [],
+   "item_key": "breaker|amps=30|panel=A|poles=3",
+   "material_category_hint": "Switchgear",
+   "notes": null,
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c22",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 5,
+   "row_id": "C22",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "A",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 0.99,
+   "coverage": "schedule",
+   "description": "Panel B branch breaker, 20A 1-pole",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "172d1ca05cca",
+   "flags": [],
+   "item_key": "breaker|amps=20|panel=B|poles=1",
+   "material_category_hint": "Switchgear",
+   "notes": "Excludes two-pole water heater and ODU breakers, continuation rows, spaces, and main breaker.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c23",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 54,
+   "row_id": "C23",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "B",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 1,
+   "coverage": "schedule",
+   "description": "Panel B branch breaker, 20A 2-pole",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "77458a3a7fcb",
+   "flags": [],
+   "item_key": "breaker|amps=20|panel=B|poles=2",
+   "material_category_hint": "Switchgear",
+   "notes": null,
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c24",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 1,
+   "row_id": "C24",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "B-15,17",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "schedule_text",
+   "confidence": 1,
+   "coverage": "schedule",
+   "description": "Panel B branch breaker, 30A 2-pole",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "d888804e45fb",
+   "flags": [],
+   "item_key": "breaker|amps=30|panel=B|poles=2",
+   "material_category_hint": "Switchgear",
+   "notes": null,
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "c25",
+    "pass": 1
+   },
+   "page": 3,
+   "quantity": 1,
+   "row_id": "C25",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "B-16,18",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.99,
+   "coverage": "sheet_total",
+   "description": "Rooftop-unit electrical connections, RTU-1 through RTU-6",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "5be5dd98951d",
+   "flags": [],
+   "item_key": "other:rtu_rooftop_unit_electrical_connections_rtu_1_th|desc=rtu_rooftop_unit_electrical_connections_rtu_1_th",
+   "material_category_hint": "General Material",
+   "notes": "Electrical connections only, not furnishing RTUs. Ratings and conductor sizes require equipment/panel schedules. Circuit assignments recorded in page notes.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c1",
+    "pass": 1
+   },
+   "page": 6,
+   "quantity": 6,
+   "row_id": "C26",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 6,
+    "sheet_key": "D4P6",
+    "sheet_number": "E1.01"
+   },
+   "sheet_number": "E1.01",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "RTU",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.94,
+   "coverage": "sheet_total",
+   "description": "Rooftop-unit disconnect symbols; ratings not shown",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "ed46b0117910",
+   "flags": [],
+   "item_key": "panel:disconnect|desc=rooftop_unit_disconnect_symbols_ratings_not_show",
+   "material_category_hint": "General Material",
+   "notes": "Small disconnect symbols at equipment supply points. Confirm whether field-furnished or factory-furnished and confirm fuse requirements.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c2",
+    "pass": 1
+   },
+   "page": 6,
+   "quantity": 6,
+   "row_id": "C27",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 6,
+    "sheet_key": "D4P6",
+    "sheet_number": "E1.01"
+   },
+   "sheet_number": "E1.01",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": null,
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.99,
+   "coverage": "sheet_total",
+   "description": "Split-system outdoor-unit electrical connection",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "2527afb2d72e",
+   "flags": [],
+   "item_key": "equipment_connection|desc=split_system_outdoor_unit_electrical_connection",
+   "material_category_hint": "General Material",
+   "notes": "Circuit B-16,18. Mechanical equipment furnishing not included in this connection count.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c3",
+    "pass": 1
+   },
+   "page": 6,
+   "quantity": 1,
+   "row_id": "C28",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 6,
+    "sheet_key": "D4P6",
+    "sheet_number": "E1.01"
+   },
+   "sheet_number": "E1.01",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "ODU 1",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.91,
+   "coverage": "sheet_total",
+   "description": "Outdoor-unit disconnect symbol",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "533e1c49131e",
+   "flags": [],
+   "item_key": "panel:disconnect|desc=outdoor_unit_disconnect_symbol",
+   "material_category_hint": "General Material",
+   "notes": "Rating and factory-versus-field furnishing require confirmation.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c4",
+    "pass": 1
+   },
+   "page": 6,
+   "quantity": 1,
+   "row_id": "C29",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 6,
+    "sheet_key": "D4P6",
+    "sheet_number": "E1.01"
+   },
+   "sheet_number": "E1.01",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": null,
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.99,
+   "coverage": "sheet_total",
+   "description": "Split-system indoor unit requiring electrical/control coordination",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "08160e566942",
+   "flags": [],
+   "item_key": "other:idu_1_split_system_indoor_unit_requiring_electri|desc=idu_1_split_system_indoor_unit_requiring_electri",
+   "material_category_hint": "General Material",
+   "notes": "No independent supply circuit identified; verify power/interconnect from ODU-1 before adding a separate homerun.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c5",
+    "pass": 1
+   },
+   "page": 6,
+   "quantity": 1,
+   "row_id": "C30",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 6,
+    "sheet_key": "D4P6",
+    "sheet_number": "E1.01"
+   },
+   "sheet_number": "E1.01",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "IDU 1",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.99,
+   "coverage": "sheet_total",
+   "description": "Domestic water-heater electrical connection",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "d95c971286d5",
+   "flags": [],
+   "item_key": "equipment_connection|desc=domestic_water_heater_electrical_connection",
+   "material_category_hint": "General Material",
+   "notes": "Circuit B-15,17. Electrical ratings not stated on this sheet.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c6",
+    "pass": 1
+   },
+   "page": 6,
+   "quantity": 1,
+   "row_id": "C31",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 6,
+    "sheet_key": "D4P6",
+    "sheet_number": "E1.01"
+   },
+   "sheet_number": "E1.01",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "DWH 1",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.9,
+   "coverage": "sheet_total",
+   "description": "Water-heater disconnect symbol",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "8079d630d71f",
+   "flags": [],
+   "item_key": "panel:disconnect|desc=water_heater_disconnect_symbol",
+   "material_category_hint": "General Material",
+   "notes": "Size, poles, and fusing not shown.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c7",
+    "pass": 1
+   },
+   "page": 6,
+   "quantity": 1,
+   "row_id": "C32",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 6,
+    "sheet_key": "D4P6",
+    "sheet_number": "E1.01"
+   },
+   "sheet_number": "E1.01",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": null,
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.92,
+   "coverage": "sheet_total",
+   "description": "Exhaust-fan-type electrical connections",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "2d61736ecc01",
+   "flags": [],
+   "item_key": "other:exhaust_fan_type_electrical_connections|desc=exhaust_fan_type_electrical_connections",
+   "material_category_hint": "General Material",
+   "notes": "Two A-2 connections and three A-4 connections. Fan tags and ratings are not printed beside these symbols; reconcile with mechanical schedules.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c8",
+    "pass": 1
+   },
+   "page": 6,
+   "quantity": 5,
+   "row_id": "C33",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 6,
+    "sheet_key": "D4P6",
+    "sheet_number": "E1.01"
+   },
+   "sheet_number": "E1.01",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": null,
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.99,
+   "coverage": "sheet_total",
+   "description": "Roof receptacle, weatherproof and GFCI rated",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "9e62b8553e1b",
+   "flags": [],
+   "item_key": "receptacle|mod=GFCI|mod=WP",
+   "material_category_hint": "General Material",
+   "notes": "B-22; keyed note 1 places these on roof, not in rooms beneath. Coordinate final locations and weatherproof covers.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c9",
+    "pass": 1
+   },
+   "page": 6,
+   "quantity": 3,
+   "row_id": "C34",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 6,
+    "sheet_key": "D4P6",
+    "sheet_number": "E1.01"
+   },
+   "sheet_number": "E1.01",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "WP",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.95,
+   "coverage": "sheet_total",
+   "description": "Light fixture type A",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "91fb8d206dac",
+   "flags": [],
+   "item_key": "luminaire|desc=light_fixture_type_a",
+   "material_category_hint": "Lighting",
+   "notes": "Includes differing rectangular plan orientations. Use E0.02 schedule for dimensions, wattage, manufacturer and mounting.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c1",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 26,
+   "row_id": "C35",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "A",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.95,
+   "coverage": "sheet_total",
+   "description": "Light fixture type AE",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "4ebd88450c14",
+   "flags": [],
+   "item_key": "luminaire|desc=light_fixture_type_ae",
+   "material_category_hint": "Lighting",
+   "notes": "Retain AE as a distinct fixture type; confirm emergency equipment requirements from E0.02.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c2",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 29,
+   "row_id": "C36",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "AE",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.94,
+   "coverage": "sheet_total",
+   "description": "Light fixture type B",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "bf6b93177712",
+   "flags": [],
+   "item_key": "luminaire|desc=light_fixture_type_b",
+   "material_category_hint": "Lighting",
+   "notes": "Small square fixture symbols. See E0.02 for fixture specification.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c3",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 14,
+   "row_id": "C37",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "B",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.94,
+   "coverage": "sheet_total",
+   "description": "Light fixture type BE",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "d7364f095a28",
+   "flags": [],
+   "item_key": "luminaire|desc=light_fixture_type_be",
+   "material_category_hint": "Lighting",
+   "notes": "Retain BE separately; confirm emergency equipment requirements from E0.02.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c4",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 14,
+   "row_id": "C38",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "BE",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.99,
+   "coverage": "sheet_total",
+   "description": "Light fixture type C",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "37eab46ce2f7",
+   "flags": [],
+   "item_key": "luminaire|desc=light_fixture_type_c",
+   "material_category_hint": "Lighting",
+   "notes": "Counted in lighting view only; repeated on HVAC/power backgrounds.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c5",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 3,
+   "row_id": "C39",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "C",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.99,
+   "coverage": "sheet_total",
+   "description": "Light fixture type CE",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "73bc72a95bbc",
+   "flags": [],
+   "item_key": "luminaire|desc=light_fixture_type_ce",
+   "material_category_hint": "Lighting",
+   "notes": "Counted in lighting view only.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c6",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 4,
+   "row_id": "C40",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "CE",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.87,
+   "coverage": "sheet_total",
+   "description": "Long linear light fixture type D, including one provisionally classified symbol",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "c5e3b3844441",
+   "flags": [
+    "linear_luminaire_ea"
+   ],
+   "item_key": "luminaire_linear:linear",
+   "material_category_hint": "Lighting",
+   "notes": "Eight readable D labels plus one matching long-linear symbol in Open Office 222 with tag obscured by room text. Verify the latter before ordering.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c7",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 9,
+   "row_id": "C41",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "D",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.96,
+   "coverage": "sheet_total",
+   "description": "Long linear light fixture type DE",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "96d4473478b2",
+   "flags": [
+    "linear_luminaire_ea"
+   ],
+   "item_key": "luminaire_linear:linear",
+   "material_category_hint": "Lighting",
+   "notes": "See E0.02 for emergency and fixture requirements.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c8",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 10,
+   "row_id": "C42",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "DE",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.99,
+   "coverage": "sheet_total",
+   "description": "Light fixture type E",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "bf2b9a8a92dc",
+   "flags": [],
+   "item_key": "luminaire|desc=light_fixture_type_e",
+   "material_category_hint": "Lighting",
+   "notes": "Four large circular fixture symbols.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c9",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 4,
+   "row_id": "C43",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "E",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.88,
+   "coverage": "sheet_total",
+   "description": "Short linear light fixture type F, readable tags",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "69b6abbae210",
+   "flags": [
+    "linear_luminaire_ea"
+   ],
+   "item_key": "luminaire_linear:linear",
+   "material_category_hint": "Lighting",
+   "notes": "Excludes the separately reported center short-linear symbol with unreadable tag.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c10",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 7,
+   "row_id": "C44",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "F",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.9,
+   "coverage": "sheet_total",
+   "description": "Short linear light fixture type FE",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "6e3285054423",
+   "flags": [
+    "linear_luminaire_ea"
+   ],
+   "item_key": "luminaire_linear:linear",
+   "material_category_hint": "Lighting",
+   "notes": "Confirm against enlarged conference-room region and E0.02 schedule.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c11",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 5,
+   "row_id": "C45",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "FE",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.78,
+   "coverage": "sheet_total",
+   "description": "Short linear light fixture with obscured or absent type tag",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "bcb982011c28",
+   "flags": [
+    "linear_luminaire_ea"
+   ],
+   "item_key": "luminaire_linear:linear",
+   "material_category_hint": "Lighting",
+   "notes": "Visible short-linear symbol near room text; not included in F or FE counts. Type requires enlarged view/confirmation.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c12",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 1,
+   "row_id": "C46",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": null,
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.98,
+   "coverage": "sheet_total",
+   "description": "Exit/emergency fixture type EX1",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "5c867e4e72a7",
+   "flags": [],
+   "item_key": "luminaire|desc=exit_emergency_fixture_type_ex1|mod=EMERGENCY",
+   "material_category_hint": "Lighting",
+   "notes": "Exact exit/emergency configuration, faces and arrows require E0.02.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c13",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 6,
+   "row_id": "C47",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "EX1",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.99,
+   "coverage": "sheet_total",
+   "description": "Exit/emergency fixture type EX2",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "1d113bbf564c",
+   "flags": [],
+   "item_key": "luminaire|desc=exit_emergency_fixture_type_ex2|mod=EMERGENCY",
+   "material_category_hint": "Lighting",
+   "notes": "Exact configuration requires E0.02.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c14",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 1,
+   "row_id": "C48",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "EX2",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.88,
+   "coverage": "sheet_total",
+   "description": "Wall-mounted lighting-control symbols marked S/OS",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "c7ff643798b8",
+   "flags": [],
+   "item_key": "luminaire|desc=wall_mounted_lighting_control_symbols_marked_s_o",
+   "material_category_hint": "Lighting",
+   "notes": "Counts locations, not separate components within combined switch/sensor notation. Confirm dimming, occupancy/vacancy operation and high-end-trim compatibility.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c15",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 28,
+   "row_id": "C49",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "S/OS",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.9,
+   "coverage": "sheet_total",
+   "description": "Lighting-control symbols marked M",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "3d0039a72f50",
+   "flags": [],
+   "item_key": "luminaire|desc=lighting_control_symbols_marked_m",
+   "material_category_hint": "Lighting",
+   "notes": "Likely motion/occupancy-control family, but exact legend definition and power-pack requirements not supplied.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c16",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 10,
+   "row_id": "C50",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "M",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.88,
+   "coverage": "sheet_total",
+   "description": "Unidentified circular lighting-control symbols with internal rectangle",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "19db85ad9250",
+   "flags": [],
+   "item_key": "luminaire|desc=unidentified_circular_lighting_control_symbols_w",
+   "material_category_hint": "Lighting",
+   "notes": "Graphic count only. Do not assign sensor, switch, relay or emergency-unit product without the symbol legend.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c17",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 6,
+   "row_id": "C51",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": null,
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.78,
+   "coverage": "sheet_total",
+   "description": "Two-line receptacle symbols, half-filled circle",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "6550f86810e4",
+   "flags": [],
+   "item_key": "receptacle",
+   "material_category_hint": "General Material",
+   "notes": "Preliminary graphic-family count. Half-fill may signify controlled or another special receptacle classification; the supplied reference does not define it. Includes counter and elevated outlets. Excludes unfilled circles, four-line symbols, floor boxes and circular/internal-rectangle symbols.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c18",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 62,
+   "row_id": "C52",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": null,
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.78,
+   "coverage": "sheet_total",
+   "description": "Two-line receptacle symbols, unfilled circle",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "a5b8ffeb0331",
+   "flags": [],
+   "item_key": "receptacle",
+   "material_category_hint": "General Material",
+   "notes": "Preliminary count of unfilled two-line receptacle family. Exact electrical designation requires legend. Nearby symbols can share rounded coordinates.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c19",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 19,
+   "row_id": "C53",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": null,
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.78,
+   "coverage": "sheet_total",
+   "description": "Four-line receptacle symbols, apparent quad receptacle family",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "ae413cbd576d",
+   "flags": [],
+   "item_key": "receptacle",
+   "material_category_hint": "General Material",
+   "notes": "Counted as outlet locations, not doubled into duplex devices. Confirm quad configuration and meaning of filled/unfilled variants before converting to material quantities.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c20",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 35,
+   "row_id": "C54",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": null,
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.86,
+   "coverage": "sheet_total",
+   "description": "Circular power-outlet symbols with internal rectangle",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "c69af19ff215",
+   "flags": [],
+   "item_key": "receptacle",
+   "material_category_hint": "General Material",
+   "notes": "Four restroom locations called out +60\" AFF. Other associated circuits include B-2, B-10, B-23 and B-25. Device type and connected loads need legend/schedule confirmation.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c21",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 8,
+   "row_id": "C55",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": null,
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.92,
+   "coverage": "sheet_total",
+   "description": "Conference-table floor-box receptacle symbols",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "062d70baf66c",
+   "flags": [],
+   "item_key": "other:accessory|desc=conference_table_floor_box_receptacle_symbols|mod=FLOOR",
+   "material_category_hint": "General Material",
+   "notes": "Boxed receptacle symbols within table footprint; confirm floor-box assembly, power/data compartments and pathway through second-floor construction.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c22",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 2,
+   "row_id": "C56",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": null,
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.76,
+   "coverage": "sheet_total",
+   "description": "Green triangular low-voltage outlet symbols, type unconfirmed",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "d95824a7c688",
+   "flags": [],
+   "item_key": "receptacle",
+   "material_category_hint": "Low Voltage",
+   "notes": "Preliminary graphic count. Port count, cable category, terminations, conduit-only versus complete cabling, and trade responsibility are not defined by the supplied legend references. Repeated green symbols on E1.01 are excluded.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c23",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 77,
+   "row_id": "C57",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": null,
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.98,
+   "coverage": "sheet_total",
+   "description": "TV outlet locations",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "7a63a54d2b83",
+   "flags": [],
+   "item_key": "other:low_voltage_outlet|desc=tv_tv_outlet_locations",
+   "material_category_hint": "Low Voltage",
+   "notes": "TV symbols shown with +72\" AFF locations and adjacent power outlets. Count is outlets, not owner display equipment.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c24",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 4,
+   "row_id": "C58",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "TV",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "keyed_note",
+   "confidence": 1,
+   "coverage": "sheet_total",
+   "description": "75 kVA transformer T-B mounted above panel B",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "ca546d215ae5",
+   "flags": [],
+   "item_key": "panel:transformer|desc=75_kva_transformer_t_b_mounted_above_panel_b|kva=75|panel=B",
+   "material_category_hint": "Switchgear",
+   "notes": "Keyed note 1 and one tagged transformer location. Repeated panel/transformer graphics between views counted once. Confirm voltage, enclosure, support, grounding and feeder details from one-line.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c25",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 1,
+   "row_id": "C59",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "T-B",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.93,
+   "coverage": "sheet_total",
+   "description": "Panel A location, existing status indicated by run ledger",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "767178d37629",
+   "flags": [],
+   "item_key": "panel:panel|desc=panel_a_location_existing_status_indicated_by_ru|panel=A",
+   "material_category_hint": "Switchgear",
+   "notes": "Location count only, not a new-panel procurement quantity. Verify existing status and new breakers with schedules/one-line. Counted once across both views.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c26",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 1,
+   "row_id": "C60",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "A",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.93,
+   "coverage": "sheet_total",
+   "description": "Panel B location, existing status indicated by run ledger",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "b06c884c25f2",
+   "flags": [],
+   "item_key": "panel:panel|desc=panel_b_location_existing_status_indicated_by_ru|panel=B",
+   "material_category_hint": "Switchgear",
+   "notes": "Location count only, not a new-panel procurement quantity. Verify existing status and new breakers with schedules/one-line. Transformer mounts above this panel.",
+   "origin": {
+    "group_id": "ae56c320-f414-420d-9446-c23870bcfa67",
+    "group_kind": "sub",
+    "local_id": "c27",
+    "pass": 1
+   },
+   "page": 7,
+   "quantity": 1,
+   "row_id": "C61",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [],
+   "symbol_or_tag": "B",
+   "unit": "EA"
+  },
+  {
+   "alternates": [],
+   "basis": "counted_symbols",
+   "confidence": 0.99,
+   "coverage": "sheet_total",
+   "description": "Previously untyped center short-linear fixture, now identified as type F",
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "ea948a3035e9",
+   "flags": [
+    "linear_luminaire_ea"
+   ],
+   "item_key": "luminaire_linear:linear",
+   "material_category_hint": "Lighting",
+   "model_coverage": "whole_sheet",
+   "notes": "Blind recount raise: raise 1 to 8 (recount+second_sample).",
+   "origin": {
+    "group_id": "f9b2f511-fe82-4185-8fb4-9ec06429d9e3",
+    "group_kind": "recount",
+    "local_id": "p3.c1",
+    "pass": 3
+   },
+   "page": 7,
+   "quantity": 8.0,
+   "row_id": "C62",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 7,
+    "sheet_key": "D4P7",
+    "sheet_number": "E2.00"
+   },
+   "sheet_number": "E2.00",
+   "status": "active",
+   "superseded": [
+    {
+     "basis": "counted_symbols",
+     "coverage": "tile_subtotal",
+     "description": "Previously untyped center short-linear fixture, now identified as type F",
+     "origin": {
+      "group_id": "6725542e-2296-4159-bcfa-b37c6619cfa6",
+      "group_kind": "escalation",
+      "local_id": "p1.c1",
+      "pass": 2
+     },
+     "quantity": 1,
+     "reason": "superseded by a whole-sheet patch"
+    }
+   ],
+   "supersedes_row_id": "C62",
+   "symbol_or_tag": "F",
+   "unit": "EA"
+  }
+ ],
+ "details": [],
+ "floors": [
+  {
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family": "demo_x",
+   "floor": null,
+   "key": "demo_x",
+   "method": "unavailable",
+   "note": "no usable text layer",
+   "page": 5,
+   "positions": [],
+   "sheet_key": "D4P5",
+   "sheet_number": "E1.00",
+   "strength": "strong",
+   "tag": null
+  },
+  {
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family": "relocate_r",
+   "floor": null,
+   "key": "relocate_r",
+   "method": "unavailable",
+   "note": "no usable text layer",
+   "page": 5,
+   "positions": [],
+   "sheet_key": "D4P5",
+   "sheet_number": "E1.00",
+   "strength": "strong",
+   "tag": null
+  },
+  {
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family": "circuit",
+   "floor": null,
+   "key": "circuit",
+   "method": "unavailable",
+   "note": "no usable text layer",
+   "page": 5,
+   "positions": [],
+   "sheet_key": "D4P5",
+   "sheet_number": "E1.00",
+   "strength": "weak",
+   "tag": null
+  },
+  {
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family": "circuit",
+   "floor": 5,
+   "key": "circuit",
+   "method": "text_layer",
+   "note": null,
+   "page": 6,
+   "positions": [
+    [
+     0.8545,
+     0.0437
+    ],
+    [
+     0.779,
+     0.0487
+    ],
+    [
+     0.7926,
+     0.0538
+    ],
+    [
+     0.8241,
+     0.0739
+    ],
+    [
+     0.8397,
+     0.099
+    ]
+   ],
+   "sheet_key": "D4P6",
+   "sheet_number": "E1.01",
+   "strength": "weak",
+   "tag": null
+  },
+  {
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family": "circuit",
+   "floor": 5,
+   "key": "circuit",
+   "method": "text_layer",
+   "note": null,
+   "page": 7,
+   "positions": [
+    [
+     0.6145,
+     0.0416
+    ],
+    [
+     0.6844,
+     0.0416
+    ],
+    [
+     0.6554,
+     0.0466
+    ],
+    [
+     0.8905,
+     0.0665
+    ],
+    [
+     0.5842,
+     0.0668
+    ]
+   ],
+   "sheet_key": "D4P7",
+   "sheet_number": "E2.00",
+   "strength": "weak",
+   "tag": null
+  }
+ ],
+ "pages": [
+  {
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "notes": [
+    "The page contains general Division 16 notes, abbreviations, and a symbol legend; it does not contain a panel named AND. The extracted PANEL AND and circuit tags are parsing artifacts from prose, not equipment or device counts.",
+    "Visit the site before bidding and review all disciplines. Field verify dimensions, existing conditions, and equipment requirements.",
+    "Remove unused existing devices and associated wiring, conduit, and fittings. Coordinate demolition with architectural and mechanical work and obtain owner consent before de-energizing distribution panels.",
+    "Verify existing fire-alarm equipment functionality and provide an equipment-status report to engineer and owner.",
+    "Provide complete operational systems, including required junction/pull boxes not individually shown, permits, inspections, access panels, supports, and firestopping.",
+    "Default lighting, receptacle, and equipment branch circuits: 2 No. 12 plus 1 No. 12 ground unless otherwise specified. Provide an individual neutral for each circuit in multiple-circuit conduits. Copper conductors only.",
+    "Minimum raceway is 1/2-inch trade size; maximum unsupported flexible conduit length is 6 feet. Rust-proof one-hole straps required; tie-wrap supports prohibited.",
+    "Legend: ordinary and top-switched duplex/quad receptacles generally 18 inches AFF to center; GFCI duplex generally 42 inches AFF; telephone/data and TV outlets generally 18 inches AFF. Switch legend states 48 inches AFF to top.",
+    "Maintain redlined as-builts, provide updated panel directories and PDF O&M manuals, demonstrate operation, and provide at least one year parts-and-labor warranty.",
+    "Coordinate roof work to preserve roof warranty. Drawing note states: DO NOT SCALE OFF CONSTRUCTION DOCUMENTS."
+   ],
+   "page": 1,
+   "page_role": "cover_index",
+   "resolution_flags": [],
+   "scale": null,
+   "sheet_number": "E0.00",
+   "tags": [
+    "general notes",
+    "legend",
+    "demolition",
+    "coordination",
+    "closeout",
+    "electrical sheet index"
+   ],
+   "title": "E0.00 ELECTRICAL COVER SHEET",
+   "viewports": null
+  },
+  {
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "notes": [
+    "Specifications use Division 16 section numbers and include 160001, 160050, 160140, 16 0553, 16 2416, 164200, 16511, and 16721.",
+    "No installed devices are counted from specification examples or conditional installation requirements.",
+    "MC cable is permitted only where concealed. LFMC is specified for vibrating equipment and wet or damp locations.",
+    "Minimum junction/device box size is 4 square with extension/plaster rings as required; galvanized steel boxes are specified.",
+    "Specification mounting heights are 44 inches to centerline for switches/dimmers and 18 inches for receptacles; coordinate with E0.00 switch legend's 48 inches to top.",
+    "Flush panelboard installations require four empty 1-inch conduits to accessible ceiling space and four empty 1-inch conduits to raised floor or below slab not on grade. Applicability is conditional; scheduled panels A and B are surface mounted.",
+    "Lighting fixtures require support clips and at least four support rods/wires near fixture corners. Fixture schedule additionally requires supports independent of ceiling system.",
+    "Fire-alarm specification requires landlord-approved contractor, factory-authorized testing, NFPA 72 testing and retesting, and up to two requested adjustment visits within one year.",
+    "Fire-alarm text references a mall master alarm and tenant rooftop unit; applicability to this office project requires confirmation."
+   ],
+   "page": 2,
+   "page_role": "spec_text",
+   "resolution_flags": [],
+   "scale": null,
+   "sheet_number": "E0.01",
+   "tags": [
+    "specifications",
+    "conductors",
+    "raceways",
+    "panelboards",
+    "lighting controls",
+    "fire alarm",
+    "identification"
+   ],
+   "title": "E0.01 ELECTRICAL SPECIFICATION",
+   "viewports": null
+  },
+  {
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "notes": [
+    "Single Line Diagram 1 is marked Not to Scale.",
+    "Existing MSA: 2000A, 480/277V, 3Ø, 4 wire, 65,000 AIC, Nema 1, to remain as is. Existing utility connection, existing DHP, and existing tenant stub provisions are shown.",
+    "Panels A and B and transformer T-B are explicitly marked (N); this overrides any ledger inference that all panels are existing.",
+    "Panel A: 277/480V, 3 phases, 4 wires, surface, Type 1, 14,000 AIC, 200A mains. Mains Type MLO conflicts with the simultaneous MCB Rating 200 A entry.",
+    "Panel B: 120/208V, 3 phases, 4 wires, supplied from T-B, surface, Type 1, 10,000 AIC, 200A MCB and mains.",
+    "Feeder calculation lengths are 300ft for MSA to A, 10ft for A to T-B, and 10ft for T-B to B. These are calculation lengths, not dimensioned field routes.",
+    "Transformer grounding callout is #8 GND. Feeder 2 lists no equipment grounding conductor; confirm grounding/bonding requirements.",
+    "Panel load cells visibly contain ellipses, such as 1535... and 5265...; those are transcribed as printed rather than completed.",
+    "Luminaire schedule counts govern procurement quantities pending reconciliation with E2.00. Do not add these schedule quantities to plan-symbol quantities.",
+    "Luminaire types C, CE, D, DE, E, F, and FE are to be selected by Owner/Architect; selection is not an owner-furnished designation.",
+    "Lighting schedule requires high-efficacy luminaires, minimum 60 lumens per watt, application-specific trims/mounting kits, independent supports, fire-rated provisions where necessary, and separate neutrals for dimmed switch legs."
+   ],
+   "page": 3,
+   "page_role": "schedule",
+   "resolution_flags": [],
+   "scale": "NTS",
+   "sheet_number": "E0.02",
+   "tags": [
+    "one-line",
+    "panel schedule",
+    "fixture schedule",
+    "feeder",
+    "transformer",
+    "existing to remain",
+    "mechanical connections"
+   ],
+   "title": "E0.02 ELECTRICAL SCHEDULES",
+   "viewports": [
+    {
+     "region": "0.06,0.04,0.56,0.32",
+     "scale_text": "Not to Scale",
+     "title": "1 Single Line Diagram"
+    },
+    {
+     "region": "0.11,0.34,0.53,0.52",
+     "scale_text": null,
+     "title": "Lighting Fixture Schedule"
+    },
+    {
+     "region": "0.61,0.03,0.90,0.36",
+     "scale_text": null,
+     "title": "Branch Panel: A"
+    },
+    {
+     "region": "0.61,0.36,0.90,0.75",
+     "scale_text": null,
+     "title": "Branch Panel: B"
+    },
+    {
+     "region": "0.20,0.56,0.44,0.73",
+     "scale_text": null,
+     "title": "ELECTRICAL LOAD CALCULATION-COMMERCIAL"
+    }
+   ]
+  },
+  {
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "notes": [
+    "COMcheckWeb report dated Aug 10, 2026; energy code 2024 IECC, Las Vegas, Nevada, climate zone 3b; alteration/initial buildout, 8618 square feet.",
+    "Total allowed interior lighting power is 5343 W; proposed is 4361 W. Interior Lighting PASSES.",
+    "Proposed lighting table groups normal and emergency versions together. These are the same fixtures scheduled on E0.02, not additional quantities.",
+    "All listed lighting groups have Occupancy Sensor, Manual Control except conference room 209 F/FE, which lists Manual Control.",
+    "Checklist requires automatic control of 50% of applicable 15/20A receptacles and more than 25% of modular-furniture branch-circuit feeders.",
+    "Open-office occupancy controls require separately controlled zones no larger than 600 square feet, automatic shutoff within 20 minutes after all occupants leave, and at least 80% reduction in unoccupied zones within 20 minutes.",
+    "Final-inspection checklist references P01 energy monitoring, L02 high-end trim lighting controls, and L03 increased occupancy-sensor control, with location E2.00. Energy-credit cover block also says Not applicable; reconcile actual required scope.",
+    "Provide lighting/receptacle-control functional testing, O&M instructions, and electric-power as-builts within 90 days of system acceptance.",
+    "Transformer efficiency checklist is marked requirement does not apply, although E0.02 shows a new 75 kVA transformer."
+   ],
+   "page": 4,
+   "page_role": "other",
+   "resolution_flags": [],
+   "scale": null,
+   "sheet_number": "E0.03",
+   "tags": [
+    "COMcheck",
+    "2024 IECC",
+    "lighting controls",
+    "controlled receptacles",
+    "commissioning",
+    "energy monitoring"
+   ],
+   "title": "E0.03 INTERIOR LIGHTING COMPLIANCE CHECK",
+   "viewports": null
+  },
+  {
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "notes": [
+    "Site identifies existing utility transformer west of PAD B and main switchgear MSA at the southwest portion of the building.",
+    "Crosshatched scope area is within the eastern portion of PAD B. Background building label is Medical Office, Two Story, 34,200 SF; this is not the tenant electrical area of 8618 SF.",
+    "Existing utility transformer and MSA duplicate equipment on E0.02 and are not counted again.",
+    "No explicit new site-lighting, trench, sawcut, conduit-size, or underground feeder annotation is provided here. Background parking and landscape symbols are not treated as new electrical work.",
+    "An untagged heavy line follows the building's south side toward the tenant area; its electrical meaning, installation level, and relation to feeder 1 are not established by this sheet."
+   ],
+   "page": 5,
+   "page_role": "site",
+   "resolution_flags": [],
+   "scale": "3/64\" = 1'-0\"",
+   "sheet_number": "E1.00",
+   "tags": [
+    "site",
+    "service entrance",
+    "existing transformer",
+    "existing switchgear",
+    "scope boundary"
+   ],
+   "title": "E1.00 SITE PLAN",
+   "viewports": [
+    {
+     "region": "0.10,0.15,0.82,0.85",
+     "scale_text": "3/64\" = 1'-0\"",
+     "title": "1 SITE PLAN"
+    }
+   ]
+  },
+  {
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "notes": [
+    "Keyed note 1: \"Receptacles are to be located on the roof. Coordinate locations with architect/owner prior to rough in.\" Three WP receptacle symbols are shown on circuit B-22.",
+    "General note 1: \"All circuits shown are home-runs unless noted otherwise. Do not combine home-runs.\"",
+    "General note 2 requires conductors within the building structure, not exposed to ambient conditions. Where exposed, the contractor must derate conductors and upsize conduit accordingly.",
+    "General note 3: \"All electrical devices exposed to weather shall be weatherproof/GFCI rated. NEC 406.9(B)(1).\"",
+    "General note 4 requires listed tamper-resistant 120V, 20A receptacles in areas specified in 210.52; drawing cites NEC 406.11.",
+    "General note 5 requires a continuous building-envelope air barrier and verification under 2024 IECC C402.6.1; coordinate electrical penetrations.",
+    "RTU circuit assignments: RTU-1 A-8,10,12; RTU-2 A-9,11,13; RTU-3 A-14,16,18; RTU-4 A-15,17,19; RTU-5 A-20,22,24; RTU-6 A-21,23,25.",
+    "ODU-1 is shown on B-16,18. IDU-1 is also shown, but no separate IDU supply circuit is identified.",
+    "DWH-1 is shown on B-15,17. A separate B-1 connection is drawn at the same equipment cluster; connected load identity requires confirmation.",
+    "Two exhaust-fan-type connections in restrooms 202 and 203 are labeled A-2. Three in restrooms 230 and 231 and the breakroom are labeled A-4.",
+    "Breakroom and open-office lighting symbols and green triangular symbols repeated from E2.00 are not counted again here.",
+    "Adjacent B occupancy, existing common vestibule, existing stairs, and existing hall are labeled NOT A PART.",
+    "Circuit arrows stop near equipment; complete routes to panels and vertical roof transitions are not shown. No full homerun lengths have been assigned.",
+    "The supplied tile shows a boxed J symbol at approximately (0.4595, 0.5523), beside the Restroom 231 label.",
+    "Neither DWH-1 nor the B-1 circuit designation is readable within this crop. The boxed J symbol cannot be reliably assigned to the additional B-1 load or reconciled with the previously counted water-heater disconnect.",
+    "No additional junction-box quantity is added because it could duplicate the previously interpreted device. First-pass quantities remain unchanged pending a wider view.",
+    "The rest of the sheet was not re-reviewed; retain first-pass circuit assignments, general notes and scope outside this tile."
+   ],
+   "page": 6,
+   "page_role": "plan",
+   "resolution_flags": [
+    {
+     "doc_index": 1,
+     "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+     "page": 6,
+     "reason": "Overlapping symbols at DWH-1 obscure the identity of the additional B-1 connected device and its relationship to the water-heater disconnect.",
+     "region": "0.45,0.54,0.48,0.58"
+    },
+    {
+     "doc_index": 1,
+     "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+     "page": 6,
+     "reason": "The boxed J is legible, but the crop lacks the equipment tag, circuit labels and surrounding connections needed to identify the B-1 load and distinguish it from the previously counted water-heater disconnect. A wider high-resolution view is needed.",
+     "region": "0.450,0.540,0.480,0.580"
+    }
+   ],
+   "scale": "3/16\" = 1'-0\"",
+   "sheet_number": "E1.01",
+   "tags": [
+    "mechanical connections",
+    "roof",
+    "rooftop units",
+    "disconnects",
+    "water heater",
+    "roof receptacles",
+    "keyed notes",
+    "junction box identification unresolved"
+   ],
+   "title": "E1.01 HVAC PLAN",
+   "viewports": [
+    {
+     "region": "0.08,0.27,0.88,0.63",
+     "scale_text": "3/16\" = 1'-0\"",
+     "title": "1 HVAC PLAN"
+    }
+   ]
+  },
+  {
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "notes": [
+    "Two views: 1 PROPOSED LIGHTING PLAN and 2 PROPOSED POWER PLAN, each at 3/16\" = 1'-0\". Do not measure between views.",
+    "Keyed note 1: \"75 kVA transformer T-B to be mounted above panel 'B'.\" Panels A and B and transformer T-B are repeated between views and counted once.",
+    "General note 1: \"All circuits shown are home-runs unless noted otherwise. Do not combine home-runs.\"",
+    "General note 2 requires conductors within the structure; contractor must derate conductors and upsize conduit if exposed to ambient conditions.",
+    "General note 3 requires weatherproof/GFCI-rated weather-exposed devices, citing NEC 406.9(B)(1).",
+    "General note 4 requires listed tamper-resistant 120V, 20A receptacles in areas specified in 210.52.",
+    "General note 5: \"See Light Fixture Schedule on Sheet E0.02.\" That schedule is outside this group; fixture descriptions below intentionally retain drawing tags rather than inventing products or dimensions.",
+    "General note 6: \"Verify with architect/owner exact location of all light fixtures prior to rough in.\"",
+    "General note 7: \"Per 2024 IECC C406.2.4: P01 energy monitoring is to be included.\"",
+    "General note 8: \"Per 2024 IECC C406.5.2: L02, high-end trim lighting controls are to be present.\"",
+    "General note 9 requires a continuous building-envelope air barrier and verification under 2024 IECC C402.6.1.",
+    "Lighting homerun labels visible include A-2, A-4, A-6, A-7, B-52, and B-59. These are circuit destinations, not complete physical routes.",
+    "Power plan includes receptacle mounting callouts at +42\", +48\", +60\", and +72\" AFF. TV locations are shown at +72\" AFF; coordinate exact rough-ins and the device legend.",
+    "The power plan uses half-filled and unfilled receptacle circles, two-line and four-line variants, circular symbols with internal rectangles, floor-box symbols, and green triangles. Their exact distinctions are not established by the supplied reference specification page.",
+    "Counts of power symbol families are preliminary graphic counts; confirm controlled-receptacle, GFCI, quad, dedicated-outlet, and low-voltage definitions before procurement.",
+    "One short linear fixture at the center of Conference Room 209 has an obscured or absent tag. It is reported separately rather than added to type F.",
+    "One long linear fixture in Open Office 222 has its tag obscured by room text; included provisionally with type D and identified in that count's notes.",
+    "Lighting shown again on the power plan is not counted twice.",
+    "No demolition or relocation designation is readable on these views. Do not infer demolition quantities from the proposed layouts.",
+    "Complete panel-to-load homerun routes and conductor/conduit sizes are absent; lengths have not been invented.",
+    "Two separate lighting and power views; do not measure between views or count repeated lighting graphics twice.",
+    "The black F tag beside the center short-linear fixture in Conference Room 209 is readable despite overlapping gray room lettering.",
+    "Reclassify the previously untyped one-fixture row as F. Retain the separate first-pass count of seven previously tagged F fixtures; this patch does not recount fixtures clipped by or outside the tile.",
+    "The conference tile clips lower fixtures and the leftmost FE fixture. The first-pass FE quantity remains unchanged.",
+    "The Open Office 222 tile does not show a readable fixture tag. Retain the first-pass D quantity of nine, including its one provisional classification.",
+    "Other first-pass scope and quantities are unchanged."
+   ],
+   "page": 7,
+   "page_role": "plan",
+   "resolution_flags": [
+    {
+     "doc_index": 1,
+     "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+     "page": 7,
+     "reason": "Conference-room center short-linear fixture tag is obscured by room/control annotation; confirm its type and the short-linear fixture count.",
+     "region": "0.32,0.10,0.44,0.17"
+    },
+    {
+     "doc_index": 1,
+     "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+     "page": 7,
+     "reason": "Long-linear fixture tag overlaps Open Office 222 room text; verify provisional type D classification.",
+     "region": "0.76,0.24,0.81,0.27"
+    },
+    {
+     "doc_index": 1,
+     "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+     "page": 7,
+     "reason": "The supplied tile does not expose a readable tag for the provisionally classified long-linear fixture in Open Office 222. A wider crop including the fixture and room label is required.",
+     "region": "0.760,0.240,0.810,0.270"
+    }
+   ],
+   "scale": "3/16\" = 1'-0\"",
+   "sheet_number": "E2.00",
+   "tags": [
+    "lighting",
+    "lighting controls",
+    "power",
+    "receptacles",
+    "low voltage",
+    "transformer",
+    "energy monitoring",
+    "keyed notes"
+   ],
+   "title": "E2.00 ELECTRICAL PLAN",
+   "viewports": [
+    {
+     "region": "0.08,0.08,0.88,0.44",
+     "scale_text": "3/16\" = 1'-0\"",
+     "title": "1 PROPOSED LIGHTING PLAN"
+    },
+    {
+     "region": "0.08,0.46,0.88,0.90",
+     "scale_text": "3/16\" = 1'-0\"",
+     "title": "2 PROPOSED POWER PLAN"
+    }
+   ]
+  }
+ ],
+ "questions": [],
+ "row_seq": {
+  "C": 62,
+  "D": 2,
+  "O": 34,
+  "P": 27,
+  "Q": 29,
+  "R": 3,
+  "S": 9
+ },
+ "rows_version": 2,
+ "runs": [
+  {
+   "alternates": [],
+   "basis": "stated",
+   "conductors": "(4) #3/0 AWG & (1) #6 GND, Copper",
+   "conduit_size": "2\"",
+   "conduit_type": null,
+   "confidence": 0.95,
+   "coverage": "stated",
+   "description": "Feeder 1, existing MSA 200A 3P provision to new panel A",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "d2ab4d4a5c55",
+   "flags": [],
+   "from_location": "Existing main switchgear MSA",
+   "item_key": "panel:panel|amps=200|desc=feeder_1_existing_msa_200a_3p_provision_to_new_p|panel=A|poles=3",
+   "length_ft": 300,
+   "notes": "Length stated only in voltage-drop calculation: VD = 1.89% @ 300ft; Isc = 10,034 A. NTS single-line; no field route, conduit material, or below-grade designation established. underground=false is not a confirmed above-grade installation method; verify routing and reuse of existing tenant stub.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "r1",
+    "pass": 1
+   },
+   "page": 3,
+   "positions": [],
+   "route": null,
+   "row_id": "R1",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "to_location": "New panel A",
+   "underground": false
+  },
+  {
+   "alternates": [],
+   "basis": "stated",
+   "conductors": "(3) #3 AWG, Copper",
+   "conduit_size": "2\"",
+   "conduit_type": null,
+   "confidence": 0.98,
+   "coverage": "stated",
+   "description": "Feeder 2, panel A to transformer T-B primary",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "c0c3fcf745ec",
+   "flags": [],
+   "from_location": "Panel A, circuits 1/3/5, 100A 3P",
+   "item_key": "panel:transformer|desc=feeder_2_panel_a_to_transformer_t_b_primary|panel=A",
+   "length_ft": 10,
+   "notes": "Calculation states VD = 0.09% @ 10ft; Isc = 9,327 A. No equipment grounding conductor is included in feeder text. Separate transformer #8 GND callout shown; confirm complete bonding design.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "r2",
+    "pass": 1
+   },
+   "page": 3,
+   "positions": [],
+   "route": null,
+   "row_id": "R2",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "to_location": "Transformer T-B, 75 kVA",
+   "underground": false
+  },
+  {
+   "alternates": [],
+   "basis": "stated",
+   "conductors": "(4) #3/0 AWG & (1) #4 GND, Copper",
+   "conduit_size": "2\"",
+   "conduit_type": null,
+   "confidence": 0.98,
+   "coverage": "stated",
+   "description": "Feeder 3, transformer T-B secondary to panel B",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "ed10d6ba5eda",
+   "flags": [],
+   "from_location": "Transformer T-B",
+   "item_key": "panel:transformer|desc=feeder_3_transformer_t_b_secondary_to_panel_b|panel=B",
+   "length_ft": 10,
+   "notes": "Calculation states VD = 0.15% @ 10ft; Isc = 8,795 A. No field route or vertical additions shown.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "r3",
+    "pass": 1
+   },
+   "page": 3,
+   "positions": [],
+   "route": null,
+   "row_id": "R3",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "status": "active",
+   "superseded": [],
+   "to_location": "Panel B",
+   "underground": false
+  }
+ ],
+ "schedules": [
+  {
+   "alternates": [],
+   "columns": [
+    "Mark",
+    "Count",
+    "Description",
+    "Manufacturer",
+    "Model",
+    "Electrical Data",
+    "Lamp",
+    "Comments"
+   ],
+   "coverage": "schedule",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "c4933f4e6f95",
+   "flags": [],
+   "item_key": null,
+   "name": "Lighting Fixture Schedule",
+   "notes": "1. Luminaire selected by others to be high efficacy to comply with IECC C405.1. 2. All lamps shall be provided by contractor and be of the same manufacturer, UNO. 3. Contractor is responsible to verify type of construction at each location and provide the required trims and mounting accessories/kits for application. 4. Provide all necessary supports independent of ceiling system as required per codes and ordinances. 5. Recessed fixtures in fire rated ceilings and air plenums shall be approved for the fire rating of the ceiling or shall be enclosed in a fire rated housing or structure acceptable to the Authority having jurisdiction. 6. Provide separate neutral conductors to each dimmed circuit switch leg. Do not share neutral conductors in dimmed circuits. 7. All lamps and luminaires to be high efficacy rated with a minimum of 60 lumens per watt.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "s1",
+    "pass": 1
+   },
+   "page": 3,
+   "row_id": "S1",
+   "rows": [
+    [
+     "A",
+     "26",
+     "2’ X 4’ Ceiling Light",
+     "Lithonia Lighting",
+     "CPX 2X4 3000LM 80CRI 35K SWL MIN10 ZT MVOLT",
+     "277 V/1-25 VA",
+     "LED",
+     ""
+    ],
+    [
+     "AE",
+     "29",
+     "2’ X 4’ Ceiling Light",
+     "Lithonia Lighting",
+     "CPX 2X4 3000LM 80CRI 35K SWL MIN10 ZT MVOLT E10W",
+     "277 V/1-25 VA",
+     "LED",
+     "Provide 10W Emergency Battery Pack"
+    ],
+    [
+     "B",
+     "14",
+     "Square Recessed Can",
+     "Lithonia Lighting",
+     "LDN4SQ 35/30 LS4 AR LSS TRW MVOLT GZ10",
+     "277 V/1-32 VA",
+     "LED",
+     ""
+    ],
+    [
+     "BE",
+     "14",
+     "Square Recessed Can",
+     "Lithonia Lighting",
+     "LDN4SQ 35/30 LS4 AR LSS TRW MVOLT GZ10 EL",
+     "277 V/1-32 VA",
+     "LED",
+     "Provide 10W Emergency Battery Pack"
+    ],
+    [
+     "C",
+     "3",
+     "Pendant Light",
+     "To be selected by Owner/Architect",
+     "To be selected by Owner/Architect",
+     "277 V/1-38 VA",
+     "LED",
+     "Do Not Exceed Listed Wattage"
+    ],
+    [
+     "CE",
+     "4",
+     "Pendant Light",
+     "To be selected by Owner/Architect",
+     "To be selected by Owner/Architect",
+     "277 V/1-38 VA",
+     "LED",
+     "Do Not Exceed Listed Wattage. Provide 10W Emergency Battery Pack"
+    ],
+    [
+     "D",
+     "9",
+     "Linear Light Fixture",
+     "To be selected by Owner/Architect",
+     "To be selected by Owner/Architect",
+     "277 V/1-64 VA",
+     "LED",
+     "Do Not Exceed Listed Wattage"
+    ],
+    [
+     "DE",
+     "10",
+     "Linear Light Fixture",
+     "To be selected by Owner/Architect",
+     "To be selected by Owner/Architect",
+     "277 V/1-64 VA",
+     "LED",
+     "Do Not Exceed Listed Wattage. Provide 10W Emergency Battery Pack"
+    ],
+    [
+     "E",
+     "4",
+     "Ceiling Light Fixture",
+     "To be selected by Owner/Architect",
+     "To be selected by Owner/Architect",
+     "277 V/1-100 VA",
+     "LED",
+     "Do Not Exceed Listed Wattage"
+    ],
+    [
+     "EX1",
+     "6",
+     "Exit Sign",
+     "Lithonia Lighting",
+     "LQM S W RG MVOLT EL HO M6",
+     "277 V/1-5 VA",
+     "LED",
+     ""
+    ],
+    [
+     "EX2",
+     "1",
+     "Exit Sign",
+     "Lithonia Lighting",
+     "LQM S W RG MVOLT EL HO M6",
+     "277 V/1-5 VA",
+     "LED",
+     ""
+    ],
+    [
+     "F",
+     "8",
+     "Linear Light Fixture",
+     "To be selected by Owner/Architect",
+     "To be selected by Owner/Architect",
+     "277 V/1-16 VA",
+     "LED",
+     "Do Not Exceed Listed Wattage"
+    ],
+    [
+     "FE",
+     "5",
+     "Linear Light Fixture",
+     "To be selected by Owner/Architect",
+     "To be selected by Owner/Architect",
+     "277 V/1-16 VA",
+     "LED",
+     "Do Not Exceed Listed Wattage. Provide 10W Emergency Battery Pack"
+    ]
+   ],
+   "schedule_id": "Lighting Fixture Schedule",
+   "schedule_type": "fixture",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "source": "vision",
+   "status": "active",
+   "superseded": []
+  },
+  {
+   "alternates": [],
+   "columns": [
+    "CKT",
+    "Circuit Description",
+    "Trip",
+    "Poles",
+    "A",
+    "A",
+    "B",
+    "B",
+    "C",
+    "C",
+    "Poles",
+    "Trip",
+    "Circuit Description",
+    "CKT"
+   ],
+   "coverage": "schedule",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "af17a63d1dd9",
+   "flags": [],
+   "item_key": null,
+   "name": "Branch Panel: A",
+   "notes": "Location: blank; Supply From: blank; Mounting: Surface; Enclosure: Type 1; Volts: 277/480; Phases: 3; Wires: 4; A.I.C. Rating: 14,000; Mains Type: MLO; Mains Rating: 200 A; MCB Rating: 200 A. Each printed A/B/C header spans two load subcells, represented here by duplicate phase headers. Ellipses are printed cell truncation, not reconstructed values. Total Load A/B/C: 41963 VA / 41700 VA / 41216 VA; Total Amps: 152 A / 151 A / 149 A.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "s2",
+    "pass": 1
+   },
+   "page": 3,
+   "row_id": "S2",
+   "rows": [
+    [
+     "1",
+     "TRANSFORMER 'T-B'",
+     "100 A",
+     "3",
+     "1535...",
+     "1326...",
+     "",
+     "",
+     "",
+     "",
+     "1",
+     "20 A",
+     "GENERAL LIGHTING (1)",
+     "2"
+    ],
+    [
+     "3",
+     "--",
+     "--",
+     "--",
+     "",
+     "",
+     "1539...",
+     "1638...",
+     "",
+     "",
+     "1",
+     "20 A",
+     "GENERAL LIGHTING (2)",
+     "4"
+    ],
+    [
+     "5",
+     "--",
+     "--",
+     "--",
+     "",
+     "",
+     "",
+     "",
+     "1533...",
+     "1214...",
+     "1",
+     "20 A",
+     "GENERAL LIGHTING (3)",
+     "6"
+    ],
+    [
+     "7",
+     "GENERAL LIGHTING (4)",
+     "20 A",
+     "1",
+     "618 VA",
+     "5265...",
+     "",
+     "",
+     "",
+     "",
+     "3",
+     "30 A",
+     "RTU - 1",
+     "8"
+    ],
+    [
+     "9",
+     "RTU - 2",
+     "20 A",
+     "3",
+     "",
+     "",
+     "2771...",
+     "5265...",
+     "",
+     "",
+     "--",
+     "--",
+     "--",
+     "10"
+    ],
+    [
+     "11",
+     "--",
+     "--",
+     "--",
+     "",
+     "",
+     "",
+     "",
+     "2771...",
+     "5265...",
+     "--",
+     "--",
+     "--",
+     "12"
+    ],
+    [
+     "13",
+     "--",
+     "--",
+     "--",
+     "2771...",
+     "4157...",
+     "",
+     "",
+     "",
+     "",
+     "3",
+     "30 A",
+     "RTU - 3",
+     "14"
+    ],
+    [
+     "15",
+     "RTU - 4",
+     "30 A",
+     "3",
+     "",
+     "",
+     "4157...",
+     "4157...",
+     "",
+     "",
+     "--",
+     "--",
+     "--",
+     "16"
+    ],
+    [
+     "17",
+     "--",
+     "--",
+     "--",
+     "",
+     "",
+     "",
+     "",
+     "4157...",
+     "4157...",
+     "--",
+     "--",
+     "--",
+     "18"
+    ],
+    [
+     "19",
+     "--",
+     "--",
+     "--",
+     "4157...",
+     "4157...",
+     "",
+     "",
+     "",
+     "",
+     "3",
+     "30 A",
+     "RTU - 5",
+     "20"
+    ],
+    [
+     "21",
+     "RTU - 6",
+     "30 A",
+     "3",
+     "",
+     "",
+     "4157...",
+     "4157...",
+     "",
+     "",
+     "--",
+     "--",
+     "--",
+     "22"
+    ],
+    [
+     "23",
+     "--",
+     "--",
+     "--",
+     "",
+     "",
+     "",
+     "",
+     "4157...",
+     "4157...",
+     "--",
+     "--",
+     "--",
+     "24"
+    ],
+    [
+     "25",
+     "--",
+     "--",
+     "--",
+     "4157...",
+     "--",
+     "",
+     "",
+     "",
+     "",
+     "1",
+     "--",
+     "Space",
+     "26"
+    ],
+    [
+     "27",
+     "Space",
+     "--",
+     "1",
+     "",
+     "",
+     "--",
+     "--",
+     "",
+     "",
+     "1",
+     "--",
+     "Space",
+     "28"
+    ],
+    [
+     "29",
+     "Space",
+     "--",
+     "1",
+     "",
+     "",
+     "",
+     "",
+     "--",
+     "--",
+     "1",
+     "--",
+     "Space",
+     "30"
+    ],
+    [
+     "31",
+     "Space",
+     "--",
+     "1",
+     "--",
+     "--",
+     "",
+     "",
+     "",
+     "",
+     "1",
+     "--",
+     "Space",
+     "32"
+    ],
+    [
+     "33",
+     "Space",
+     "--",
+     "1",
+     "",
+     "",
+     "--",
+     "--",
+     "",
+     "",
+     "1",
+     "--",
+     "Space",
+     "34"
+    ],
+    [
+     "35",
+     "Space",
+     "--",
+     "1",
+     "",
+     "",
+     "",
+     "",
+     "--",
+     "--",
+     "1",
+     "--",
+     "Space",
+     "36"
+    ],
+    [
+     "37",
+     "Space",
+     "--",
+     "1",
+     "--",
+     "--",
+     "",
+     "",
+     "",
+     "",
+     "1",
+     "--",
+     "Space",
+     "38"
+    ],
+    [
+     "39",
+     "Space",
+     "--",
+     "1",
+     "",
+     "",
+     "--",
+     "--",
+     "",
+     "",
+     "1",
+     "--",
+     "Space",
+     "40"
+    ],
+    [
+     "41",
+     "Space",
+     "--",
+     "1",
+     "",
+     "",
+     "",
+     "",
+     "--",
+     "--",
+     "1",
+     "--",
+     "Space",
+     "42"
+    ]
+   ],
+   "schedule_id": "A",
+   "schedule_type": "panel",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "source": "vision",
+   "status": "active",
+   "superseded": []
+  },
+  {
+   "alternates": [],
+   "columns": [
+    "Load Classification",
+    "Connected Load",
+    "Demand Factor",
+    "Estimated Demand",
+    "Panel Totals",
+    ""
+   ],
+   "coverage": "schedule",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "56960de186b8",
+   "flags": [],
+   "item_key": null,
+   "name": "Branch Panel: A - Load Classification and Panel Totals",
+   "notes": "Panel Totals is a merged heading over label/value subcells. Printed totals are retained without recalculation.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "s3",
+    "pass": 1
+   },
+   "page": 3,
+   "row_id": "S3",
+   "rows": [
+    [
+     "Other",
+     "2680 VA",
+     "100.00%",
+     "2680 VA",
+     "",
+     ""
+    ],
+    [
+     "Receptacle",
+     "34180 VA",
+     "64.63%",
+     "22090 VA",
+     "Total Conn. Load:",
+     "124880 VA"
+    ],
+    [
+     "Power",
+     "85944 VA",
+     "100.00%",
+     "85944 VA",
+     "Total Est. Demand:",
+     "112790 VA"
+    ],
+    [
+     "Lighting",
+     "2076 VA",
+     "100.00%",
+     "2076 VA",
+     "Total Conn.:",
+     "150 A"
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "Total Est. Demand:",
+     "136 A"
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ]
+   ],
+   "schedule_id": "A-loads",
+   "schedule_type": "other",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "source": "vision",
+   "status": "active",
+   "superseded": []
+  },
+  {
+   "alternates": [],
+   "columns": [
+    "CKT",
+    "Circuit Description",
+    "Trip",
+    "Poles",
+    "A",
+    "A",
+    "B",
+    "B",
+    "C",
+    "C",
+    "Poles",
+    "Trip",
+    "Circuit Description",
+    "CKT"
+   ],
+   "coverage": "schedule",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "2b6da454e770",
+   "flags": [],
+   "item_key": null,
+   "name": "Branch Panel: B",
+   "notes": "Location: blank; Supply From: T-B; Mounting: Surface; Enclosure: Type 1; Volts: 120/208; Phases: 3; Wires: 4; A.I.C. Rating: 10,000; Mains Type: MCB; Mains Rating: 200 A; MCB Rating: 200 A. Repeated phase headings represent left/right subcells under printed merged A/B/C headers. Ellipses are printed truncation. Total Load A/B/C: 15355 VA / 15399 VA / 15339 VA; Total Amps: 128 A / 128 A / 128 A.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "s4",
+    "pass": 1
+   },
+   "page": 3,
+   "row_id": "S4",
+   "rows": [
+    [
+     "1",
+     "CIRCULATION PUMP",
+     "20 A",
+     "1",
+     "55 VA",
+     "250 VA",
+     "",
+     "",
+     "",
+     "",
+     "1",
+     "20 A",
+     "BACKLIT SIGN - RECEPTION",
+     "2"
+    ],
+    [
+     "3",
+     "POWER (1) - RESTROOMS",
+     "20 A",
+     "1",
+     "",
+     "",
+     "200 VA",
+     "360 VA",
+     "",
+     "",
+     "1",
+     "20 A",
+     "RECEPTS (1) - BREAK ROOM",
+     "4"
+    ],
+    [
+     "5",
+     "POWER (2) - RESTROOMS",
+     "20 A",
+     "1",
+     "",
+     "",
+     "",
+     "",
+     "200 VA",
+     "360 VA",
+     "1",
+     "20 A",
+     "RECEPTS (1) - RESTROOMS",
+     "6"
+    ],
+    [
+     "7",
+     "WATER FOUNTAIN - BREAK ROOM",
+     "20 A",
+     "1",
+     "500 VA",
+     "800 VA",
+     "",
+     "",
+     "",
+     "",
+     "1",
+     "20 A",
+     "GARBAGE DISPOSAL - BREAK ROOM",
+     "8"
+    ],
+    [
+     "9",
+     "REFRIGERATOR - BREAK ROOM",
+     "20 A",
+     "1",
+     "",
+     "",
+     "1800...",
+     "250 VA",
+     "",
+     "",
+     "1",
+     "20 A",
+     "KEY FOB DETECTOR (2)",
+     "10"
+    ],
+    [
+     "11",
+     "RECEPTS (1) - OFFICE 217",
+     "20 A",
+     "1",
+     "",
+     "",
+     "",
+     "",
+     "540 VA",
+     "1200...",
+     "1",
+     "20 A",
+     "COPIER (2) - COPY",
+     "12"
+    ],
+    [
+     "13",
+     "RECEPTS (2) - CONFERENCE ROOM",
+     "20 A",
+     "1",
+     "900 VA",
+     "1080...",
+     "",
+     "",
+     "",
+     "",
+     "1",
+     "20 A",
+     "RECEPTS (1) - BREAKROOM",
+     "14"
+    ],
+    [
+     "15",
+     "WATER HEATER",
+     "20 A",
+     "2",
+     "",
+     "",
+     "1500...",
+     "2049...",
+     "",
+     "",
+     "2",
+     "30 A",
+     "ODU - 1",
+     "16"
+    ],
+    [
+     "17",
+     "--",
+     "--",
+     "--",
+     "",
+     "",
+     "",
+     "",
+     "1500...",
+     "2049...",
+     "--",
+     "--",
+     "--",
+     "18"
+    ],
+    [
+     "19",
+     "RECEPTS (1) - CONFERENCE ROOM",
+     "20 A",
+     "1",
+     "1080...",
+     "1200...",
+     "",
+     "",
+     "",
+     "",
+     "1",
+     "20 A",
+     "COPIER (1) - COPY",
+     "20"
+    ],
+    [
+     "21",
+     "RECEPTS (2) - RESTROOMS",
+     "20 A",
+     "1",
+     "",
+     "",
+     "360 VA",
+     "540 VA",
+     "",
+     "",
+     "1",
+     "20 A",
+     "RECEPTS - ROOF",
+     "22"
+    ],
+    [
+     "23",
+     "KEY FOB DETECTOR (3)",
+     "20 A",
+     "1",
+     "",
+     "",
+     "",
+     "",
+     "250 VA",
+     "360 VA",
+     "1",
+     "20 A",
+     "RECEPTS - COPY",
+     "24"
+    ],
+    [
+     "25",
+     "KEY FOB DETECTOR (1)",
+     "20 A",
+     "1",
+     "250 VA",
+     "360 VA",
+     "",
+     "",
+     "",
+     "",
+     "1",
+     "20 A",
+     "RECEPTS (2) - BREAK ROOM",
+     "26"
+    ],
+    [
+     "27",
+     "RECEPTS - OFFICE 226",
+     "20 A",
+     "1",
+     "",
+     "",
+     "540 VA",
+     "540 VA",
+     "",
+     "",
+     "1",
+     "20 A",
+     "RECEPTS (2) - OFFICE 220",
+     "28"
+    ],
+    [
+     "29",
+     "RECEPTS - UTILITY",
+     "20 A",
+     "1",
+     "",
+     "",
+     "",
+     "",
+     "540 VA",
+     "540 VA",
+     "1",
+     "20 A",
+     "RECEPTS - OFFICE 227",
+     "30"
+    ],
+    [
+     "31",
+     "RECEPTS - OFFICE 234",
+     "20 A",
+     "1",
+     "540 VA",
+     "540 VA",
+     "",
+     "",
+     "",
+     "",
+     "1",
+     "20 A",
+     "RECEPTS - OFFICE 221",
+     "32"
+    ],
+    [
+     "33",
+     "RECEPTS (2) - OFFICE 207",
+     "20 A",
+     "1",
+     "",
+     "",
+     "540 VA",
+     "720 VA",
+     "",
+     "",
+     "1",
+     "20 A",
+     "RECEPTS (3) - CONFERENCE ROOM",
+     "34"
+    ],
+    [
+     "35",
+     "RECEPTS - OFFICE 216",
+     "20 A",
+     "1",
+     "",
+     "",
+     "",
+     "",
+     "540 VA",
+     "540 VA",
+     "1",
+     "20 A",
+     "RECEPTS (2) - OFFICE 208",
+     "36"
+    ],
+    [
+     "37",
+     "RECEPTS (2) - OFFICE 218",
+     "20 A",
+     "1",
+     "540 VA",
+     "540 VA",
+     "",
+     "",
+     "",
+     "",
+     "1",
+     "20 A",
+     "RECEPTS (1) - OFFICE 219",
+     "38"
+    ],
+    [
+     "39",
+     "RECEPTS (1) - OPEN OFFICE 228",
+     "20 A",
+     "1",
+     "",
+     "",
+     "720 VA",
+     "720 VA",
+     "",
+     "",
+     "1",
+     "20 A",
+     "RECEPTS (1) - OFFICE 208",
+     "40"
+    ],
+    [
+     "41",
+     "RECEPTS - OFFICE 235",
+     "20 A",
+     "1",
+     "",
+     "",
+     "",
+     "",
+     "720 VA",
+     "720 VA",
+     "1",
+     "20 A",
+     "RECEPTS (2) - OFFICE 217",
+     "42"
+    ],
+    [
+     "43",
+     "RECEPTS (2) - OFFICE 219",
+     "20 A",
+     "1",
+     "720 VA",
+     "720 VA",
+     "",
+     "",
+     "",
+     "",
+     "1",
+     "20 A",
+     "RECEPTS (1) - OFFICE 220",
+     "44"
+    ],
+    [
+     "45",
+     "RECEPTS - STORAGE + HALL",
+     "20 A",
+     "1",
+     "",
+     "",
+     "900 VA",
+     "1080...",
+     "",
+     "",
+     "1",
+     "20 A",
+     "RECEPTS - OFFICE 225",
+     "46"
+    ],
+    [
+     "47",
+     "RECEPTS (1) - OFFICE 218",
+     "20 A",
+     "1",
+     "",
+     "",
+     "",
+     "",
+     "720 VA",
+     "900 VA",
+     "1",
+     "20 A",
+     "RECEPTS - WAITING + RECEPTION",
+     "48"
+    ],
+    [
+     "49",
+     "RECEPTS (1) - OFFICE 207",
+     "20 A",
+     "1",
+     "720 VA",
+     "900 VA",
+     "",
+     "",
+     "",
+     "",
+     "1",
+     "20 A",
+     "RECEPTS - ELEC ROOM",
+     "50"
+    ],
+    [
+     "51",
+     "RECEPTS - OFFICE 210 + 211",
+     "20 A",
+     "1",
+     "",
+     "",
+     "1080...",
+     "1500...",
+     "",
+     "",
+     "1",
+     "20 A",
+     "SECURITY CAMERAS (1)",
+     "52"
+    ],
+    [
+     "53",
+     "RECEPTS - OPEN OFFICE 222",
+     "20 A",
+     "1",
+     "",
+     "",
+     "",
+     "",
+     "1080...",
+     "1080...",
+     "1",
+     "20 A",
+     "RECEPTS - OFFICE 212 + 213",
+     "54"
+    ],
+    [
+     "55",
+     "RECEPTS - OFFICE 214 + 215",
+     "20 A",
+     "1",
+     "1080...",
+     "1080...",
+     "",
+     "",
+     "",
+     "",
+     "1",
+     "20 A",
+     "RECEPTS (2) - OPEN OFFICE 228",
+     "56"
+    ],
+    [
+     "57",
+     "Space",
+     "--",
+     "1",
+     "",
+     "",
+     "--",
+     "--",
+     "",
+     "",
+     "1",
+     "--",
+     "Space",
+     "58"
+    ],
+    [
+     "59",
+     "SECURITY CAMERAS (2)",
+     "20 A",
+     "1",
+     "",
+     "",
+     "",
+     "",
+     "1500...",
+     "--",
+     "1",
+     "--",
+     "Space",
+     "60"
+    ],
+    [
+     "61",
+     "MICROWAVE - BREAK ROOM",
+     "20 A",
+     "1",
+     "1500...",
+     "--",
+     "",
+     "",
+     "",
+     "",
+     "1",
+     "--",
+     "Space",
+     "62"
+    ],
+    [
+     "63",
+     "Space",
+     "--",
+     "1",
+     "",
+     "",
+     "--",
+     "--",
+     "",
+     "",
+     "1",
+     "--",
+     "Space",
+     "64"
+    ]
+   ],
+   "schedule_id": "B",
+   "schedule_type": "panel",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "source": "vision",
+   "status": "active",
+   "superseded": []
+  },
+  {
+   "alternates": [],
+   "columns": [
+    "Load Classification",
+    "Connected Load",
+    "Demand Factor",
+    "Estimated Demand",
+    "Panel Totals",
+    ""
+   ],
+   "coverage": "schedule",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "d03adc84cd0b",
+   "flags": [],
+   "item_key": null,
+   "name": "Branch Panel: B - Load Classification and Panel Totals",
+   "notes": "Panel Totals is a merged heading over label/value subcells.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "s5",
+    "pass": 1
+   },
+   "page": 3,
+   "row_id": "S5",
+   "rows": [
+    [
+     "Other",
+     "360 VA",
+     "100.00%",
+     "360 VA",
+     "",
+     ""
+    ],
+    [
+     "Receptacle",
+     "34180 VA",
+     "64.63%",
+     "22090 VA",
+     "Total Conn. Load:",
+     "46093 VA"
+    ],
+    [
+     "Power",
+     "11553 VA",
+     "100.00%",
+     "11553 VA",
+     "Total Est. Demand:",
+     "34003 VA"
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "Total Conn.:",
+     "128 A"
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "Total Est. Demand:",
+     "94 A"
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ]
+   ],
+   "schedule_id": "B-loads",
+   "schedule_type": "other",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "source": "vision",
+   "status": "active",
+   "superseded": []
+  },
+  {
+   "alternates": [],
+   "columns": [
+    "",
+    "Wire Size"
+   ],
+   "coverage": "schedule",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "72cd33aa1a85",
+   "flags": [],
+   "item_key": null,
+   "name": "Wire Size",
+   "notes": "Numbered feeder list adjacent to single-line, transcribed in table form. Conduit material not stated.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "s6",
+    "pass": 1
+   },
+   "page": 3,
+   "row_id": "S6",
+   "rows": [
+    [
+     "1.",
+     "2\"C with (4) #3/0 AWG & (1) #6 GND, Copper\n(VD = 1.89% @ 300ft; Isc = 10,034 A)"
+    ],
+    [
+     "2.",
+     "2\"C with (3) #3 AWG, Copper\n(VD = 0.09% @ 10ft; Isc = 9,327 A)"
+    ],
+    [
+     "3.",
+     "2\"C with (4) #3/0 AWG & (1) #4 GND, Copper\n(VD = 0.15% @ 10ft; Isc = 8,795 A)"
+    ]
+   ],
+   "schedule_id": "Wire Size",
+   "schedule_type": "feeder",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "source": "vision",
+   "status": "active",
+   "superseded": []
+  },
+  {
+   "alternates": [],
+   "columns": [
+    "",
+    "",
+    "",
+    "",
+    "TOTAL LOAD",
+    "DEMAND FACTOR",
+    "TOTAL DEMAND"
+   ],
+   "coverage": "schedule",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "9b262c0c493a",
+   "flags": [],
+   "item_key": null,
+   "name": "ELECTRICAL LOAD CALCULATION-COMMERCIAL",
+   "notes": "PROJECT NAME: FIVE STAR TAX RESOLUTIONS; BUILDING SQUARE FOOTAGE: 8,618; SERVICE VOLTAGE: 480 /277. TOTAL LOAD = 131,359 VA; TOTAL DEMAND AMPS = 158 AMPS; SERVICE SIZE = 200 AMPS.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "s7",
+    "pass": 1
+   },
+   "page": 3,
+   "row_id": "S7",
+   "rows": [
+    [
+     "",
+     "OFFICE LIGHTING",
+     "8,618 SF",
+     "3.50 VA/SF",
+     "30,163 VA",
+     "1.25",
+     "37,704 VA"
+    ],
+    [
+     "",
+     "OFFICE RECEPTACLE",
+     "8,618 SF",
+     "1.00 VA/SF",
+     "8,618 VA",
+     "1.00",
+     "8,618 VA"
+    ],
+    [
+     "",
+     "OTHER LOADS",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ],
+    [
+     "1",
+     "WATER HEATER",
+     "",
+     "",
+     "3,000 VA",
+     "1.00",
+     "3,000 VA"
+    ],
+    [
+     "1",
+     "RTU - 1",
+     "",
+     "",
+     "15,796 VA",
+     "1.00",
+     "15,796 VA"
+    ],
+    [
+     "1",
+     "RTU - 2",
+     "",
+     "",
+     "8,314 VA",
+     "1.00",
+     "8,314 VA"
+    ],
+    [
+     "4",
+     "RTU - 3,4,5,6",
+     "",
+     "",
+     "12,470 VA",
+     "1.00",
+     "49,880 VA"
+    ],
+    [
+     "1",
+     "ODU - 1",
+     "",
+     "",
+     "4,098 VA",
+     "1.00",
+     "4,098 VA"
+    ],
+    [
+     "",
+     "25% LARGEST MOTOR",
+     "",
+     "",
+     "15,796 VA",
+     "0.25",
+     "3,949 VA"
+    ]
+   ],
+   "schedule_id": "Commercial Load Calculation",
+   "schedule_type": "other",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 3,
+    "sheet_key": "D4P3",
+    "sheet_number": "E0.02"
+   },
+   "sheet_number": "E0.02",
+   "source": "vision",
+   "status": "active",
+   "superseded": []
+  },
+  {
+   "alternates": [],
+   "columns": [
+    "Fixture ID : Description / Lamp / Wattage Per Lamp / Ballast",
+    "# of Fixture",
+    "Fixture Watt.",
+    "(B X C)"
+   ],
+   "coverage": "schedule",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "38950e19b368",
+   "flags": [],
+   "item_key": null,
+   "name": "Proposed Interior Lighting Power",
+   "notes": "Report pages 4 and 5 reproduced on this single drawing sheet. Grouped normal/emergency fixtures duplicate E0.02, not additional procurement quantities.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "s1",
+    "pass": 1
+   },
+   "page": 4,
+   "row_id": "S8",
+   "rows": [
+    [
+     "1-Office - 210 (Common Space Types:Office - enclosed)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "2",
+     "25",
+     "50"
+    ],
+    [
+     "2-Office - 207 (Common Space Types:Office - enclosed)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "4",
+     "25",
+     "100"
+    ],
+    [
+     "3-Conference Room - 209 (Common Space Types:Conference/meeting/multipurpose room)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "D, DE: D, DE: LED:",
+     "4",
+     "64",
+     "256"
+    ],
+    [
+     "F, FE: F, FE: LED:",
+     "13",
+     "16",
+     "208"
+    ],
+    [
+     "4-Office - 208 (Common Space Types:Office - enclosed)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "4",
+     "25",
+     "100"
+    ],
+    [
+     "5-Office - 213 (Common Space Types:Office - enclosed)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "2",
+     "25",
+     "50"
+    ],
+    [
+     "6-Office - 211 (Common Space Types:Office - enclosed)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "2",
+     "25",
+     "50"
+    ],
+    [
+     "7-Office - 212 (Common Space Types:Office - enclosed)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "2",
+     "25",
+     "50"
+    ],
+    [
+     "8-Office - 225 (Common Space Types:Office - enclosed)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "2",
+     "25",
+     "50"
+    ],
+    [
+     "9-Office - 214 (Common Space Types:Office - enclosed)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "2",
+     "25",
+     "50"
+    ],
+    [
+     "10-Office - 215 (Common Space Types:Office - enclosed)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "2",
+     "25",
+     "50"
+    ],
+    [
+     "11-Office - 216 (Common Space Types:Office - enclosed)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "2",
+     "25",
+     "50"
+    ],
+    [
+     "12-Office - 217 (Common Space Types:Office - enclosed)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "4",
+     "25",
+     "100"
+    ],
+    [
+     "13-Office - 220 (Common Space Types:Office - enclosed)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "4",
+     "25",
+     "100"
+    ],
+    [
+     "14-Office - 218 (Common Space Types:Office - enclosed)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "3",
+     "25",
+     "75"
+    ],
+    [
+     "15-Office - 221 (Common Space Types:Office - enclosed)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "2",
+     "25",
+     "50"
+    ],
+    [
+     "16-Office - 219 (Common Space Types:Office - enclosed)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "3",
+     "25",
+     "75"
+    ],
+    [
+     "17-Restroom - 230 (Common Space Types:Restrooms)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "B, BE: B, BE: LED:",
+     "2",
+     "32",
+     "64"
+    ],
+    [
+     "18-Utility - 232 (Common Space Types:Electrical/mechanical room)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "1",
+     "25",
+     "25"
+    ],
+    [
+     "19-Hall - 204 + 206 (Common Space Types:Corridor <8 ft wide)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "B, BE: B, BE: LED:",
+     "12",
+     "32",
+     "384"
+    ],
+    [
+     "D, DE: D, DE: LED:",
+     "2",
+     "64",
+     "128"
+    ],
+    [
+     "20-Office - 226 (Common Space Types:Office - enclosed)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "2",
+     "25",
+     "50"
+    ],
+    [
+     "21-Office - 234 (Common Space Types:Office - enclosed)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "2",
+     "25",
+     "50"
+    ],
+    [
+     "22-Office - 227 (Common Space Types:Office - enclosed)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "2",
+     "25",
+     "50"
+    ],
+    [
+     "23-BreakRoom - 233 (Common Space Types:Lounge/breakroom)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "C, CE: C, CE: LED:",
+     "6",
+     "38",
+     "228"
+    ],
+    [
+     "E: E: LED:",
+     "4",
+     "100",
+     "400"
+    ],
+    [
+     "24-Storage - 205 (Common Space Types:Storage room >=50 - <=1000 sq.ft.)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "2",
+     "25",
+     "50"
+    ],
+    [
+     "25-Office - 235 (Common Space Types:Office - enclosed)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "2",
+     "25",
+     "50"
+    ],
+    [
+     "26-Restroom - 231 (Common Space Types:Restrooms)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "B, BE: B, BE: LED:",
+     "2",
+     "32",
+     "64"
+    ],
+    [
+     "27-Copy - 224 (Common Space Types:Copy/print room)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "2",
+     "25",
+     "50"
+    ],
+    [
+     "28-Restroom - 203 (Common Space Types:Restrooms)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "B, BE: B, BE: LED:",
+     "2",
+     "32",
+     "64"
+    ],
+    [
+     "29-Elec - 223 (Common Space Types:Electrical/mechanical room)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "2",
+     "25",
+     "50"
+    ],
+    [
+     "30-Restroom - 202 (Common Space Types:Restrooms)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "B, BE: B, BE: LED:",
+     "2",
+     "32",
+     "64"
+    ],
+    [
+     "31-Reception - 201 (Common Space Types:Lobby)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "B, BE: B, BE: LED:",
+     "2",
+     "32",
+     "64"
+    ],
+    [
+     "32-Office - 222 (Common Space Types:Office - open plan)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "C, CE: C, CE: LED:",
+     "1",
+     "38",
+     "38"
+    ],
+    [
+     "D, DE: D, DE: LED:",
+     "3",
+     "64",
+     "192"
+    ],
+    [
+     "33-Waiting - 200 (Common Space Types:Seating area, general)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "B, BE: B, BE: LED:",
+     "6",
+     "32",
+     "192"
+    ],
+    [
+     "34-Hall - 206 (Common Space Types:Corridor <8 ft wide)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "D, DE: D, DE: LED:",
+     "2",
+     "64",
+     "128"
+    ],
+    [
+     "35-Office - 228 (Common Space Types:Office - open plan)",
+     "",
+     "",
+     ""
+    ],
+    [
+     "D, DE: D, DE: LED:",
+     "8",
+     "64",
+     "512"
+    ],
+    [
+     "Total Proposed Watts:",
+     "",
+     "",
+     "4361"
+    ]
+   ],
+   "schedule_id": "COMcheck-Proposed-Power",
+   "schedule_type": "fixture",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 4,
+    "sheet_key": "D4P4",
+    "sheet_number": "E0.03"
+   },
+   "sheet_number": "E0.03",
+   "source": "vision",
+   "status": "active",
+   "superseded": []
+  },
+  {
+   "alternates": [],
+   "columns": [
+    "Fixture",
+    "Lighting Control"
+   ],
+   "coverage": "schedule",
+   "doc_index": 1,
+   "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+   "family_tags": [],
+   "fingerprint": "d15d0cf79564",
+   "flags": [],
+   "item_key": null,
+   "name": "Proposed Interior Lighting Controls",
+   "notes": "Control descriptions do not state sensor quantities. Determine physical devices and power packs from E2.00 and control design.",
+   "origin": {
+    "group_id": "36a36349-28cd-493f-90a0-5484591cca72",
+    "group_kind": "sub",
+    "local_id": "s2",
+    "pass": 1
+   },
+   "page": 4,
+   "row_id": "S9",
+   "rows": [
+    [
+     "1-Office - 210 (Common Space Types:Office - enclosed)",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "2-Office - 207 (Common Space Types:Office - enclosed)",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "3-Conference Room - 209 (Common Space Types:Conference/meeting/multipurpose room)",
+     ""
+    ],
+    [
+     "D, DE: D, DE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "F, FE: F, FE: LED:",
+     "Manual Control"
+    ],
+    [
+     "4-Office - 208 (Common Space Types:Office - enclosed)",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "5-Office - 213 (Common Space Types:Office - enclosed)",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "6-Office - 211 (Common Space Types:Office - enclosed)",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "7-Office - 212 (Common Space Types:Office - enclosed)",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "8-Office - 225 (Common Space Types:Office - enclosed)",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "9-Office - 214 (Common Space Types:Office - enclosed)",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "10-Office - 215 (Common Space Types:Office - enclosed)",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "11-Office - 216 (Common Space Types:Office - enclosed)",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "12-Office - 217 (Common Space Types:Office - enclosed)",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "13-Office - 220 (Common Space Types:Office - enclosed)",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "14-Office - 218 (Common Space Types:Office - enclosed)",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "15-Office - 221 (Common Space Types:Office - enclosed)",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "16-Office - 219 (Common Space Types:Office - enclosed)",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "17-Restroom - 230 (Common Space Types:Restrooms)",
+     ""
+    ],
+    [
+     "B, BE: B, BE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "18-Utility - 232 (Common Space Types:Electrical/mechanical room)",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "19-Hall - 204 + 206 (Common Space Types:Corridor <8 ft wide)",
+     ""
+    ],
+    [
+     "B, BE: B, BE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "D, DE: D, DE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "20-Office - 226 (Common Space Types:Office - enclosed)",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "21-Office - 234 (Common Space Types:Office - enclosed)",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "22-Office - 227 (Common Space Types:Office - enclosed)",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "23-BreakRoom - 233 (Common Space Types:Lounge/breakroom)",
+     ""
+    ],
+    [
+     "C, CE: C, CE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "E: E: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "24-Storage - 205 (Common Space Types:Storage room >=50 - <=1000 sq.ft.)",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "25-Office - 235 (Common Space Types:Office - enclosed)",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "26-Restroom - 231 (Common Space Types:Restrooms)",
+     ""
+    ],
+    [
+     "B, BE: B, BE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "27-Copy - 224 (Common Space Types:Copy/print room)",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "28-Restroom - 203 (Common Space Types:Restrooms)",
+     ""
+    ],
+    [
+     "B, BE: B, BE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "29-Elec - 223 (Common Space Types:Electrical/mechanical room)",
+     ""
+    ],
+    [
+     "A, AE: A, AE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "30-Restroom - 202 (Common Space Types:Restrooms)",
+     ""
+    ],
+    [
+     "B, BE: B, BE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "31-Reception - 201 (Common Space Types:Lobby)",
+     ""
+    ],
+    [
+     "B, BE: B, BE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "32-Office - 222 (Common Space Types:Office - open plan)",
+     ""
+    ],
+    [
+     "C, CE: C, CE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "D, DE: D, DE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "33-Waiting - 200 (Common Space Types:Seating area, general)",
+     ""
+    ],
+    [
+     "B, BE: B, BE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "34-Hall - 206 (Common Space Types:Corridor <8 ft wide)",
+     ""
+    ],
+    [
+     "D, DE: D, DE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ],
+    [
+     "35-Office - 228 (Common Space Types:Office - open plan)",
+     ""
+    ],
+    [
+     "D, DE: D, DE: LED:",
+     "Occupancy Sensor, Manual Control"
+    ]
+   ],
+   "schedule_id": "COMcheck-Proposed-Controls",
+   "schedule_type": "other",
+   "sheet": {
+    "document_id": "7280c6fe-6971-4466-ba6e-7a61c680f772",
+    "page": 4,
+    "sheet_key": "D4P4",
+    "sheet_number": "E0.03"
+   },
+   "sheet_number": "E0.03",
+   "source": "vision",
+   "status": "active",
+   "superseded": []
+  }
+ ],
+ "scope": [],
+ "source": {
+  "failed_groups": 0,
+  "group_ids": [
+   "36a36349-28cd-493f-90a0-5484591cca72",
+   "ae56c320-f414-420d-9446-c23870bcfa67",
+   "6725542e-2296-4159-bcfa-b37c6619cfa6",
+   "b4780f89-8d12-478f-9f1a-178b6054f67b",
+   "f9b2f511-fe82-4185-8fb4-9ec06429d9e3"
+  ],
+  "groups": 2,
+  "rolled_up": false
+ },
+ "specs": []
+}

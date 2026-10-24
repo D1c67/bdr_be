@@ -126,3 +126,26 @@ AUTO_SEND_NOTIFY_ROLES = frozenset(
 )
 AUTO_SEND_PCT_ROLES = frozenset({Role.EXECUTIVE, Role.IT_ADMIN})
 AUTO_SEND_ACTION_ROLES = frozenset({Role.ESTIMATING_ADMIN, Role.EXECUTIVE, Role.IT_ADMIN})
+
+# AI Estimating pricing (docs/AI_ESTIMATING_BUILD_SPEC.md section 5.5). Who
+# may SEE AI prices (priced lines, the Verify draft, price chips, pricing chat
+# tools): the Executive, the IT Admin, the Estimating Admin and both engineer
+# focuses. The read-only accountant is left out by owner decision (Q7) and the
+# external estimator never sees a price. core/features.ai_pricing_allowed
+# narrows this further by AI_PRICING_STATE (test = Executive and IT Admin).
+AI_PRICING_VIEW_ROLES = frozenset(
+    {Role.EXECUTIVE, Role.IT_ADMIN, Role.ESTIMATING_ADMIN}
+) | ESTIMATING_ENGINEER_ROLES
+# Who may run, re-run or edit a pricing version (the engineers read only).
+AI_PRICING_WRITE_ROLES = frozenset({Role.EXECUTIVE, Role.IT_ADMIN, Role.ESTIMATING_ADMIN})
+# Who may change the pricing policy (labor rates, markups, the cost library
+# settings) and sign off a priced estimate: the Verify roles.
+AI_PRICING_POLICY_ROLES = VERIFY_ROLES
+
+# Who may override a blocking AI Estimating integrity gate, always with a
+# written reason (Q20). Engineers may request a recount but never override.
+AI_GATE_OVERRIDE_ROLES = frozenset({Role.ESTIMATING_ADMIN, Role.EXECUTIVE, Role.IT_ADMIN})
+
+# Who may review and accept the eval adjudications (owner answer to Q1 on
+# 2026-10-21): the Executive, the IT Admin and both engineer focuses.
+AI_ADJUDICATION_REVIEW_ROLES = frozenset({Role.EXECUTIVE, Role.IT_ADMIN}) | ESTIMATING_ENGINEER_ROLES
