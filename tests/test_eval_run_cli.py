@@ -98,7 +98,7 @@ def test_tree_is_dirty_reads_git_status(monkeypatch, tmp_path):
     # an untracked new module makes the tree dirty (the holdout must run on committed code)
     out = "?? app/services/new_module.py\n"
     assert er.tree_is_dirty(tmp_path) is True
-    assert "--untracked-files=normal" in calls[-1] and "--untracked-files=no" not in calls[-1]
+    assert "--untracked-files=all" in calls[-1] and "--untracked-files=no" not in calls[-1]
     out = ""
     assert er.tree_is_dirty(tmp_path) is False
 
@@ -494,3 +494,35 @@ def test_holdout_allow_list_scopes_the_dirty_tree_rule(tmp_path):
     allow.write_text("# other builds\napp/assistant/\ncomponents/chat/\n\napp/core/config.py\n")
     assert er.load_allow_dirty(str(allow)) == ["app/assistant/", "components/chat/", "app/core/config.py"]
     assert er.load_allow_dirty(None) == []
+
+
+def test_auth_relogs_in_when_the_refresh_token_is_revoked(monkeypatch):
+    import httpx
+
+    from scripts import plans_reader_live_run as lr
+
+    auth = lr._Auth.__new__(lr._Auth)
+    auth._url, auth._anon, auth._service_key = "https://x.supabase.co", "anon", "svc"
+    auth.access, auth.refresh, auth.expires_at = "old", "r1", 0.0
+    calls = []
+
+    def fake_grant(grant_type, body):
+        calls.append(grant_type)
+        if grant_type == "refresh_token":
+            req = httpx.Request("POST", "https://x.supabase.co/auth/v1/token")
+            raise httpx.HTTPStatusError("400", request=req, response=httpx.Response(400, request=req))
+        auth.access, auth.refresh, auth.expires_at = "new", "r2", 10**12
+
+    monkeypatch.setattr(auth, "_grant", fake_grant)
+    monkeypatch.setattr(auth, "_login", lambda: fake_grant("password", {}))
+    assert auth.headers() == {"Authorization": "Bearer new"}
+    assert calls == ["refresh_token", "password"]
+    # a server-side failure other than a revoked token still raises
+    def grant_500(grant_type, body):
+        req = httpx.Request("POST", "https://x.supabase.co/auth/v1/token")
+        raise httpx.HTTPStatusError("500", request=req, response=httpx.Response(500, request=req))
+
+    auth.expires_at = 0.0
+    monkeypatch.setattr(auth, "_grant", grant_500)
+    with pytest.raises(httpx.HTTPStatusError):
+        auth.headers()

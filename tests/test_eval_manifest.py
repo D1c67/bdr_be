@@ -132,3 +132,36 @@ def test_manifest_round_trip_and_case_lookup(tmp_path):
         loaded.case("9999")
     assert M.is_big_sheet(42, 30) and M.is_big_sheet(18, 24) and not M.is_big_sheet(11, 8.5) and not M.is_big_sheet(36, 12)
     assert chr(0x2014) not in json.dumps(doc) and chr(0x2013) not in json.dumps(doc)
+
+
+# pricing-stage misfiles (7158) ----------------------------------------------------
+
+
+def test_pricing_misfile_reason_notes_then_generic_rules():
+    notes = {"Lighting_RFQ.pdf": "G3's own RFQ (answer)."}
+    drawing_sha = "d" * 64
+    assert M.pricing_misfile_reason("Lighting_RFQ.pdf", "1" * 64, {drawing_sha}, notes) == "G3's own RFQ (answer)."
+    # the same bytes as a quantity input: a drawing re-attached to an RFQ email
+    assert "quantity input" in M.pricing_misfile_reason("Electrical set.pdf", drawing_sha, {drawing_sha}, {})
+    # inline email images
+    assert "inline email image" in M.pricing_misfile_reason("image001.jpg", "2" * 64, set(), {})
+    assert "inline email image" in M.pricing_misfile_reason("g3-logo.PNG", "3" * 64, set(), {})
+    # a real vendor quote stays
+    assert M.pricing_misfile_reason("Graybar Lighting Quote.pdf", "4" * 64, {drawing_sha}, notes) is None
+    assert M.pricing_misfile_reason("Quote.docx", "", set(), {}) is None
+
+
+def test_7158_notes_name_the_answers_and_the_vendor_override():
+    notes = M.CASE_NOTES["7158"]
+    for name in ("Lighting_RFQ.pdf", "Switchgear_RFQ.pdf", "Generator & Equipment_RFQ.pdf", "Trench and Sawcut Markup.pdf"):
+        assert name in notes["misfiled_pricing_inputs"]
+    overrides = sorted(notes["blind_overrides"])
+    assert len(overrides) == 2
+    override = overrides[0]
+    assert override.startswith("PROPOSAL - LV Specialty Veterinary Hospital - NG GEN - Empire")
+    assert overrides[1].startswith("Proposal - LV Specialty Vet Hospital - 300REZXC")
+    # the override is the vendor's file: the blind guard lets it through only by name
+    case = _case(case_id="7158", blind_overrides=(override,))
+    M.blind_guard(case, [_upload(override, "quote", "9" * 64)], stage="pricing")
+    with pytest.raises(M.BlindViolation):
+        M.blind_guard(_case(case_id="7158"), [_upload(override, "quote", "9" * 64)], stage="pricing")

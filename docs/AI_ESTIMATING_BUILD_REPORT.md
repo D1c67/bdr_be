@@ -1,10 +1,10 @@
-# AI Estimating autonomous build: final report (draft)
+# AI Estimating autonomous build: final report
 
-Status 2026-10-22, written from `docs/AI_ESTIMATING_BUILD_LOG.md`, the ledger report, and the sweep results under `EVAL_ROOT/sweeps/`. DEV ONLY. No dollar figures from real projects appear here; USD amounts are API spend. The core sweep, the live gauntlet and the holdout have not finished; their sections are placeholders.
+Status 2026-10-24 15:00 PT, written from `docs/AI_ESTIMATING_BUILD_LOG.md`, the ledger report, and the sweep results under `EVAL_ROOT/sweeps/`. DEV ONLY, committed locally on branch `build` in both repos, never pushed. No dollar figures from real projects appear here; USD amounts are API spend. The core sweep and the live gauntlet are done; the holdout has not run (stop condition 0.4 item 7, the owner decides).
 
 ## 1. Workstreams
 
-File counts come from the no-dash manifest `tests/ai_estimating_new_files.txt` (301 paths: 98 app modules, 33 scripts, 113 test modules and helpers, 32 fixtures, 7 migrations, 16 FE files, 2 docs). Existing files changed only through the integrator: `config.py`, `roles.py`, `features.py`, `deps.py`, `.env.example`, dev `.env`, `pyproject.toml`, `tests/conftest.py` (S3 and wave 1); `plans_reader_agents.py`, `plans_reader_runs.py`, `app/main.py`, `llm_health.py`, `llm_queue.py`, `file_access.py`, `plans_reader_golden.py` (waves 1 and 2); the wave 3 spine pass applied 88 collected hook edits (54 applied or adapted, 24 already done, 9 handed back, 1 superseded), changed 6 assertions in two existing test files, and merged 465 locale keys into all six locale files.
+File counts come from the no-dash manifest `tests/ai_estimating_new_files.txt` (305 paths after the 10-24 additions: 98 app modules, 34 scripts, 115 test modules and helpers, 33 fixtures, 7 migrations, 16 FE files, 2 docs). Existing files changed only through the integrator: `config.py`, `roles.py`, `features.py`, `deps.py`, `.env.example`, dev `.env`, `pyproject.toml`, `tests/conftest.py` (S3 and wave 1); `plans_reader_agents.py`, `plans_reader_runs.py`, `app/main.py`, `llm_health.py`, `llm_queue.py`, `file_access.py`, `plans_reader_golden.py` (waves 1 and 2); the wave 3 spine pass applied 88 collected hook edits (54 applied or adapted, 24 already done, 9 handed back, 1 superseded), changed 6 assertions in two existing test files, and merged 465 locale keys into all six locale files.
 
 | WS | Status | New files | Main modules | Migration (dev) | Dev flags |
 |---|---|---|---|---|---|
@@ -23,7 +23,7 @@ All seven migrations were applied to dev (`bpidntbyvoooqvaispup`) through `apply
 
 ## 2. Tests
 
-Baseline before the build: 2 failed (known browser-agent pair), 8,436 passed, 1 skipped. Latest full run (the entry before the core sweep): 2 baseline failures, 12,071 passed, golden 74. The last run that listed xfails showed 6 strict xfails (the missed targets below). Totals include the concurrent assistant session's tests from 2026-10-22 on. Progression: 9,601 (wave 1), 10,888 (wave 3), 11,616 (re-run fixes), 12,071. ruff clean throughout. FE (last recorded, wave 3 fix pass): `npx eslint .` 0 errors with the 2 baseline warnings; build exit 0.
+Baseline before the build: 2 failed (known browser-agent pair), 8,436 passed, 1 skipped. Latest full run (2026-10-24, before the core relaunch): 2 baseline failures, 13,745 passed (with the other sessions' tests). Earlier: 12,071 passed before the core sweep, golden 74. The last run that listed xfails showed 6 strict xfails (the missed targets below). Totals include the concurrent assistant session's tests from 2026-10-22 on. Progression: 9,601 (wave 1), 10,888 (wave 3), 11,616 (re-run fixes), 12,071. ruff clean throughout. FE (last recorded, wave 3 fix pass): `npx eslint .` 0 errors with the 2 baseline warnings; build exit 0.
 
 New test modules per workstream (manifest): S3 5, WS0 17, WS1 10, WS2 14, WS3 6, WS4 10, WS5 11, WS6 15, WS7 7, WS8 11, plus the spine suite. Counts the log gives: 25 spine tests; 52 new WS7 scripted tests in wave 3; 136 gate tests green after the orphan fix; the 25 golden-script tests unchanged after the identity move.
 
@@ -92,23 +92,46 @@ Refusals and why: run 2492ba7a, `unsourced_line` x2 (engine-inserted TR split an
 
 $0 LOPO pricing backtest (holdout-free, 33 cases): library strong-or-good share of basis hours 44.0% (target 70%); hours within 10% on 30.3% (65%), median abs error 16.6% (8%); false-confident 27.6% of 557 lines (5%); 1.3 item 4 oracle median abs error 15.7% (7%), 30.3% within 10% (70%), 0 refusals. Golden Verify band passes (clean n 11, median 7.4%, 72.7% within 10%). Verify replay 43 of 45 within one dollar. PG-A2 1.5% below the corrected total (3% gate met); PG-A3 16.5% above the corrected total (reported).
 
-CORE SWEEP: pending (sweep 01813bde open, cases 7181, 7196, 7167, 7158, 7179, budget 97 USD, drop order 7179 then 7158).
+Hours policy re-cut on 2026-10-24 ($0, holdout never read): the single 1.20 uplift conflated two regimes, so the engine now keys the uplift on the estimate's own coverage: 1.10 where the engine covers the estimate (reviewer round-up, 9 of 10 clean pairs) and 1.32 where it is under-covered (4 clean pairs). Leave-one-out on the 23 training pairs: median abs error 23.1% to 15.4%, within 10% 62% to 69%. Effects: 7154 PG-A3 +20.7% to +12.8% vs sent (+8.8% vs corrected); run 087ac7a6 re-priced +25.5% to +20.2% (reviewer hours 825 to 775); golden Verify band median 7.2% to 5.2% with 72.7% within 10%; pool oracle within 10% 27.3% to 30.3% (median unchanged). The remaining 7154 gap is this estimator's p25 unit hours and small round-up; no pool-supported calibration closes it. The core sweep (attempt 2) ran on this calibrated code.
 
-HOLDOUT SWEEP: pending (7188, 7173, 7178, 7148; once, on the frozen committed tree).
+CORE SWEEP (attempt 2, sweep 01813bde, 2026-10-24, 54.85 USD): four of five cases ran; 7158 was stopped by the blind guard before upload (its quote folder holds G3's own RFQ PDFs and markup; fixed in the manifest notes, re-run on its own sweep, see below). Attempt 1 (10-22 to 10-24) ended on an unclaimed bid_split job and a network drop and spent 4.78 USD on this sweep before the relaunch.
 
-| Case | Tier | Run | Bid error vs sent | Hours error | Count exact | Length bands | Dollar coverage | Refusal |
+| Case | Tier | Run | Bid error vs sent | Hours error | Count exact | Length bands | Dollar coverage (partial) | Refusal |
 |---|---|---|---|---|---|---|---|---|
-| | | | | | | | | |
+| 7181 lighting controls retrofit | core | 10f9599c | -12.7% (miss band) | 40 h = G3 (good) | 0 of 5 (truth 7) | 1 of 2 produced, miss | 0.00 (0.26) | none |
+| 7196 streetlight and signage | core | 69ca79f8 | refused (counts as miss) | none | 0 of 6 | none | 0.00 (0.00) | safe refusal `new_devices_no_branch`; GC3 false_refusal (no reference defect matches: civil scope) |
+| 7167 signs and wall packs | core | 843f11dc | +383% | 625 h vs G3 none, estimator x9.3 | 1 of 4 (truth 7) | 2 of 3 produced, miss | 0.04 (0.51) | none |
+| 7179 lighting retrofit, nLight | core | 478fa524 | refused (counts as miss) | none | 20 of 51 (within 1: 23; truth 56) | 0 of 5 produced | 0.42 (0.69) | safe refusal `new_devices_no_branch; partial_basis; orphan_rows` |
+| 7158 veterinary hospital TI (132 truth lines) | core | cf2ef066 (sweep cdf595c7, 18.11 USD) | refused (counts as miss) | none | 13 of 99 (within 1: 16) | 5 of 33 produced (2 good, 3 miss) | 0.17 (0.26) | safe refusal `unit_class; partial_basis; uom_conflict_quote`; done_with_errors: one recount group failed (page image too large for the provider) |
 
-GAUNTLET: pending (attempt 1, sweep 3939c072, ended before any call on a None client, 0 USD; fixed in process; re-run after core).
+Core verdict against 1.3 item 2 (median absolute bid error <= 10%, 60% within 10%, at most one refusal, none worse than 25%): missed on every clause. Three refusals of five, one case at +383%, the best case at -12.7%. Stop condition 0.4 item 7 (median above 20% after core) holds: the holdout waits for the owner.
 
-| Pack | Variant | Seeded error | Caught | Findings | Precision | Cost |
-|---|---|---|---|---|---|---|
-| | | | | | | |
+Causes, from the score lines (no model call): 7167 carried two existing panels and 58 breakers as new work by a binding scope-policy carry and the measure ran branch for every breaker (#10 21,285 FT, EMT 7,260 FT against truth 763 FT), the same schedule family as Five Star; 7181 read the nine "disconnect existing lighting controls" rows as control modifications, split the five receptacles by mounting height, missed the breakers and assumed #10 where the estimator used #12, while hours still landed on G3's 40; 7196 is site and streetlight work with no branch to measure (like YMCA's feeders), so the pricing gate refused; 7179 matched most of the fixture schedule exactly but folded the E-suffixed emergency variants into their base tags, rendered the nLight control products (switches, sensors, power packs) as generic occupancy-sensor rows the matcher could not assign, and produced no branch, so pricing refused; 7158 (the one full tenant-improvement set) read the lighting schedule almost exactly (L3 48, L4 102, L11 10, X 26 and most other tags) and found all eight panels and the switchboard (the matcher filed them as extras because the AI names them by designation while the estimator names them by rating), but one recount group failed (page 3 at 150 ppi rejected by the provider as too large, so that page kept its first-pass count), receptacles came out at a fraction of the estimator's (duplex 0 of 282, quad 20 of 138), data outlets, switches and sensors were almost all missing, no feeders, and pricing refused on a unit class and two quote unit conflicts. The recount pass and the reviewer ran on every case (two or three recount groups each) and did not change these outcomes.
+
+HOLDOUT SWEEP: pending the owner's decision (7188, 7173, 7178, 7148; once, on the committed tree with the assistant build's files on a recorded allow list).
+
+GAUNTLET (WS7, sweep 837a9a00, 2026-10-24 14:30 to 14:43 PT, 7.04 USD of 15): the frozen reviewer (gpt-6-astra medium, tools on, 4 USD cap per review) ran in-process on the four stored 7154 bundles (51ec302b, 2492ba7a, ad69e5a4, 087ac7a6), each as a clean control plus the two seeded E-class variants the pack builder supports (E2 branch conductors removed, E4 wage condition broken). Attempt 1 on 10-22 (sweep 3939c072) ended before any call on a None client and spent nothing. Spec WS7 acceptance: catches the seeded defects in at least 70% of variants, at most 1 false critical per clean control, review cost at most 4 USD per run.
+
+| Pack (bundle) | Variant | Seeded error | Caught | Findings | False criticals | Tool calls | Seconds |
+|---|---|---|---|---|---|---|---|
+| 7154 087ac7a6 | clean | none | control | 7 | 1 | 10 | 44 |
+| 7154 087ac7a6 | E2 | branch conductors removed | yes | 8 | 0 | 10 | 52 |
+| 7154 087ac7a6 | E4 | wage condition broken | yes | 6 | 0 | 10 | 41 |
+| 7154 2492ba7a | clean | none | control | 8 | 0 | 9 | 76 |
+| 7154 2492ba7a | E2 | branch conductors removed | yes | 7 | 0 | 10 | 55 |
+| 7154 2492ba7a | E4 | wage condition broken | yes | 7 | 0 | 9 | 66 |
+| 7154 51ec302b | clean | none | control | 8 | 1 | 10 | 56 |
+| 7154 51ec302b | E2 | branch conductors removed | yes | 8 | 0 | 10 | 60 |
+| 7154 51ec302b | E4 | wage condition broken | yes | 7 | 0 | 10 | 63 |
+| 7154 ad69e5a4 | clean | none | control | 7 | 0 | 10 | 37 |
+| 7154 ad69e5a4 | E2 | branch conductors removed | yes | 8 | 0 | 9 | 73 |
+| 7154 ad69e5a4 | E4 | wage condition broken | yes | 6 | 0 | 8 | 63 |
+
+Result: 8 of 8 seeded variants caught (100%, target 70%); 2 false criticals over 4 clean controls (0.5 per control, no control above 1); 0.59 USD per review (12 reviews, 7.04 USD); 0 errors. The WS7 reviewer acceptance is MET on these packs. Caveats: all four bundles are 7154 runs (the Five Star and YMCA bundles were not included; `--bundle` flags would add them), only the E2 and E4 seeds exist, and three bundles ran on the text-layer fallback because their stored documents carry no page facts (the 2492ba7a bundle had facts). Results: `EVAL_ROOT/reports/gauntlet/20261024_143055/gauntlet_results.json`.
 
 ## 5. Spend
 
-Ceiling 400.00 USD, spent 114.46, remaining 285.54 (ledger report). Checkpoints: probes 40.04 (limit 108); cumulative after integration, noise stand-in and smoke 114.46 (limit 216).
+Ceiling 400.00 USD, spent 194.46, remaining 205.54 (ledger report, 2026-10-24 15:00 PT). Checkpoints: probes 40.04 (limit 108); cumulative after integration, noise stand-in and smoke 114.46 (limit 216); after core and the gauntlet 194.46. The holdout (73 USD) would leave about 132 USD.
 
 | Workstream | Allocated | Spent | Remaining |
 |---|---|---|---|
@@ -117,10 +140,10 @@ Ceiling 400.00 USD, spent 114.46, remaining 285.54 (ledger report). Checkpoints:
 | WS4 | 26.00 | 11.59 | 14.41 |
 | WS5 | 6.00 | 0.11 | 5.89 |
 | WS6 | 8.00 | 3.64 | 4.36 |
-| WS7 | 28.00 | 0.00 | 28.00 |
+| WS7 | 28.00 | 7.04 | 20.96 |
 | WS8 | 5.00 | 0.00 | 5.00 |
 | Contingency | 0.00 | 0.00 | 0.00 |
-| Shared | 278.00 | 74.43 | 203.57 |
+| Shared | 278.00 | 147.39 | 130.61 |
 
 | Workstream | Sweeps (id spent) |
 |---|---|
@@ -128,8 +151,9 @@ Ceiling 400.00 USD, spent 114.46, remaining 285.54 (ledger report). Checkpoints:
 | WS3 | assist bfae814e 0.22; B12 72cc2b7b 6.11, f694fef6 7.79 |
 | WS4 | iterations 777f88cb 2.43, 37fa4918 1.24, 7aebab69 1.11, 208863fc 2.92; main A/B a064650c 1.05, db2ad49b 1.68, 91e7d7ad (YMCA) 1.15 |
 | WS5, WS6 | attribution b1721e86 0.11; quote fallback 1f7bed54 3.64 |
-| shared | integration 1 8888aad1 12.26 and chain e5695cad 0.86; integration 2 ace9a2cd 14.29; re-runs 53be8304 2.61, 7601c069 3.16; smoke 78f334dc 22.16, 1658b6ec 15.64; Five Star re-run e744c68c 3.46 |
-| zero spend | 7 sweeps: refused or aborted starts, gauntlet 3939c072, core 01813bde (open) |
+| WS7 | gauntlet 837a9a00 7.04 |
+| shared | integration 1 8888aad1 12.26 and chain e5695cad 0.86; integration 2 ace9a2cd 14.29; re-runs 53be8304 2.61, 7601c069 3.16; smoke 78f334dc 22.16, 1658b6ec 15.64; Five Star re-run e744c68c 3.46; core 01813bde 54.85 (attempt 1 4.78 included); core 7158 re-run cdf595c7 18.11 |
+| zero spend | 6 sweeps: refused or aborted starts and gauntlet attempt 1 3939c072 |
 
 Ledger sweep totals count every call stamped to the sweep and can exceed the per-run costs in the log. Sweep 208863fc includes 24 calls (2.78 USD) that the owner's port 5051 dev server ran unenforced, stamped to the sweep by SQL on dev.
 
@@ -142,7 +166,7 @@ All live calls ran on OpenAI (owner, Q3). Spec routes naming `claude-opus-5-5` w
 | sub, escalation | gpt-6-astra medium | fixed by spec |
 | recount | gpt-6-astra medium; per-group cap raised 0.80 to 1.50 USD | L1: gpt-6-astra and gpt-5.4-mini pass all four checks. L2 round 1: 7 of 12 pairs truncated; clean 5 split 3 both, 1 each. Repeat at 1.50: A clean 6 of 7, B truncated 5, errored 2. A exact 7 of 12 plus 2 within 10%; B 5 of 12 |
 | main consolidator | gpt-6-astra medium | attempt 1 invalid (harness offered 18 of 31 tools). Attempt 2 on 7154: A passed first finish, 36 lines, 1.38 USD; gpt-5.4 truncated with 0 lines. YMCA: both passed; the rule picks B there, but B fails the 300-row case |
-| review | gpt-6-astra (code route, same model as the builder: the deviation's fallback); no review A/B; gauntlet pending | live chains: verdicts advisory or needs_human, 10 rounds, 0.93 to 1.33 USD per review where the log gives it alone |
+| review | gpt-6-astra (code route, same model as the builder: the deviation's fallback); no review A/B; gauntlet 8 of 8 caught, 0.5 false criticals per control, 0.59 USD per review | live chains: verdicts advisory or needs_human, 10 rounds, 0.93 to 1.33 USD per review where the log gives it alone |
 | revise | gpt-6-astra | fixed |
 | scope attribution | gpt-6-astra low | probe b1721e86: 21 of 21 accepted |
 | quote fallback | gpt-6-astra | probe 1f7bed54: 29 of 32 parsed, 3 referenced quotes exact |
@@ -150,7 +174,7 @@ All live calls ran on OpenAI (owner, Q3). Spec routes naming `claude-opus-5-5` w
 
 ## 7. Deviations, defaults, decisions, open items
 
-Deviations: (1) all-OpenAI routing; (2) WS7 bands measure 2.33 / 3.46 / 6.05 hours per device (the prototype read only the first labor block); (3) WS6 targets missed (below); (4) recount cap 1.50 USD instead of 0.80; (5) YMCA's 5-page addendum belongs to 7171 and is excluded, so 7177 has 7 big sheets; (6) dollar coverage printed in both definitions, the in-band one gates; (7) hard seed rules with an `unless` became soft (5.8 forbids it); (8) PF7 maps 33 numbered spec sections, not 34; (9) E3.01 reads 45 tags on 2 circuits, not 44 on 3; (10) S2 seeding moved to wave 4 (spend hazard); (11) the third full 7154 run stands in for the noise repeat because the smoke tier includes 7154; (12) core opens before the gauntlet's second attempt, with the reviewer frozen; (13) recount re-merge is not wired for finished runs.
+Deviations: (1) all-OpenAI routing; (2) WS7 bands measure 2.33 / 3.46 / 6.05 hours per device (the prototype read only the first labor block); (3) WS6 targets missed (below); (4) recount cap 1.50 USD instead of 0.80; (5) YMCA's 5-page addendum belongs to 7171 and is excluded, so 7177 has 7 big sheets; (6) dollar coverage printed in both definitions, the in-band one gates; (7) hard seed rules with an `unless` became soft (5.8 forbids it); (8) PF7 maps 33 numbered spec sections, not 34; (9) E3.01 reads 45 tags on 2 circuits, not 44 on 3; (10) S2 seeding moved to wave 4 (spend hazard); (11) the third full 7154 run stands in for the noise repeat because the smoke tier includes 7154; (12) core opens before the gauntlet's second attempt, with the reviewer frozen; (13) recount re-merge is not wired for finished runs; (14) the hour uplift is two-regime by coverage (1.10 / 1.32) instead of one constant; (15) the holdout's clean-tree rule takes an allow list of the assistant build's uncommitted paths, recorded in the sweep config, because that build shares the tree; (16) pricing-stage uploads drop re-attached drawings and inline email images, and 7158 carries two documented blind overrides for vendor proposals whose names say PROPOSAL.
 
 Defaults used (spec 2.2): Q2 tiers frozen, Q4 sent truth, Q8 PG-A2 gate, Q9 lowest eligible quote, Q11 seed grades (eval runs take the reference seeds), Q14 thermostat inclusion beats the mechanical fact, Q16 code owns branch rows, Q17 drops 0, Q18 relabel in dev, Q20 override roles, Q21 apply in dev, Q25 proposal lines as suggestions, Q26 sign-off by VERIFY_ROLES, Q27 7154 fixtures committed, Q29 both plan outputs; the E3.01 tag count is a measured default for the owner to restate.
 
@@ -165,9 +189,12 @@ Open items:
 - B12: draft at `EVAL_ROOT/manifest/scales_draft.json`, 330 labeled, 34 unresolved, 332 pages unsent; not in the live product.
 - Checks tab recount button stays uninstalled until a reopen path is designed.
 - Missed $0 targets: WS6 LOPO fidelity and 1.3 item 4 (numbers in section 4; open owner questions: keep 1.3 item 4 as a gate or report it, and allow a per-project productivity factor); WS3 B9 conduit within 15% on 31.2% (60%), within 30% on 50.0% (85%), wire within 20% on 43.8% (60%), route_factor 0.90 and home run 60.1 FT await sign-off; WS1 titles 18.3% (90%); WS8 marks precision 0.762, recall 0.661 (0.85); WS3 markup truth 6 of 8 pages (80%).
-- 7154 bid error +22.5% to +25.5% and hours +28% to +32% against G3 on the two priced runs.
-- Still to do: core, gauntlet, the two commits, holdout, the `PLANS_READER.md` section 8 entry.
+- 7154 bid error +20.2% (two-regime re-price of 087ac7a6; +25.5% as run) and +22.5% on the noise stand-in, hours +24% to +28%, against G3.
+- Core attempt 2 (section 4): every 1.3 item 2 clause missed; defects are generalization (scope policy binding carries of existing panels, per-breaker branch fallback, control-product vocabulary, E-suffix fixture variants, no site or feeder measure). Tuning is frozen; the owner decides where the remaining budget goes.
+- Done since the draft: the two commits in both repos (BE 89b807c and cd1cc81, FE 632d5a7 and f436069, local only), the `PLANS_READER.md` section 8.7 entry, the 7158 manifest fix.
+- Still to do: the owner's holdout decision (73 USD, once, on the committed tree with `--allow-dirty-paths EVAL_ROOT/handoff/holdout_allow_dirty.txt`), or the same budget on the core defects above; after that the memory note's final line.
+- Known small defects from today: the recount pass sends a page's original render to the provider and one 7158 page was rejected as too large (tile or down-sample above the limit); the run status text over-states a failed recount as missing reading pages; the sweep wrapper must never close a sweep on a runner crash (now a separate step).
 
 ## 8. Memory
 
-Feature note: "BDR AI Estimating Autonomous Build" (`bdr-ai-estimating-autonomous-build.md`), DEV ONLY until released; to be updated with this report's state.
+Feature note: "BDR AI Estimating Autonomous Build" (`bdr-ai-estimating-autonomous-build.md`), updated 2026-10-24 with the commits, the core verdict, the stop condition and the holdout allow list. DEV ONLY until released.

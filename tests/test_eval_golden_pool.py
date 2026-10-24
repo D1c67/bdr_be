@@ -163,7 +163,18 @@ def test_manifest_on_disk_matches_spec_8_1():
             assert inp.category not in M.ANSWER_CATEGORIES and inp.category != "quote"
         M.blind_guard(c, list(c.quantity_inputs), stage="quantity", answer_hashes=manifest.answer_sha256)
     ymca = manifest.case("7177")
-    assert ymca.misfiled_inputs == ("2026-08-28_ITB_100028_Addendum_No._02_LVCC_Central_Hall_Airwalls.pdf",)
+    # The LVCC addendum is the only misfiled QUANTITY input; the pricing stage
+    # also drops re-attached drawings and inline email images by the generic
+    # rules (eval_manifest.pricing_misfile_reason, 2026-10-24).
+    assert "2026-08-28_ITB_100028_Addendum_No._02_LVCC_Central_Hall_Airwalls.pdf" in ymca.misfiled_inputs
+    quantity_misfiled = [i.filename for i in ymca.inputs if i.misfiled and i.stage_scope == "quantity"]
+    assert quantity_misfiled == ["2026-08-28_ITB_100028_Addendum_No._02_LVCC_Central_Hall_Airwalls.pdf"]
+    for i in ymca.inputs:
+        if i.misfiled and i.stage_scope == "pricing":
+            assert i.note, i.filename  # a generic rule or a CASE_NOTES reason
+    for c in manifest.cases:
+        for i in c.pricing_inputs:
+            assert not M.ANSWER_NAME_RE.search(i.filename) or i.filename in c.blind_overrides, (c.case_id, i.filename)
     assert manifest.case("7188").distinct_sent_totals == 2
     assert manifest.populations["lopo"]["n"] == 33 and sorted(manifest.populations["lopo"]["failed_reconcile"]) == ["e70b9bdc", "f33871cc"]
     assert manifest.populations["golden"]["n"] == 66

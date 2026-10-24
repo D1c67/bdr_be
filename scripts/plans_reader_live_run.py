@@ -68,17 +68,34 @@ class _Auth:
     an unexpected 401. The password is scrambled by the caller afterwards."""
 
     def __init__(self, env: dict[str, str]) -> None:
-        from supabase import create_client
 
         self._url = env["SUPABASE_URL"]
         self._anon = (
             env.get("SUPABASE_ANON_KEY") or env.get("SUPABASE_PUBLISHABLE_KEY")
             or env.get("NEXT_PUBLIC_SUPABASE_ANON_KEY")
         )
-        sb = create_client(env["SUPABASE_URL"], env["SUPABASE_SERVICE_ROLE_KEY"])
+        self._service_key = env["SUPABASE_SERVICE_ROLE_KEY"]
+        self._login()
+
+    def _login(self) -> None:
+        """Scramble the e2e user's password with the service key and sign in
+        with it. Also the fallback when a refresh fails: an admin password
+        reset by another process (a second runner, a peer's live test)
+        revokes this session's refresh token."""
+        from supabase import create_client
+
+        sb = create_client(self._url, self._service_key)
         pw = secrets.token_urlsafe(24)
         sb.auth.admin.update_user_by_id(E2E_USER_ID, {"password": pw})
         self._grant("password", {"email": E2E_EMAIL, "password": pw})
+
+    def _refresh(self) -> None:
+        try:
+            self._grant("refresh_token", {"refresh_token": self.refresh})
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in (400, 401, 403):
+                raise
+            self._login()
 
     def _grant(self, grant_type: str, body: dict) -> None:
         r = httpx.post(
@@ -95,13 +112,13 @@ class _Auth:
 
     def headers(self) -> dict[str, str]:
         if time.time() > self.expires_at - 300:
-            self._grant("refresh_token", {"refresh_token": self.refresh})
+            self._refresh()
         return {"Authorization": f"Bearer {self.access}"}
 
     def retry_401(self, client: httpx.Client, method: str, url: str, **kw) -> httpx.Response:
         r = client.request(method, url, headers=self.headers(), **kw)
         if r.status_code == 401:
-            self._grant("refresh_token", {"refresh_token": self.refresh})
+            self._refresh()
             r = client.request(method, url, headers=self.headers(), **kw)
         return r
 

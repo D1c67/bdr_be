@@ -130,11 +130,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def dirty_paths(root: Path = ROOT) -> list[str] | None:
     """The tree's uncommitted paths (git status --porcelain
-    --untracked-files=normal, caches stay out through .gitignore), or None
-    when git is absent."""
+    --untracked-files=all, so every untracked file is named and an allow
+    list can be matched file by file; caches stay out through .gitignore),
+    or None when git is absent."""
     try:
         out = subprocess.run(
-            ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=normal"],
+            ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=all"],
             capture_output=True, text=True, timeout=15, check=True,
         ).stdout
     except (OSError, subprocess.SubprocessError):

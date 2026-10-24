@@ -31,7 +31,7 @@ import hashlib
 import json
 import re
 from collections import defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -113,9 +113,29 @@ CASE_NOTES: dict[str, dict[str, Any]] = {
                 "Excluded from the 7177 inputs; the case has 7 big sheets, not 9."
             )
         },
+        "misfiled_pricing_inputs": {
+            "Trench Markup.pdf": "G3's trenching markup re-attached to an RFQ email (answer, also filed under markup).",
+        },
         "note": "The quote category holds email attachments that are drawings (E0.30, E5.01, Trench Markup); the blind guard keeps every quote out of the quantity stage anyway.",
     },
     "7154": {"note": "Training case (1.3 item 5): the stored prod run ff8fad25 is the old-pipeline bundle; ELEC and MECH sets sit in the drawing folder with category electrical_drawing (3.2)."},
+    "7158": {
+        # The quote category holds every RFQ email attachment of the project.
+        # Four of them are G3's own documents, so they are answers and never
+        # reach the pricing stage (core attempt 2, 2026-10-24: the blind guard
+        # stopped the case on the first PROPOSAL name).
+        "misfiled_pricing_inputs": {
+            "Lighting_RFQ.pdf": "G3's own RFQ to lighting vendors: it lists the BOQ quantities (answer).",
+            "Switchgear_RFQ.pdf": "G3's own RFQ to gear vendors: it lists the BOQ quantities (answer).",
+            "Generator & Equipment_RFQ.pdf": "G3's own RFQ to generator vendors: it lists the BOQ quantities (answer).",
+            "Trench and Sawcut Markup.pdf": "G3's trenching markup, also filed under markup (answer).",
+        },
+        "blind_overrides": {
+            "PROPOSAL - LV Specialty Veterinary Hospital - NG GEN - Empire R0 080326.pdf": "Empire's generator proposal to G3: a vendor quote, not G3's proposal; the PROPOSAL word is the vendor's.",
+            "Proposal - LV Specialty Vet Hospital - 300REZXC - G3 Electrical.pdf": "A vendor's proposal addressed to G3 Electrical (quote 300REZXC), listed in the WS0 reference among the quotes G3 reconciled; not G3's own proposal.",
+        },
+        "note": "Quote category = RFQ email attachments; the re-attached drawings and inline images are dropped by the generic pricing rules.",
+    },
     "7188": {"note": "Two sends with different totals: truth is the latest sent_at, the spread is reported (8.1)."},
 }
 
@@ -462,6 +482,28 @@ def _label_for(category: str) -> str | None:
     }.get(category)
 
 
+INLINE_IMAGE_SUFFIXES: frozenset[str] = frozenset({".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"})
+
+
+def pricing_misfile_reason(
+    filename: str,
+    sha: str,
+    input_hashes: Collection[str],
+    notes_pricing: Mapping[str, str],
+) -> str | None:
+    """Why a quote-category file stays out of the pricing stage, or None.
+    Per-case notes first (misfiled_pricing_inputs), then two generic rules:
+    the same bytes as a quantity input (a drawing re-attached to an RFQ
+    email) and inline email images (logos, signatures)."""
+    if filename in notes_pricing:
+        return notes_pricing[filename]
+    if sha and sha in input_hashes:
+        return "same bytes as a quantity input: a drawing re-attached to an RFQ email, not a quote"
+    if Path(filename).suffix.lower() in INLINE_IMAGE_SUFFIXES:
+        return "inline email image (logo or signature), not a quote"
+    return None
+
+
 def build_case(
     data: BackupData,
     case_id: str,
@@ -475,6 +517,8 @@ def build_case(
     project = data.project(project_id) or {}
     notes = CASE_NOTES.get(case_id, {})
     misfiled = notes.get("misfiled_inputs") or {}
+    misfiled_pricing = notes.get("misfiled_pricing_inputs") or {}
+    overrides = notes.get("blind_overrides") or {}
     inputs: list[CaseInput] = []
     answers: list[CaseAnswer] = []
     big_sheets = 0
@@ -507,6 +551,11 @@ def build_case(
                 pages = len(sizes) if sizes else None
                 big = sum(1 for w, h in sizes if is_big_sheet(w, h)) if sizes else None
             is_misfiled = filename in misfiled
+            misfile_note = misfiled.get(filename)
+            if scope == "pricing" and not is_misfiled:
+                reason = pricing_misfile_reason(filename, sha, input_hashes, misfiled_pricing)
+                if reason:
+                    is_misfiled, misfile_note = True, reason
             if scope == "quantity" and not is_misfiled:
                 if category in ("drawing", "electrical_drawing", "addendum"):
                     big_sheets += big or 0
@@ -524,7 +573,7 @@ def build_case(
                     pages=pages,
                     big_pages=big,
                     misfiled=is_misfiled,
-                    note=misfiled.get(filename),
+                    note=misfile_note,
                 )
             )
     truth = g3_truth(data, project_id)
@@ -541,16 +590,19 @@ def build_case(
         answers=tuple(answers),
         reference_path=str(reference),
         reviewed=False,
-        blind_overrides=(),
+        blind_overrides=tuple(sorted(overrides)),
         bundles=tuple(b for b in [OLD_PIPELINE_BUNDLES.get(case_id)] if b),
-        notes=str(notes.get("note") or ""),
+        notes=" ".join(
+            [str(notes.get("note") or "")]
+            + [f"Blind override {name}: {reason}" for name, reason in sorted(overrides.items())]
+        ).strip(),
         big_sheets=big_sheets,
         spec_pages=spec_pages,
         sent_truth=truth["g3_sent"]["total"] is not None,
         committed_verify=truth["g3_verify"]["sum"] is not None,
         sends=int(truth["g3_sent"]["sends"]),
         distinct_sent_totals=len(truth["g3_sent"]["distinct_totals"]),
-        misfiled_inputs=tuple(sorted(misfiled)),
+        misfiled_inputs=tuple(sorted({i.filename for i in inputs if i.misfiled})),
     )
 
 
