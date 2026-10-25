@@ -36,6 +36,7 @@ from fastapi import (
     Depends,
     File,
     Form,
+    Header,
     HTTPException,
     Response,
     UploadFile,
@@ -83,6 +84,7 @@ from app.core.ratelimit import (
     rate_limit,
     upload_rate_limit,
 )
+from app.core.revision_context import REVISION_HEADER
 from app.core.roles import WRITER_ROLES, Role
 from app.core.supabase_client import get_supabase
 from app.models.schemas import FilesExportIn
@@ -92,6 +94,7 @@ from app.services import (
     file_export,
     files_needed,
     office_preview,
+    proposal_revisions,
     rfp_file_issues,
     storage,
 )
@@ -405,6 +408,9 @@ async def upload_file(
     addendum_issued_on: str | None = Form(None),  # ISO calendar date "YYYY-MM-DD"
     file: UploadFile = File(...),
     user: CurrentUser = Depends(require_project_assignment),
+    # Sent by the Revise proposal modal (0179): the file joins the open
+    # revision's revised plans. Uploads themselves are never locked.
+    x_proposal_revision: str | None = Header(default=None, alias=REVISION_HEADER),
 ):
     if category not in VALID_CATEGORIES:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid category")
@@ -533,6 +539,12 @@ async def upload_file(
         },
         path,
     )
+    # (isinstance: a direct call, like the unit tests make, passes the
+    # Header() default object, never a revision id.)
+    if isinstance(x_proposal_revision, str) and x_proposal_revision and user.role != Role.ESTIMATOR:
+        await run_in_threadpool(
+            proposal_revisions.tag_revision_file, project_id, x_proposal_revision, row["id"]
+        )
     audit_payload = {"category": category}
     if doc_type:
         audit_payload["doc_type"] = doc_type

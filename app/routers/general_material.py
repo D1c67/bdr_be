@@ -14,6 +14,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from app.core.config import get_settings
 from app.core.deps import CurrentUser, get_current_user, require_writer
 from app.core.ratelimit import ai_rate_limit
+from app.core.revision_context import require_revision_context
 from app.core.roles import INTERNAL_ROLES, WRITER_ROLES
 from app.core.supabase_client import get_supabase
 from app.models.schemas import GeneralMaterialIn, TaxIn
@@ -140,7 +141,7 @@ def get_general_material(
     return row
 
 
-@router.post("/extract", dependencies=[Depends(ai_rate_limit)])
+@router.post("/extract", dependencies=[Depends(require_revision_context), Depends(ai_rate_limit)])
 def rerun_extraction(
     project_id: str, background: BackgroundTasks, user: CurrentUser = Depends(_EDITOR)
 ):
@@ -152,7 +153,7 @@ def rerun_extraction(
     return {"status": "pending"}
 
 
-@router.put("")
+@router.put("", dependencies=[Depends(require_revision_context)])
 def set_general_material(
     project_id: str, body: GeneralMaterialIn, user: CurrentUser = Depends(_EDITOR)
 ):
@@ -161,6 +162,8 @@ def set_general_material(
     sb = get_supabase()
     _refuse_if_locked(sb, project_id)
     window = workflow.in_post_submission_window(project_id, sb)
+    if not window:
+        workflow.prepare_revision_cost_edit(project_id, user.id, "General material price changed", sb)
     row = (
         sb
         .table("general_material_estimates")
@@ -190,7 +193,7 @@ def set_general_material(
     return row
 
 
-@router.put("/tax")
+@router.put("/tax", dependencies=[Depends(require_revision_context)])
 def set_general_material_tax(
     project_id: str, body: TaxIn, user: CurrentUser = Depends(_EDITOR)
 ):
@@ -202,6 +205,8 @@ def set_general_material_tax(
     sb = get_supabase()
     _refuse_if_locked(sb, project_id)
     window = workflow.in_post_submission_window(project_id, sb)
+    if not window:
+        workflow.prepare_revision_cost_edit(project_id, user.id, "General material tax changed", sb)
     row = (
         sb
         .table("general_material_estimates")

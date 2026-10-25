@@ -38,6 +38,7 @@ from app.core.ratelimit import (
     rate_limit,
     rfq_nudge_rate_limit,
 )
+from app.core.revision_context import require_revision_context
 from app.core.roles import INTERNAL_ROLES, Role
 from app.core.supabase_client import get_supabase
 from app.models.schemas import (
@@ -51,8 +52,8 @@ from app.models.schemas import (
     RFQCreate,
     RFQNudgeIn,
     RFQNudgeOut,
-    RFQRecipientsOut,
     RfqQuotesConfirmIn,
+    RFQRecipientsOut,
     TaxIn,
 )
 from app.routers.pricing import tax_info, taxed_amount
@@ -109,7 +110,7 @@ def list_rfqs(project_id: str, user: CurrentUser = Depends(get_current_user)):
     ).data or []
 
 
-@rfq_router.post("", status_code=status.HTTP_201_CREATED)
+@rfq_router.post("", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_revision_context)])
 def create_rfq(project_id: str, body: RFQCreate, user: CurrentUser = Depends(_PE)):
     payload = body.model_dump(mode="json")
     payload.update({"project_id": project_id, "created_by": user.id})
@@ -166,7 +167,7 @@ def default_attachments(project_id: str, user: CurrentUser = Depends(get_current
     return rfq_sending.default_attachments(get_supabase(), project_id)
 
 
-@rfq_router.post("/bulk-send", dependencies=[Depends(bulk_send_rate_limit)])
+@rfq_router.post("/bulk-send", dependencies=[Depends(require_revision_context), Depends(bulk_send_rate_limit)])
 def bulk_send(project_id: str, body: RFQBulkSendIn, user: CurrentUser = Depends(_PE)):
     """Send each group's RFQ to its selected contacts - one email per contact.
     Per-contact failures are reported in `results`, not raised."""
@@ -360,7 +361,7 @@ def get_message(project_id: str, message_id: str, user: CurrentUser = Depends(ge
 @rfq_router.post(
     "/messages/{message_id}/manual-quote",
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(quote_write_rate_limit)],
+    dependencies=[Depends(require_revision_context), Depends(quote_write_rate_limit)],
 )
 def add_reply_manual_quote(
     project_id: str,
@@ -506,7 +507,7 @@ def list_rfq_recipients(
 @rfq_router.post(
     "/{rfq_id}/nudges",
     response_model=RFQNudgeOut,
-    dependencies=[Depends(rfq_nudge_rate_limit)],
+    dependencies=[Depends(require_revision_context), Depends(rfq_nudge_rate_limit)],
 )
 def send_rfq_nudges(
     project_id: str, rfq_id: str, body: RFQNudgeIn, user: CurrentUser = Depends(_PE)
@@ -682,7 +683,7 @@ def list_quotes(project_id: str, rfq_id: str, user: CurrentUser = Depends(get_cu
     }
 
 
-@rfq_router.post("/{rfq_id}/quotes", status_code=status.HTTP_201_CREATED)
+@rfq_router.post("/{rfq_id}/quotes", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_revision_context)])
 def add_quote(project_id: str, rfq_id: str, body: QuoteIn, user: CurrentUser = Depends(_PE)):
     """Type in a quote that a VENDOR gave (origin stays 'vendor' - the number
     came from them, it just didn't arrive through the mailbox). It lands
@@ -736,7 +737,7 @@ def add_quote(project_id: str, rfq_id: str, body: QuoteIn, user: CurrentUser = D
 @rfq_router.post(
     "/{rfq_id}/quotes/manual",
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(quote_write_rate_limit)],
+    dependencies=[Depends(require_revision_context), Depends(quote_write_rate_limit)],
 )
 def add_manual_quote(
     project_id: str, rfq_id: str, body: ManualQuoteIn, user: CurrentUser = Depends(_PE)
@@ -802,7 +803,7 @@ def add_manual_quote(
 @rfq_router.delete(
     "/{rfq_id}/quotes/{quote_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(quote_write_rate_limit)],
+    dependencies=[Depends(require_revision_context), Depends(quote_write_rate_limit)],
 )
 def delete_quote(
     project_id: str, rfq_id: str, quote_id: str, user: CurrentUser = Depends(_PE)
@@ -838,6 +839,8 @@ def delete_quote(
     window = _post_submission(sb, project_id)
     _refuse_if_sent_quote(window, quote)
     was_selected = bool(quote.get("is_selected"))
+    if was_selected and not window:
+        workflow.prepare_revision_cost_edit(project_id, user.id, "Winning quote removed", sb)
     sb.table("quotes").delete().eq("id", quote_id).eq("rfq_id", rfq_id).execute()
     audit(
         user.id,
@@ -885,7 +888,7 @@ def delete_quote(
         _bounce(window, project_id, user.id, "Winning quote removed")
 
 
-@rfq_router.patch("/{rfq_id}/quotes/{quote_id}")
+@rfq_router.patch("/{rfq_id}/quotes/{quote_id}", dependencies=[Depends(require_revision_context)])
 def override_quote(
     project_id: str,
     rfq_id: str,
@@ -902,6 +905,8 @@ def override_quote(
     quote = _quote_in_rfq(sb, rfq_id, quote_id)
     window = _post_submission(sb, project_id)
     _refuse_if_sent_quote(window, quote)
+    if not window:
+        workflow.prepare_revision_cost_edit(project_id, user.id, "Vendor quote amount changed", sb)
     sb.table("quote_revisions").insert(
         {
             "quote_id": quote_id,
@@ -932,7 +937,7 @@ def override_quote(
 
 @rfq_router.post(
     "/{rfq_id}/quotes/{quote_id}/approval",
-    dependencies=[Depends(quote_write_rate_limit)],
+    dependencies=[Depends(require_revision_context), Depends(quote_write_rate_limit)],
 )
 def set_quote_approval(
     project_id: str,
@@ -971,6 +976,10 @@ def set_quote_approval(
     cleared_selection = bool(quote.get("is_selected")) and not body.approved
     if cleared_selection:
         payload["is_selected"] = False
+    if cleared_selection and not window:
+        workflow.prepare_revision_cost_edit(
+            project_id, user.id, "Winning quote's approval withdrawn", sb
+        )
     updated = (
         sb.table("quotes")
         .update(payload)
@@ -996,7 +1005,7 @@ def set_quote_approval(
     return updated
 
 
-@rfq_router.post("/{rfq_id}/quotes/{quote_id}/select")
+@rfq_router.post("/{rfq_id}/quotes/{quote_id}/select", dependencies=[Depends(require_revision_context)])
 def select_quote(
     project_id: str, rfq_id: str, quote_id: str, user: CurrentUser = Depends(_PE)
 ):
@@ -1032,6 +1041,7 @@ def select_quote(
         )
     # Clear first: quotes_one_selected_per_rfq is a partial unique index, so the
     # new winner would collide with the old one.
+    workflow.prepare_revision_cost_edit(project_id, user.id, "Quote selection changed", sb)
     sb.table("quotes").update({"is_selected": False}).eq("rfq_id", rfq_id).execute()
     winner: dict = {"is_selected": True}
     if target[0].get("received_after_submission"):
@@ -1048,7 +1058,7 @@ def select_quote(
     return updated[0]
 
 
-@rfq_router.delete("/{rfq_id}/select", status_code=status.HTTP_204_NO_CONTENT)
+@rfq_router.delete("/{rfq_id}/select", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_revision_context)])
 def clear_selected_quote(
     project_id: str, rfq_id: str, user: CurrentUser = Depends(_PE)
 ):
@@ -1064,6 +1074,12 @@ def clear_selected_quote(
     _rfq_in_project(sb, project_id, rfq_id)
     if _post_submission(sb, project_id):
         raise HTTPException(status.HTTP_409_CONFLICT, _SELECTION_LOCKED)
+    selected = (
+        sb.table("quotes").select("id").eq("rfq_id", rfq_id)
+        .eq("is_selected", True).execute()
+    ).data or []
+    if selected:
+        workflow.prepare_revision_cost_edit(project_id, user.id, "Winning quote cleared", sb)
     cleared = (
         sb.table("quotes")
         .update({"is_selected": False})
@@ -1078,7 +1094,7 @@ def clear_selected_quote(
         )
 
 
-@rfq_router.put("/{rfq_id}/quotes-confirmed")
+@rfq_router.put("/{rfq_id}/quotes-confirmed", dependencies=[Depends(require_revision_context)])
 def set_quotes_confirmed(
     project_id: str, rfq_id: str, body: RfqQuotesConfirmIn, user: CurrentUser = Depends(_PE)
 ):
@@ -1092,6 +1108,8 @@ def set_quotes_confirmed(
     sb = get_supabase()
     _rfq_in_project(sb, project_id, rfq_id)
     window = _post_submission(sb, project_id)
+    if not window:
+        workflow.prepare_revision_cost_edit(project_id, user.id, "Quotes-confirmed flag changed", sb)
     updated = (
         sb.table("rfqs")
         .update(
@@ -1109,7 +1127,7 @@ def set_quotes_confirmed(
     return updated
 
 
-@rfq_router.put("/{rfq_id}/quotes/{quote_id}/tax")
+@rfq_router.put("/{rfq_id}/quotes/{quote_id}/tax", dependencies=[Depends(require_revision_context)])
 def set_quote_tax(
     project_id: str,
     rfq_id: str,
@@ -1134,6 +1152,8 @@ def set_quote_tax(
     window = _post_submission(sb, project_id)
     if window:
         _refuse_if_sent_quote(window, _quote_in_rfq(sb, rfq_id, quote_id))
+    if not window:
+        workflow.prepare_revision_cost_edit(project_id, user.id, "Quote tax setting changed", sb)
     updated = (
         sb.table("quotes")
         .update({"tax_included": body.tax_included, "tax_rate": str(body.tax_rate)})

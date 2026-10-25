@@ -12,9 +12,9 @@ import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
-from app.core.deps import CurrentUser, require_internal, require_writer
+from app.core.deps import CurrentUser, require_internal, require_role, require_writer
 from app.core.ratelimit import outbound_email_rate_limit
-from app.core.roles import ACTUAL_BID_VIEWER_ROLES
+from app.core.roles import ACTUAL_BID_VIEWER_ROLES, VERIFY_ROLES
 from app.models.schemas import (
     ProjectUpdate,
     ProposalRevisionGcsIn,
@@ -22,6 +22,7 @@ from app.models.schemas import (
     ProposalRevisionMarkIn,
     ProposalRevisionSendIn,
     ProposalRevisionStartIn,
+    VerifyOverrideIn,
 )
 from app.services import office_preview, proposal_revisions
 from app.services.proposal_send import ProposalSendError
@@ -185,6 +186,36 @@ def mark_revision_submitted(
     except ProposalSendError as exc:
         raise _http(exc) from exc
     return {**out, "overview": _overview(project_id, user.role)}
+
+
+@router.post("/{revision_id}/approve-costs")
+def approve_revision_costs(
+    project_id: str,
+    revision_id: str,
+    background: BackgroundTasks,
+    body: VerifyOverrideIn | None = None,
+    user: CurrentUser = Depends(require_role(*VERIFY_ROLES)),
+):
+    """The Executive's approval of the revised costs, inside the revision:
+    re-commits the pricing snapshot (the Verify commit, with its optional
+    per-figure overrides) without moving the bid off Submitted."""
+    try:
+        proposal_revisions.approve_costs(project_id, revision_id, user, body, background)
+    except ProposalSendError as exc:
+        raise _http(exc) from exc
+    return _overview(project_id, user.role)
+
+
+@router.post("/{revision_id}/request-approval")
+def request_revision_approval(
+    project_id: str, revision_id: str, user: CurrentUser = Depends(require_writer)
+):
+    """Ask the Executives again to approve the revised costs."""
+    try:
+        proposal_revisions.request_approval(project_id, revision_id, user.id)
+    except ProposalSendError as exc:
+        raise _http(exc) from exc
+    return _overview(project_id, user.role)
 
 
 @router.post("/{revision_id}/complete")

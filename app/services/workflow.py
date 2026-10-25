@@ -759,6 +759,19 @@ def return_from_reverify(
     return _project_row(project_id)
 
 
+def prepare_revision_cost_edit(
+    project_id: str, actor_id: str | None, reason: str, sb
+) -> None:
+    """Fail closed before changing costs in an open revision.
+
+    Call after endpoint validation and before the first pricing mutation.
+    The existing after-edit hook still stamps the saved change and notifies.
+    """
+    from app.services import proposal_revisions
+
+    proposal_revisions.prepare_cost_change(project_id, actor_id, reason, sb)
+
+
 def maybe_reopen_verify_after_edit(
     project_id: str, actor_id: str | None, reason: str, stale: str
 ) -> bool:
@@ -779,6 +792,13 @@ def maybe_reopen_verify_after_edit(
             .execute()
         ).data
         if not proj or proj.get("abandoned_at") or proj.get("current_stage") == "declined":
+            return False
+        # An open revised proposal (0179) owns its own re-verify: the bid
+        # stays at Submitted, the revision records the cost change, and an
+        # Executive approves the new figures inside Revise proposal.
+        from app.services import proposal_revisions
+
+        if proposal_revisions.record_cost_change(project_id, actor_id, reason, get_supabase()):
             return False
         state = load_category_state(project_id)
         so = state.get("send_out", {})

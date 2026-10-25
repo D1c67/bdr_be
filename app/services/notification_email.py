@@ -155,6 +155,12 @@ _TYPE_META: dict[str, tuple[str, str]] = {
     "auto_send.failed": ("Auto send: could not send", "Open Auto send"),
     "auto_send.missed": ("Auto send did not run", "Open Auto send"),
     "auto_send.lines_review": ("Review the scope lines", "Open scope lines"),
+    # Revise proposal (0179): a cost change in an open revision waits on an
+    # Executive's approval inside the modal (see _deep_link).
+    "proposal_revision.approval_requested": (
+        "Revised proposal costs need your approval",
+        "Open Revise proposal",
+    ),
 }
 
 # Calling In notification type -> the call round its link opens.
@@ -272,6 +278,9 @@ def _deep_link(
             # Mark submitted (0140) opens its side-menu box on arrival.
             if (type_ or "").startswith("external_submission."):
                 return f"{base}/projects/{project_id}?box=mark_submitted"
+            # Revise proposal (0179) opens its box, where approval happens.
+            if (type_ or "").startswith("proposal_revision."):
+                return f"{base}/projects/{project_id}?box=revise_proposal"
             # Auto send opens its side-menu panel (Send now, the scope lines).
             if (type_ or "").startswith(_AUTO_SEND_PREFIX):
                 return f"{base}/projects/{project_id}?box=auto_send"

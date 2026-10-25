@@ -163,6 +163,12 @@ Found" body. Same header contract as the RFP tables: the code rides in
 | `ai_estimating_spend_cap` | 409 | The daily spend cap is reached, or the step would pass it. Start, resume and modify refuse before anything is queued; nothing was sent to the model. | Show `detail`; IT Admins and Executives can raise or reset the cap in Settings. |
 | `ai_estimating_unavailable` | 503 | The OpenAI route for AI Estimating is not configured, or it is off by design while `FULL_SELF_HOSTED_LLMS_ENABLED` is true, or the AI job queue (`LLM_QUEUE_ENABLED`) is off. Nothing was queued. | Show `detail`; disable Start, Modify and chat send. |
 
+## Revise proposal (`revision_open`)
+
+| Code | HTTP | Meaning | Frontend action |
+| --- | --- | --- | --- |
+| `revision_open` | 409 | A revised proposal is open on this bid, so a cost, pricing or proposal write (quotes, selection, RFQs, labor, markup, Verify, GC amounts, scope lines, proposal generate / send / re-send / mark, Mark submitted, auto send) must come from the Revise proposal modal, which sends `X-Proposal-Revision: <open revision id>`. A stale tab or the regular project page gets this instead. Email-ingested quotes are not affected. | Show `detail` and offer to open Revise proposal (`?box=revise_proposal`). |
+
 ---
 
 ## Other stable behaviors

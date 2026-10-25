@@ -191,6 +191,14 @@ def _latest_estimate_file(project_id: str) -> dict[str, Any] | None:
 
 
 def _save(project_id: str, **fields: Any) -> None:
+    if "amount" in fields:
+        prior = _current_row(project_id)
+        if _amount_changed(prior.get("amount") if prior else None, fields["amount"]):
+            from app.services import workflow
+
+            workflow.prepare_revision_cost_edit(
+                project_id, None, "General material re-extracted", get_supabase()
+            )
     get_supabase().table("general_material_estimates").upsert(
         {"project_id": project_id, "updated_at": "now()", **fields},
         on_conflict="project_id",

@@ -1,4 +1,4 @@
-"""Revised proposals after submission (migration 0178).
+"""Revised proposals after submission (migrations 0178 and 0179).
 
 A bid was submitted, then the GC pushed the bid date out and the team wants
 to revise its numbers and send a "Revised Proposal". docs/PROPOSAL_REVISIONS.md
@@ -16,10 +16,9 @@ is the full design; the load-bearing rules:
 - One open revision per project. While it is open, and only then, the locks
   that guard a submitted bid open up: scope lines, the GC amounts of the GCs
   in the revision (direct writer edits, no 0118 approval), and quote
-  selection (workflow.in_post_submission_window answers False). A cost-side
-  edit bounces the send_out head to Verify through the existing re-verify
-  mechanism; nothing in the revision is generated or sent until the
-  Executive re-commits and the head is back at 'submitted'.
+  selection (workflow.in_post_submission_window answers False). Cost-side
+  edits keep the bid at Submitted and require Executive approval inside the
+  revision before GC pricing, generation or dispatch can continue.
 - A GC whose revised document does not go out (unchecked, Done, Cancel) gets
   the per-GC overrides it had at the start back, so its figures match the
   document it holds.
@@ -57,6 +56,13 @@ WAITING_ON_VERIFY_MESSAGE = (
     "Cost changes in this revision are waiting on the Executive's re-verify. "
     "Nothing can be generated or sent until pricing is re-committed."
 )
+APPROVAL_PENDING_MESSAGE = (
+    "The costs changed in this revision. An Executive must approve the new figures "
+    "in Revise proposal before GC prices are set or anything is generated or sent."
+)
+APPROVAL_TYPE = "proposal_revision.approval_requested"
+# A teammate's "Ask again" ping to the Executives, at most this often.
+APPROVAL_PING_MINUTES = 10
 OUTCOME_BLOCKED_MESSAGE = (
     "A revised proposal is open on this bid. Finish or cancel the revision "
     "before recording the win/loss."
@@ -157,6 +163,21 @@ def revision_open(project_id: str, sb=None) -> bool:
     return open_revision(project_id, sb) is not None
 
 
+def costs_pending(rev: dict | None) -> bool:
+    """A cost-side edit landed after the last Executive approval (0179)."""
+    if not rev or not rev.get("costs_changed_at"):
+        return False
+    approved = rev.get("costs_approved_at")
+    return not approved or _ts(approved) < _ts(rev["costs_changed_at"])
+
+
+def _ts(value: str) -> datetime:
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+
 def _rows(sb, revision_id: str) -> list[dict]:
     return (
         sb.table("proposal_revision_sends")
@@ -234,6 +255,8 @@ def _require_dispatch_head(sb, project_id: str) -> str:
         raise ProposalSendError(WAITING_ON_VERIFY_MESSAGE)
     if head != "submitted":
         raise ProposalSendError("This bid is not on Submitted, so a revision cannot go out.")
+    if costs_pending(open_revision(project_id, sb)):
+        raise ProposalSendError(APPROVAL_PENDING_MESSAGE)
     return head
 
 
@@ -305,6 +328,163 @@ def _same(a, b) -> bool:
     if a is None or b is None:
         return a is None and b is None
     return Decimal(str(a)) == Decimal(str(b))
+
+
+def _clear_overrides(sb, project_id: str, gc_id: str) -> None:
+    """A GC in the revision is priced from the current figures (0179)."""
+    sb.table("project_gcs").update({c: None for c in _OVERRIDE_COLUMNS}).eq(
+        "project_id", project_id
+    ).eq("gc_id", gc_id).execute()
+
+
+def _verification_row(sb, project_id: str) -> dict | None:
+    rows = (
+        sb.table("verifications").select("*").eq("project_id", project_id).limit(1).execute()
+    ).data or []
+    return rows[0] if rows else None
+
+
+# ── cost changes and the Executive's approval (0179) ───────────────────────
+
+
+def prepare_cost_change(project_id: str, actor_id: str | None, reason: str, sb) -> None:
+    """Persist the approval requirement before a cost mutation can run.
+
+    Unlike the after-edit workflow hook, errors here propagate and prevent
+    the mutation. The after-edit stamp remains necessary to catch an approval
+    racing the write. Notifications wait until that hook sees the saved edit.
+    """
+    rev = open_revision(project_id, sb)
+    if rev is None:
+        return
+    fields = {
+        "costs_changed_at": datetime.now(timezone.utc).isoformat(),
+        "costs_changed_by": actor_id,
+        "costs_change_reason": (reason or "")[:500] or None,
+    }
+    if not costs_pending(rev):
+        fields["approval_requested_at"] = None
+    written = sb.table("proposal_revisions").update(fields).eq("id", rev["id"]).eq(
+        "status", "open"
+    ).execute().data
+    if not written:
+        raise ProposalSendError(NOT_OPEN_MESSAGE)
+
+
+def record_cost_change(project_id: str, actor_id: str | None, reason: str, sb=None) -> bool:
+    """A cost-side edit landed while a revision is open. The bid stays at
+    Submitted (no Verify bounce, no stage_events): the revision records the
+    change, and the Executives are asked to approve the new figures in the
+    modal the first time it goes from approved (or untouched) to pending.
+    Returns True when a revision is open (the caller skips its bounce)."""
+    client = sb if sb is not None else get_supabase()
+    rev = open_revision(project_id, client)
+    if rev is None:
+        return False
+    was_pending = costs_pending(rev)
+    client.table("proposal_revisions").update(
+        {
+            "costs_changed_at": datetime.now(timezone.utc).isoformat(),
+            "costs_changed_by": actor_id,
+            "costs_change_reason": (reason or "")[:500] or None,
+        }
+    ).eq("id", rev["id"]).eq("status", "open").execute()
+    audit(
+        actor_id, "proposal.revision_costs_changed", "project", project_id,
+        {"revision_id": rev["id"], "revision_number": rev["revision_number"], "reason": reason},
+    )
+    if not was_pending or not rev.get("approval_requested_at"):
+        _ask_executives(client, project_id, rev, reason)
+    return True
+
+
+def _ask_executives(sb, project_id: str, rev: dict, reason: str | None) -> None:
+    """Bell (plus email / Teams per the notification routing) to every
+    Executive. Best effort: the cost edit is already saved."""
+    from app.core.roles import Role
+
+    try:
+        project = (
+            sb.table("projects").select("name, number").eq("id", project_id).limit(1).execute()
+        ).data or [{}]
+        label = " ".join(x for x in (project[0].get("number"), project[0].get("name")) if x)
+        message = (
+            f"Revision {rev['revision_number']} of {label or 'a bid'} changed its costs"
+            + (f" ({reason})" if reason else "")
+            + ". Approve the new figures in Revise proposal so the revised proposals can go out."
+        )
+        dismiss_notifications(project_id=project_id, types=[APPROVAL_TYPE])
+        notify_role(
+            Role.EXECUTIVE, project_id, APPROVAL_TYPE, message,
+            metadata={"revision_id": rev["id"]},
+        )
+        sb.table("proposal_revisions").update(
+            {"approval_requested_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("id", rev["id"]).execute()
+    except Exception:  # noqa: BLE001 - a bell must never undo the edit
+        logger.exception("revision approval request failed for %s", project_id)
+
+
+def request_approval(project_id: str, revision_id: str, user_id: str) -> None:
+    """A teammate asks the Executives again (at most every
+    APPROVAL_PING_MINUTES)."""
+    sb = get_supabase()
+    rev = _require_open(sb, project_id, revision_id)
+    if not costs_pending(rev):
+        raise ProposalSendError("Nothing is waiting on an Executive's approval.")
+    last = rev.get("approval_requested_at")
+    if last and datetime.now(timezone.utc) - _ts(last) < timedelta(minutes=APPROVAL_PING_MINUTES):
+        raise ProposalSendError(
+            f"The Executives were asked less than {APPROVAL_PING_MINUTES} minutes ago."
+        )
+    _ask_executives(sb, project_id, rev, rev.get("costs_change_reason"))
+    audit(user_id, "proposal.revision_approval_requested", "project", project_id,
+          {"revision_id": rev["id"]})
+
+
+def approve_costs(project_id: str, revision_id: str, user, body=None, background=None) -> dict:
+    """The Executive approves the revised costs, inside the revision: the
+    verifications snapshot is re-committed through the Verify commit
+    (pricing.commit_verify, so generation reads committed figures, with the
+    same per-figure overrides the Verify panel takes), then the approval is
+    stamped with the moment the commit STARTED, so an edit racing it leaves
+    the revision pending again. Role-gated by the router (VERIFY_ROLES)."""
+    from app.routers import pricing as pricing_router
+
+    sb = get_supabase()
+    rev = _require_open(sb, project_id, revision_id)
+    if not costs_pending(rev):
+        raise ProposalSendError("Nothing is waiting on approval: the costs have not changed.")
+    started = datetime.now(timezone.utc).isoformat()
+    # Keep dispatch blocked until the new committed snapshot is durable. Use
+    # the start time so an edit racing the commit still requires approval.
+    pricing_router.commit_verify(project_id, body, user, background)
+    sb.table("proposal_revisions").update(
+        {"costs_approved_at": started, "costs_approved_by": user.id}
+    ).eq("id", rev["id"]).eq("status", "open").execute()
+    if not costs_pending(open_revision(project_id, sb)):
+        dismiss_notifications(project_id=project_id, types=[APPROVAL_TYPE])
+        pricing_router._regenerate_stale_proposals_after_commit(project_id, user, background)
+    audit(
+        user.id, "proposal.revision_costs_approve", "project", project_id,
+        {"revision_id": rev["id"], "revision_number": rev["revision_number"]},
+    )
+    return open_revision(project_id, sb) or rev
+
+
+def tag_revision_file(project_id: str, revision_id: str | None, file_id: str) -> None:
+    """A file uploaded from the modal (its X-Proposal-Revision header names
+    the open revision) is recorded as part of that revision. Silently
+    ignored for any other header value: the upload itself is not locked."""
+    if not revision_id:
+        return
+    sb = get_supabase()
+    rev = open_revision(project_id, sb)
+    if rev is None or rev["id"] != revision_id:
+        return
+    sb.table("project_files").update({"proposal_revision_id": rev["id"]}).eq(
+        "id", file_id
+    ).eq("project_id", project_id).execute()
 
 
 # ── start ──────────────────────────────────────────────────────────────────
@@ -402,13 +582,23 @@ def start_revision(
     project, sent = _start_context(sb, project_id)
     previous = (
         (
-            sb.table("proposal_revisions").select("revision_number")
+            sb.table("proposal_revisions").select("*")
             .eq("project_id", project_id).order("revision_number", desc=True)
             .limit(1).execute()
         ).data
         or []
     )
-    number = (previous[0]["revision_number"] if previous else 0) + 1
+    prior = previous[0] if previous else None
+    number = (prior["revision_number"] if prior else 0) + 1
+    # Cancel and Done retain upstream edits. Unapproved costs must therefore
+    # follow the project into its next revision, rather than becoming approved
+    # merely because the earlier revision closed.
+    pending_costs = (
+        {key: prior.get(key) for key in (
+            "costs_changed_at", "costs_changed_by", "costs_change_reason"
+        )}
+        if costs_pending(prior) else {}
+    )
     after = new_bid_dates or {}
     try:
         rev = (
@@ -425,6 +615,10 @@ def start_revision(
                     "new_actual_bid_at": after.get("actual_bid_at"),
                     "started_by": user_id,
                     "start_gc_ids": sorted(_on_project(sb, project_id)),
+                    # The committed pricing the GCs hold: the approval step's
+                    # "held" column (0179).
+                    "start_verification": _verification_row(sb, project_id),
+                    **pending_costs,
                 }
             )
             .execute()
@@ -456,6 +650,12 @@ def start_revision(
         # Never leave an open revision with no GCs behind.
         sb.table("proposal_revisions").delete().eq("id", rev["id"]).execute()
         raise
+    # Revision GC prices start from the CURRENT computed figures, exactly like
+    # the initial GC Pricing step: the per-GC overrides each GC was bid with
+    # are kept in start_overrides (shown as the held reference, and restored
+    # if its revision does not go out) and cleared on the link (0179).
+    for r in sent:
+        _clear_overrides(sb, project_id, r["gc_id"])
     audit(
         user_id, "proposal.revision_start", "project", project_id,
         {
@@ -518,6 +718,8 @@ def set_included_gcs(
             continue  # a send claimed it meanwhile; nothing changed
         if not include:
             _restore_overrides(sb, project_id, r)
+        else:
+            _clear_overrides(sb, project_id, r["gc_id"])
         changed.append({"gc_id": r["gc_id"], "gc_name": r["gc_name"], "included": include})
     if changed:
         audit(
@@ -1399,6 +1601,101 @@ def _row_state(row: dict) -> str:
     return row.get("status") or "pending"
 
 
+def _figures_wire(final: dict | None) -> dict | None:
+    """The ten resolved pricing figures plus the per-section prices and total
+    they make (amounts_from_final), as strings."""
+    if final is None:
+        return None
+    out = {k: (str(v) if v is not None else None) for k, v in final.items()}
+    out["prices"] = {
+        k: (str(v) if v is not None else None)
+        for k, v in proposal_send.amounts_from_final(final).items()
+    }
+    return out
+
+
+def _costs_wire(sb, project_id: str, rev: dict) -> dict:
+    """The approval step: the project's cost figures committed at the start,
+    the figures its quotes, selection, labor and markup give right now, the
+    committed snapshot today, what each GC holds (its live proposal's per-GC
+    prices: the real "held" numbers), and the approval state."""
+    from app.routers.pricing import _verify_originals
+
+    start = rev.get("start_verification")
+    held = (
+        proposal_send.resolved_verify_numbers({}, start)
+        if start and start.get("committed_at")
+        else None
+    )
+    try:
+        current = proposal_send.resolved_verify_numbers(_verify_originals(project_id), {})
+    except Exception:  # noqa: BLE001 - a display read must never fail the box
+        logger.exception("revision costs: current figures failed for %s", project_id)
+        current = None
+    committed_row = _verification_row(sb, project_id)
+    committed = (
+        proposal_send.resolved_verify_numbers({}, committed_row)
+        if committed_row and committed_row.get("committed_at")
+        else None
+    )
+    names = _names(sb, [rev.get("costs_changed_by"), rev.get("costs_approved_by")])
+    # What each GC in the revision actually holds today: the live
+    # proposal_sends stamps (per-GC prices), not the project-level snapshot.
+    live = {
+        r["gc_id"]: r
+        for r in (
+            sb.table("proposal_sends").select("*").eq("project_id", project_id)
+            .eq("status", "sent").execute()
+        ).data
+        or []
+    }
+    held_by_gc = []
+    for row in _rows(sb, rev["id"]):
+        sent = live.get(row["gc_id"])
+        if not sent:
+            continue
+        held_by_gc.append(
+            {
+                "gc_id": row["gc_id"],
+                "gc_name": row["gc_name"],
+                "included": bool(row.get("included")),
+                "revision_number": sent.get("revision_number") or 0,
+                **_amounts_wire(sent),
+            }
+        )
+    totals = [Decimal(g["total"]) for g in held_by_gc if g.get("total") is not None]
+    return {
+        "pending": costs_pending(rev),
+        "changed_at": rev.get("costs_changed_at"),
+        "changed_by_name": names.get(rev.get("costs_changed_by")),
+        "change_reason": rev.get("costs_change_reason"),
+        "approved_at": rev.get("costs_approved_at"),
+        "approved_by_name": names.get(rev.get("costs_approved_by")),
+        "approval_requested_at": rev.get("approval_requested_at"),
+        # The project-level cost figures: committed when the revision
+        # started, the live upstream figures now, and the snapshot today.
+        "start": _figures_wire(held),
+        "current": _figures_wire(current),
+        "committed": _figures_wire(committed),
+        # What the GCs hold (per-GC prices from their live proposals).
+        "held_by_gc": held_by_gc,
+        "held_total_range": (
+            {"min": str(min(totals)), "max": str(max(totals))} if totals else None
+        ),
+    }
+
+
+def _revision_files(sb, revision_id: str) -> list[dict]:
+    """The revised plans, specs and addenda uploaded from the modal."""
+    return (
+        sb.table("project_files")
+        .select("id, filename, category, doc_type, addendum_number, created_at, preview_status")
+        .eq("proposal_revision_id", revision_id)
+        .order("created_at")
+        .execute()
+    ).data or []
+
+
 def overview(project_id: str) -> dict:
     """Everything the Revise proposal box shows: the open revision (with its
     per-GC rows, their documents and statuses, and the GCs added during it),
@@ -1566,8 +1863,10 @@ def overview(project_id: str) -> dict:
             e["proposal_revision_id"] == open_rev["id"] for e in events
         )
         open_wire = {
-            **open_rev,
+            **{k: v for k, v in open_rev.items() if k != "start_verification"},
             "started_by_name": names.get(open_rev.get("started_by")),
+            "costs": _costs_wire(sb, project_id, open_rev),
+            "files": _revision_files(sb, open_rev["id"]),
             "head": head,
             "reverify_return_stage": return_stage,
             "waiting_on_verify": head == "verify",
@@ -1594,7 +1893,7 @@ def overview(project_id: str) -> dict:
         rows = [r for r in all_rows if r["revision_id"] == rev["id"]]
         history.append(
             {
-                **rev,
+                **{k: v for k, v in rev.items() if k != "start_verification"},
                 "started_by_name": names.get(rev.get("started_by")),
                 "completed_by_name": names.get(rev.get("completed_by")),
                 "cancelled_by_name": names.get(rev.get("cancelled_by")),

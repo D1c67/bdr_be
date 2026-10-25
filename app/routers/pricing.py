@@ -6,6 +6,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from app.core.deps import CurrentUser, get_current_user, require_role, require_writer
+from app.core.revision_context import require_revision_context
 from app.core.roles import INTERNAL_ROLES, VERIFY_ROLES, Role
 from app.core.supabase_client import get_supabase
 from app.models.schemas import LaborReviewIn, MarkupIn, VerifyOverrideIn
@@ -458,10 +459,11 @@ def get_labor(project_id: str, user: CurrentUser = Depends(get_current_user)):
     return _get_one("labor_reviews", project_id)
 
 
-@router.put("/labor")
+@router.put("/labor", dependencies=[Depends(require_revision_context)])
 def set_labor(
     project_id: str, body: LaborReviewIn, user: CurrentUser = Depends(require_writer)
 ):
+    workflow.prepare_revision_cost_edit(project_id, user.id, "Labor numbers edited", get_supabase())
     row = (
         get_supabase()
         .table("labor_reviews")
@@ -485,10 +487,11 @@ def get_markup(project_id: str, user: CurrentUser = Depends(get_current_user)):
     return _get_one("markups", project_id)
 
 
-@router.put("/markup")
+@router.put("/markup", dependencies=[Depends(require_revision_context)])
 def set_markup(
     project_id: str, body: MarkupIn, user: CurrentUser = Depends(require_writer)
 ):
+    workflow.prepare_revision_cost_edit(project_id, user.id, "Markup edited", get_supabase())
     row = (
         get_supabase()
         .table("markups")
@@ -569,7 +572,7 @@ def _deltas(body: VerifyOverrideIn, project_id: str) -> dict:
     return verify_delta_pairs(_verify_originals(project_id), body)
 
 
-@router.put("/verify")
+@router.put("/verify", dependencies=[Depends(require_revision_context)])
 def edit_verify(
     project_id: str,
     body: VerifyOverrideIn,
@@ -594,7 +597,7 @@ def edit_verify(
     return row
 
 
-@router.post("/verify")
+@router.post("/verify", dependencies=[Depends(require_revision_context)])
 def commit_verify(
     project_id: str,
     body: VerifyOverrideIn | None = None,
@@ -678,6 +681,20 @@ def commit_verify(
             notify_roles(VERIFIED_ROLES, project_id, "verified",
                          "Pricing committed by Executive — ready to send out", mirror_email=True)
 
+    _regenerate_stale_proposals_after_commit(project_id, user, background)
+    return row
+
+
+def _regenerate_stale_proposals_after_commit(
+    project_id: str, user: CurrentUser, background: BackgroundTasks = None
+) -> None:
+    from app.services import proposal_revisions
+
+    # Revision approval is published only after its committed snapshot is saved.
+    # The approval caller retries regeneration after publishing that approval.
+    if proposal_revisions.costs_pending(proposal_revisions.open_revision(project_id, get_supabase())):
+        return
+
     # Never-sent proposal documents generated before this commit now carry
     # stale figures; re-render them so a preview can never show numbers the
     # commit just changed (runs after the advance/return above so the send
@@ -722,6 +739,4 @@ def commit_verify(
                     and office_preview.is_convertible(file["filename"], "proposal")
                 ):
                     background.add_task(office_preview.generate_preview, file["id"])
-    return row
-
 

@@ -115,3 +115,14 @@ def _routing_defaults(monkeypatch):
     from app.services import notification_routing
 
     monkeypatch.setattr(notification_routing, "_overrides", lambda: {})
+
+
+@pytest.fixture(autouse=True)
+def _no_revision_lock(monkeypatch):
+    """The Revise proposal lock (app/core/revision_context, 0179) reads
+    Supabase on every locked write route. Route tests run with no revision
+    open, so none of them reaches a real database; the revision tests put
+    the real lookup back on their fake store."""
+    from app.core import revision_context
+
+    monkeypatch.setattr(revision_context, "_open_revision", lambda project_id: None)

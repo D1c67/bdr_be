@@ -443,6 +443,10 @@ class Env:
         mp.setattr(workflow.notifications, "notify_role", lambda *a, **k: None)
         mp.setattr(workflow.notifications, "dismiss_notifications", lambda **kw: None)
         mp.setattr(pr.time, "sleep", lambda s: None)
+        from app.core import revision_context
+
+        mp.setattr(revision_context, "_open_revision",
+                   lambda project_id: pr.open_revision(project_id, db))
         mp.setattr(psend.time, "sleep", lambda s: None)
         # Pricing: one committed snapshot whose figures are AMOUNTS.
         mp.setattr(pricing_router, "_verify_originals", lambda pid: {})
@@ -641,23 +645,25 @@ def test_quote_selection_locked_after_submission_but_open_during_a_revision(env)
     assert exc.value.status_code == 409
     rev = _start(env)
     assert workflow.in_post_submission_window(PID, env.db) is False
+    events_before = len(env.db.tables.get("stage_events", []))
     rfqs_router.select_quote(PID, "r1", "q2", user)
     assert env.one("quotes", id="q2")["is_selected"] is True
-    # A cost edit bounces the bid to Verify, returning to Submitted.
-    assert env.one("project_category_state", category="send_out")["current_task"] == "verify"
-    assert env.one("projects", id=PID)["reverify_return_stage"] == "submitted"
-    # Still inside the revision while parked at Verify.
-    assert workflow.in_post_submission_window(PID, env.db) is False
+    # 0179: no bounce. The bid stays at Submitted with no stage event; the
+    # revision records the cost change instead.
+    assert env.one("project_category_state", category="send_out")["current_task"] == "submitted"
+    assert env.one("projects", id=PID)["reverify_return_stage"] is None
+    assert len(env.db.tables.get("stage_events", [])) == events_before
+    assert env.one("verifications", project_id=PID)["committed_at"]  # snapshot kept
+    assert pr.costs_pending(env.one("proposal_revisions", id=rev["id"]))
     pr.cancel_revision(PID, rev["id"], "u-admin")
-    # Closed again (verify on its way back to submitted counts as submitted).
     assert workflow.in_post_submission_window(PID, env.db) is True
 
 
-# ── generate: refused at Verify, only checked GCs ────────────────────────────
+# ── cost changes: approved inside the revision (0179) ────────────────────────
 
 
-def _commit_verify(env, monkeypatch):
-    """The Executive's real re-commit: POST /verify (pricing.commit_verify)."""
+def _commit_patches(monkeypatch):
+    """What the Verify commit (pricing.commit_verify) reaches, faked."""
     monkeypatch.setattr(pricing_router, "section_summary", lambda rows: {
         "materials": {"present": True}, "gear": {"present": False, "includes_generator": False},
         "underground": {"present": False}, "low_voltage": {"present": False},
@@ -665,28 +671,194 @@ def _commit_verify(env, monkeypatch):
     monkeypatch.setattr(pricing_router, "audit", lambda *a, **k: None)
     monkeypatch.setattr(pricing_router, "notify_roles", lambda *a, **k: None)
     monkeypatch.setattr(pricing_router, "notify_role", lambda *a, **k: None)
-    user = SimpleNamespace(id="u-exec", role=Role.EXECUTIVE)
-    pricing_router.commit_verify(PID, None, user, None)
 
 
-def test_cost_edit_blocks_generation_until_recommit(env, monkeypatch):
+EXEC = SimpleNamespace(id="u-exec", role=Role.EXECUTIVE)
+
+
+def test_cost_edit_blocks_generation_until_executive_approval(env, monkeypatch):
     _quote_world(env)
+    _commit_patches(monkeypatch)
     rev = _start(env)
     rfqs_router.select_quote(PID, "r1", "q2", SimpleNamespace(id="u-admin", role=None))
-    assert env.one("verifications", project_id=PID)["committed_at"] is None
-    with pytest.raises(ProposalSendError, match="re-verify"):
-        pr.generate_revision_documents(PID, rev["id"], "u-admin")
-    _commit_verify(env, monkeypatch)
-    assert env.one("verifications", project_id=PID)["committed_at"]
+    for blocked in (
+        lambda: pr.generate_revision_documents(PID, rev["id"], "u-admin"),
+        lambda: psend.set_gc_amounts(PID, "g1", {"material": Decimal("1")}, "u-admin",
+                                     role=Role.ESTIMATING_ADMIN),
+    ):
+        with pytest.raises(ProposalSendError, match="Executive must approve"):
+            blocked()
+    pr.approve_costs(PID, rev["id"], EXEC)
+    after = env.one("verifications", project_id=PID)
+    assert after["committed_at"] and after["verified_by"] == "u-exec"
+    approved = env.one("proposal_revisions", id=rev["id"])
+    assert not pr.costs_pending(approved) and approved["costs_approved_by"] == "u-exec"
     assert env.one("project_category_state", category="send_out")["current_task"] == "submitted"
-    assert env.one("projects", id=PID)["reverify_return_stage"] is None
-    created = pr.generate_revision_documents(PID, rev["id"], "u-admin")
-    assert len(created) == 2
+    assert len(pr.generate_revision_documents(PID, rev["id"], "u-admin")) == 2
+    # Nothing left to approve.
+    with pytest.raises(ProposalSendError, match="Nothing is waiting"):
+        pr.approve_costs(PID, rev["id"], EXEC)
+
+
+def test_approval_keeps_dispatch_blocked_until_commit_finishes(env, monkeypatch):
+    _quote_world(env)
+    _commit_patches(monkeypatch)
+    rev = _start(env)
+    pr.record_cost_change(PID, "u-admin", "Labor numbers edited", env.db)
+    commit = pricing_router.commit_verify
+    regenerated = []
+    monkeypatch.setattr(pricing_router, "_regenerate_stale_proposals_after_commit",
+                        lambda *args: regenerated.append(
+                            pr.costs_pending(env.one("proposal_revisions", id=rev["id"]))
+                        ))
+
+    def paused_commit(*args):
+        # A second request arriving before the new snapshot is persisted must
+        # still be refused, even though the Executive clicked Approve.
+        with pytest.raises(ProposalSendError, match="Executive must approve"):
+            pr._require_dispatch_head(env.db, PID)
+        return commit(*args)
+
+    monkeypatch.setattr(pricing_router, "commit_verify", paused_commit)
+    pr.approve_costs(PID, rev["id"], EXEC)
+    assert regenerated == [True, False]
+    assert pr._require_dispatch_head(env.db, PID) == "submitted"
+
+
+def test_failed_approval_keeps_dispatch_blocked(env, monkeypatch):
+    rev = _start(env)
+    pr.record_cost_change(PID, "u-admin", "Labor numbers edited", env.db)
+
+    def failed_commit(*args):
+        raise RuntimeError("Snapshot write failed")
+
+    monkeypatch.setattr(pricing_router, "commit_verify", failed_commit)
+    with pytest.raises(RuntimeError, match="Snapshot write failed"):
+        pr.approve_costs(PID, rev["id"], EXEC)
+    assert pr.costs_pending(env.one("proposal_revisions", id=rev["id"]))
+    assert not env.one("proposal_revisions", id=rev["id"]).get("costs_approved_at")
+
+
+def test_cost_edit_during_approval_stays_pending(env, monkeypatch):
+    _commit_patches(monkeypatch)
+    rev = _start(env)
+    pr.record_cost_change(PID, "u-admin", "Labor numbers edited", env.db)
+    commit = pricing_router.commit_verify
+    dismissed = []
+    monkeypatch.setattr(pr, "dismiss_notifications", lambda **kw: dismissed.append(kw))
+
+    def concurrent_edit(*args):
+        row = commit(*args)
+        pr.record_cost_change(PID, "u-admin", "Markup edited", env.db)
+        return row
+
+    monkeypatch.setattr(pricing_router, "commit_verify", concurrent_edit)
+    pr.approve_costs(PID, rev["id"], EXEC)
+    assert pr.costs_pending(env.one("proposal_revisions", id=rev["id"]))
+    assert not dismissed
+    with pytest.raises(ProposalSendError, match="Executive must approve"):
+        pr._require_dispatch_head(env.db, PID)
+
+
+def test_failed_pre_edit_stamp_prevents_quote_selection_change(env, monkeypatch):
+    _quote_world(env)
+    _start(env)
+
+    def failed_stamp(*args):
+        raise RuntimeError("Approval state write failed")
+
+    monkeypatch.setattr(pr, "prepare_cost_change", failed_stamp)
+    with pytest.raises(RuntimeError, match="Approval state write failed"):
+        rfqs_router.select_quote(PID, "r1", "q2", SimpleNamespace(id="u-admin"))
+    assert env.one("quotes", id="q1")["is_selected"]
+    assert not env.one("quotes", id="q2")["is_selected"]
+
+
+def test_pre_edit_stamp_refuses_revision_closed_after_lookup(env, monkeypatch):
+    rev = _start(env)
+    snapshot = dict(rev)
+    env.one("proposal_revisions", id=rev["id"])["status"] = "cancelled"
+    monkeypatch.setattr(pr, "open_revision", lambda *args: snapshot)
+    with pytest.raises(ProposalSendError, match="no longer open"):
+        pr.prepare_cost_change(PID, "u-admin", "Labor numbers edited", env.db)
+    assert not env.one("proposal_revisions", id=rev["id"]).get("costs_changed_at")
+
+
+def test_failed_after_edit_stamp_keeps_prepared_approval_pending(env, monkeypatch):
+    _quote_world(env)
+    rev = _start(env)
+
+    def failed_stamp(*args):
+        raise RuntimeError("Approval state write failed")
+
+    monkeypatch.setattr(pr, "record_cost_change", failed_stamp)
+    rfqs_router.select_quote(PID, "r1", "q2", SimpleNamespace(id="u-admin"))
+    assert env.one("quotes", id="q2")["is_selected"]
+    assert pr.costs_pending(env.one("proposal_revisions", id=rev["id"]))
+    with pytest.raises(ProposalSendError, match="Executive must approve"):
+        pr._require_dispatch_head(env.db, PID)
+
+
+def test_cancel_retains_pending_costs_when_next_revision_starts(env, monkeypatch):
+    _commit_patches(monkeypatch)
+    rev = _start(env)
+    pr.record_cost_change(PID, "u-admin", "Labor numbers edited", env.db)
+    pr.cancel_revision(PID, rev["id"], "u-admin")
+    next_rev = _start(env)
+    assert next_rev["revision_number"] == rev["revision_number"] + 1
+    assert pr.costs_pending(next_rev)
+    assert next_rev["costs_change_reason"] == "Labor numbers edited"
+    assert next_rev["costs_changed_by"] == "u-admin"
+    with pytest.raises(ProposalSendError, match="Executive must approve"):
+        pr.generate_revision_documents(PID, next_rev["id"], "u-admin")
+    pr.approve_costs(PID, next_rev["id"], EXEC)
+    assert not pr.costs_pending(env.one("proposal_revisions", id=next_rev["id"]))
+
+
+def test_a_cost_change_after_approval_needs_approval_again(env, monkeypatch):
+    _quote_world(env)
+    _commit_patches(monkeypatch)
+    rev = _start(env)
+    user = SimpleNamespace(id="u-admin", role=None)
+    rfqs_router.select_quote(PID, "r1", "q2", user)
+    pr.approve_costs(PID, rev["id"], EXEC)
+    env.db.now = NOW + timedelta(minutes=5)
+    # The approval stamp is the wall clock; push the next change past it.
+    env.one("proposal_revisions", id=rev["id"])["costs_approved_at"] = _iso(
+        datetime.now(timezone.utc) - timedelta(minutes=1)
+    )
+    rfqs_router.select_quote(PID, "r1", "q1", user)
+    assert pr.costs_pending(env.one("proposal_revisions", id=rev["id"]))
+    with pytest.raises(ProposalSendError, match="Executive must approve"):
+        pr.generate_revision_documents(PID, rev["id"], "u-admin")
+
+
+def test_cost_change_asks_the_executives_once(env, monkeypatch):
+    _quote_world(env)
+    asked = []
+    monkeypatch.setattr(pr, "notify_role", lambda role, pid, type_, msg, **kw: asked.append(
+        (role, type_, kw.get("metadata"))))
+    rev = _start(env)
+    user = SimpleNamespace(id="u-admin", role=None)
+    rfqs_router.select_quote(PID, "r1", "q2", user)
+    rfqs_router.select_quote(PID, "r1", "q1", user)  # still pending: no second bell
+    assert asked == [(Role.EXECUTIVE, pr.APPROVAL_TYPE, {"revision_id": rev["id"]})]
+    from app.services import notification_email, notification_routing
+
+    assert notification_routing.event_for(pr.APPROVAL_TYPE) == "revision_approval"
+    assert notification_routing.default(
+        notification_routing.EVENT_BY_KEY["revision_approval"], Role.EXECUTIVE, "teams"
+    )
+    link = notification_email._deep_link(PID, "executive", pr.APPROVAL_TYPE)
+    assert link.endswith(f"/projects/{PID}?box=revise_proposal")
+    # A ping is throttled.
+    with pytest.raises(ProposalSendError, match="minutes ago"):
+        pr.request_approval(PID, rev["id"], "u-admin")
 
 
 def test_generate_targets_only_checked_gcs_with_revision_markers(env):
-    env.db.tables["project_gcs"][0]["proposal_material_amount"] = "50000"
     rev = _start(env)
+    env.db.tables["project_gcs"][0]["proposal_material_amount"] = "50000"
     pr.set_included_gcs(PID, rev["id"], "u-admin", ["g1"])
     created = pr.generate_revision_documents(PID, rev["id"], "u-admin")
     assert [c["gc_id"] for c in created] == ["g1"]
@@ -700,6 +872,28 @@ def test_generate_targets_only_checked_gcs_with_revision_markers(env):
     assert _rev_row(env, "g2")["status"] == "pending"
     # The live rows are untouched by generation.
     assert env.one("proposal_sends", id="ps1")["file_id"] == "f-orig1"
+
+
+def test_gc_prices_start_from_current_figures_not_prior_overrides(env):
+    """The Cactus Ridge case: a GC bid at its own figures must not carry
+    them into the revision; its revised price starts from today's figures and
+    its held figures are only a reference."""
+    env.db.tables["project_gcs"][1].update(proposal_material_amount="123456.78",
+                                         proposal_labor_amount="9999")
+    rev = _start(env)
+    g2 = env.one("project_gcs", gc_id="g2")
+    assert g2["proposal_material_amount"] is None and g2["proposal_labor_amount"] is None
+    assert _rev_row(env, "g2")["start_overrides"]["proposal_material_amount"] == "123456.78"
+    pr.generate_revision_documents(PID, rev["id"], "u-admin")
+    assert _rev_row(env, "g2")["material_amount"] == str(AMOUNTS["material"])
+    # The held document's figures are still shown, as a reference only.
+    g2_wire = next(g for g in pr.overview(PID)["open"]["gcs"] if g["gc_id"] == "g2")
+    assert g2_wire["current"]["material_amount"] == "45000"
+    # Unchecking gives the GC its own figures back (it keeps its proposal).
+    pr.set_included_gcs(PID, rev["id"], "u-admin", ["g1"])
+    assert env.one("project_gcs", gc_id="g2")["proposal_material_amount"] == "123456.78"
+    pr.set_included_gcs(PID, rev["id"], "u-admin", ["g1", "g2"])
+    assert env.one("project_gcs", gc_id="g2")["proposal_material_amount"] is None
 
 
 def test_generate_refuses_an_unchecked_gc_by_id(env):
@@ -924,6 +1118,37 @@ def test_added_gc_gets_a_normal_initial_proposal(env):
         pr.cancel_revision(PID, rev["id"], "u-admin")
 
 
+def test_readded_gc_can_regenerate_a_retired_initial_proposal(env):
+    _start(env)
+    env.db.tables["project_gcs"].append(_gc_link("g3", "Charlie Co"))
+    original = psend.generate_documents(PID, "d1", "u-admin", gc_ids=["g3"])[0]
+    psend.retire_unsent_proposals(PID, "g3")
+    assert env.one("proposal_sends", id=original["id"])["status"] == "superseded"
+    regenerated = psend.generate_documents(PID, "d1", "u-admin", gc_ids=["g3"])[0]
+    assert regenerated["id"] == original["id"]
+    assert regenerated["status"] == "generated"
+    assert regenerated["file_id"] != original["file_id"]
+    assert env.one("proposal_sends", gc_id="g1")["status"] == "sent"
+
+
+def test_retirement_racing_initial_generation_is_not_overwritten(env, monkeypatch):
+    _start(env)
+    env.db.tables["project_gcs"].append(_gc_link("g3", "Charlie Co"))
+    original = psend.generate_documents(PID, "d1", "u-admin", gc_ids=["g3"])[0]
+    upload = storage.upload_file
+
+    def retire_during_render(*args, **kwargs):
+        psend.retire_unsent_proposals(PID, "g3")
+        return upload(*args, **kwargs)
+
+    monkeypatch.setattr(storage, "upload_file", retire_during_render)
+    with pytest.raises(ProposalSendError, match="changed while generating"):
+        psend.generate_documents(PID, "d1", "u-admin", gc_ids=["g3"])
+    retired = env.one("proposal_sends", id=original["id"])
+    assert retired["status"] == "superseded"
+    assert retired["file_id"] == original["file_id"]
+
+
 def test_auto_complete_waits_for_an_added_gc_generated_during_the_revision(env):
     env.db.tables["project_gcs"].append(_gc_link("g3", "Charlie Co"))
     rev = _generated(env, ("g1",))
@@ -1128,11 +1353,14 @@ def test_m2_figures_restored_when_unchecked_or_closed_unsent(env):
 
 
 def test_m2_sent_gc_keeps_its_new_figures_on_done(env):
+    rev = _start(env)
     env.db.tables["project_gcs"][0]["proposal_material_amount"] = "52000"
-    rev = _generated(env, ("g1", "g2"))
+    pr.generate_revision_documents(PID, rev["id"], "u-admin")
     pr.send_revision_documents(PID, rev["id"], "u-admin", [_rev_row(env, "g1")["id"]])
     env.db.tables["project_gcs"][1]["proposal_material_amount"] = "53000"
     pr.complete_revision(PID, rev["id"], "u-admin")
+    # g1 now holds the 52k document: its figures stay. g2's revision did not
+    # go out: back to its start values (none).
     assert env.one("project_gcs", gc_id="g1")["proposal_material_amount"] == "52000"
     assert env.one("project_gcs", gc_id="g2")["proposal_material_amount"] is None
 
@@ -1308,3 +1536,184 @@ def test_router_refused_date_change_keeps_the_revision_open(env, client, monkeyp
     assert body["open"]["revision_number"] == 1
     assert "bid date was not changed" in body["bid_date_error"]
     assert body["open"]["new_actual_bid_at"] is None
+
+
+# ── the lock: writes outside the modal are refused (0179) ────────────────────
+
+LOCKED_ROUTES = {
+    ("PUT", "/projects/{project_id}/labor"),
+    ("PUT", "/projects/{project_id}/markup"),
+    ("PUT", "/projects/{project_id}/verify"),
+    ("POST", "/projects/{project_id}/verify"),
+    ("POST", "/projects/{project_id}/rfqs"),
+    ("POST", "/projects/{project_id}/rfqs/bulk-send"),
+    ("POST", "/projects/{project_id}/rfqs/{rfq_id}/quotes"),
+    ("POST", "/projects/{project_id}/rfqs/{rfq_id}/quotes/manual"),
+    ("DELETE", "/projects/{project_id}/rfqs/{rfq_id}/quotes/{quote_id}"),
+    ("PATCH", "/projects/{project_id}/rfqs/{rfq_id}/quotes/{quote_id}"),
+    ("POST", "/projects/{project_id}/rfqs/{rfq_id}/quotes/{quote_id}/approval"),
+    ("POST", "/projects/{project_id}/rfqs/{rfq_id}/quotes/{quote_id}/select"),
+    ("DELETE", "/projects/{project_id}/rfqs/{rfq_id}/select"),
+    ("PUT", "/projects/{project_id}/rfqs/{rfq_id}/quotes-confirmed"),
+    ("PUT", "/projects/{project_id}/rfqs/{rfq_id}/quotes/{quote_id}/tax"),
+    ("PUT", "/projects/{project_id}/general-material"),
+    ("PUT", "/projects/{project_id}/general-material/tax"),
+    ("POST", "/projects/{project_id}/general-material/extract"),
+    ("POST", "/projects/{project_id}/proposal-lines"),
+    ("POST", "/projects/{project_id}/proposal-lines/manual"),
+    ("PUT", "/projects/{project_id}/proposal-lines/{draft_id}/lines"),
+    ("POST", "/projects/{project_id}/proposal-lines/{draft_id}/approve"),
+    ("PUT", "/projects/{project_id}/proposals/amounts/{gc_id}"),
+    ("POST", "/projects/{project_id}/proposals/amounts/{gc_id}/request"),
+    ("POST", "/projects/{project_id}/proposals/generate"),
+    ("POST", "/projects/{project_id}/proposals/send"),
+    ("POST", "/projects/{project_id}/proposals/resend"),
+    ("POST", "/projects/{project_id}/proposals/mark-submitted"),
+    ("POST", "/projects/{project_id}/proposals/complete-send-out"),
+    ("POST", "/projects/{project_id}/external-submission"),
+    ("POST", "/projects/{project_id}/external-submission/undo"),
+    ("POST", "/projects/{project_id}/auto-send/accept"),
+    ("POST", "/projects/{project_id}/boq-analysis/{analysis_id}/confirm"),
+}
+
+
+def _locked_routes():
+    import app.main
+    from app.core.revision_context import require_revision_context
+
+    def deps(dependant):
+        for d in dependant.dependencies:
+            yield d.call
+            yield from deps(d)
+
+    out = set()
+    for route in app.main.app.routes:
+        dependant = getattr(route, "dependant", None)
+        if dependant and require_revision_context in set(deps(dependant)):
+            for method in route.methods:
+                out.add((method, route.path))
+    return out
+
+
+def test_every_cost_pricing_and_proposal_write_is_behind_the_lock():
+    locked = _locked_routes()
+    missing = {r for r in LOCKED_ROUTES if r not in locked}
+    assert not missing, missing
+    # Uploads, the estimator file updates, notes and the revision routes
+    # themselves stay open (the modal and the rest of the page use them).
+    for open_route in (
+        ("POST", "/projects/{project_id}/files"),
+        ("POST", "/projects/{project_id}/send-file-updates"),
+        ("POST", "/projects/{project_id}/proposal-revisions/{revision_id}/generate"),
+        ("POST", "/projects/{project_id}/proposals/amounts/{gc_id}/approve"),
+    ):
+        assert open_route not in locked, open_route
+
+
+def test_lock_refuses_without_the_header_and_passes_with_it(env):
+    from app.core.revision_context import require_revision_context
+
+    assert require_revision_context(PID, None) is None  # no revision: unchanged
+    rev = _start(env)
+    for header in (None, "some-other-revision"):
+        with pytest.raises(HTTPException) as exc:
+            require_revision_context(PID, header)
+        assert exc.value.status_code == 409
+        assert exc.value.headers["X-Error-Code"] == "revision_open"
+        assert "Revision 1 is open" in exc.value.detail
+    assert require_revision_context(PID, rev["id"]) == rev["id"]
+    pr.cancel_revision(PID, rev["id"], "u-admin")
+    assert require_revision_context(PID, None) is None
+
+
+def test_locked_route_over_http(env, client, monkeypatch):
+    c, _who = client
+    _start(env)
+    for method, path in (("put", "markup"), ("put", "labor"), ("post", "proposals/generate")):
+        resp = getattr(c, method)(f"/projects/{PID}/{path}", json={})
+        assert resp.status_code == 409, path
+        assert resp.headers["x-error-code"] == "revision_open"
+        assert "happen in Revise proposal" in resp.json()["detail"]
+
+
+def test_revision_lock_authenticates_before_exposing_open_revision(env, client):
+    from app.core.deps import get_current_user
+    from app.main import app
+
+    c, _who = client
+    _start(env)
+    override = app.dependency_overrides.pop(get_current_user)
+    try:
+        response = c.put(f"/projects/{PID}/labor", json={})
+    finally:
+        app.dependency_overrides[get_current_user] = override
+    assert response.status_code == 401
+    assert "revision_open" not in response.headers.get("x-error-code", "")
+
+
+def test_router_only_executives_approve_costs(env, client):
+    c, who = client
+    _quote_world(env)
+    rev = _start(env)
+    rfqs_router.select_quote(PID, "r1", "q2", SimpleNamespace(id="u-admin", role=None))
+    for role in (Role.ESTIMATING_ADMIN, Role.ESTIMATING_ENGINEER_LABOR, Role.ACCOUNTANT):
+        who["role"] = role
+        resp = c.post(f"/projects/{PID}/proposal-revisions/{rev['id']}/approve-costs")
+        assert resp.status_code == 403, role
+    assert pr.costs_pending(env.one("proposal_revisions", id=rev["id"]))
+
+
+def test_files_uploaded_from_the_modal_join_the_revision(env):
+    rev = _start(env)
+    env.db.tables["project_files"].append({"id": "f-plan", "project_id": PID, "filename": "A1 rev.pdf"})
+    pr.tag_revision_file(PID, "not-the-open-one", "f-plan")
+    assert env.one("project_files", id="f-plan").get("proposal_revision_id") is None
+    pr.tag_revision_file(PID, rev["id"], "f-plan")
+    assert env.one("project_files", id="f-plan")["proposal_revision_id"] == rev["id"]
+    files = pr.overview(PID)["open"]["files"]
+    assert [f["id"] for f in files] == ["f-plan"]
+
+
+def test_quotes_added_during_a_revision_are_candidates_not_late(env):
+    from app.models.schemas import ManualQuoteIn
+
+    _quote_world(env)
+    _start(env)
+    user = SimpleNamespace(id="u-admin", role=Role.ESTIMATING_ENGINEER_MATERIALS)
+    row = rfqs_router.add_manual_quote(
+        PID, "r1",
+        ManualQuoteIn(amount=Decimal("8"), tax_included=True, tax_rate=Decimal("0")),
+        user,
+    )
+    assert not row.get("received_after_submission")
+    assert row["is_approved"] is True
+
+
+def test_cancel_keeps_cost_changes(env, monkeypatch):
+    _quote_world(env)
+    rev = _start(env)
+    rfqs_router.select_quote(PID, "r1", "q2", SimpleNamespace(id="u-admin", role=None))
+    pr.cancel_revision(PID, rev["id"], "u-admin")
+    assert env.one("quotes", id="q2")["is_selected"] is True  # not rolled back
+    assert env.one("proposal_revisions", id=rev["id"])["status"] == "cancelled"
+
+
+def test_costs_wire_shows_held_and_current_figures(env, monkeypatch):
+    rev = _start(env)
+    start = env.one("proposal_revisions", id=rev["id"])["start_verification"]
+    assert start and start["committed_at"]
+    costs = pr.overview(PID)["open"]["costs"]
+    assert costs["pending"] is False and costs["start"] and costs["current"]
+    assert set(costs["start"]["prices"]) >= {"material", "labor", "total"}
+
+
+def test_held_figures_are_what_each_gc_holds(env):
+    """'Held' is each GC's live proposal (its per-GC price), not the
+    project-level committed figure (the SND-05 step 5 report)."""
+    env.db.tables["proposal_sends"][0].update(material_amount="340000", labor_amount="31791.63")
+    _start(env)
+    costs = pr.overview(PID)["open"]["costs"]
+    held = {g["gc_id"]: g for g in costs["held_by_gc"]}
+    assert held["g1"]["total"] == "371791.63" and held["g2"]["total"] == "76000"
+    assert costs["held_total_range"] == {"min": "76000", "max": "371791.63"}
+    assert costs["current"]["prices"]["total"] != held["g1"]["total"]
