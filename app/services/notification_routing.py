@@ -211,6 +211,12 @@ EVENTS: tuple[Event, ...] = (
         audience=frozenset({EXE, EA, IT}), teams=frozenset({EXE}),
         types=("gc_pricing.approval_requested", "external_submission.requested"),
     ),
+    Event(
+        "revision_approval", "Approvals", "Revised proposal approval",
+        "Costs changed in an open revised proposal and need an Executive's approval.",
+        audience=frozenset({EXE}), teams=frozenset({EXE}),
+        types=("proposal_revision.approval_requested",),
+    ),
     # ── Revisions ──
     Event(
         "revision_round", "Revisions", "Estimator revisions",

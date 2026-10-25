@@ -1,7 +1,11 @@
 # Revise proposal (revised proposals after submission)
 
-Status: built 2026-10-23 on `urgent-updates`, migration 0178 applied to dev
-(BDR) only. Not committed, not deployed.
+Status: 0178 LIVE (BE 03d50b8 / FE 5d53f18). 0179 (the modal becomes the
+whole workspace: in-modal Executive approval, the lock, GC prices from the
+current figures) built 2026-10-24 on `urgent-updates`, applied to dev (BDR)
+only. Reviewed and validated 2026-10-25; staging/production rollout awaits
+explicit owner approval. Sections 5 and 8 describe 0179; where earlier sections
+mention the Verify bounce during a revision, 0179 replaces it.
 
 ## 1. The user story
 
@@ -23,9 +27,9 @@ Owner decisions (final):
 4. During a revision the team may change the cost side (quotes / selection,
    labor, markup), the per-GC numbers, the scope lines, and the extra files on
    the email.
-5. Any cost-side change goes through the Executive's re-Verify before anything
-   can be sent (the existing bounce). GC-specific numbers and scope lines do
-   not need re-verify (same as at Send Out).
+5. Any cost-side change needs Executive approval inside the modal before
+   anything can be sent. The bid stays Submitted. GC-specific numbers and
+   scope lines do not need cost approval (same as at Send Out).
 6. Every GC that holds a sent proposal is preselected; unchecked GCs keep
    their proposal. GCs added during the revision get a normal initial
    proposal at the revised numbers.
@@ -197,9 +201,10 @@ for a row with `revision_number > 0` is the revised body; the resend
 isolation check expects the `Rev N` filename and the markers; the resend
 reclaim accepts the stored subject as proof as well.
 
-No stage_events for any of this (analytics derives time-in-stage from
-consecutive stage_events). The re-verify bounce itself still writes its
-existing submitted -> verify -> submitted events, as it did before 0178.
+No stage_events for revision edits or sends (analytics derives time-in-stage
+from consecutive stage_events). Cost changes during an open revision stay
+at Submitted and need approval inside the modal. Outside a revision, the
+existing re-verify bounce still writes its normal stage events.
 Audit actions, labelled in `analytics_metrics`: `proposal.revision_start`,
 `proposal.revision_gcs`, `proposal.revision_generate`,
 `proposal.revision_generate_docs`, `proposal.revision_send`,
@@ -212,25 +217,85 @@ sent to the GC"); the live row's `email_log_id` keeps labelling the original.
 A proposal document that went out (any sent transmission, or a revision's
 prior or sent document) can no longer be deleted from Files.
 
-## 5. Lock matrix
+## 5. Lock matrix (0179: everything happens in the modal)
 
-| Edit | No revision, bid submitted | Revision open, head `submitted` | Revision open, head `verify` (cost change) |
-|---|---|---|---|
-| Scope lines save / approve | 409 (any sent row) | Open (only a send in flight refuses). A save on a draft a sent document was built from creates a NEW draft, so the record of what each GC holds is never rewritten and re-sends keep validating | Open |
-| GC amounts, GC in the revision (checked, revised doc not sent) | 409 (sent) | Writer edits directly, no 0118 approval | Writer edits directly |
-| GC amounts, GC unchecked or already sent in this revision | 409 | 409 | 409 |
-| GC amounts, GC added (no sent row) | Executive approval (0118) for non-executives | Writer edits directly | Writer edits directly |
-| Quote selection / approval / tax / override / delete / quotes-confirmed | 0138 late-quote lock, no bounce | Behaves like a pre-Verify edit: allowed and bounces to Verify | Same |
-| New quotes | Tagged `received_after_submission` (record only) | Ordinary candidates (not tagged late) | Same |
-| A quote tagged late before the revision | Record only | Selecting it as the winner clears the tag: it now prices the bid, so analytics count it | Same |
-| Labor, markup | Bounce to Verify (unchanged) | Bounce to Verify | Already at Verify |
-| Generate / send / mark (revision) | n/a | Allowed | Refused (waiting on re-verify) |
-| Send / mark (initial, added GC) | 0104/0118 rules | Allowed | Refused (waiting on re-verify) |
-| Win/loss outcome | Allowed | Refused | Refused (head not submitted) |
+While a revision is open, every change to the bid goes through the Revise
+proposal modal. The modal's API calls carry `X-Proposal-Revision: <open
+revision id>` (the frontend's revision context in `lib/api.ts`); the write
+routes below depend on `app/core/revision_context.require_revision_context`,
+which passes a request when no revision is open (nothing changes outside a
+revision) or when the header names the open revision, and answers **409
+`revision_open`** otherwise ("Revision N is open on this bid. All changes to
+this bid happen in Revise proposal."). A stale tab or the regular project page
+therefore cannot edit a bid under revision. Email-ingested quotes do not go
+through these routes and keep landing (as ordinary candidates).
 
-The window switch is `workflow.in_post_submission_window`, which answers False
-while a revision is open; every 0138 lock keys off it. Everything locks again
-the moment the revision is completed or cancelled.
+Locked (header required while open): labor PUT, markup PUT, Verify PUT and
+POST, RFQ create, bulk-send, nudges, reply manual quote, quote add / manual /
+delete / override / approval / select / deselect / quotes-confirmed / tax,
+general material PUT / tax / extract, proposal lines generate / manual / save
+/ approve, per-GC amounts PUT and the 0118 request, proposal generate / send /
+re-send / mark submitted / complete send out, external submission submit and
+undo, auto send send-now and accept, BOQ confirm. Not locked: file uploads (a
+header-carrying upload is tagged with the revision), the estimator routes
+(assign, send-file-updates, re-send), notes, project details and bid dates,
+project GCs add / remove, the 0118 approve / reject (an Executive can still
+decide a request that predates the revision), and the `/proposal-revisions`
+routes (scoped by URL). `tests/test_proposal_revisions.py` checks the route
+set against the app's routes.
+
+| Edit (from the modal) | No revision, bid submitted | Revision open |
+|---|---|---|
+| Scope lines save / approve | 409 (any sent row) | Open (only a send in flight refuses). A save on a draft a sent document was built from creates a NEW draft |
+| Quote selection / approval / tax / override / delete / quotes-confirmed | 0138 late-quote lock | Allowed; records a cost change on the revision (no Verify bounce) |
+| Labor, markup, general material | Bounce to Verify | Allowed; records a cost change on the revision (no Verify bounce) |
+| New quotes | Tagged `received_after_submission` (record only) | Ordinary candidates (not tagged late); a previously late quote that becomes the winner loses the tag |
+| GC amounts, GC in the revision (checked, not sent) | 409 (sent) | Writer edits directly, no 0118 approval; refused while a cost change waits on approval |
+| GC amounts, GC unchecked or already sent in this revision | 409 | 409 |
+| GC amounts, GC added (no sent row) | Executive approval (0118) for non-executives | Writer edits directly; refused while a cost change waits on approval |
+| Generate / send / mark (revision, and initial for an added GC) | n/a / 0104 rules | Refused while a cost change waits on the Executive's approval |
+| Win/loss outcome | Allowed | Refused |
+
+### Cost changes and the Executive's approval (0179)
+
+A cost-side edit during an open revision no longer bounces the send_out head:
+`workflow.maybe_reopen_verify_after_edit` hands it to
+`proposal_revisions.record_cost_change`, the bid stays at Submitted (no
+stage_events), the committed verifications snapshot is left as it is (it is
+what the GCs hold), and the revision stamps `costs_changed_at / by / reason`.
+The first change after an approval (or the first ever) notifies every
+Executive: type `proposal_revision.approval_requested`, routing event
+`revision_approval` (Approvals group; Executive bell + email + Teams by
+default), deep link `/projects/{id}?box=revise_proposal`. Writers can ask again
+(`POST /{rev}/request-approval`, at most every 10 minutes).
+
+Pending = `costs_changed_at` later than `costs_approved_at` (or never
+approved). While pending: revision generate / send / mark, an added GC's
+initial generate / send / mark, and per-GC price edits are refused.
+`POST /{rev}/approve-costs` (Executive / IT Admin) runs the Verify commit
+(`pricing.commit_verify`, with the same optional per-figure overrides the
+Verify panel takes) at the Submitted head, which re-stamps the snapshot
+without moving the stage, and stamps `costs_approved_at` with the moment the
+commit STARTED (written before the commit, rolled back if it fails), so an
+edit racing the approval leaves the revision pending again. The approval step
+shows `costs.held` (the snapshot at the start, `start_verification`),
+`costs.current` (the live upstream figures) and `costs.committed`.
+
+### GC prices in a revision (0179)
+
+GC prices in a revision look and work exactly like the initial GC Pricing
+step: computed from the current (approved) figures, then adjusted. At start,
+each checked GC's per-GC overrides are saved in `start_overrides` and CLEARED
+on project_gcs, so the defaults come from today's figures and a GC's old
+absolute override can never ride into the revision (the SND-05 Cactus Ridge
+bug). The figures the GC holds are shown only as a reference (the row's
+`current`, from the live proposal_sends stamps). Storage: the revision's
+working per-GC prices ARE the project_gcs overrides (one pricing pipeline,
+`amounts_overview` / `set_gc_amounts` / generation). Afterwards: a GC whose
+revised proposal went out keeps the overrides it was revised with (they
+describe what it now holds); a GC unchecked, or whose revision did not go out
+(Done or Cancel), gets its `start_overrides` back; re-checking clears them
+again. GCs added during the revision are priced in the same step.
 
 ### Added GCs and the 0118 approval (decision)
 
@@ -248,13 +313,17 @@ still works for anyone who prefers it.
 
 ## 6. Deliberately not built
 
+- The Verify panel's figure overrides are accepted by approve-costs, but the
+  approval step itself approves the figures as they are unless the modal
+  sends overrides (see section 8 for what the UI exposes).
+
 - No rollback of pricing on cancel (owner decision).
 - Revised documents are not regenerated automatically after a re-commit
   (`regenerate_after_commit` covers proposal_sends only). The overview flags a
   stale document (`stale_reason`: waiting_on_verify, lines_changed,
   amounts_changed, gc_removed) and the send fails closed on it.
-- No stage_events, no new notifications beyond the existing failure bell and
-  the re-verify ping (whose text now mentions the open revision).
+- No stage_events for revision edits or sends. Cost approval requests use
+  the revised proposal approval notification described in section 5.
 - No per-revision email body history beyond the row's stored body.
 - No "Revising" badge on the dashboard list (the project wire carries the
   flag; only the project page shows it).
@@ -281,10 +350,10 @@ document):
 
 ## 7. Tests
 
-`tests/test_proposal_revisions.py` (62 tests, plus the review follow-ups:
+`tests/test_proposal_revisions.py` covers the redesign and the v1 review follow-ups:
 GET reclaim, delivered-but-not-recorded, Done/Cancel while sending, the
 re-send block, per-GC figures restored, per-GC head re-check, router roles,
-start ordering): start guards, lock opening and
+start ordering; start guards, lock opening and
 closing (lines, GC amounts, quote selection), the bounce and the generate
 refusal until re-commit, checked-GC targeting with real rendered documents,
 the live row swap with the prior snapshot and the revision event, unchecked
@@ -299,3 +368,70 @@ sending, cancel refused once sent, claim refused on a closed revision, the
 swap leaving the submission record untouched); the endpoints and the real
 PostgREST error mapping were smoke-tested live on dev (reads, start, cancel;
 no email).
+
+
+## 8. The modal workspace (0179)
+
+Everything for Revision N happens in the Revise proposal modal, with a notice
+saying so; the project page shows its workflow panels read-only with a banner
+and a button back to the modal. Steps: revise the plans (uploads tagged with
+the revision, `project_files.proposal_revision_id`), re-send plans to the
+estimator (existing file-updates send), request new quotes (existing RFQ
+create and bulk-send), quotes, select vendors, labor, markup (all through the
+same endpoints with the revision header), Executive approval, GC pricing,
+scope lines, review and send / mark / Done / Cancel. Cancel keeps the cost
+changes (not rolled back; the per-GC figures go back to their start values).
+
+### Migration 0179 (data)
+
+For revisions open at release: `start_verification` is snapshotted, per-GC
+overrides a checked unsent GC carried in unchanged from before the revision
+are cleared (start values stay in `start_overrides`), and a legacy Verify
+bounce inside an open revision is returned to Submitted (with a closing
+stage event) as a pending cost change. On dev, SND-05 Rev 1 was migrated:
+Cactus Ridge's 123,456.78 / 78,000 overrides were cleared and its generated
+document now reads `amounts_changed` (generate again). Its
+`start_verification` is the snapshot after the user's re-commit, so its
+"At revision start" column shows those figures. The held proposal prices
+come from each GC's live `proposal_sends` row, including its per-GC adjustments.
+
+
+## 9. Redesign review and validation (2026-10-25)
+
+Independent review and fixes are recorded in
+`PROPOSAL_REVISIONS_REDESIGN_REVIEW.md`. The release candidate keeps approval
+pending until the committed pricing snapshot is saved, carries unapproved
+kept costs into a later revision, and persists pending state before cost
+mutations. The frontend guards unsaved wizard navigation, hides BOQ editing
+on the locked page, and requires regeneration before sending a stale document.
+A removed and re-added GC can reuse its retired initial proposal row without
+overwriting a concurrent retirement or send. Cancel explicitly explains that
+cost/scope edits stay and GC overrides return
+to their revision-start values.
+
+Final automated gates: backend 7,962 passed, 9 skipped; Ruff clean. Frontend
+TypeScript clean, ESLint zero errors with two existing warnings, 91 tests
+passed. Live dev checks: 18 authenticated reads, 29 mutation/approval checks,
+and five real HTTP checks (including four revision lock refusals). All 11
+wizard steps, the loaded project lock banner, held prices, stale-document
+readiness and an unsaved labor edit/discard were checked in the browser.
+
+Email delivery is separately gated: automatic approval review requires direct
+owner authorization for the prepared test email. Do not describe simulated
+Graph delivery as a real email delivery test. Staging/production migration
+0179, deployment, and the subsequent local build merges remain release steps.
+
+The final dev lifecycle also exercised revised-plan and extra-file uploads,
+initial generation for an added GC, revised generation, custom subject/body
+and attachment validation, revision mark-submitted, added-GC mark-submitted,
+automatic completion and resend of the revised document under its stored
+subject. Graph delivery was simulated throughout. A final read audit confirmed
+exact restoration of labor, markup, verification, GC links/overrides and
+stage events, plus preservation of every originally sent proposal's submission
+stamps. Test transmission history and its sent documents remain in dev.
+
+SND-05's three Rev 1 documents were regenerated after the Cactus Ridge fix:
+materials $59,364.92, total $240,919.47 for each, no stale reason. The GCs'
+held live proposals were not changed. RFQ and estimator emails were not sent.
+Evidence and reproducible dev drivers are in the workspace
+`scratch/redesign-review/`; the auth session is removed after testing.

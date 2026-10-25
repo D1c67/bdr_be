@@ -102,6 +102,10 @@ class ErrorCode(StrEnum):
     AI_ESTIMATING_SPEND_CAP = "ai_estimating_spend_cap"            # 409: the daily spend cap is reached (or this step would pass it)
     AI_ESTIMATING_UNAVAILABLE = "ai_estimating_unavailable"        # 503: the OpenAI route or the AI job queue is not available here
 
+    # ── Revise proposal (app/core/revision_context.py; docs/PROPOSAL_REVISIONS.md
+    # section 5). Same header contract: the code rides in `X-Error-Code`.
+    REVISION_OPEN = "revision_open"  # 409: a revision is open; this write belongs in Revise proposal
+
 
 class RateLimitScope(StrEnum):
     """Values emitted in the X-RateLimit-Scope header for a RATE_LIMITED 429.

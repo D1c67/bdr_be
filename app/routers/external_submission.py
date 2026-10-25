@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.deps import CurrentUser, require_writer
 from app.core.ratelimit import gc_pricing_request_rate_limit, outbound_email_rate_limit
+from app.core.revision_context import require_revision_context
 from app.models.schemas import (
     ExternalSubmissionDenyIn,
     ExternalSubmissionIn,
@@ -65,7 +66,7 @@ def get_wizard(project_id: str, user: CurrentUser = Depends(require_writer)):
 # A submit notifies and emails every materials engineer, labor engineer and
 # executive, and undo re-opens the project for another submit, so both share
 # the hourly outbound-email budget.
-@router.post("", dependencies=[Depends(outbound_email_rate_limit)])
+@router.post("", dependencies=[Depends(require_revision_context), Depends(outbound_email_rate_limit)])
 def submit(
     project_id: str, body: ExternalSubmissionIn, user: CurrentUser = Depends(require_writer)
 ):
@@ -75,7 +76,7 @@ def submit(
         _raise(exc)
 
 
-@router.post("/undo", dependencies=[Depends(outbound_email_rate_limit)])
+@router.post("/undo", dependencies=[Depends(require_revision_context), Depends(outbound_email_rate_limit)])
 def undo(
     project_id: str, body: ExternalSubmissionUndoIn, user: CurrentUser = Depends(require_writer)
 ):

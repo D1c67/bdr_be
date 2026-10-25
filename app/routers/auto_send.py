@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from app.core.deps import CurrentUser, require_internal, require_role
 from app.core.ratelimit import outbound_email_rate_limit
+from app.core.revision_context import require_revision_context
 from app.core.roles import AUTO_SEND_ACTION_ROLES, AUTO_SEND_PCT_ROLES, Role
 from app.services import auto_send
 from app.services.auto_send import AutoSendError
@@ -91,7 +92,7 @@ def get_project_auto_send(
 # outbound-email budget.
 @router.post(
     "/projects/{project_id}/auto-send/send-now",
-    dependencies=[Depends(outbound_email_rate_limit)],
+    dependencies=[Depends(require_revision_context), Depends(outbound_email_rate_limit)],
 )
 def post_send_now(
     project_id: str,
@@ -107,7 +108,7 @@ def post_send_now(
         _raise(exc)
 
 
-@router.post("/projects/{project_id}/auto-send/accept")
+@router.post("/projects/{project_id}/auto-send/accept", dependencies=[Depends(require_revision_context)])
 def post_accept(
     project_id: str,
     body: AutoSendAcceptIn,

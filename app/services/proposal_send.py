@@ -1111,6 +1111,11 @@ def set_gc_amounts(
     from app.services import proposal_revisions
 
     revision = proposal_revisions.open_revision(project_id, sb)
+    # GC prices in a revision are set from the figures the Executive
+    # approved; while a cost change waits on that approval they would be
+    # priced against figures about to move (0179).
+    if proposal_revisions.costs_pending(revision):
+        raise ProposalSendError(proposal_revisions.APPROVAL_PENDING_MESSAGE)
     if not (revision and gc_id in proposal_revisions.unlocked_gc_ids(project_id, revision, sb)):
         _assert_gc_not_sent(sb, project_id, gc_id)
     # Pending = locked at EVERY head: a re-verify bounce parks the head at
@@ -1656,6 +1661,9 @@ def generate_documents(
         raise ProposalSendError("Project not found", status_code=404)
 
     head = send_window_head(project_id)
+    # A GC added during an open revision is generated at the approved figures
+    # only (0179): refused while the revision's cost change waits.
+    _revision_guard(project_id, head)
     verification = _get_one("verifications", project_id)
     if not verification or not verification.get("committed_at"):
         raise ProposalSendError("Executive must verify/commit pricing first")
@@ -1781,14 +1789,15 @@ def generate_documents(
             "email_log_id": None,
         }
         if prior:
-            # Compare-and-set on the row we read: it must still be unsent AND
-            # still carry the document we are replacing. A send or mark that
+            # Compare-and-set on the exact status and document we read. This
+            # also reuses a retired row when its GC was added back. A send,
+            # retirement or mark that
             # claimed it meanwhile, or another generate that already swapped
             # the file, leaves nothing to update, so the delivered (or newer)
             # document is never reverted or orphaned.
             query = (
                 sb.table("proposal_sends").update(fields).eq("id", prior["id"])
-                .in_("status", ["generated", "failed"])
+                .eq("status", prior["status"])
             )
             query = (
                 query.eq("file_id", prior["file_id"])
@@ -3123,6 +3132,8 @@ def _revision_guard(project_id: str, head: str) -> str | None:
         return None
     if head == "verify":
         raise ProposalSendError(proposal_revisions.WAITING_ON_VERIFY_MESSAGE)
+    if proposal_revisions.costs_pending(revision):
+        raise ProposalSendError(proposal_revisions.APPROVAL_PENDING_MESSAGE)
     return revision["id"]
 
 

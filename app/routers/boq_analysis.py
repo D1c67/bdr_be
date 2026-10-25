@@ -21,6 +21,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from app.core.config import get_settings
 from app.core.deps import CurrentUser, require_writer
 from app.core.ratelimit import ai_rate_limit
+from app.core.revision_context import require_revision_context
 from app.core.supabase_client import get_supabase
 from app.models.schemas import BoqAnalysisStart, BoqConfirmIn, BoqDraftIn, BoqManualIn
 from app.services import (
@@ -305,7 +306,7 @@ def save_draft(
     return {"draft_json": draft_json, "draft_updated_at": now}
 
 
-@router.post("/{analysis_id}/confirm")
+@router.post("/{analysis_id}/confirm", dependencies=[Depends(require_revision_context)])
 def confirm_analysis(
     project_id: str,
     analysis_id: str,
@@ -340,14 +341,19 @@ def confirm_analysis(
         .execute()
     ).data
 
+    for group in body.groups:
+        if group.material_category_id not in names:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Unknown material category: {group.material_category_id}",
+            )
+    workflow.prepare_revision_cost_edit(
+        project_id, user.id, "BOQ re-confirmed - RFQ categories changed", sb
+    )
+
     created = []
     for group in body.groups:
         category_id = group.material_category_id
-        if category_id not in names:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST, f"Unknown material category: {category_id}"
-            )
-
         # One RFQ per (project, category) — reuse the existing row if present.
         existing = (
             sb.table("rfqs")

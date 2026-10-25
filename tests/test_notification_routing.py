@@ -26,7 +26,7 @@ def _teams_events(role: Role) -> set[str]:
 def test_teams_defaults_per_role():
     assert _teams_events(EXE) == {
         "digest.bids_due_today", "go_no_go", "verify", "call_in", "approval_requested",
-        "revision_round", "reverify_required", "personal",
+        "revision_approval", "revision_round", "reverify_required", "personal",
     }
     assert _teams_events(EA) == {
         "digest.bids_due_today", "digest.auto_send", "intake_needed", "rfp_review",

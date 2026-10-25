@@ -19,6 +19,7 @@ from app.core.ratelimit import (
     gc_pricing_request_rate_limit,
     outbound_email_rate_limit,
 )
+from app.core.revision_context import require_revision_context
 from app.core.roles import INTERNAL_ROLES, VERIFY_ROLES
 from app.core.supabase_client import get_supabase
 from app.models.schemas import (
@@ -85,7 +86,7 @@ def _wire_shape(draft: dict | None) -> dict | None:
 @router.post(
     "/proposal-lines",
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(ai_rate_limit)],
+    dependencies=[Depends(require_revision_context), Depends(ai_rate_limit)],
 )
 def start_lines_generation(
     project_id: str,
@@ -186,7 +187,7 @@ def _drop_active_generation(sb, project_id: str) -> None:
         logger.exception("Proposal manual entry: could not cancel the queued job")
 
 
-@router.post("/proposal-lines/manual", status_code=status.HTTP_201_CREATED)
+@router.post("/proposal-lines/manual", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_revision_context)])
 def start_manual_lines(
     project_id: str,
     body: ProposalManualIn,
@@ -280,7 +281,7 @@ def latest_draft(project_id: str, user: CurrentUser = Depends(get_current_user))
     return _wire_shape(draft)
 
 
-@router.put("/proposal-lines/{draft_id}/lines")
+@router.put("/proposal-lines/{draft_id}/lines", dependencies=[Depends(require_revision_context)])
 def save_lines(
     project_id: str,
     draft_id: str,
@@ -337,7 +338,7 @@ def _draft_backs_a_sent_document(sb, project_id: str, draft_id: str) -> bool:
     return False
 
 
-@router.post("/proposal-lines/{draft_id}/approve")
+@router.post("/proposal-lines/{draft_id}/approve", dependencies=[Depends(require_revision_context)])
 def approve_lines(
     project_id: str, draft_id: str, user: CurrentUser = Depends(_PA_PM)
 ):
@@ -485,7 +486,7 @@ def _amounts(body: ProposalAmountsIn) -> dict:
     }
 
 
-@router.put("/proposals/amounts/{gc_id}")
+@router.put("/proposals/amounts/{gc_id}", dependencies=[Depends(require_revision_context)])
 def set_proposal_amounts(
     project_id: str,
     gc_id: str,
@@ -508,7 +509,7 @@ def set_proposal_amounts(
 
 @router.post(
     "/proposals/amounts/{gc_id}/request",
-    dependencies=[Depends(gc_pricing_request_rate_limit)],
+    dependencies=[Depends(require_revision_context), Depends(gc_pricing_request_rate_limit)],
 )
 def request_proposal_amounts_change(
     project_id: str,
@@ -557,7 +558,7 @@ def reject_proposal_amounts_change(
         raise HTTPException(exc.status_code, str(exc)) from exc
 
 
-@router.post("/proposals/generate")
+@router.post("/proposals/generate", dependencies=[Depends(require_revision_context)])
 def generate_proposals(
     project_id: str,
     background: BackgroundTasks,
@@ -612,7 +613,7 @@ def email_preview(project_id: str, user: CurrentUser = Depends(get_current_user)
     }
 
 
-@router.post("/proposals/send", dependencies=[Depends(outbound_email_rate_limit)])
+@router.post("/proposals/send", dependencies=[Depends(require_revision_context), Depends(outbound_email_rate_limit)])
 def send_proposals(
     project_id: str,
     body: ProposalSendIn,
@@ -633,7 +634,7 @@ def send_proposals(
         raise HTTPException(exc.status_code, str(exc)) from exc
 
 
-@router.post("/proposals/resend", dependencies=[Depends(outbound_email_rate_limit)])
+@router.post("/proposals/resend", dependencies=[Depends(require_revision_context), Depends(outbound_email_rate_limit)])
 def resend_proposals(
     project_id: str,
     body: ProposalResendIn,
@@ -657,7 +658,7 @@ def resend_proposals(
         raise HTTPException(exc.status_code, str(exc)) from exc
 
 
-@router.post("/proposals/mark-submitted")
+@router.post("/proposals/mark-submitted", dependencies=[Depends(require_revision_context)])
 def mark_proposals_submitted(
     project_id: str,
     body: ProposalMarkSubmittedIn,
@@ -672,7 +673,7 @@ def mark_proposals_submitted(
         raise HTTPException(exc.status_code, str(exc)) from exc
 
 
-@router.post("/proposals/complete-send-out")
+@router.post("/proposals/complete-send-out", dependencies=[Depends(require_revision_context)])
 def complete_send_out(project_id: str, user: CurrentUser = Depends(_PA_PM)):
     """The PA's explicit "Done sending": flips the project to Submitted.
     Requires at least one sent proposal; GCs never sent are recorded in the
