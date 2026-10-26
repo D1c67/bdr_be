@@ -162,7 +162,7 @@ def test_rfp_create_messages_are_never_linkified(monkeypatch):
     ne._send_one(
         {"id": None, "user_id": "u1", "project_id": "p1", "type": "quote.received", "message": "Quote in",
          "metadata": {}},
-        profile, None,
+        {**profile, "role": Role.ESTIMATING_ENGINEER_MATERIALS.value}, None,
     )
     assert seen == [False, True]
     assert '<a href="https://evil.example"' not in sent[0]["body_html"]

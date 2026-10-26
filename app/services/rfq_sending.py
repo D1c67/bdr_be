@@ -27,7 +27,7 @@ from app.core.file_categories import category_label, exclude_source_set
 from app.services import email_branding, graph_email, office_preview, storage
 from app.services.datetime_format import _parse_ts, format_bid_datetime  # noqa: F401 - re-exported; formatter lives in datetime_format
 from app.services.email_branding import DOCUMENTS_LINK_SENTENCE, SIGNOFF
-from app.services.notifications import audit
+from app.services.notifications import audit, deliver
 from app.services.openai_text import vary_email_body
 
 logger = logging.getLogger(__name__)
@@ -636,10 +636,39 @@ def bulk_send(
         # Flip draft → sent without regressing quotes_in/closed.
         sb.table("rfqs").update({"status": "sent"}).eq("id", rfq_id).eq("status", "draft").execute()
 
+    if touched_rfqs:
+        _notify_initial_send(sb, project, results)
+
     return {
         "results": results,
         "drawings_delivery": "onedrive_link" if (drawings_link or explicit.used_link) else "attached",
     }
+
+
+def _notify_initial_send(sb, project: dict, results: list[dict]) -> None:
+    """One project-level notice, even across batches, retries and workers.
+
+    The RPC claims the project and inserts its recipient rows atomically.
+    Existing projects are seeded by the migration, so resends never become
+    an initial-send announcement. Notification failures must not make the
+    already-sent vendor batch look failed and invite another send.
+    """
+    sent = sum(r["status"] == "sent" for r in results)
+    if not sent:
+        return
+    failed = sum(r["status"] == "failed" for r in results)
+    message = f"RFQs initially sent to vendors for {project['name']}: {sent} email(s) sent."
+    if failed:
+        message += f" {failed} email(s) failed; review the RFQ send results."
+    try:
+        rows = sb.rpc(
+            "notify_initial_rfq_send",
+            {"p_project_id": project["id"], "p_message": message},
+        ).execute().data or []
+        if rows:
+            deliver(rows)
+    except Exception:  # noqa: BLE001 - vendor delivery already succeeded
+        logger.exception("Initial RFQ notification failed for project %s", project["id"])
 
 
 def _send_one(

@@ -63,6 +63,18 @@ Email defaults keep everything that emailed before. The audiences added on
 quotes / RFQ replies and numbers verified, the IT Admin for Go/No-Go and
 Verify.
 
+RFQ email routing (2026-10-25): Estimating Admins, Executives and IT Admins
+receive one `rfq.initial_send` announcement per project after its first
+successful vendor batch. Later batches and retries do not announce it again.
+Failed-only batches do not count; a partially successful batch reports its
+sent and failed totals. Migration 0181 seeds projects with existing sends,
+then atomically claims each new project and inserts its recipient notices.
+The new "RFQs initially sent" routing row defaults to email on and Teams off.
+These three roles never receive incoming RFQ reply, quote or late-quote
+emails, including old queued rows or stale routing overrides. Engineers keep
+their existing routing. The vendor email's configured shared bids-desk CC
+is separate from role notification routing.
+
 ## How a message gets to a person
 
 All app-only (no user sign-in), using the existing Graph app registration:

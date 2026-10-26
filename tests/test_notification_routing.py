@@ -74,6 +74,7 @@ def test_email_keeps_todays_sends_except_the_new_audiences():
         ("rfp_create.created", None, "go_no_go"),
         ("quote.received", None, "quote_received"),
         ("rfq.reply_received", None, "quote_received"),
+        ("rfq.initial_send", None, "rfq_initial_send"),
         ("estimate_revised", None, "revision_round"),
         ("note_mention", None, "personal"),
         ("due.internal_bid.1d", None, "due"),
@@ -189,6 +190,35 @@ def test_email_mirror_skips_roles_routed_off(monkeypatch):
     assert sent == []
     notification_email._send_one({**row, "type": "late_quote.received"}, profile, None)
     assert len(sent) == 1
+
+
+@pytest.mark.parametrize("role", [EA, EXE, IT])
+def test_rfq_oversight_emails_only_the_initial_send(monkeypatch, role):
+    # A stale queued row or a recipient whose role changed still must not
+    # get replies, even if an obsolete override asks to turn their email on.
+    monkeypatch.setattr(nr, "_overrides", lambda: {
+        (role.value, "quote_received"): {"email": True},
+        (role.value, "late_quote"): {"email": True},
+    })
+    sent = []
+    monkeypatch.setattr(
+        notification_email.graph_email, "send_mail", lambda **k: sent.append(k)
+    )
+    profile = {"role": role.value, "is_active": True, "email": "team@example.com"}
+    for type_ in ("rfq.reply_received", "quote.received", "late_quote.received"):
+        notification_email._send_one({"type": type_}, profile, None)
+    assert sent == []
+    notification_email._send_one({"type": "rfq.initial_send"}, profile, None)
+    assert len(sent) == 1
+    assert "RFQs sent to vendors" in sent[0]["subject"]
+
+
+@pytest.mark.parametrize("role", [EA, EXE, IT])
+def test_rfq_oversight_reply_email_cannot_be_enabled(table, role):
+    for event in ("quote_received", "late_quote"):
+        with pytest.raises(nr.RoutingError, match="does not receive"):
+            nr.set_cell(role.value, event, "email", True, "actor")
+    assert table.log == []
 
 
 def test_digest_teams_lines_are_short():

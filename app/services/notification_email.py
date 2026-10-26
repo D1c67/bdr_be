@@ -54,6 +54,7 @@ _TYPE_META: dict[str, tuple[str, str]] = {
     # the bell rows are created with mirror_email=False, so this entry only
     # matters if a future caller re-enables the mirror for this type.
     "estimate_revised": ("Estimator sent changes/revisions", "Review changes"),
+    "rfq.initial_send": ("RFQs sent to vendors", "View RFQs"),
     "rfq.reply_received": ("A vendor replied to an RFQ", "View quotes"),
     "quote.received": ("A vendor quote came in", "View quotes"),
     # A quote recorded after the bid was submitted (0138): on record only, the
