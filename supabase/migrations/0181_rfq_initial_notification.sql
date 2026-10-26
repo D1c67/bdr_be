@@ -7,6 +7,8 @@ create table if not exists rfq_initial_notifications (
 );
 alter table rfq_initial_notifications enable row level security;
 alter table rfq_initial_notifications force row level security;
+revoke all on table rfq_initial_notifications from public, anon, authenticated;
+grant all on table rfq_initial_notifications to service_role;
 
 -- Existing sends predate this announcement. Do not announce their next
 -- resend as an initial send; failed-only projects remain eligible.
