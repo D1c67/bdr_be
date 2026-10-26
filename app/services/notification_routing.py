@@ -125,6 +125,12 @@ EVENTS: tuple[Event, ...] = (
         types=("estimate_submitted",),
     ),
     Event(
+        "rfq_initial_send", "Bidding", "RFQs initially sent",
+        "Once per project, after the first successful batch of vendor RFQs.",
+        audience=frozenset({EXE, EA, IT}),
+        types=("rfq.initial_send",),
+    ),
+    Event(
         "quote_received", "Bidding", "Vendor quotes",
         "A vendor quote or RFQ reply came in.",
         audience=frozenset({LAB, MAT}), teams=frozenset({LAB}),
@@ -367,6 +373,15 @@ def wants(role: str | Role | None, event_key: str, channel: str) -> bool:
     event = EVENT_BY_KEY.get(event_key)
     if role is None or role not in ROUTED_ROLES or event is None:
         return True
+    # These oversight roles hear only the initial RFQ send by email. Keep
+    # this explicit because the compatibility fallback below permits email
+    # outside an event's audience (including an older queued bell row).
+    if (
+        channel == "email"
+        and role in {EXE, EA, IT}
+        and event_key in {"quote_received", "late_quote"}
+    ):
+        return False
     if role not in event.audience:
         # Only reachable when code sends an event to a role the catalog does
         # not list: keep today's behavior for email, never add Teams.

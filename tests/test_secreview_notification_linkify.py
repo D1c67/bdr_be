@@ -12,7 +12,10 @@ from app.services import email_branding as eb
 from app.services import notification_email as ne
 
 FRONTEND = "https://bdr.example.com"
-PROFILE = {"id": "u1", "full_name": "Pat", "email": "pat@g3.com", "role": "executive", "is_active": True}
+# Materials engineers receive every event exercised below, including vendor
+# quotes. Oversight roles intentionally no longer receive quote emails.
+PROFILE = {"id": "u1", "full_name": "Pat", "email": "pat@g3.com",
+           "role": "estimating_engineer_materials", "is_active": True}
 
 
 def _send(monkeypatch, type_, message, project=None):
