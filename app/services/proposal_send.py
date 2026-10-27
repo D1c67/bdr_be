@@ -2436,6 +2436,7 @@ def send_proposals(
             validate_pdf_isolation(
                 office_preview.extract_pdf_text(pdf_bytes),
                 gc_name=row["gc_name"],
+                scope_lines=draft.get("lines_json") or (),
                 other_gc_names=tuple(n for n in all_names if n != row["gc_name"]),
                 amounts=stamp_figures(_pdf_stamp) if _pdf_stamp is not None else (),
                 **section_validation_kwargs(_pdf_stamp, includes_generator),
@@ -2865,6 +2866,7 @@ def resend_proposals(
             validate_pdf_isolation(
                 office_preview.extract_pdf_text(pdf_bytes),
                 gc_name=row["gc_name"],
+                scope_lines=built_from,
                 other_gc_names=tuple(n for n in all_names if n != row["gc_name"]),
                 amounts=stamp_figures(_pdf_stamp) if _pdf_stamp is not None else (),
                 **resend_section_kwargs(row, _pdf_stamp, includes_generator),

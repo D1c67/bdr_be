@@ -1234,6 +1234,7 @@ def send_revision_documents(
             proposal_send.validate_pdf_isolation(
                 office_preview.extract_pdf_text(pdf_bytes),
                 gc_name=row["gc_name"],
+                scope_lines=draft.get("lines_json") or (),
                 other_gc_names=tuple(n for n in all_names if n != row["gc_name"]),
                 amounts=proposal_send.stamp_figures(stamp) if stamp is not None else (),
                 **proposal_send.section_validation_kwargs(stamp, fresh["includes_generator"]),
