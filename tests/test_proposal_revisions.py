@@ -1435,6 +1435,17 @@ def test_low_late_quote_selected_during_revision_counts_again(env):
     assert env.one("quotes", id="q2")["received_after_submission"] is False
 
 
+def test_late_quote_counts_as_lowest_only_while_a_revision_is_open(env):
+    _quote_world(env)
+    for q in env.db.tables["quotes"]:
+        q["tax_included"] = True
+    env.one("quotes", id="q2")["received_after_submission"] = True
+    user = SimpleNamespace(id="u-admin", role=Role.ESTIMATING_ENGINEER_MATERIALS)
+    assert Decimal(rfqs_router.list_quotes(PID, "r1", user)["lowest_amount"]) == Decimal("10")
+    _start(env)
+    assert Decimal(rfqs_router.list_quotes(PID, "r1", user)["lowest_amount"]) == Decimal("9")
+
+
 def test_low_removed_gc_does_not_block_generate_or_auto_complete(env):
     rev = _start(env)
     env.db.tables["project_gcs"] = [g for g in env.db.tables["project_gcs"] if g["gc_id"] != "g2"]

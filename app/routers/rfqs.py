@@ -669,9 +669,14 @@ def list_quotes(project_id: str, rfq_id: str, user: CurrentUser = Depends(get_cu
     # Lowest by tax-INCLUSIVE amount - comparing raw quotes would flatter a
     # vendor whose price doesn't yet carry sales tax. Display only: the lowest
     # quote prices nothing, the SELECTED one does. A quote received after the
-    # bid was submitted (0138) is on record only and never competes for it.
+    # bid was submitted (0138) is on record only and does not compete for it,
+    # except inside an open revised proposal, where it can be picked.
+    locked = _post_submission(sb, project_id)
     lowest = min(
-        (taxed_amount(q) for q in quotes if not q.get("received_after_submission")),
+        (
+            taxed_amount(q) for q in quotes
+            if not (locked and q.get("received_after_submission"))
+        ),
         default=None,
     )
     counts = _note_counts(sb, quotes)
@@ -1371,7 +1376,9 @@ def _candidate(quote: dict, note_count: int = 0) -> dict:
         # Resolved so the row can open a preview without a second lookup.
         "quote_file_name": (quote.get("project_files") or {}).get("filename"),
         "received_at": quote.get("received_at"),
-        # Recorded after the bid was submitted (0138): never selectable.
+        # Recorded after the bid was submitted (0138). Not selectable while the
+        # bid is locked; selectable inside an open revised proposal (0178),
+        # where select_quote clears the tag.
         "received_after_submission": bool(quote.get("received_after_submission")),
     }
 
