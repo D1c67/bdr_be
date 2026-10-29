@@ -739,6 +739,69 @@ def test_failed_approval_keeps_dispatch_blocked(env, monkeypatch):
     assert not env.one("proposal_revisions", id=rev["id"]).get("costs_approved_at")
 
 
+def _bounced_before_revision(env):
+    """A labor edit on the submitted bid (no revision open yet) bounced it to
+    Verify the classic way, uncommitting the snapshot (prod 26.10.7250)."""
+    env.db.tables["project_category_state"][-1]["current_task"] = "verify"
+    env.db.tables["projects"][0]["reverify_return_stage"] = "submitted"
+    env.db.tables["verifications"][0]["committed_at"] = None
+    env.db.tables["stage_events"] = [
+        {"project_id": PID, "category": "send_out", "from_stage": "submitted",
+         "to_stage": "verify", "actor_id": "u-exec", "note": "Labor numbers edited",
+         "entered_at": "2026-10-29T21:44:21+00:00"},
+    ]
+
+
+def _assert_approval_returns_to_submitted(env, rev_id):
+    with pytest.raises(ProposalSendError, match="re-verify"):
+        pr.generate_revision_documents(PID, rev_id, "u-admin")
+    pr.approve_costs(PID, rev_id, EXEC)
+    assert env.one("verifications", project_id=PID)["committed_at"]
+    assert env.one("project_category_state", category="send_out")["current_task"] == "submitted"
+    assert env.one("projects", id=PID)["reverify_return_stage"] is None
+    assert not pr.costs_pending(env.one("proposal_revisions", id=rev_id))
+    assert pr._require_dispatch_head(env.db, PID) == "submitted"
+    assert len(pr.generate_revision_documents(PID, rev_id, "u-admin")) == 2
+
+
+def test_revision_started_on_a_bounced_bid_takes_over_the_recommit(env, monkeypatch):
+    _commit_patches(monkeypatch)
+    _bounced_before_revision(env)
+    rev = _start(env)
+    stamped = env.one("proposal_revisions", id=rev["id"])
+    assert pr.costs_pending(stamped)
+    assert stamped["costs_change_reason"] == "Labor numbers edited"
+    assert stamped["costs_changed_by"] == "u-exec" and stamped["approval_requested_at"]
+    assert pr.overview(PID)["open"]["costs"]["pending"] is True
+    _assert_approval_returns_to_submitted(env, rev["id"])
+
+
+def test_revision_already_open_on_a_bounced_bid_is_healed(env, monkeypatch):
+    # Opened before the fix: nothing pending, so nothing could be approved and
+    # the locked Verify page could not re-commit either.
+    _commit_patches(monkeypatch)
+    _bounced_before_revision(env)
+    rev = _start(env)
+    env.db.tables["proposal_revisions"][0].update(
+        costs_changed_at=None, costs_changed_by=None, costs_change_reason=None,
+        approval_requested_at=None,
+    )
+    asks = []
+    monkeypatch.setattr(pr, "notify_role", lambda *a, **k: asks.append(a))
+    assert pr.overview(PID)["open"]["costs"]["pending"] is True
+    assert pr.overview(PID)["open"]["costs"]["pending"] is True
+    assert len(asks) == 1  # the second read does not ask the Executives again
+    _assert_approval_returns_to_submitted(env, rev["id"])
+
+
+def test_approve_heals_without_an_overview_read(env, monkeypatch):
+    _commit_patches(monkeypatch)
+    _bounced_before_revision(env)
+    rev = _start(env)
+    env.db.tables["proposal_revisions"][0].update(costs_changed_at=None)
+    _assert_approval_returns_to_submitted(env, rev["id"])
+
+
 def test_cost_edit_during_approval_stays_pending(env, monkeypatch):
     _commit_patches(monkeypatch)
     rev = _start(env)

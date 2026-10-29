@@ -398,6 +398,53 @@ def record_cost_change(project_id: str, actor_id: str | None, reason: str, sb=No
     return True
 
 
+def adopt_pending_reverify(project_id: str, rev: dict, sb=None) -> dict:
+    """A cost edit made BEFORE the revision started bounced the submitted bid
+    to Verify the classic way (reverify_return_stage = 'submitted'), and the
+    revision then opened on top of it. The open revision locks the Verify page
+    (409 revision_open), so that pending re-commit becomes the revision's own
+    cost approval: stamped here, the Executive approves it in Revise proposal,
+    and the approval's Verify commit returns the bid to Submitted. Without
+    this nothing is pending, nothing can be approved, and dispatch stays
+    blocked for good. No-op unless the head is at Verify with nothing pending.
+    Returns the (possibly updated) revision."""
+    client = sb if sb is not None else get_supabase()
+    if costs_pending(rev):
+        return rev
+    head, return_stage = _send_out_head(client, project_id)
+    if head != "verify" or return_stage != "submitted":
+        return rev
+    bounce = (
+        client.table("stage_events").select("actor_id, note")
+        .eq("project_id", project_id).eq("category", "send_out").eq("to_stage", "verify")
+        .order("entered_at", desc=True).limit(1).execute()
+    ).data or [{}]
+    reason = bounce[0].get("note") or "Pricing edited before the revision started"
+    query = client.table("proposal_revisions").update(
+        {
+            "costs_changed_at": datetime.now(timezone.utc).isoformat(),
+            "costs_changed_by": bounce[0].get("actor_id"),
+            "costs_change_reason": reason[:500],
+        }
+    ).eq("id", rev["id"]).eq("status", "open")
+    # Only the request that wins the stamp asks the Executives.
+    query = (
+        query.eq("costs_changed_at", rev["costs_changed_at"])
+        if rev.get("costs_changed_at")
+        else query.is_("costs_changed_at", "null")
+    )
+    if not query.execute().data:
+        return open_revision(project_id, client) or rev
+    audit(
+        bounce[0].get("actor_id"), "proposal.revision_costs_changed", "project", project_id,
+        {"revision_id": rev["id"], "revision_number": rev["revision_number"],
+         "reason": reason, "before_revision": True},
+    )
+    adopted = open_revision(project_id, client) or rev
+    _ask_executives(client, project_id, adopted, reason)
+    return open_revision(project_id, client) or adopted
+
+
 def _ask_executives(sb, project_id: str, rev: dict, reason: str | None) -> None:
     """Bell (plus email / Teams per the notification routing) to every
     Executive. Best effort: the cost edit is already saved."""
@@ -452,7 +499,7 @@ def approve_costs(project_id: str, revision_id: str, user, body=None, background
     from app.routers import pricing as pricing_router
 
     sb = get_supabase()
-    rev = _require_open(sb, project_id, revision_id)
+    rev = adopt_pending_reverify(project_id, _require_open(sb, project_id, revision_id), sb)
     if not costs_pending(rev):
         raise ProposalSendError("Nothing is waiting on approval: the costs have not changed.")
     started = datetime.now(timezone.utc).isoformat()
@@ -656,6 +703,7 @@ def start_revision(
     # if its revision does not go out) and cleared on the link (0179).
     for r in sent:
         _clear_overrides(sb, project_id, r["gc_id"])
+    rev = adopt_pending_reverify(project_id, rev, sb)
     audit(
         user_id, "proposal.revision_start", "project", project_id,
         {
@@ -1807,6 +1855,8 @@ def overview(project_id: str) -> dict:
     open_rev = next((r for r in revisions if r["status"] == "open"), None)
     open_wire = None
     if open_rev is not None:
+        # Heals a revision opened on a bid already bounced to Verify.
+        open_rev = adopt_pending_reverify(project_id, open_rev, sb)
         head, return_stage = _send_out_head(sb, project_id)
         try:
             fresh = _fresh_inputs(sb, project_id)
