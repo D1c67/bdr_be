@@ -505,7 +505,8 @@ def validate_output(
     `amounts` is the list of non-None formatted figures (material, present
     sections, labor, total). `removed_sections` names the section keys whose
     rows were removed ('gear', 'underground', 'low_voltage'): their labels
-    must not appear. The generator caption must appear iff includes_generator.
+    must not appear outside the expected scope lines. The generator caption
+    must appear iff includes_generator.
     Raises ProposalRenderError with a precise message on any failure."""
     parts = _visible_parts(docx_bytes)
     if "word/document.xml" not in parts:
@@ -561,12 +562,18 @@ def validate_output(
             "has no generator: stale or wrong render."
         )
 
-    # A section whose row was removed must leave no trace of its label.
+    # Scope may legitimately name an omitted pricing section (e.g. Low Voltage
+    # conduit only). Exempt one occurrence of each expected scope line, not
+    # every occurrence of its label: a leftover pricing row must still fail.
+    section_text = body
+    for line in scope_lines:
+        if line:
+            section_text = section_text.replace(line, "", 1)
     for key in removed_sections:
         label = SECTION_LABELS.get(key)
         if label is None:
             raise ProposalRenderError(f"Unknown pricing section key {key!r}.")
-        if label in body:
+        if label in section_text:
             raise ProposalRenderError(
                 f"Removed section label {label!r} still appears in the "
                 "document: stale or wrong render."
@@ -617,6 +624,7 @@ def validate_pdf_isolation(
     pdf_text: str,
     *,
     gc_name: str,
+    scope_lines: tuple[str, ...] | list[str] = (),
     other_gc_names: tuple[str, ...] | list[str] = (),
     amounts: tuple[str, ...] | list[str] = (),
     includes_generator: bool = False,
@@ -645,9 +653,7 @@ def validate_pdf_isolation(
                 f"Amount {amount!r} is missing from the rendered PDF — stale or wrong render."
             )
 
-    # Same section checks as validate_output, on the outbound artifact: the
-    # generator caption iff includes_generator, and no removed section's label
-    # (case-sensitive, so scope prose mentioning 'low voltage' never blocks).
+    # Same section checks as validate_output, on the outbound artifact.
     if includes_generator:
         if _norm_ws(GENERATOR_CAPTION) not in norm:
             raise ProposalRenderError(
@@ -659,11 +665,18 @@ def validate_pdf_isolation(
             f"Generator caption {GENERATOR_CAPTION!r} appears in the rendered "
             "PDF but this project has no generator: stale or wrong render."
         )
+    # Only the section-label check exempts known scope text. GC isolation,
+    # amount and caption checks still inspect the entire rendered PDF.
+    section_text = norm
+    for line in scope_lines:
+        normalized_line = _norm_ws(line)
+        if normalized_line:
+            section_text = section_text.replace(normalized_line, "", 1)
     for key in removed_sections:
         label = SECTION_LABELS.get(key)
         if label is None:
             raise ProposalRenderError(f"Unknown pricing section key {key!r}.")
-        if _norm_ws(label) in norm:
+        if _norm_ws(label) in section_text:
             raise ProposalRenderError(
                 f"Removed section label {label!r} still appears in the "
                 "rendered PDF: stale or wrong render."
