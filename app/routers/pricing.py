@@ -555,6 +555,71 @@ _SECTION_OF_NUMBER = {
 }
 
 
+_VERIFY_LABELS = {
+    "labor_amount": "Labor",
+    "materials_amount": "Materials",
+    "gear_amount": "Gear",
+    "underground_amount": "Underground",
+    "low_voltage_amount": "Low Voltage",
+    "labor_markup_amount": "Labor markup",
+    "materials_markup_amount": "Materials markup",
+    "gear_markup_amount": "Gear markup",
+    "underground_markup_amount": "Underground markup",
+    "low_voltage_markup_amount": "Low Voltage markup",
+}
+
+
+def _same_money(a: Decimal | None, b: Decimal | None) -> bool:
+    if a is None or b is None:
+        return a is None and b is None
+    return abs(a - b) <= Decimal("0.005")
+
+
+def stale_verify_figures(
+    originals: dict, saved: dict | None, body: VerifyOverrideIn, sections: dict[str, dict]
+) -> list[tuple[str, Decimal, Decimal | None]]:
+    """Pure: the submitted verify figures that match NEITHER the live upstream
+    figure NOR the saved verify row, as (key, submitted, live) triples.
+
+    The Verify panel shows read-only figures seeded from exactly those two
+    sources (saved row value, else live upstream), so a submitted figure that
+    matches neither was read from a stale page: the panel loaded before quotes
+    were picked or labor/markup were entered and never reloaded. Committing it
+    would silently freeze that stale number as an Executive override (prod
+    26.10.7274, 2026-11-02: every materials section committed at $0). Figures
+    of sections not on the project are skipped; the commit stores NULL there."""
+    out: list[tuple[str, Decimal, Decimal | None]] = []
+    for key in VERIFY_NUMBERS:
+        submitted = getattr(body, key)
+        if submitted is None:
+            continue
+        section = _SECTION_OF_NUMBER.get(key)
+        if section and not sections[section]["present"]:
+            continue
+        live = originals.get(key)
+        if _same_money(submitted, live):
+            continue
+        if saved is not None and _same_money(submitted, _num(saved, key)):
+            continue
+        out.append((key, submitted, live))
+    return out
+
+
+def _stale_message(stale: list[tuple[str, Decimal, Decimal | None]]) -> str:
+    def money(v: Decimal | None) -> str:
+        return "blank" if v is None else f"${v:,.2f}"
+
+    parts = [
+        f"{_VERIFY_LABELS[k]} shows {money(sub)} but is now {money(live)}"
+        for k, sub, live in stale
+    ]
+    return (
+        "The pricing changed since this page was loaded ("
+        + "; ".join(parts)
+        + "). Nothing was committed. Reload the page, review the figures, then commit again."
+    )
+
+
 def verify_delta_pairs(originals: dict, body: VerifyOverrideIn) -> dict:
     """Pure: original → final for each verify number, so the change is auditable."""
     out: dict[str, dict] = {}
@@ -629,6 +694,21 @@ def commit_verify(
     body = body or VerifyOverrideIn()
     originals = _verify_originals(project_id)
     sections = section_summary(_materials_rows(project_id))
+    # Refuse figures read from a stale page (they match neither the live
+    # upstream number nor the saved verify draft) before anything is written.
+    stale = stale_verify_figures(
+        originals, _get_one("verifications", project_id), body, sections
+    )
+    if stale:
+        audit(
+            user.id,
+            "pricing.commit_refused_stale",
+            "project",
+            project_id,
+            {k: {"submitted": str(sub), "live": str(live) if live is not None else None}
+             for k, sub, live in stale},
+        )
+        raise HTTPException(status.HTTP_409_CONFLICT, _stale_message(stale))
     snapshot: dict[str, str | None] = {}
     for key in VERIFY_NUMBERS:
         section = _SECTION_OF_NUMBER.get(key)
