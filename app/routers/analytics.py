@@ -8,6 +8,7 @@ project spent in a stage = when it left it minus when it entered). The current
 import uuid
 from collections import defaultdict
 from datetime import datetime
+from typing import Literal
 
 from urllib.parse import quote
 
@@ -245,17 +246,20 @@ def activity(
     project_id: str | None = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    actor_kind: Literal["all", "human", "assistant"] = "all",
     user: CurrentUser = Depends(get_current_user),
 ):
     """Audit trail (who did what / who inputted what) for the Activity sub-page.
 
-    Merges audit_log writes with stage transitions, filterable by person, action
-    and project. Read-only and gated to internal roles (the accountant included).
+    Merges audit_log writes with stage transitions, filterable by person, action,
+    project and actor kind (a person or their assistant, 0172). Read-only and
+    gated to internal roles (the accountant included).
     """
     _gate(user)
     try:
         return metrics.activity_log(
-            range_, date_from, date_to, actor_id, action, project_id, limit, offset
+            range_, date_from, date_to, actor_id, action, project_id, limit, offset,
+            actor_kind=actor_kind,
         )
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
@@ -274,6 +278,7 @@ def file_access_report(
     include_prefetch: bool = False,
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    actor_kind: Literal["all", "human", "assistant"] = "all",
     user: CurrentUser = Depends(get_current_user),
 ):
     """Who opened which file, and how often (file_access_events, 0161): a
@@ -303,6 +308,7 @@ def file_access_report(
         include_prefetch=include_prefetch,
         limit=limit,
         offset=offset,
+        actor_kind=actor_kind,
     )
 
 

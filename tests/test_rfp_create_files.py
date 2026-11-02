@@ -496,7 +496,7 @@ def test_execute_promotes_the_verified_files_records_the_rest_and_rings_once(db,
     assert store["deletes"] == [] and store["previews"] == []
     # One audit row per promoted file, source rfp.
     assert [(a[1], a[3], a[4]) for a in store["audits"]] == [
-        ("file.upload", r["id"], {"category": r["category"], "source": "rfp"}) for r in rows
+        ("file.upload", r["id"], {"category": r["category"], "source": "rfp", "project_id": P1}) for r in rows
     ]
     # One bell for the two drawings, at the end.
     assert store["bells"] == [(P1, 2)]

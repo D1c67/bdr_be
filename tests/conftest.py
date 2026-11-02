@@ -42,6 +42,11 @@ os.environ["ENVIRONMENT"] = "test"
 os.environ["BIDDING_ENABLED"] = "true"
 os.environ["PM_ENABLED"] = "true"
 os.environ["CERTIFIED_PAYROLL_ENABLED"] = "true"
+# The assistant defaults off; pin it so a dev .env that enables it can never
+# start the claim pass or the scheduler under the suite. Tests that exercise
+# the assistant patch get_settings themselves.
+os.environ["ASSISTANT_ENABLED"] = "false"
+os.environ["ASSISTANT_SCHEDULER_ENABLED"] = "false"
 # The Bid File Splitter flag defaults FALSE (experimental tool); pin it ON so
 # its router tests exercise real routes whatever the local .env says. Tests
 # that exercise the flag being off set it themselves (test_bid_splitter).
@@ -144,6 +149,10 @@ from app.core.config import get_settings  # noqa: E402
 
 get_settings.cache_clear()
 
+# The real (lru-cached) client factory, kept before any test patches the
+# module attribute, so the guard below can always empty its cache.
+from app.core.supabase_client import get_supabase as _REAL_GET_SUPABASE  # noqa: E402
+
 
 import pytest  # noqa: E402
 
@@ -168,3 +177,41 @@ def _no_revision_lock(monkeypatch):
     from app.core import revision_context
 
     monkeypatch.setattr(revision_context, "_open_revision", lambda project_id: None)
+
+
+@pytest.fixture(autouse=True)
+def _assistant_offboarding_defaults(monkeypatch):
+    """An MFA reset and a hard delete read the assistant's legal hold whatever
+    ASSISTANT_ENABLED says (app/routers/users.py _assistant_tables). Every
+    test runs as if the database had no assistant tables, so no user-admin
+    test reaches a real database; tests/test_users_assistant_offboarding.py
+    restores the real reader over its own stubs."""
+    from app.routers import users
+
+    monkeypatch.setattr(users, "_assistant_tables", lambda user_id: None)
+
+
+class RealSupabaseBlocked(RuntimeError):
+    """A test reached the real Supabase client (see _no_real_supabase)."""
+
+
+@pytest.fixture(autouse=True)
+def _no_real_supabase(monkeypatch):
+    """The local .env carries the dev project's service-role key, so any path
+    that calls the real get_supabase() (directly or through a module that
+    bound it by name, such as services/notifications) would write to the dev
+    database: a test once left assistant.offboarded audit rows and
+    ai_spend.cap_hit bells for real users there. Every client goes through
+    supabase_client.create_client behind the lru cache, so the cache is
+    emptied and the constructor refuses for the whole test. Tests fake the
+    client by patching get_supabase (or the writer) as before; a test that
+    forgets fails or degrades here instead of reaching the network."""
+    from app.core import supabase_client
+
+    def _blocked(*args, **kwargs):
+        raise RealSupabaseBlocked("tests must not reach the real Supabase; fake get_supabase or the writer")
+
+    _REAL_GET_SUPABASE.cache_clear()
+    monkeypatch.setattr(supabase_client, "create_client", _blocked)
+    yield
+    _REAL_GET_SUPABASE.cache_clear()

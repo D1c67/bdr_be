@@ -66,7 +66,7 @@ def test_run_command_refuses_without_enrollment(paths, capsys):
 
 def test_load_runners_finds_the_agent_types():
     runners, provider = load_runners()
-    assert set(runners) == {"rfi_from_email", "canary"}
+    assert set(runners) == {"rfi_from_email", "canary", "user_browser_read"}
     assert all(r.needs_browser and r.version == "1.0.0" for r in runners.values())
     assert callable(provider)
 
@@ -93,3 +93,16 @@ async def test_bdr_outage_inside_a_job_is_an_uncharged_interruption(bdr, worker,
     rec = bdr.jobs[job.job_id]
     assert rec.requeues[0]["reason"] == "interrupted"
     assert rec.resume_reason == "interrupted"
+
+
+async def test_personal_claim_refused_before_browser_runner_or_plaintext_spool(bdr, worker, paths):
+    ac, _ = make_clients(bdr, worker.token)
+    job = await hello_and_claim(bdr, ac, "canary")
+    job = job.model_copy(update={"principal_kind": "user"})
+    deps = _deps(bdr, worker, ac, paths, _RaisingRunner(AssertionError("must not run")))
+    outcome = await Slot("canary", 1, deps).run(job, TC)
+    assert outcome.detail == "principal_mismatch"
+    assert outcome.terminal == "none"
+    assert not deps.tracker.holds(job.job_id, job.epoch)
+    assert not list(paths.spool_dir.glob("**/*.jsonl"))
+    assert not bdr.calls_to("turns") and not bdr.calls_to("finish")

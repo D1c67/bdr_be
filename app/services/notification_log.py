@@ -69,7 +69,7 @@ _MIRROR_WINDOW = timedelta(minutes=5)
 _NOTIFICATION_SELECT = (
     "id, user_id, type, message, created_at, read_at, dismissed_at, rfq_id, email_log_id"
 )
-_EMAIL_SELECT = "id, to_addrs, subject, status, error, created_at, rfq_id, sent_by"
+_EMAIL_SELECT = "id, to_addrs, subject, status, error, created_at, rfq_id, sent_by, actor_kind"
 
 
 # ── small helpers ───────────────────────────────────────────────────────────
@@ -525,6 +525,8 @@ def _email_groups(
                 "recipients": [],
                 "_seen": set(),
                 "sent_by": email.get("sent_by"),
+                # 0172: the sender or their assistant (pre-0172 rows: human).
+                "actor_kind": email.get("actor_kind") or "human",
             }
             groups.append(group)
             open_groups[key] = group
@@ -562,7 +564,13 @@ def _finalize(group: dict, index: int, people: _People) -> dict:
         "subject": group.get("subject"),
         "category": group.get("category"),
         "sent_by": (
-            {"name": sender.get("full_name"), "role": sender.get("role")} if sender else None
+            {
+                "name": sender.get("full_name"),
+                "role": sender.get("role"),
+                "actor_kind": group.get("actor_kind") or "human",
+            }
+            if sender
+            else None
         ),
         "recipients": recipients,
         "counts": {

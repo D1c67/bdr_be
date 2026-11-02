@@ -29,6 +29,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.core import provenance
 from app.core.config import get_settings
 from app.core.deps import CurrentUser, get_current_user, require_writer
 from app.core.error_codes import RateLimitScope
@@ -1231,7 +1232,7 @@ def list_quote_notes(
     if quotes:
         notes = (
             sb.table("quote_notes")
-            .select(f"id, quote_id, body, author_id, created_at, {_NOTE_AUTHOR_JOIN}")
+            .select(f"id, quote_id, body, author_id, created_at, actor_kind, {_NOTE_AUTHOR_JOIN}")
             .in_("quote_id", [q["id"] for q in quotes])
             .order("created_at")
             .execute()
@@ -1280,7 +1281,8 @@ def add_quote_note(
     _quote_in_rfq(sb, rfq_id, quote_id)
     row = (
         sb.table("quote_notes")
-        .insert({"quote_id": quote_id, "author_id": user.id, "body": body.body})
+        .insert({"quote_id": quote_id, "author_id": user.id, "body": body.body,
+                 **provenance.fields(user.id)})
         .execute()
     ).data[0]
     audit(

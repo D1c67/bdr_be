@@ -121,6 +121,32 @@ async def lifespan(_: FastAPI):
         from app.services import auto_send_scheduler
 
         auto_send_task = asyncio.create_task(auto_send_scheduler.polling_loop())
+    # Assistant routines (docs/ASSISTANT_PHASE3_PLAN.md 3.4.1): refill, claim
+    # and deliver due occurrences, then the maintenance riders. Multi-worker
+    # safe: the claim RPC's row locks and the occurrence key make a double
+    # claim harmless, and each delivery channel is claimed once. Not tied to
+    # a sub-app (memory and the sweeps are not bidding; a recipe with Bidding
+    # off pauses itself) nor to Graph (chat and bell still deliver).
+    assistant_scheduler_task: asyncio.Task | None = None
+    if settings.assistant_enabled and settings.assistant_scheduler_enabled and settings.supabase_url:
+        from app.services import assistant_scheduler
+
+        assistant_scheduler_task = asyncio.create_task(assistant_scheduler.polling_loop())
+    assistant_calendar_task: asyncio.Task | None = None
+    if settings.assistant_enabled and settings.assistant_calendar_enabled and settings.supabase_url:
+        from app.services import assistant_calendar
+
+        assistant_calendar_task = asyncio.create_task(assistant_calendar.polling_loop())
+    # Assistant proactive router (docs/ASSISTANT_PHASE7_PLAN.md 6.1): tails the
+    # bells and the audit log, sweeps, routes facts into per-user inbox rows and
+    # sends their ledgered Teams and email. Multi-worker safe: correctness
+    # lives in Postgres (claim RPC, cursor fences, slot ledger, send ledger),
+    # so both uvicorn workers run it and nothing elects a leader.
+    assistant_proactive_task: asyncio.Task | None = None
+    if settings.assistant_enabled and settings.assistant_proactive_enabled and settings.supabase_url:
+        from app.services import assistant_proactive
+
+        assistant_proactive_task = asyncio.create_task(assistant_proactive.polling_loop())
     # Calling In (docs/CALLING_IN.md section 5): claims a call_in_entries row
     # when a project lands on a call list and notifies Executive + Estimating
     # Engineer Labor once, then closes the row when the project leaves.
@@ -315,7 +341,8 @@ async def lifespan(_: FastAPI):
     for task in (
         poll_task, reminder_task, digest_task, email_task, rfp_email_task,
         rfp_portal_task, llm_health_task, llm_queue_task, call_in_task, llm_target_task,
-        pm_rfi_sync_task, browser_agents_task, auto_send_task,
+        pm_rfi_sync_task, browser_agents_task, auto_send_task, assistant_scheduler_task, assistant_calendar_task,
+        assistant_proactive_task,
     ):
         if task:
             task.cancel()
@@ -606,7 +633,16 @@ def features(user: CurrentUser = Depends(get_current_user)) -> dict[str, bool]:
     AAL1_ALLOWED in app/core/deps.py) because the shell loads it alongside the
     profile, before the 2FA gate has been passed.
     """
-    return enabled_map(user.role)
+    flags = enabled_map(user.role)
+    # Per user, not per role (docs/ASSISTANT.md, Permissions item 15):
+    # ASSISTANT_ENABLED and assistant_settings.enabled and
+    # assistant_profiles.enabled and an internal role.
+    flags["assistant"] = assistant.features_flag(user)
+    # Phase 7 (docs/ASSISTANT_PHASE7_PLAN.md 10.1): the Inbox, and the admin
+    # block that stays visible with the company switch off.
+    flags["assistant_inbox"] = assistant_inbox.features_flag(user)
+    flags["assistant_proactive_admin"] = assistant_inbox.proactive_admin_flag(user)
+    return flags
 
 
 # Routers are mounted as each domain is implemented.
@@ -619,6 +655,19 @@ from app.routers import (  # noqa: E402
     ai_pricing,
     ai_spend,
     analytics,
+    analytics_evidence,
+    assistant,
+    assistant_inbox,
+    assistant_memory,
+    assistant_outlook,
+    assistant_phase5,
+    assistant_browser,
+    assistant_browser_views,
+    agent_worker_user,
+    assistant_mail,
+    assistant_inspection,
+    assistant_reports,
+    assistant_routines,
     auto_send,
     bid_drafts,
     bid_splitter,
@@ -648,6 +697,7 @@ from app.routers import (  # noqa: E402
     payroll_reports,
     payroll_settings,
     plans_reader,
+    plans_reader_assistant,
     plans_reader_checks,
     scope_policy as scope_policy_router,
     pm,
@@ -715,6 +765,27 @@ app.include_router(projects.router)
 app.include_router(notification_log.router)
 app.include_router(submittals.router)
 app.include_router(todos.router)
+# BDR Assistant (docs/ASSISTANT.md): the per-user assistant's API. On the
+# spine: require_internal on the router, and every route 404s for a caller
+# whose assistant is off (ASSISTANT_ENABLED, company and profile switches).
+# The worker's tool calls never come through here: they go through the
+# in-process shim (app/assistant/shim.py), which main.py never touches.
+app.include_router(assistant.router)
+# Phase 3: routines (recipes, schedules, runs, holidays) and memory. Same
+# spine rules; the recipe rows route carries the Bidding flag itself.
+app.include_router(assistant_routines.router)
+app.include_router(assistant_memory.router)
+# Phase 7: the proactive router's Inbox, Alerts and admin routes.
+app.include_router(assistant_inbox.router)
+app.include_router(assistant_outlook.router)
+app.include_router(assistant_phase5.router)
+app.include_router(assistant_browser.router)
+app.include_router(assistant_browser_views.router)
+app.include_router(agent_worker_user.router)
+app.include_router(assistant_mail.router)
+app.include_router(assistant_inspection.router)
+# Phase 4: report files (the build_report tool route, the person's download).
+app.include_router(assistant_reports.router)
 # AI model status — the sidebar indicator. Shared: the AI features it reports on
 # belong to Bidding and PM alike, so it must survive either being switched off.
 app.include_router(llm_status.router)
@@ -748,6 +819,8 @@ app.include_router(bid_splitter.router)
 # require_internal on the router itself. Not connected to the bidding
 # pipeline, so it must not ride the BIDDING flag (splitter precedent).
 app.include_router(plans_reader.router)
+# The assistant's plans routes (phase 4): same three gates on the router.
+app.include_router(plans_reader_assistant.router)
 # Same gates as plans_reader: the evidence (crop, review) and checks routes
 # carry PLANS_READER_ENABLED and the role gates on each route.
 app.include_router(ai_estimating_evidence.router)
@@ -818,6 +891,7 @@ app.include_router(deleted_projects.router, dependencies=_BIDDING)
 # shared audit_log, pm.* and cp.* rows included), so a future PM-only deployment
 # that wants it must split that one route out of routers/analytics.py — nothing
 # else in the router is reusable, every other metric is derived from bid stages.
+app.include_router(analytics_evidence.router, dependencies=_BIDDING)  # assistant evidence (phase 4)
 app.include_router(analytics.router, dependencies=_BIDDING)
 app.include_router(notes.router, dependencies=_BIDDING)
 app.include_router(files.router, dependencies=_BIDDING)

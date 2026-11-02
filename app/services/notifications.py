@@ -12,6 +12,7 @@ import logging
 from collections.abc import Iterable
 from typing import Any
 
+from app.core import provenance
 from app.core.roles import Role
 from app.core.supabase_client import get_supabase
 from app.services import notification_email, teams_alerts
@@ -52,8 +53,19 @@ BROWSER_AGENT_NOTIFICATION_TYPES = [
     "browser_agent.spend_alert",
 ]
 # A metadata key that alone scopes a dismissal (no project or rfq needed):
-# it names exactly one browser agent help request.
-_SELF_SCOPING_METADATA_KEYS = ("help_id",)
+# it names exactly one browser agent help request, one assistant approval
+# card, or one assistant conversation.
+_SELF_SCOPING_METADATA_KEYS = ("help_id", "approval_id", "assistant_conversation_id")
+
+
+def _with_provenance(metadata: dict | None) -> dict | None:
+    """The caller's metadata plus the assistant provenance pair when this
+    notification is created inside an assistant run (0172). Outside a run
+    the metadata is passed through untouched (None stays None)."""
+    extra = provenance.metadata_fields()
+    if not extra:
+        return metadata
+    return {**(metadata or {}), **extra}
 
 
 def deliver(rows: list[dict], *, email: bool = True) -> None:
@@ -115,6 +127,7 @@ def notify_role(
     ).data or []
     if not users:
         return 0
+    metadata = _with_provenance(metadata)
     rows = [
         {
             "user_id": u["id"],
@@ -170,6 +183,7 @@ def notify_roles(
     ).data or []
     if not users:
         return
+    metadata = _with_provenance(metadata)
     rows = [
         {
             "user_id": u["id"],
@@ -194,6 +208,7 @@ def notify_user(
     mirror_email: bool = True,
     metadata: dict | None = None,
 ) -> None:
+    metadata = _with_provenance(metadata)
     row = {
         "user_id": user_id,
         "project_id": project_id,
@@ -232,7 +247,9 @@ def dismiss_notifications(
     Requires a project_id or rfq_id scope so a dismissal can never sweep the
     whole table. The one exception: a `metadata_eq` carrying `help_id` (a
     browser agent help request, whose bells usually have no project) is a
-    scope of its own, since it names exactly one request. The email mirror is already sent and is intentionally left
+    scope of its own, since it names exactly one request; so are
+    `approval_id` (one assistant approval card) and
+    `assistant_conversation_id` (one assistant conversation). The email mirror is already sent and is intentionally left
     untouched.
 
     Exact types and each prefix run as separate UPDATEs (in_ / like) rather than
@@ -274,7 +291,8 @@ def audit(
     entity_id: str | None = None,
     payload: dict[str, Any] | None = None,
 ) -> None:
-    """Append an audit-log entry (used heavily for estimator activity)."""
+    """Append an audit-log entry (used heavily for estimator activity).
+    Inside an assistant run the row also carries the 0172 provenance pair."""
     get_supabase().table("audit_log").insert(
         {
             "actor_id": actor_id,
@@ -282,5 +300,6 @@ def audit(
             "entity": entity,
             "entity_id": entity_id,
             "payload": payload,
+            **provenance.fields(actor_id),
         }
     ).execute()

@@ -181,6 +181,31 @@ _TYPE_META: dict[str, tuple[str, str]] = {
         "Revised proposal costs need your approval",
         "Open Revise proposal",
     ),
+    # The per-user assistant's approval cards (docs/ASSISTANT_PHASE1_PLAN.md
+    # 3.15). Bell rows only today (mirror_email=False); every one opens the
+    # Activity tab of the assistant page (see _deep_link).
+    "assistant.approval_superseded": ("An assistant change needs a fresh look", "Review the change"),
+    "assistant.approval_failed": ("An assistant change did not go through", "See what happened"),
+    "assistant.approval_expired": ("An assistant change was not made", "See why"),
+    # Phase 2 split tasks (docs/ASSISTANT_PHASE2_PLAN.md 3.9.7): bell rows
+    # only, opening the same Activity tab, where the split card shows the task.
+    "assistant.browser_help": ("Your browser task needs help", "Open your browser task"),
+    "assistant.browser_task": ("Your browser task has an update", "Open your browser task"),
+    "assistant.task_finished": ("An assistant split finished", "See the result"),
+    "assistant.task_failed": ("An assistant split did not finish", "See what happened"),
+    # Phase 3 routines (docs/ASSISTANT_PHASE3_PLAN.md 3.11): bell rows only
+    # (mirror_email=False, so no Teams copy either); all four open the
+    # Routines tab of the assistant page (see _deep_link).
+    "assistant.schedule_delivered": ("Your assistant routine is ready", "Open Routines"),
+    "assistant.schedule_paused": ("An assistant routine was paused", "Open Routines"),
+    "assistant.schedule_resumed": ("An assistant routine resumed", "Open Routines"),
+    "assistant.schedule_ended": ("An assistant routine ended", "Open Routines"),
+    # Phase 7 proactive router (docs/ASSISTANT_PHASE7_PLAN.md 10.1): the
+    # router's own bell rows. They never pass through queue(); the labels
+    # reach the notification log and the router's Teams card and digest email
+    # through heading_for.
+    "assistant.inbox": ("An assistant item needs a look", "Open your inbox"),
+    "assistant.digest": ("Your assistant digest", "Open your inbox"),
 }
 
 # Browser agent notice -> page. Help notices open the help chat, job notices
@@ -211,6 +236,10 @@ _INTAKE_TYPE = "rfp_create.intake_needed"
 _NO_LINKIFY_PREFIX = ("rfp_create.", "rfp_processing.")
 # Auto send notices: their box link, and a subject with no em dash.
 _AUTO_SEND_PREFIX = "auto_send."
+# Assistant approval notices: the Activity tab, and a subject with no em dash.
+_ASSISTANT_PREFIX = "assistant."
+# Assistant routine notices: the Routines tab (checked before the prefix above).
+_ASSISTANT_SCHEDULE_PREFIX = "assistant.schedule_"
 
 
 def linkify_for(type_: str | None) -> bool:
@@ -289,6 +318,20 @@ def _deep_link(
     # job's), but their page is the agent's own, never the project hub.
     if (type_ or "").startswith("browser_agent.") and not is_estimator:
         return f"{base}{_browser_agent_path(type_ or '', metadata or {})}"
+    # Assistant approval notices carry the card's project, but the card lives
+    # in the owner's assistant Activity tab (estimators have no assistant).
+    # Routine notices open the Routines tab instead.
+    if (type_ or "").startswith(_ASSISTANT_SCHEDULE_PREFIX) and not is_estimator:
+        return f"{base}/assistant?tab=routines"
+    if type_ in {"assistant.browser_help", "assistant.browser_task"} and not is_estimator:
+        from uuid import UUID
+        try:
+            job_id = str(UUID(str((metadata or {}).get("browser_job_id"))))
+            return f"{base}/assistant/browser/{job_id}"
+        except (ValueError, TypeError):
+            return f"{base}/assistant/browser"
+    if (type_ or "").startswith(_ASSISTANT_PREFIX) and not is_estimator:
+        return f"{base}/assistant?tab=activity"
     if project_id:
         # PM notifications land on the PM view of the project. Estimators never
         # receive them (notify_role refuses estimator broadcasts), but the
@@ -387,7 +430,7 @@ def _subject(
         number, name = project.get("number"), project.get("name")
         tag = f"#{number} {name}" if number and name else (name or (f"#{number}" if number else ""))
         if tag:
-            if (type_ or "").startswith(_AUTO_SEND_PREFIX):
+            if (type_ or "").startswith((_AUTO_SEND_PREFIX, _ASSISTANT_PREFIX)):
                 # New subjects carry no em dash (the older types keep theirs).
                 return f"G3 BDR · {heading} · {tag}"
             return f"G3 BDR · {heading} — {tag}"

@@ -380,7 +380,8 @@ class Supervisor:
         self.heartbeat = self._heartbeat_factory(
             self.hb_client, self.tracker, self, boot_id=self.boot_id,
             config_version=lambda: self.config.config_version if self.config else 0,
-            slots_free=self.slots_free, loop=self._loop)
+            slots_free=self.slots_free, loop=self._loop,
+            principal_kind=lambda: self.config.worker.principal_kind if self.config else "org")
         self.heartbeat.start()
 
     async def _replay_loop(self) -> None:
@@ -399,6 +400,9 @@ class Supervisor:
         return self.config.types.get(agent_type) if self.config else None
 
     def _start_job(self, job: ClaimedJob) -> None:
+        if self.config is None or job.principal_kind != self.config.worker.principal_kind:
+            log.error("refused claimed job from another worker pool")
+            return
         tc = self._type_config(job.agent_type)
         # Register before anything awaits, so the next heartbeat lists it and
         # never mistakes it for an orphan.

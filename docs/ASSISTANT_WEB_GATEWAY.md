@@ -1,0 +1,11 @@
+# Phase 5 vetted web gateway contract
+
+The assistant never makes a direct HTTP request to a model-provided URL. A configured HTTPS gateway origin receives authenticated JSON POST requests. `ASSISTANT_WEB_ENABLED` defaults false; `ASSISTANT_WEB_API_URL` is an HTTPS origin without path, query or credentials; `ASSISTANT_WEB_API_KEY` stays server-side. No provider is configured by this build.
+
+The gateway operator must enforce `public-https-no-redirects-v1`: HTTPS on port443 only, reject credentials/fragments, resolve and pin only public globally routable IP addresses, reject all private/loopback/link-local/reserved destinations including mixed DNS answers, and refuse redirects before following them. Repeat DNS and destination validation on every operation; disable environment proxies and private network access at the gateway. A returned attestation alone is not evidence that an unreviewed provider implements this policy. Activate only after provider review and negative-destination testing. The BDR adapter independently rejects unsafe input and contradictory responses.
+
+`POST /search` accepts `{query,limit,policy}` (limit1-10) and returns `{policy,results:[{url,title,summary}]}`. Every result URL must be public HTTPS. Search query text must appear in the current or immediately previous user's own unquoted text. Search results never grant fetch authority.
+
+`POST /fetch` accepts `{url,max_bytes:524288,follow_redirects:false,policy}` and returns `{policy,url,redirects:[],public_destination:true,title,text}`. The URL must exactly equal the requested normalized URL. Any redirect, absent attestation or changed URL is refused. The request URL must be typed in the current or previous user message, with recognized quotes/forwards/code/HTML excluded. The BDR adapter accepts at most512KB of gateway response, exposes at most12000 content characters, times out after20 seconds, and performs no retries or fallback fetching.
+
+Both operations return citation URLs and tainted data to the assistant. Mailbox review excludes both tools at discovery and runtime. Provider errors, keys and response bodies never appear in public error text. Automated tests cover destination binding, private addresses, mixed DNS, redirects, attestation and size handling. Live provider validation remains an activation step until a gateway is selected.

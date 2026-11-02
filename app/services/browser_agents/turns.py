@@ -987,6 +987,8 @@ def handle_turn(lease: AgentLease, body: protocol.TurnRequest, *, worker_token: 
     job = _one(rpc("browser_agent_fence", {**lease.params(), "p_statuses": ["running", "waiting_help"]}))
     if not job:
         raise agent_error(ErrorCode.LEASE_LOST)
+    if job.get("principal_kind", "org") != "org":
+        raise agent_error(ErrorCode.IDOR, "user_browser_execution_unavailable")
     job_id = lease.job_id
     agent_type = str(job.get("agent_type"))
     turn_no = body.prev_turn_no + 1

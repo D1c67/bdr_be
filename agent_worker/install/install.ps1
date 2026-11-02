@@ -47,18 +47,26 @@
     Offline install: the release's {"manifest": ..., "signature": ...} JSON.
 
 .PARAMETER UseExistingPython
-    Use a machine-wide Python 3.12 found by the py launcher instead of installing
-    a private copy.
+    Use a protected machine-wide Python 3.12 x64 registered in HKLM instead of
+    installing a private copy.
+
+.PARAMETER PythonPath
+    Use this explicit python.exe under Program Files instead of reading HKLM.
+    Implies -UseExistingPython. The runtime must be administrator-owned, signed
+    by the Python Software Foundation, and include venv and ensurepip.
 #>
 [CmdletBinding()]
 param(
+    [ValidateSet('org', 'user')]
+    [string]$Pool = 'org',
     [string]$Code,
     [switch]$Reenroll,
     [string]$ApiBase,
     [string]$BundlePath,
     [string]$ReleaseJsonPath,
     [string]$InstallRoot = (Join-Path $env:ProgramData 'BDRAgent'),
-    [switch]$UseExistingPython
+    [switch]$UseExistingPython,
+    [string]$PythonPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -76,6 +84,23 @@ $EmbeddedReleaseB64  = '__RELEASE_JSON_B64__'
 
 $ServiceId   = 'BDRAgent'
 $ServiceUser = 'bdr-agent'
+if ($Pool -eq 'user') {
+    $ServiceId = 'BDRAgentUser'
+    $ServiceUser = 'bdr-agent-user'
+    if (-not $PSBoundParameters.ContainsKey('InstallRoot')) {
+        $InstallRoot = Join-Path $env:ProgramData 'BDRAgentUser'
+    }
+}
+# A second pool must never share credentials, writable data or a service account.
+$otherRoot = Join-Path $env:ProgramData $(if ($Pool -eq 'user') { 'BDRAgent' } else { 'BDRAgentUser' })
+$installFull = [IO.Path]::GetFullPath($InstallRoot).TrimEnd('\')
+$otherFull = [IO.Path]::GetFullPath($otherRoot).TrimEnd('\')
+if ($installFull.Equals($otherFull, [StringComparison]::OrdinalIgnoreCase) -or
+    $installFull.StartsWith($otherFull + '\', [StringComparison]::OrdinalIgnoreCase) -or
+    $otherFull.StartsWith($installFull + '\', [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Worker pool installation roots must not overlap.'
+}
+
 
 # Pinned downloads (sha256 measured 2026-10-19). Change only together with the hash.
 $PythonVersion = '3.12.10'
@@ -195,6 +220,65 @@ function Invoke-Launcher([string[]]$Arguments) {
     return @{ Code = $LASTEXITCODE; Output = ($out -join "`n") }
 }
 
+function Resolve-MachinePython([string]$ExplicitPath) {
+    # Read only the machine registration. py.exe can prefer a user-registered
+    # interpreter, so never execute it in an elevated installer to discover Python.
+    if ($ExplicitPath) {
+        if (-not [IO.Path]::IsPathRooted($ExplicitPath) -or $ExplicitPath -notmatch '^[A-Za-z]:\\' -or $ExplicitPath.Substring(2).Contains(':')) {
+            Stop-Install '-PythonPath must be an absolute local path to python.exe under Program Files.'
+        }
+        $found = $ExplicitPath
+    } else {
+        $key = 'HKLM:\SOFTWARE\Python\PythonCore\3.12\InstallPath'
+        if (-not (Test-Path -LiteralPath $key)) {
+            Stop-Install 'Prepare an administrator-managed Python 3.12 x64 under Program Files, then rerun with -PythonPath or -UseExistingPython.'
+        }
+        $registration = Get-Item -LiteralPath $key
+        $found = $registration.GetValue('ExecutablePath', '')
+        if (-not $found) { $found = Join-Path ($registration.GetValue('')) 'python.exe' }
+    }
+    $found = [IO.Path]::GetFullPath($found)
+    $prefix = [IO.Path]::GetFullPath($env:ProgramFiles).TrimEnd('\') + '\'
+    if (-not $found.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $found -PathType Leaf)) {
+        Stop-Install 'The shared Python runtime must be under Program Files. The other worker runtime will not be moved or copied.'
+    }
+    if ([IO.Path]::GetFileName($found) -ine 'python.exe') { Stop-Install 'The shared Python runtime executable must be named python.exe.' }
+    $root = Split-Path -Parent $found
+    $path = Get-Item -LiteralPath $root
+    $ancestors = @()
+    while ($path -and $path.FullName.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+        if ($path.Attributes -band [IO.FileAttributes]::ReparsePoint) { Stop-Install 'The shared Python runtime path must not contain reparse points.' }
+        $ancestors += $path
+        $path = $path.Parent
+    }
+    $writeMask = [Security.AccessControl.FileSystemRights]::WriteData -bor [Security.AccessControl.FileSystemRights]::AppendData -bor
+        [Security.AccessControl.FileSystemRights]::WriteAttributes -bor [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+        [Security.AccessControl.FileSystemRights]::Delete -bor [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+        [Security.AccessControl.FileSystemRights]::ChangePermissions -bor [Security.AccessControl.FileSystemRights]::TakeOwnership
+    $trusted = @('S-1-5-18', 'S-1-5-32-544') # SYSTEM, Administrators
+    $entries = $ancestors + @(Get-ChildItem -LiteralPath $root -Recurse -Force)
+    foreach ($entry in $entries) {
+        if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) { Stop-Install 'The shared Python runtime must not contain reparse points.' }
+        $acl = Get-Acl -LiteralPath $entry.FullName
+        $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+        if ($owner -notin $trusted) { Stop-Install 'The shared Python runtime must be owned by Administrators or SYSTEM.' }
+        foreach ($rule in $acl.Access) {
+            if ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) { continue }
+            if ($rule.AccessControlType -eq 'Allow' -and ($rule.FileSystemRights -band $writeMask)) {
+                $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+                if ($sid -notin $trusted) { Stop-Install 'The shared Python runtime must not be writable by non-administrators.' }
+            }
+        }
+    }
+    $signature = Get-AuthenticodeSignature -FilePath $found
+    if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notlike '*Python Software Foundation*') {
+        Stop-Install 'The shared Python executable must have a valid Python Software Foundation signature.'
+    }
+    $version = & $found -I -S -c 'import sys, sysconfig, venv, ensurepip; print(str(sys.version_info.major)+chr(46)+str(sys.version_info.minor)+chr(124)+sysconfig.get_platform()); ensurepip.version()'
+    if ($LASTEXITCODE -ne 0 -or $version -ne '3.12|win-amd64') { Stop-Install 'The shared Python runtime must be Python 3.12 x64 with venv and ensurepip.' }
+    return $found
+}
+
 # 0. Preconditions ----------------------------------------------------------------------------
 
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -214,6 +298,16 @@ if (-not $Api.StartsWith('https://')) { Stop-Install 'The BDR API address must s
 $existingService = Get-Service -Name $ServiceId -ErrorAction SilentlyContinue
 if ($existingService -and -not $Reenroll) {
     Stop-Install "BDR Agent is already installed. To re-enroll it with a new code, run this again with -Reenroll. To remove it, copy $InstallRoot\service\uninstall.ps1 to another folder and run it there as Administrator."
+}
+
+# Resolve prerequisites before replacing launchers, service credentials or files.
+$ExistingPython = $null
+if ($PythonPath) { $UseExistingPython = $true }
+if ($UseExistingPython) {
+    $ExistingPython = Resolve-MachinePython -ExplicitPath $PythonPath
+} elseif (-not (Test-Path -LiteralPath (Join-Path $InstallRoot 'python\python.exe')) -and
+          (Test-Path -LiteralPath (Join-Path $otherRoot 'python\python.exe'))) {
+    Stop-Install 'The other worker already owns a private Python 3.12 MSI runtime. Windows cannot install the same MSI into a second home. Prepare the official Python NuGet runtime under Program Files, then rerun with -PythonPath pointing to its python.exe. The existing worker was not changed.'
 }
 
 # 1. Release key fingerprint (nothing changes before the owner confirms) --------------------
@@ -268,7 +362,11 @@ if ($BundlePath) {
     Stop-Install 'This installer carries no release. Download a fresh installer from BDR, or pass -BundlePath and -ReleaseJsonPath.'
 }
 if ($BundleZip) {
-    $manifestSha = ((Get-Content -LiteralPath $ReleaseJson -Raw) | ConvertFrom-Json).manifest.sha256
+    $releaseManifest = ((Get-Content -LiteralPath $ReleaseJson -Raw) | ConvertFrom-Json).manifest
+    if ($Pool -eq 'user' -and [Version]$releaseManifest.version -lt [Version]'1.0.1') {
+        Stop-Install 'Personal workers require release 1.0.1 or later. Ask IT Admin to publish and select the personal-worker release, then download a fresh installer.'
+    }
+    $manifestSha = $releaseManifest.sha256
     if ((Get-Sha256 $BundleZip) -ne $manifestSha) { Stop-Install 'The downloaded release does not match its manifest (sha256).' }
     Write-Host 'Release downloaded; sha256 matches the manifest.'
 }
@@ -322,13 +420,7 @@ $PythonDir = Join-Path $InstallRoot 'python'
 $script:Python = Join-Path $PythonDir 'python.exe'
 $pythonInstalledByUs = $false
 if ($UseExistingPython) {
-    $found = & py.exe -3.12 -c 'import sys; print(sys.executable)' 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $found) { Stop-Install 'No Python 3.12 found by the py launcher.' }
-    $found = $found.Trim()
-    if (-not $found.StartsWith($env:ProgramFiles, [StringComparison]::OrdinalIgnoreCase)) {
-        Stop-Install "Python 3.12 at $found is not a machine-wide install under Program Files; the service user could not use it reliably. Run without -UseExistingPython."
-    }
-    $script:Python = $found
+    $script:Python = $ExistingPython
 } elseif (Test-Path -LiteralPath $script:Python) {
     $ver = & $script:Python -I -c 'import sys; print(*sys.version_info[:2], sep=chr(46))'
     if ($ver -ne '3.12') { Stop-Install "$script:Python is Python $ver, expected 3.12. Run $InstallRoot\service\uninstall.ps1 first (copy it to another folder, then run it)." }
@@ -409,7 +501,7 @@ $enrollOut = Join-Path $InstallRoot 'logs\enroll.out.txt'
 $enrollErr = Join-Path $InstallRoot 'logs\enroll.err.txt'
 $fpHex = $Fingerprint.Replace(' ', '')
 $enrollArgs = @('-I', '-X', 'utf8', '-m', 'bdr_agent', '--home', "`"$InstallRoot`"", 'enroll', '--api', $Api,
-                '--code', $Code, '--fingerprint', $fpHex, '--yes', '--release-key', "`"$WorkerKeyPath`"")
+                '--code', $Code, '--pool', $Pool, '--fingerprint', $fpHex, '--yes', '--release-key', "`"$WorkerKeyPath`"")
 if ($Reenroll) { $enrollArgs += '--force' }
 $p = Start-Process -FilePath $WorkerPython -ArgumentList $enrollArgs -Credential $Credential -LoadUserProfile `
     -WorkingDirectory $InstallRoot -Wait -PassThru -WindowStyle Hidden `
@@ -437,6 +529,7 @@ if (Test-Filled $EmbeddedWinswXmlB64) {
 } else {
     $template = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'winsw\BDRAgent.xml') -Raw
 }
+$template = $template.Replace('<id>BDRAgent</id>', '<id>' + $ServiceId + '</id>').Replace('<name>BDR Agent</name>', '<name>BDR Agent ' + $Pool + '</name>')
 $xml = $template.Replace('{{PYTHON}}', [Security.SecurityElement]::Escape($script:Python)).
     Replace('{{HOME}}', [Security.SecurityElement]::Escape($InstallRoot)).
     Replace('{{SERVICE_USER}}', $ServiceUser).
@@ -456,7 +549,7 @@ $Password = $null
 if ($installCode -ne 0) { Stop-Install "WinSW could not register the service (exit $installCode)." }
 
 $installInfo = @{ python = $script:Python; python_installed_by_us = $pythonInstalledByUs; python_version = $PythonVersion;
-                  installed_at = (Get-Date).ToUniversalTime().ToString('o'); api = $Api } | ConvertTo-Json
+                  installed_at = (Get-Date).ToUniversalTime().ToString('o'); api = $Api; pool = $Pool } | ConvertTo-Json
 [IO.File]::WriteAllText((Join-Path $ServiceDir 'install.json'), $installInfo, (New-Object Text.UTF8Encoding($false)))
 
 Start-Service -Name $ServiceId
@@ -478,5 +571,12 @@ if ($healthy) {
 } else {
     Write-Host "The service is installed but has not reported healthy yet. Check $launcherLog and $InstallRoot\logs\worker.log" -ForegroundColor Yellow
 }
-Write-Host 'Next: ask IT Admin to click Approve for this PC in BDR Settings > Browser agents,'
-Write-Host 'set its allowed types, then run Run self-test. It shows Online within about 30 seconds of approval.'
+Write-Host 'Next: ask IT Admin to click Approve for this PC in BDR Settings > Browser agents.'
+if ($Pool -eq 'user') {
+    Write-Host 'Allow Personal browser read for this personal worker. Run self-test is for organization workers only.'
+    Write-Host 'Complete personal browser setup in BDR before requesting a read from the assistant.'
+} else {
+    Write-Host 'Enable the Worker self-test type and allow it for this organization worker.'
+    Write-Host 'Click Run self-test once the worker shows Online.'
+}
+Write-Host "If it stays Offline, check the $ServiceId service and $InstallRoot\logs\worker.log for connection errors."

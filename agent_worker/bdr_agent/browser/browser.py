@@ -37,6 +37,11 @@ from .guard import Ceiling, Guard
 log = logging.getLogger("bdr_agent.browser")
 
 VIEWPORT = {"width": 1366, "height": 768}
+# Route.fetch uses Playwright's Node HTTP parser, not Chromium's parser. Keep
+# its response-header allowance bounded for sites with large CSP/cookie sets.
+# This affects only the driver child; inherited Node execution flags are not
+# forwarded, and the parent environment is restored before Chromium launches.
+DRIVER_NODE_OPTIONS = "--max-http-header-size=65536"
 LAUNCH_ARGS = (
     "--password-store=basic",
     "--use-mock-keychain",
@@ -96,10 +101,11 @@ class JobBrowser:
     """The browser side of one job: its context, its guard and the pages this
     code owns (one model page, at most one login page)."""
 
-    def __init__(self, context: Any, guard: Guard, *, agent_type: str):
+    def __init__(self, context: Any, guard: Guard, *, agent_type: str, asset_request: Any = None):
         self.context = context
         self.guard = guard
         self.agent_type = agent_type
+        self.asset_request = asset_request
         self.page: Any = None
         self.login_page: Any = None
         self._closed = False
@@ -142,11 +148,19 @@ class JobBrowser:
         self._closed = True
         self.login_page = None
         self.guard.release_login_page()
-        await self.guard.settle()
         try:
-            await self.context.close()
-        except Exception as exc:
-            log.debug("context close failed: %s", exc)
+            await self.guard.settle()
+        finally:
+            try:
+                await self.context.close()
+            except Exception as exc:
+                log.debug("context close failed: %s", exc)
+            finally:
+                if self.asset_request is not None:
+                    try:
+                        await self.asset_request.dispose()
+                    finally:
+                        self.asset_request = None
 
 
 class ChromiumProvider:
@@ -188,7 +202,15 @@ class ChromiumProvider:
         from playwright.async_api import async_playwright
 
         self._pw_cm = async_playwright()
-        self._pw = await self._pw_cm.__aenter__()
+        previous_node_options = os.environ.get("NODE_OPTIONS")
+        os.environ["NODE_OPTIONS"] = DRIVER_NODE_OPTIONS
+        try:
+            self._pw = await self._pw_cm.__aenter__()
+        finally:
+            if previous_node_options is None:
+                os.environ.pop("NODE_OPTIONS", None)
+            else:
+                os.environ["NODE_OPTIONS"] = previous_node_options
         await self._launch()
 
     async def _launch(self) -> None:
@@ -233,20 +255,38 @@ class ChromiumProvider:
 
     async def new_context(self, job: ClaimedJob) -> JobBrowser:
         browser = await self._ensure_browser()
-        guard = Guard(self._ceilings(job.agent_type, self.api_host))
+        if job.principal_kind == "user":
+            if job.agent_type != "user_browser_read" or not job.principal_user_id:
+                raise ValueError("Personal job principal invalid")
+            from ..agents.user_browser.guard import UserGuard
+            guard = UserGuard(self._ceilings(job.agent_type, self.api_host))
+            guard.bind_seed(job.input.get("url", ""))
+        else:
+            guard = Guard(self._ceilings(job.agent_type, self.api_host))
         context = await browser.new_context(
             viewport=VIEWPORT, accept_downloads=False, service_workers="block", locale="en-US",
             timezone_id="America/Los_Angeles", java_script_enabled=True,
             ignore_https_errors=self._ignore_https_errors)
+        asset_request = None
         try:
             context.set_default_timeout(30_000)
             context.set_default_navigation_timeout(45_000)
+            if job.principal_kind == "user":
+                options = {"ignore_https_errors": self._ignore_https_errors}
+                if self._proxy:
+                    options["proxy"] = self._proxy
+                asset_request = await self._pw.request.new_context(**options)
+                guard.asset_request = asset_request
             await guard.install(context)
-            jb = JobBrowser(context, guard, agent_type=job.agent_type)
+            jb = JobBrowser(context, guard, agent_type=job.agent_type, asset_request=asset_request)
             await jb.model_page()
             return jb
-        except Exception:
-            await context.close()
+        except BaseException:
+            try:
+                await context.close()
+            finally:
+                if asset_request is not None:
+                    await asset_request.dispose()
             raise
 
     async def close_context(self, context: Any) -> None:

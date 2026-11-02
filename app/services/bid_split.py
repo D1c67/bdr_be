@@ -51,8 +51,10 @@ from __future__ import annotations
 
 import copy
 import logging
+import sys
 import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import httpx
@@ -430,6 +432,50 @@ def stage_upload(sb, job: dict, filename: str, content: bytes, pages: int | None
     return frow
 
 
+def stage_copy(
+    sb, job: dict, filename: str, src_path: str, size_bytes: int, pages: int | None, *,
+    assistant_run_id: str | None, spend_reservation_id: str | None,
+) -> dict:
+    """`stage_upload` for bytes already in the bucket (the assistant's
+    staged PDFs, docs/ASSISTANT_PHASE2_PLAN.md 3.5.2): the same per-job file
+    cap, `bid_split_files` insert and job re-stamp, but the source object is
+    a server-side copy of `src_path`, and the row carries the assistant run
+    and spend hold that scope its run (`_assistant_scope`). A failed insert
+    removes the copy. Raises UploadRefused (400) when the job is full."""
+    s = get_settings()
+    existing = (
+        sb.table("bid_split_files").select("id").eq("job_id", job["id"]).execute()
+    ).data or []
+    if len(existing) >= s.bid_split_max_files_per_job:
+        raise UploadRefused(f"This job already holds {s.bid_split_max_files_per_job} files.", 400)
+    path = storage.build_bid_split_source_path(job["id"], filename)
+    storage.copy_file(src_path, path)
+    try:
+        frow = (
+            sb.table("bid_split_files")
+            .insert(
+                {
+                    "job_id": job["id"],
+                    "filename": filename,
+                    "storage_path": path,
+                    "size_bytes": size_bytes,
+                    "page_count": pages,
+                    "status": "pending",
+                    "assistant_run_id": assistant_run_id,
+                    "spend_reservation_id": spend_reservation_id,
+                }
+            )
+            .execute()
+        ).data[0]
+    except Exception:
+        storage.delete_file(path)
+        raise
+    sb.table("bid_split_jobs").update(
+        {"file_count": len(existing) + 1, "status": "processing", "completed_at": None}
+    ).eq("id", job["id"]).execute()
+    return frow
+
+
 def dispatch(background, file_id: str, user_id: str | None, forced_kind: str | None = None) -> None:
     """Queue one file run, degrading to inline dispatch exactly like BOQ.
     `background` is the request's BackgroundTasks (the inline fallback).
@@ -470,6 +516,212 @@ def dispatch(background, file_id: str, user_id: str | None, forced_kind: str | N
     background.add_task(run_file, file_id, forced_kind)
 
 
+# ── Assistant-started runs (docs/ASSISTANT_PHASE2_PLAN.md 3.5) ───────────
+#
+# split-drop stamps the assistant run and the spend hold on each file it
+# stages (stage_copy). A run of such a file, while its task is open and its
+# owner may still run assistant work, runs inside the assistant's
+# attribution (every llm_call_log row carries the user, the run and the
+# hold) and provenance (the project rows it files carry
+# actor_kind='assistant'). A human Retry or Reprocess clears both columns,
+# so that run is the person's. Every other run is untouched: one file-row
+# read, then nothing.
+
+ASSISTANT_OPEN_TASK_STATUSES = ("pending", "waiting_external", "running")
+# Seconds between re-wakes while a running continuation absorbs the wake.
+ASSISTANT_WAKE_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
+# app/assistant/continue_job PRIORITY and MAX_ATTEMPTS (this module never
+# imports it; a test pins the copies).
+ASSISTANT_CONTINUE_PRIORITY = 45
+ASSISTANT_CONTINUE_MAX_ATTEMPTS = 3
+MSG_ASSISTANT_REVOKED = "assistant access was revoked"
+MSG_HOLD_EXHAUSTED = "the spend hold for this split is used up"
+
+
+class AssistantAccessRevoked(ValueError):
+    """The owner of an assistant-started split may no longer run it. A
+    ValueError, so the queue fails the file once with this sentence."""
+
+
+class SplitHoldExhausted(ValueError):
+    """The spend hold of an assistant-started split is used up or closed:
+    no further model call starts (a ValueError: the queue does not retry)."""
+
+
+def _assistant_run(file_id: str) -> tuple[dict, dict] | None:
+    """`(file row, job row)` when this file's run is the assistant's: the
+    file carries `assistant_run_id`, its job was started by an assistant
+    (`assistant_task_id`, `created_by`, actor_kind 'assistant') and the
+    task is still open. None otherwise."""
+    sb = get_supabase()
+    files = (
+        sb.table("bid_split_files").select("id, job_id, assistant_run_id, spend_reservation_id")
+        .eq("id", file_id).limit(1).execute()
+    ).data or []
+    if not files or not files[0].get("assistant_run_id") or not files[0].get("job_id"):
+        return None
+    jobs = (
+        sb.table("bid_split_jobs").select("id, assistant_task_id, created_by, actor_kind")
+        .eq("id", files[0]["job_id"]).limit(1).execute()
+    ).data or []
+    if not jobs:
+        return None
+    job = jobs[0]
+    if not job.get("assistant_task_id") or not job.get("created_by") or job.get("actor_kind") != "assistant":
+        return None
+    from app.assistant import repo
+
+    task = repo.get_task(str(job["created_by"]), str(job["assistant_task_id"]))
+    if task is None or task.get("status") not in ASSISTANT_OPEN_TASK_STATUSES:
+        return None
+    return files[0], job
+
+
+# assistant_tasks.failure_reason values of an owner stop (app/assistant/access
+# OWNER_CHANGED and FEATURE_OFF; this module never imports it at load).
+ASSISTANT_OWNER_STOP_REASONS = ("owner_changed", "feature_off")
+
+
+def _assistant_owner_stopped(file_id: str) -> bool:
+    """True when this assistant-started file's task was failed because its
+    owner may no longer run assistant work (3.5.1, owner default 8.17): the
+    continuation fails the task first and then cancels the queued runs, and
+    a canceled file must not be filed whole into the project. A human retry
+    clears assistant_run_id, so the human fallback is unaffected. A read
+    failure answers False (the run scope's own owner check still applies)."""
+    try:
+        sb = get_supabase()
+        files = (
+            sb.table("bid_split_files").select("id, job_id, assistant_run_id")
+            .eq("id", file_id).limit(1).execute()
+        ).data or []
+        if not files or not files[0].get("assistant_run_id") or not files[0].get("job_id"):
+            return False
+        jobs = (
+            sb.table("bid_split_jobs").select("id, assistant_task_id, created_by, actor_kind")
+            .eq("id", files[0]["job_id"]).limit(1).execute()
+        ).data or []
+        if not jobs or not jobs[0].get("assistant_task_id") or not jobs[0].get("created_by"):
+            return False
+        from app.assistant import repo
+
+        task = repo.get_task(str(jobs[0]["created_by"]), str(jobs[0]["assistant_task_id"]))
+    except Exception:  # noqa: BLE001 - an unreadable task never blocks the fallback
+        logger.warning("bid_split: the assistant task of %s could not be read", file_id, exc_info=True)
+        return False
+    return bool(task) and task.get("status") == "failed" and task.get("failure_reason") in ASSISTANT_OWNER_STOP_REASONS
+
+
+@contextmanager
+def _assistant_scope(file_id: str):
+    """The attribution and provenance scope of an assistant-started run
+    (3.5.1). Raises AssistantAccessRevoked before anything runs when the
+    owner may no longer run assistant work. A read failure leaves the run
+    unscoped (accounting never blocks a run); never nests."""
+    from app.core import provenance
+
+    try:
+        found = _assistant_run(file_id)
+    except Exception:  # noqa: BLE001 - an unreadable scope never blocks a run
+        logger.warning("bid_split: the assistant scope of %s could not be read", file_id, exc_info=True)
+        found = None
+    if found is None or provenance.current() is not None:
+        yield
+        return
+    frow, job = found
+    owner = str(job["created_by"])
+    run_id = str(frow["assistant_run_id"])
+    from app.assistant import access, llm_messages
+
+    try:
+        problem = access.owner_problem(owner, sub_app="bidding")
+    except Exception:  # noqa: BLE001 - a transport failure is not a verdict
+        logger.warning("bid_split: the owner check of %s could not be read", file_id, exc_info=True)
+        problem = None
+    if problem is not None:
+        raise AssistantAccessRevoked(MSG_ASSISTANT_REVOKED)
+    with llm_messages.attributed(owner, run_id, reservation_id=frow.get("spend_reservation_id")):
+        with provenance.acting_as_assistant(owner, run_id):
+            yield
+
+
+def _hold_guard() -> None:
+    """Before each model call: inside an assistant split scope whose spend
+    hold is closed, expired or used up (logged cost >= a positive hold),
+    refuse the call (3.5.1). A zero hold (self-hosted route) has no cost
+    cap but still stops once closed or expired. A no-op outside the scope; a read failure lets the call run
+    (the admission already capped the hold)."""
+    module = sys.modules.get("app.assistant.llm_messages")
+    attribution = module.current_attribution() if module is not None else None
+    if attribution is None or not attribution.reservation_id:
+        return
+    try:
+        from app.assistant import repo
+
+        usage = repo.hold_usage(attribution.user_id, attribution.reservation_id)
+    except Exception:  # noqa: BLE001 - accounting never blocks a run
+        logger.warning("bid_split: hold %s could not be read", attribution.reservation_id, exc_info=True)
+        return
+    if usage is None:
+        return
+    if usage.get("status") != "active":
+        raise SplitHoldExhausted(MSG_HOLD_EXHAUSTED)
+    # An expired hold no longer counts in the admission (expires_at > now()),
+    # so the run may not keep spending it. An unreadable stamp never blocks.
+    expires = _parse_ts(usage.get("expires_at"))
+    if expires is not None and expires <= datetime.now(timezone.utc):
+        raise SplitHoldExhausted(MSG_HOLD_EXHAUSTED)
+    # A zero hold is the self-hosted route's unpriced split: no cost cap.
+    amount = usage.get("amount_usd")
+    if amount is not None and amount > 0 and usage["logged_usd"] >= amount:
+        raise SplitHoldExhausted(MSG_HOLD_EXHAUSTED)
+
+
+def _wake_assistant_task(job_id: str | None) -> None:
+    """When the job was started by an assistant and has settled, enqueue
+    assistant_continue for its task. Fired after this file's project rows
+    exist; the continuation still verifies every file (a sibling file's
+    resync may still be running). Best effort, never raises."""
+    if not job_id:
+        return
+    try:
+        rows = (
+            get_supabase().table("bid_split_jobs").select("id, status, assistant_task_id, created_by")
+            .eq("id", job_id).limit(1).execute()
+        ).data or []
+        if not rows:
+            return
+        job = rows[0]
+        task_id, owner = job.get("assistant_task_id"), job.get("created_by")
+        if not task_id or not owner or job.get("status") == "processing":
+            return
+        from app.services import llm_queue
+
+        def wake() -> dict:
+            return llm_queue.enqueue(
+                llm_queue.JOB_ASSISTANT_CONTINUE,
+                target_id=str(task_id),
+                payload={"task_id": str(task_id), "user_id": str(owner)},
+                created_by=str(owner),
+                priority=ASSISTANT_CONTINUE_PRIORITY,
+                max_attempts_override=ASSISTANT_CONTINUE_MAX_ATTEMPTS,
+            )
+
+        # A continuation already RUNNING absorbs this enqueue (the partial
+        # unique index covers queued and running) and may have read the
+        # progress before this file's rows landed: wait for it to end and
+        # wake again, so one check always follows these rows. Bounded; the
+        # continuation's own second read and the lazy repair cover the rest.
+        job = wake()
+        for delay in ASSISTANT_WAKE_RETRY_DELAYS:
+            if not isinstance(job, dict) or job.get("status") != "running":
+                return
+            time.sleep(delay)
+            job = wake()
+    except Exception:  # noqa: BLE001 - lazy repair wakes it on the next read
+        logger.exception("bid_split: waking the assistant task of job %s failed", job_id)
+
+
 # ── Domain row marks (queue adapter) ─────────────────────────────────────
 
 
@@ -500,16 +752,28 @@ def _after_failed(file_id: str, error: str | None, job_id: str | None = None) ->
     a dropped PDF is never lost). A plans_reader job never reaches rfp_split:
     its AI Estimating run is told the file settled instead
     (docs/PLANS_READER.md 7). No-op for every other job. Best effort: the
-    failed mark stands whatever happens here."""
+    failed mark stands whatever happens here.
+
+    An assistant-started file files whole inside the assistant scope, or
+    not at all when its owner may no longer run assistant work (the source
+    copy stays in the job's prefix); either way its task is woken."""
     if _settle_without_project(file_id, job_id):
+        return
+    if _assistant_owner_stopped(file_id):
+        logger.warning("bid_split: %s not filed whole: its assistant owner may no longer run it", file_id)
+        _wake_assistant_task(job_id)
         return
     try:
         from app.services import rfp_split
 
-        # A reason, never None (None reads as "split, then the package sent").
-        rfp_split.file_project_job_whole_quietly(file_id, error or "", sb=get_supabase())
+        with _assistant_scope(file_id):
+            # A reason, never None (None reads as "split, then the package sent").
+            rfp_split.file_project_job_whole_quietly(file_id, error or "", sb=get_supabase())
+    except AssistantAccessRevoked:
+        logger.warning("bid_split: %s not filed whole: its assistant owner may no longer run it", file_id)
     except Exception:  # noqa: BLE001
         logger.exception("bid_split: whole-file fallback failed for %s", file_id)
+    _wake_assistant_task(job_id)
 
 
 def refresh_job(job_id: str, _recheck: bool = True) -> None:
@@ -593,6 +857,8 @@ def _notify_job_finished(job: dict, status: str, files: list[dict]) -> None:
     wherever AI Estimating runs alone."""
     if job.get("source") in NO_PROJECT_EFFECT_SOURCES:
         return
+    if job.get("assistant_task_id"):
+        return  # the assistant's task_finished / task_failed bell replaces it (3.5.3)
     user_id = job.get("created_by")
     if not user_id:
         return
@@ -795,6 +1061,7 @@ def _triage(
     for attempt in (1, 2):
         started = time.monotonic()
         try:
+            _hold_guard()
             llm_calls += 1
             result = llm.complete_images_json(
                 "bid_split",
@@ -940,6 +1207,7 @@ def _classify_pages(
         for attempt in (1, 2):
             started = time.monotonic()
             try:
+                _hold_guard()
                 llm_calls += 1
                 result = llm.complete_images_json(
                     "bid_split",
@@ -1396,6 +1664,7 @@ def _name_segments(
     )
     started = time.monotonic()
     try:
+        _hold_guard()  # a used-up hold falls back to the generated names
         result = llm.complete_json(
             "bid_split",
             system=_NAME_SYSTEM,
@@ -1518,6 +1787,16 @@ def _set_kind(
 
 
 def execute(file_id: str, forced_kind: str | None = None) -> None:
+    """Run one file. A file of a job the assistant started runs inside the
+    assistant's attribution (llm_call_log user, run and hold) and provenance
+    scope (rows it files carry actor_kind='assistant')."""
+    if forced_kind is not None and forced_kind not in SPLIT_KINDS:
+        return _execute_run(file_id, forced_kind)  # refuses before any read
+    with _assistant_scope(file_id):
+        return _execute_run(file_id, forced_kind)
+
+
+def _execute_run(file_id: str, forced_kind: str | None = None) -> None:
     """Run one source file to completion. Raises on failure (the llm_queue
     classifies and retries); marks running/done itself, per the _JobSpec
     contract.
@@ -1858,6 +2137,7 @@ def _after_done(file_id: str, job_id: str | None = None) -> None:
         rfp_split.resync_after_run(file_id)
     except Exception:  # noqa: BLE001
         logger.exception("bid_split: resync after run failed for %s", file_id)
+    _wake_assistant_task(job_id)
 
 
 def _identify_converted(sb, frow: dict, s: Settings) -> tuple[dict, int, int, int]:
@@ -1926,6 +2206,7 @@ def _identify_by_name(sb, frow: dict, s: Settings) -> tuple[dict, int, int]:
     started = time.monotonic()
     category, label, confidence, reason = "other", None, None, None
     try:
+        _hold_guard()  # a used-up hold files the document as `other`
         result = llm.complete_json(
             "bid_split",
             system=_NAME_CLASSIFY_SYSTEM,

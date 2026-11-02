@@ -25,6 +25,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import AwareDatetime, BaseModel, Field, field_validator
 
+from app.core import provenance
 from app.core.deps import CurrentUser, require_project_assignment
 from app.core.ratelimit import estimator_rate_limit
 from app.core.roles import INTERNAL_ROLES, WRITER_ROLES, Role
@@ -171,7 +172,9 @@ def list_notes(
     notes = (
         sb.table("estimator_notes")
         .select(
-            "id, body, created_at, author_id, source, mentioned_user_ids, "
+            # actor_kind only: the run id never leaves the assistant's own
+            # Activity tab (an estimator reads this thread too).
+            "id, body, created_at, author_id, source, mentioned_user_ids, actor_kind, "
             f"{_AUTHOR_JOIN}(full_name, role)"
         )
         .eq("project_id", project_id)
@@ -300,6 +303,7 @@ def create_note(
                 "author_id": user.id,
                 "body": payload.body,
                 "mentioned_user_ids": mentioned,
+                **provenance.fields(user.id),
             }
         )
         .execute()
@@ -365,11 +369,16 @@ def create_note(
 
     # A mentioned user gets the mention notice INSTEAD of the generic one.
     mention_msg = f"{name} mentioned you on {where}: {preview}"
+    # Inside an assistant run the bell rows carry the provenance pair (0172).
+    md = provenance.metadata_fields()
+    extra = {"metadata": md} if md else {}
     notif_rows = [
-        {"user_id": uid, "project_id": project_id, "type": "note_mention", "message": mention_msg}
+        {"user_id": uid, "project_id": project_id, "type": "note_mention",
+         "message": mention_msg, **extra}
         for uid in mentioned
     ] + [
-        {"user_id": uid, "project_id": project_id, "type": "estimator_note", "message": msg}
+        {"user_id": uid, "project_id": project_id, "type": "estimator_note",
+         "message": msg, **extra}
         for uid in targets
         if uid not in mentioned
     ]

@@ -1190,7 +1190,8 @@ def _promote_one(
         if _is_unique_violation(exc):
             return None
         raise RfpCreateFilesTransient(_MSG_STORAGE) from exc
-    audit(None, "file.upload", "project_file", inserted.get("id"), {"category": category, "source": "rfp"})
+    audit(None, "file.upload", "project_file", inserted.get("id"),
+          {"category": category, "source": "rfp", "project_id": project_id})
     # The files flag (docs/RFP_BUILDINGCONNECTED.md 3.8): a promoted drawing
     # or specification satisfies it. Best effort inside the service.
     files_needed.clear_if_satisfied(sb, project_id, category, None)

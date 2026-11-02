@@ -309,7 +309,10 @@ def test_enrollment_code_install_command_and_fingerprint(h):
                                 browser_agent_api_base_url="https://api.g3.test")
     out = h.post("/admin/enrollments", who="it", json={"worker_name": "Office PC"}).json()
     assert len(out["code"]) == 20 and out["code"].isalnum()
-    assert out["install_command"].startswith("irm https://api.g3.test/agent-worker/v1/installer.ps1")
+    assert out["install_command"].startswith("& { $ErrorActionPreference = 'Stop'; Invoke-RestMethod")
+    assert "-Uri 'https://api.g3.test/agent-worker/v1/installer.ps1'" in out["install_command"]
+    assert out["install_command"].endswith('if ($LASTEXITCODE -ne 0) { throw "BDR installer failed" } }')
+    assert "-ApiBase 'https://api.g3.test'" in out["install_command"]
     assert len(out["key_fingerprint"].replace(" ", "")) == 64
     [row] = h.db.rows("browser_agent_enrollments")
     assert out["code"] not in dump(h) and row["worker_name"] == "Office PC"

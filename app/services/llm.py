@@ -275,6 +275,12 @@ class _Feature:
     # effort; services/plans_reader_model_routes) this feature follows. None
     # = no route (plans_modify): OpenAI on OPENAI_PLANS_MODEL as before.
     route_step: str | None = None
+    # True = pinned to OpenAI like openai_only, but NOT an AI Estimating
+    # feature: no step route, no PLANS_READER_ENABLED switch and not counted
+    # in PLANS_FEATURES (BDR Assistant, docs/ASSISTANT.md, Model and
+    # transport). Under FULL_SELF_HOSTED_LLMS_ENABLED the pin holds only with
+    # ASSISTANT_ALLOW_OPENAI_IN_SELF_HOSTED (see resolve).
+    openai_pinned: bool = False
 
 
 def _plans_feature(step: str | None = None) -> _Feature:
@@ -387,6 +393,30 @@ _FEATURES: dict[str, _Feature] = {
     "plans_derive": _plans_feature("derive"),
     "plans_scope_attrib": _plans_feature("scope_attrib"),
     "pricing_quote": _plans_feature("quote"),
+    # BDR Assistant (docs/ASSISTANT.md, Model and transport). The planner is
+    # pinned to OpenAI in both LLM modes through openai_pinned (not
+    # openai_only: it is not an AI Estimating feature and must not join
+    # PLANS_FEATURES) and carries NO switch: ASSISTANT_ENABLED gates the
+    # routes and the worker pass, not the route table, so the feature stays
+    # on while PLANS_READER_ENABLED is off (a test asserts it). The pin needs
+    # ASSISTANT_ALLOW_OPENAI_IN_SELF_HOSTED under the self-hosted master
+    # switch (the boot validator demands it while the assistant is on);
+    # without it the feature follows the box like every other feature, which
+    # only the health snapshot can observe (the routes 404 and the claim
+    # pass is skipped while ASSISTANT_ENABLED is off).
+    "assistant": _Feature(
+        "openai",
+        lambda s: s.assistant_model,
+        lambda s: "",
+        openai_pinned=True,
+    ),
+    # Tool-less summarizing and classifying of untrusted text (mail bodies,
+    # phase 5); may run on the Qwen boxes, so it follows the master switch.
+    "assistant_extract": _Feature(
+        "openai",
+        lambda s: s.assistant_model,
+        lambda s: "",
+    ),
 }
 
 PLANS_FEATURES: tuple[str, ...] = tuple(
@@ -448,6 +478,13 @@ def resolve(feature: str, settings: Settings | None = None) -> Route:
         # Pinned: the self-hosted switch does not move AI Estimating; the
         # step's route (when set) decides between OpenAI and Anthropic.
         return _plans_route(spec, s)
+    if spec.openai_pinned and getattr(s, "assistant_allow_openai_in_self_hosted", False):
+        # Pinned: the self-hosted switch does not move the assistant either.
+        # The pin needs the owner's explicit allow (core/config
+        # _validate_assistant refuses to boot without it while the assistant
+        # is on); without it the feature is off on the box like any other
+        # feature whose self-hosted model is "off".
+        return Route(provider="openai", model=spec.tp_model(s), api_key=s.openai_api_key)
     if spec.self_hosted_only:
         explicit = (spec.sh_model(s) or "").strip()
         off = explicit.lower() == SELF_HOSTED_MODEL_OFF

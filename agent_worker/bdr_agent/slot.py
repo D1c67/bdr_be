@@ -27,7 +27,7 @@ import contextlib
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, Literal, Protocol
 from uuid import UUID
@@ -230,6 +230,23 @@ class Slot:
     # Run ------------------------------------------------------------------------------
 
     async def run(self, job: ClaimedJob, type_config: TypeConfig) -> SlotOutcome:
+        original = self.deps
+        if job.principal_kind == "user":
+            if job.agent_type != "user_browser_read" or not job.principal_user_id:
+                self.deps.tracker.unregister(job.job_id)
+                return SlotOutcome(job.job_id, job.agent_type, "none", detail="principal_mismatch")
+            from .agents.user_browser.client import UserClient
+            from .agents.user_browser.spool import MemorySpool
+            self.deps = replace(original, client=UserClient(original.client), spool=MemorySpool())
+        elif job.agent_type == "user_browser_read":
+            self.deps.tracker.unregister(job.job_id)
+            return SlotOutcome(job.job_id, job.agent_type, "none", detail="principal_mismatch")
+        try:
+            return await self._run_job(job, type_config)
+        finally:
+            self.deps = original
+
+    async def _run_job(self, job: ClaimedJob, type_config: TypeConfig) -> SlotOutcome:
         d = self.deps
         self.job = job
         self.stop_reason = None
@@ -237,7 +254,11 @@ class Slot:
         if not d.tracker.holds(job.job_id, job.epoch):
             d.tracker.register(job.job_id, job.epoch, job.agent_type)
         job_spool = d.spool.for_job(job.job_id, job.epoch)
-        steps = StepLog(job_spool, d.secrets, on_logged=lambda n: d.tracker.set_steps(job.job_id, n))
+        log_class = StepLog
+        if job.principal_kind == "user":
+            from .agents.user_browser.spool import UserStepLog
+            log_class = UserStepLog
+        steps = log_class(job_spool, d.secrets, on_logged=lambda n: d.tracker.set_steps(job.job_id, n))
         d.tracker.attach_steps(job.job_id, steps)
         flusher = asyncio.create_task(self._flush_loop(steps), name=f"flush-{job.job_id}")
         outcome = SlotOutcome(job.job_id, job.agent_type, "none")

@@ -87,6 +87,7 @@ class AgentTypeSpec:
     help_reasons: tuple[str, ...] = ()
     # PM-app platform this type works against (registry key), if any.
     platform: str | None = None
+    principal_kind: Literal["org", "user"] = "org"
 
     @property
     def tools(self) -> tuple[str, ...]:
@@ -181,10 +182,11 @@ def _register_builtins() -> None:
     the claim-time short-circuits of SPEC.md 5.2) and the procore adapter
     (pm_apps/procore.py: seed and capture validation)."""
     from app.services.browser_agents.pm_apps import procore as procore_app
-    from app.services.browser_agents.types import canary, rfi_from_email
+    from app.services.browser_agents.types import canary, rfi_from_email, user_browser_read
 
     register_type(canary.SPEC, replace=True)
     register_type(rfi_from_email.SPEC, replace=True)
+    register_type(user_browser_read.SPEC, replace=True)
     register_pm_app(procore_app.ADAPTER, replace=True)
 
 

@@ -249,6 +249,7 @@ def test_everything_404s_while_agents_are_off(monkeypatch):
     _, token = h.worker()
     h.settings = agent_settings(browser_agents_enabled=False)
     for method, path in (("get", "/config"), ("post", "/enroll"), ("get", "/canary/page"),
+                         ("get", "/python-runtime.ps1"),
                          ("post", f"/jobs/{uuid.uuid4()}/finish")):
         resp = getattr(h.client, method)(f"{API}{path}", headers=h.auth(token))
         assert resp.status_code == 404 and resp.json() == {"detail": "Not Found"}
@@ -304,8 +305,6 @@ def test_validator_accepts_a_complete_config():
     ({"browser_agent_secrets_key": base64.b64encode(b"x" * 16).decode()}, "exactly 32 bytes"),
     ({"browser_agent_fingerprint_key": KEY_A}, "must differ"),
     ({"browser_agent_fingerprint_key": ""}, "BROWSER_AGENT_FINGERPRINT_KEY must be set"),
-    ({"procore_login_email": ""}, "PROCORE_LOGIN_EMAIL"),
-    ({"pm_rfi_sync_enabled": False}, "PM RFI sync"),
     ({"browser_agent_secrets_old_keys": "k1:" + KEY_B}, "must not reuse"),
     ({"browser_agent_secrets_old_keys": "nokey"}, "<key_id>:<base64>"),
     ({"browser_agent_lease_seconds": 10}, "BROWSER_AGENT_LEASE_SECONDS"),
@@ -332,3 +331,9 @@ def test_validator_ignores_keys_while_off():
 def test_old_keys_parse():
     s = agent_settings(browser_agent_secrets_old_keys=f"k0:{KEY_B}")
     assert s.browser_agent_old_keys == {"k0": b"B" * 32}
+
+
+def test_browser_platform_boot_is_independent_of_org_rfi_configuration():
+    settings = agent_settings(procore_login_email="", pm_rfi_sync_enabled=False)
+    assert settings.browser_agents_enabled
+    assert not settings.pm_rfi_sync_active

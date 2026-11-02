@@ -12,6 +12,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
+from app.core import provenance
 from app.core.deps import CurrentUser, require_internal, require_writer
 from app.core.roles import INTERNAL_ROLES
 from app.core.supabase_client import get_supabase
@@ -20,7 +21,10 @@ from app.services.notifications import notify_user
 router = APIRouter(prefix="/todos", tags=["todos"])
 
 TODO_MAX_CHARS = 500
-_SELECT = "id, user_id, title, due_date, is_done, completed_at, created_at, last_nudged_at"
+_SELECT = (
+    "id, user_id, title, due_date, is_done, completed_at, created_at, last_nudged_at, "
+    "project_id, due_at, source, actor_kind"
+)
 
 # How long a to-do stays "recently nudged" — rapid re-nudges are rejected so a
 # teammate isn't spammed with duplicate pokes for the same task.
@@ -30,6 +34,9 @@ NUDGE_COOLDOWN = timedelta(hours=3)
 class TodoIn(BaseModel):
     title: str = Field(min_length=1, max_length=TODO_MAX_CHARS)
     due_date: date | None = None
+    # The project the to-do is about (0170). `source` is never taken from the
+    # client: the route sets it from who is writing.
+    project_id: UUID | None = None
 
     @field_validator("title")
     @classmethod
@@ -97,9 +104,13 @@ def _own_todo(todo_id: UUID, user: CurrentUser) -> None:
 
 @router.get("")
 def list_todos(
-    user_id: UUID | None = None, user: CurrentUser = Depends(require_internal)
+    user_id: UUID | None = None, user: CurrentUser = Depends(require_internal),
+    todo_id: UUID | None = None, newest_first: bool = False,
 ):
     """The caller's to-dos, or — read-only by design — a teammate's."""
+    # `todo_id` narrows to that one row; `newest_first` orders by created_at
+    # descending so the 500-row window keeps the newest rows (the assistant's
+    # to-do tools use both; the page keeps the default).
     target = str(user_id) if user_id else user.id
     if target != user.id:
         owner = (
@@ -113,12 +124,11 @@ def list_todos(
         # Estimator ids 404 too: the external estimator has no to-dos here.
         if not owner or owner[0]["role"] not in {r.value for r in INTERNAL_ROLES}:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    query = get_supabase().table("todos").select(_SELECT).eq("user_id", target)
+    if todo_id is not None:
+        query = query.eq("id", str(todo_id))
     return (
-        get_supabase()
-        .table("todos")
-        .select(_SELECT)
-        .eq("user_id", target)
-        .order("created_at")
+        query.order("created_at", desc=newest_first)
         .limit(500)
         .execute()
     ).data or []
@@ -136,6 +146,9 @@ def create_todo(
                 "user_id": user.id,
                 "title": payload.title,
                 "due_date": payload.due_date.isoformat() if payload.due_date else None,
+                "project_id": str(payload.project_id) if payload.project_id else None,
+                "source": "assistant" if provenance.is_assistant() else "user",
+                **provenance.fields(user.id),
             }
         )
         .execute()

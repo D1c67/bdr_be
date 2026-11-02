@@ -1,0 +1,89 @@
+{
+ "brief": {
+  "project_summary": "Main brief project summary.",
+  "electrical_scope_summary": "Main scope summary.",
+  "systems": [
+   {
+    "system": "Fire alarm",
+    "in_scope": "yes",
+    "notes": "New devices on E-201."
+   }
+  ],
+  "assumptions": [
+   "One phase of work."
+  ],
+  "exclusions": [
+   "No generator."
+  ],
+  "risks": [
+   {
+    "risk": "Footage absent.",
+    "severity": "high",
+    "source": "E-201"
+   }
+  ],
+  "rfis": [
+   {
+    "question": "Provide CAD files.",
+    "source": "E-201"
+   }
+  ],
+  "missing_documents": [
+   "Fire alarm specification section 28 31 00."
+  ],
+  "other_trades_affecting_electrical": [
+   "Mechanical units need disconnects."
+  ],
+  "sheet_summaries": [
+   {
+    "sheet_number": "E-201",
+    "title": "FIRE ALARM PLAN",
+    "summary": "Horn strobes and pull stations."
+   }
+  ],
+  "spec_highlights": [
+   {
+    "section": "26 27 26",
+    "title": "Wiring devices",
+    "summary": "Hospital grade in patient rooms."
+   }
+  ]
+ },
+ "boq": {
+  "title": "T",
+  "subtitle": null,
+  "areas": [],
+  "closing_notes": []
+ },
+ "estimate": {
+  "project_name": "T",
+  "address": null,
+  "include_standard_allowances": true,
+  "extra_allowances": [],
+  "general_notes": [],
+  "area_notes": []
+ },
+ "markups": {
+  "sheets": []
+ },
+ "marked_plans": {
+  "sheets": []
+ },
+ "material_notes": [
+  {
+   "material_category": "Lighting",
+   "notes": [
+    "Fixtures by owner."
+   ],
+   "specified_manufacturers": [
+    "Lithonia"
+   ],
+   "lead_time_items": [
+    "Exit signs"
+   ]
+  }
+ ],
+ "confidence_notes": [
+  "No run lengths were supplied."
+ ]
+}

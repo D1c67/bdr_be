@@ -204,6 +204,9 @@ def enroll(request: Request, payload: Any = Body(default=None)) -> dict[str, Any
         or (queue.parse_ts(enrollment.get("expires_at")) or now) <= now
     ):
         raise agent_error(ErrorCode.ENROLL_INVALID, "enrollment code is invalid, used or expired")
+    principal_kind = enrollment.get("principal_kind", "org")
+    if principal_kind not in ("org", "user") or body.expected_pool != principal_kind:
+        raise agent_error(ErrorCode.ENROLL_INVALID, "Enrollment code does not match this service pool.")
     spent = (
         sb.table("browser_agent_enrollments").update({"used_at": queue.iso(now)})
         .eq("id", enrollment["id"]).is_("used_at", "null").execute()
@@ -212,6 +215,7 @@ def enroll(request: Request, payload: Any = Body(default=None)) -> dict[str, Any
         raise agent_error(ErrorCode.ENROLL_INVALID, "enrollment code is invalid, used or expired")
     token, token_hash, prefix = new_worker_token()
     worker_row = {
+        "principal_kind": principal_kind,
         "name": _unique_worker_name(enrollment.get("worker_name") or body.hostname),
         "status": "pending",
         "token_hash": bytea_literal(token_hash),
@@ -237,7 +241,7 @@ def enroll(request: Request, payload: Any = Body(default=None)) -> dict[str, Any
         f"A browser agent worker ({body.hostname}) enrolled and is waiting for approval.",
         {"worker_id": str(worker["id"]), "hostname": body.hostname, "ip": ip},
     )
-    return protocol.EnrollResponse(worker_id=worker["id"], token=token, status="pending").model_dump(mode="json")
+    return protocol.EnrollResponse(worker_id=worker["id"], token=token, status="pending", principal_kind=principal_kind).model_dump(mode="json")
 
 
 # ── 2. POST /hello ────────────────────────────────────────────────────────────
@@ -288,6 +292,11 @@ def hello(
 # ── 3. GET /config ────────────────────────────────────────────────────────────
 
 
+def _user_execution_enabled() -> bool:
+    from app.services.browser_agents.types.user_browser_read import enabled
+    return enabled()
+
+
 @router.get("/config", response_model=None)
 def config(
     response: Response,
@@ -322,6 +331,7 @@ def config(
         config_version=version,
         enabled=bool(settings_row.get("enabled")),
         worker=protocol.WorkerConfig(
+            principal_kind=worker.principal_kind,
             status=wrow[0].get("status") or worker.status,
             max_slots=int(wrow[0].get("max_slots") or worker.max_slots),
             draining=bool(wrow[0].get("draining")),
@@ -329,7 +339,9 @@ def config(
         ),
         types={
             t["key"]: protocol.TypeConfig(
-                enabled=bool(t.get("enabled")) and registry.has_type(t["key"]),
+                enabled=(bool(t.get("enabled")) and registry.has_type(t["key"])
+                         and registry.get_type(t["key"]).principal_kind == worker.principal_kind
+                         and (worker.principal_kind == "org" or _user_execution_enabled())),
                 identity=t.get("identity"),
                 max_concurrency=int(t.get("max_concurrency") or 0),
                 max_steps=int(t.get("max_steps") or 0),
@@ -360,6 +372,8 @@ def heartbeat(
     lost leases, cancels, orphans (leases this boot holds but did not list),
     help updates, drain and the config_version to refetch on. Never bumps
     config_version itself."""
+    if worker.principal_kind != "org":
+        raise agent_error(protocol.ErrorCode.IDOR)
     body = _parse_body(protocol.HeartbeatRequest, payload)
     _header_boot_matches(x_agent_boot, body.boot_id)
     jobs = [
@@ -392,7 +406,10 @@ def claim(
     worker's free slots. A job prepare() closes is not returned."""
     body = _parse_body(protocol.ClaimRequest, payload)
     _header_boot_matches(x_agent_boot, body.boot_id)
-    jobs = queue.claim(worker.id, str(body.boot_id), dict(body.capacity), max_slots=worker.max_slots)
+    if worker.principal_kind == "user" and not _user_execution_enabled():
+        return protocol.ClaimResponse(jobs=[]).model_dump(mode="json")
+    jobs = queue.claim(worker.id, str(body.boot_id), dict(body.capacity), max_slots=worker.max_slots,
+                       principal_kind=worker.principal_kind)
     return protocol.ClaimResponse(jobs=jobs).model_dump(mode="json")
 
 
@@ -666,6 +683,26 @@ def installer() -> Response:
     return Response(content=body, media_type="text/plain; charset=utf-8", headers={
         "Cache-Control": "no-store",
         "Content-Disposition": 'attachment; filename="bdr-install.ps1"',
+    })
+
+
+# ── GET /python-runtime.ps1 (public installer prerequisite) ──────────────────
+
+
+@router.get("/python-runtime.ps1", response_class=Response)
+def python_runtime_installer() -> Response:
+    """Public, secret-free setup for the separate Program Files Python runtime."""
+    try:
+        script = artifact_store.download_object("installer/setup-python-runtime.ps1")
+    except Exception:
+        raise HTTPException(404, "The Python runtime setup is not published",
+                            headers={"Cache-Control": "no-store"}) from None
+    if b"__PYTHON_NUGET_SHA256__" in script:
+        raise HTTPException(404, "The Python runtime setup is not prepared",
+                            headers={"Cache-Control": "no-store"})
+    return Response(content=script, media_type="text/plain; charset=utf-8", headers={
+        "Cache-Control": "no-store",
+        "Content-Disposition": 'attachment; filename="bdr-python-runtime.ps1"',
     })
 
 

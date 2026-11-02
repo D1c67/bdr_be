@@ -18,6 +18,7 @@ size}. Signing and upload are the publish script's job
 """
 
 import argparse
+from email.parser import BytesParser
 import hashlib
 import json
 import re
@@ -59,7 +60,77 @@ def download_wheels(dest: Path, requirements: list[str]) -> None:
     cmd = [sys.executable, "-m", "pip", "download", "--dest", str(dest), "--only-binary=:all:",
            "--platform", "win_amd64", "--python-version", PY_TARGET, "--implementation", "cp",
            "--abi", "cp312", *requirements]
-    subprocess.run(cmd, check=True)
+    try:
+        import importlib.util
+        if importlib.util.find_spec("pip") is None:
+            raise SystemExit("Build requires pip: run with uv run --with pip --with packaging.")
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError:
+        raise SystemExit("Windows dependency download failed; no bundle was built.") from None
+
+
+def validate_wheels(wheels: Path, requirements: list[str]) -> None:
+    """Validate the complete dependency closure for the actual Windows target.
+
+    Supplying --wheels-dir must not silently omit cryptography (or a transitive
+    dependency), accept a Mac wheel, or replace an exact pyproject pin.
+    Packaging is a build-time dependency, never shipped to the worker for this.
+    """
+    try:
+        from packaging.markers import default_environment
+        from packaging.requirements import Requirement
+        from packaging.specifiers import SpecifierSet
+        from packaging.tags import compatible_tags, cpython_tags
+        from packaging.utils import canonicalize_name, parse_wheel_filename
+        from packaging.version import Version
+    except ImportError:
+        raise SystemExit("Build requires packaging: run with uv run --with pip --with packaging.") from None
+    target = set(cpython_tags((3, 12), platforms=["win_amd64"]))
+    target.update(compatible_tags((3, 12), interpreter="cp312", platforms=["win_amd64"]))
+    packages = {}
+    for path in sorted(wheels.glob("*.whl")):
+        name, version, _, tags = parse_wheel_filename(path.name)
+        if not target.intersection(tags):
+            raise SystemExit(f"Wheel is incompatible with Windows CPython 3.12: {path.name}")
+        if name in packages:
+            raise SystemExit(f"Duplicate wheel distribution: {name}")
+        try:
+            with zipfile.ZipFile(path) as zf:
+                members = [n for n in zf.namelist() if n.endswith(".dist-info/METADATA")]
+                if len(members) != 1:
+                    raise ValueError("metadata")
+                meta = BytesParser().parsebytes(zf.read(members[0]))
+                if canonicalize_name(meta["Name"] or "") != name or Version(meta["Version"]) != version:
+                    raise ValueError("identity")
+                if meta.get("Requires-Python") and Version("3.12.10") not in SpecifierSet(meta["Requires-Python"]):
+                    raise ValueError("python")
+        except (ValueError, TypeError, KeyError, zipfile.BadZipFile):
+            raise SystemExit(f"Invalid wheel metadata: {path.name}") from None
+        packages[name] = (version, meta.get_all("Requires-Dist", []))
+    env = default_environment()
+    env.update(os_name="nt", sys_platform="win32", platform_system="Windows", platform_machine="AMD64",
+               python_version="3.12", python_full_version="3.12.10", implementation_name="cpython",
+               implementation_version="3.12.10", platform_python_implementation="CPython")
+    pending = [Requirement(value) for value in requirements]
+    visited = set()
+    checked = set()
+    while pending:
+        req = pending.pop()
+        name = canonicalize_name(req.name)
+        if req.url or name not in packages or packages[name][0] not in req.specifier:
+            raise SystemExit(f"Missing or incorrect Windows dependency: {req}")
+        visited.add(name)
+        for extra in {"", *req.extras}:
+            key = (name, extra)
+            if key in checked:
+                continue
+            checked.add(key)
+            for raw in packages[name][1]:
+                dependency = Requirement(raw)
+                if dependency.marker is None or dependency.marker.evaluate({**env, "extra": extra}):
+                    pending.append(dependency)
+    if set(packages) != visited:
+        raise SystemExit("Unexpected wheels outside dependency closure: " + ", ".join(sorted(set(packages)-visited)))
 
 
 def lock_lines(wheels: Path) -> list[str]:
@@ -99,6 +170,11 @@ def build_bundle(version: str, out_dir: Path, wheels_dir: Path, *, package: Path
                  chromium: bool = True) -> dict[str, Any]:
     if package_version(package) != version:
         raise SystemExit(f"bdr_agent.__version__ is {package_version(package)}, not {version}")
+    if package.resolve() == PACKAGE.resolve():
+        declared = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
+        if declared != version:
+            raise SystemExit(f"pyproject version is {declared}, not {version}")
+        validate_wheels(wheels_dir, pinned_requirements())
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"bdr-agent-{version}.zip"
     meta = {"format": 1, "version": version, "python": PY_TARGET, "chromium": chromium}
@@ -121,8 +197,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--version", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--wheels-dir", help="use these wheels instead of pip download")
+    p.add_argument("--check-wheels", action="store_true", help="validate supplied Windows wheels without building")
     p.add_argument("--no-chromium", action="store_true", help="skip playwright install at stage time")
     args = p.parse_args(argv)
+    if args.check_wheels:
+        if not args.wheels_dir:
+            p.error("--check-wheels requires --wheels-dir")
+        validate_wheels(Path(args.wheels_dir), pinned_requirements())
+        print(json.dumps({"validated": True, "target": "cp312-win_amd64"}))
+        return 0
     if args.wheels_dir:
         result = build_bundle(args.version, Path(args.out), Path(args.wheels_dir), chromium=not args.no_chromium)
     else:

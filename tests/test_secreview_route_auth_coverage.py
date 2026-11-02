@@ -45,6 +45,7 @@ PUBLIC_ROUTES = {
     # release link, nothing secret; the owner checks the key fingerprint it
     # prints before it changes anything on the PC.
     ("GET", "/agent-worker/v1/installer.ps1"),
+    ("GET", "/agent-worker/v1/python-runtime.ps1"),  # secret-free runtime setup; gated by browser feature
     # The BDR Alerts bot's messaging endpoint (0175): Teams posts install
     # events there; it reads nothing and answers 200 (teams_bot.py).
     ("POST", "/teams/messages"),

@@ -190,13 +190,13 @@ def summary() -> dict[str, Any]:
     spend = spend_today()
 
     def jobs(status_: str) -> int:
-        return _count(sb.table(JOBS).select("id", count="exact").eq("status", status_))
+        return _count(sb.table(JOBS).select("id", count="exact").eq("principal_kind", "org").eq("status", status_))
 
     workers = sb.table("browser_agent_workers").select("id, status, last_seen_at").eq("status", "active").execute().data or []
     online = sum(1 for w in workers if _online(w, now))
     return {
         "enabled": bool(settings_row.get("enabled")),
-        "open_help": _count(sb.table(help_flow.HELP).select("id", count="exact").in_("status", help_flow.ACTIVE)),
+        "open_help": _count(sb.table(help_flow.HELP).select("id", count="exact").eq("principal_kind", "org").in_("status", help_flow.ACTIVE)),
         "waiting_jobs": jobs("waiting_help"),
         "running_jobs": jobs("running"),
         "queued_jobs": jobs("queued"),
@@ -246,7 +246,7 @@ def job_rows_view(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def list_jobs(*, status_: str | None, agent_type: str | None, project_id: str | None, cursor: str | None,
               limit: int | None) -> dict[str, Any]:
-    q = _sb().table(JOBS).select("*")
+    q = _sb().table(JOBS).select("*").eq("principal_kind", "org")
     if status_:
         if status_ == "needs_help":
             q = q.eq("status", "waiting_help")
@@ -401,6 +401,8 @@ def cancel_job(job: dict[str, Any], user: Any) -> dict[str, Any]:
     waiting_help with a lease: cancel_requested_at, delivered as `cancel`
     by the next heartbeat; the sweeper closes it once the lease is gone.
     Applying or finished: a no-op."""
+    if job.get("principal_kind", "org") != "org":
+        raise human_error(404, "not_found", "No such job.")
     now = _now()
     label = help_flow.user_label(user)
     st = job.get("status")
@@ -435,6 +437,8 @@ def retry_job(job: dict[str, Any], user: Any) -> dict[str, Any]:
     attempt budget. A cap_reached retry restarts the model counters once
     for a helper; after that only IT Admin (or a dev). A failed apply
     (apply_failed) re-applies the same capture instead of re-running."""
+    if job.get("principal_kind", "org") != "org":
+        raise human_error(404, "not_found", "No such job.")
     st = job.get("status")
     if st in ("queued", "running", "applying") or st == "succeeded":
         raise human_error(409, "job_not_retryable", "This job is not in a state that can be retried.")
@@ -493,6 +497,12 @@ def artifact_url(artifact_id: str, user: Any) -> dict[str, Any]:
     if not rows:
         raise human_error(404, "not_found", "No such artifact.")
     a = rows[0]
+    job = get_job(str(a["job_id"])) if a.get("job_id") else None
+    help_row = help_flow.get_help(str(a["help_id"])) if a.get("help_id") else None
+    if ((not a.get("job_id") and not a.get("help_id"))
+            or (a.get("job_id") and (not job or job.get("principal_kind", "org") != "org"))
+            or (a.get("help_id") and (not help_row or help_row.get("principal_kind", "org") != "org"))):
+        raise human_error(404, "not_found", "No such artifact.")
     if a.get("kind") in ("llm_request", "llm_response") and not help_flow.is_admin(user):
         raise human_error(403, "forbidden", "Model transcripts are for IT Admin.")
     ttl = 300
@@ -540,6 +550,7 @@ def caps_view(spend: dict[str, Any] | None = None) -> dict[str, Any]:
 def type_view(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "key": row["key"], "label": row.get("label") or row["key"], "enabled": bool(row.get("enabled")),
+        "principal_kind": registry.get_type(row["key"]).principal_kind,
         "identity": row.get("identity"), "provider": row.get("provider"), "model": row.get("model"),
         "price_in_per_mtok": _opt_num(row.get("price_in_per_mtok")),
         "price_out_per_mtok": _opt_num(row.get("price_out_per_mtok")),
@@ -585,6 +596,7 @@ def workers_view(rows: list[dict[str, Any]], releases: list[dict[str, Any]] | No
     labels = help_flow.profile_labels({w["approved_by"] for w in rows if w.get("approved_by")})
     return [{
         "id": str(w["id"]), "name": w.get("name"), "status": w.get("status"), "online": _online(w, now),
+        "principal_kind": w.get("principal_kind", "org"),
         "draining": bool(w.get("draining")), "max_slots": int(w.get("max_slots") or 1),
         "allowed_types": list(w.get("allowed_types") or []), "allowed_ips": [str(i) for i in w.get("allowed_ips") or []],
         "version": w.get("version"), "bad_versions": list(w.get("bad_versions") or []),
@@ -808,7 +820,9 @@ def release_key_fingerprint() -> str:
     return " ".join(digest[i:i + 4] for i in range(0, len(digest), 4))
 
 
-def create_enrollment(worker_name: str, user: Any, api_base: str) -> dict[str, Any]:
+def create_enrollment(worker_name: str, user: Any, api_base: str, *, principal_kind: str = "org") -> dict[str, Any]:
+    if principal_kind not in ("org", "user"):
+        raise human_error(422, "invalid_request", "Unknown worker pool.")
     name = (worker_name or "").strip()
     if not 2 <= len(name) <= 60:
         raise human_error(422, "invalid_request", "A worker name is 2 to 60 characters.")
@@ -818,6 +832,7 @@ def create_enrollment(worker_name: str, user: Any, api_base: str) -> dict[str, A
     label = help_flow.user_label(user)
     row = _sb().table("browser_agent_enrollments").insert({
         "code_hash": bytea_literal(digest), "worker_name": name, "created_by": str(user.id),
+        "principal_kind": principal_kind,
         "expires_at": _iso(expires),
     }).execute().data[0]
     try:
@@ -831,9 +846,17 @@ def create_enrollment(worker_name: str, user: Any, api_base: str) -> dict[str, A
     _audit(user, "browser_agent.enrollment_created", "browser_agent_enrollments", str(row["id"]),
            {"worker_name": name, "expires_at": _iso(expires), "actor_label": label})
     base = api_base.rstrip("/")
-    install = (f"irm {base}{protocol.API_PREFIX}/installer.ps1 -OutFile $env:TEMP\\bdr-install.ps1; "
-               "powershell -ExecutionPolicy Bypass -File $env:TEMP\\bdr-install.ps1")
+    quoted_base = "'" + base.replace("'", "''") + "'"
+    quoted_url = "'" + (base + protocol.API_PREFIX + "/installer.ps1").replace("'", "''") + "'"
+    # Keep download and execution in one terminating scope: an interactive
+    # paste must never run a leftover installer after a failed download.
+    install = ("& { $ErrorActionPreference = 'Stop'; "
+               f'Invoke-RestMethod -Uri {quoted_url} -OutFile "$env:TEMP\\bdr-install.ps1"; '
+               'powershell -ExecutionPolicy Bypass -File "$env:TEMP\\bdr-install.ps1" '
+               f"-Pool {principal_kind} -ApiBase {quoted_base}; "
+               'if ($LASTEXITCODE -ne 0) { throw "BDR installer failed" } }')
     return {"code": code, "expires_at": _iso(expires), "install_command": install,
+            "principal_kind": principal_kind,
             "key_fingerprint": release_key_fingerprint()}
 
 
@@ -878,6 +901,8 @@ def patch_worker(worker_id: str, patch: dict[str, Any], user: Any) -> dict[str, 
         unknown = [t for t in types if not registry.has_type(t)]
         if unknown:
             raise human_error(422, "invalid_request", f"Unknown agent type: {unknown[0]}.")
+        if any(registry.get_type(t).principal_kind != current.get("principal_kind", "org") for t in types):
+            raise human_error(422, "invalid_request", "Agent type belongs to another worker pool.")
         out["allowed_types"] = types
     if patch.get("allowed_ips") is not None:
         cidrs = []
@@ -902,7 +927,8 @@ def approve_worker(worker_id: str, user: Any) -> dict[str, Any]:
     if not current.get("allowed_types"):
         # A fresh worker may run every built-in type; IT Admin narrows it
         # with PATCH allowed_types. An empty list would never claim anything.
-        patch["allowed_types"] = sorted(registry.type_keys())
+        patch["allowed_types"] = [key for key in registry.type_keys()
+                                  if registry.get_type(key).principal_kind == current.get("principal_kind", "org")]
     view = _worker_update(worker_id, patch, user)
     _audit(user, "browser_agent.worker_approved", "browser_agent_workers", str(worker_id),
            {"name": current.get("name"), "hostname": current.get("hostname"),
@@ -947,7 +973,8 @@ def run_canary(worker_id: str | None, user: Any) -> dict[str, Any]:
 
     if worker_id:
         w = _worker_row(worker_id)
-        if w.get("status") != "active" or "canary" not in (w.get("allowed_types") or []):
+        if (w.get("principal_kind", "org") != "org" or w.get("status") != "active"
+                or "canary" not in (w.get("allowed_types") or [])):
             raise human_error(409, "invalid_request", "That worker is not active or not allowed to run the self-test.")
     job = canary.enqueue_canary(created_by=str(user.id))
     label = help_flow.user_label(user)
@@ -961,7 +988,7 @@ def stop_running(user: Any) -> dict[str, Any]:
     now = _now()
     rows = (
         _sb().table(JOBS).update({"cancel_requested_at": _iso(now), "cancel_requested_by": str(user.id)})
-        .in_("status", ["running", "waiting_help"]).is_("cancel_requested_at", "null").execute()
+        .eq("principal_kind", "org").in_("status", ["running", "waiting_help"]).is_("cancel_requested_at", "null").execute()
     ).data or []
     label = help_flow.user_label(user)
     for job in rows:

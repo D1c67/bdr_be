@@ -87,7 +87,8 @@ class _Ended(Exception):
 
 class ProcoreIdentity:
     def __init__(self, ctx: Any, executor: Any, desk: Any, *, host: str,
-                 on_session_ready: Any = None, now: Any = _now, sleep: Any = None):
+                 on_session_ready: Any = None, now: Any = _now, sleep: Any = None,
+                 login_factory: Any = ProcoreLoginPage, help_text: dict | None = None):
         self.ctx = ctx
         self.ex = executor
         self.desk = desk
@@ -95,6 +96,8 @@ class ProcoreIdentity:
         self._on_ready = on_session_ready
         self._now = now
         self._sleep = sleep or asyncio.sleep
+        self._login_factory = login_factory
+        self._help_text = help_text if help_text is not None else HELP_TEXT
         self.logged_in = False
         self.jar_logged_in_at: datetime | None = None
         self.stale = False
@@ -164,7 +167,7 @@ class ProcoreIdentity:
         """Open (or join) login-scope help and wait. Returns the WaitResult;
         raises _Ended when the job parked or help is suppressed."""
         shot = await self.ex.screenshot(page, label="login") if page is not None else None
-        _resp, thread = await self.desk.open(reason, HELP_TEXT.get(reason, HELP_TEXT["login_failed"]), shot,
+        _resp, thread = await self.desk.open(reason, self._help_text.get(reason, self._help_text["login_failed"]), shot,
                                              skip_history=True)
         if thread is None:
             raise _Ended(ToolReturn({"ok": False, "outcome": reason}, ok=False, terminal=Finish(
@@ -281,7 +284,7 @@ class ProcoreIdentity:
         self.ex.register_secret(email, tripwire=False)
         self.ex.register_secret(password)
         begin = None   # drop the response that carried the password
-        lp = ProcoreLoginPage(self.ex.jb, self.ex, self.host, probe=self.probe)
+        lp = self._login_factory(self.ex.jb, self.ex, self.host, probe=self.probe)
         try:
             try:
                 outcome = await lp.login(email, password)

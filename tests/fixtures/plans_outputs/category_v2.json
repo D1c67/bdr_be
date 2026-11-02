@@ -1,0 +1,132 @@
+{
+ "category": "low_voltage_drawings",
+ "rows_version": 2,
+ "summary": "Low voltage sheets with data outlets.",
+ "pages": [
+  {
+   "doc_index": 1,
+   "document_id": "11111111-1111-4111-8111-111111111111",
+   "page": 3,
+   "sheet_number": "T-101",
+   "title": "T-101 DATA PLAN",
+   "page_role": "plan",
+   "scale": null,
+   "tags": [],
+   "notes": [
+    "Cat 6A to every outlet."
+   ],
+   "resolution_flags": []
+  }
+ ],
+ "counts": [
+  {
+   "row_id": "C1",
+   "description": "Data outlet",
+   "quantity": 12,
+   "unit": "EA",
+   "status": "active",
+   "sheet": {
+    "document_id": "11111111-1111-4111-8111-111111111111",
+    "page": 3,
+    "sheet_number": "T-101",
+    "sheet_key": "D1P3"
+   },
+   "positions": [
+    [
+     0.5,
+     0.5
+    ]
+   ]
+  }
+ ],
+ "runs": [],
+ "scope": [
+  {
+   "row_id": "O1",
+   "statement": "Provide structured cabling.",
+   "relevance": "electrical",
+   "status": "active",
+   "sheet": {
+    "document_id": "11111111-1111-4111-8111-111111111111",
+    "page": 3,
+    "sheet_number": "T-101",
+    "sheet_key": "D1P3"
+   },
+   "positions": [
+    [
+     0.12,
+     0.34
+    ]
+   ],
+   "section": null,
+   "quote": null,
+   "page": 3,
+   "document_id": "11111111-1111-4111-8111-111111111111"
+  },
+  {
+   "row_id": "O2",
+   "statement": "SUPERSEDED_MARKER old scope line.",
+   "relevance": "electrical",
+   "status": "superseded",
+   "sheet": {
+    "document_id": "11111111-1111-4111-8111-111111111111",
+    "page": 3,
+    "sheet_number": "T-101",
+    "sheet_key": "D1P3"
+   },
+   "positions": [],
+   "section": null,
+   "quote": null
+  }
+ ],
+ "specs": [
+  {
+   "row_id": "P1",
+   "item": "Cat 6A cable",
+   "manufacturer": "Belden",
+   "basis_of_design": null,
+   "approved_equals": [],
+   "substitution_rule": null,
+   "vendor_or_organization_requirements": "BICSI installer",
+   "section": "27 15 00",
+   "status": "active",
+   "sheet": {
+    "document_id": "11111111-1111-4111-8111-111111111111",
+    "page": 3,
+    "sheet_number": "T-101",
+    "sheet_key": "D1P3"
+   },
+   "positions": [
+    [
+     0.98765,
+     0.4321
+    ]
+   ]
+  }
+ ],
+ "schedules": [],
+ "details": [],
+ "questions": [
+  {
+   "row_id": "Q1",
+   "question": "Confirm MDF location.",
+   "why": null,
+   "status": "alternate",
+   "sheet": {
+    "document_id": "11111111-1111-4111-8111-111111111111",
+    "page": 3,
+    "sheet_number": "T-101",
+    "sheet_key": "D1P3"
+   },
+   "positions": []
+  }
+ ],
+ "row_seq": {
+  "C": 1,
+  "O": 2,
+  "P": 1,
+  "Q": 1
+ },
+ "merge_log": {},
+ "floors": []
+}

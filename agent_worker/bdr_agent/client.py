@@ -300,7 +300,7 @@ class _ClientBase:
         _m, _p, _req, resp_model, _s = ENDPOINTS[endpoint]
         if endpoint == "canary_page":
             return resp.text
-        if endpoint == "turns":
+        if endpoint in ("turns", "user_turns"):
             return parse_turn_response(resp.status_code, resp.json())
         data = resp.json()
         if endpoint == "config" and isinstance(data, dict) and data.get("pending") is True:

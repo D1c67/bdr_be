@@ -26,6 +26,7 @@ from contextlib import contextmanager
 import httpx
 import msal
 
+from app.core import provenance
 from app.core.config import get_settings
 from app.core.supabase_client import get_supabase
 
@@ -490,6 +491,7 @@ def send_mail(
         "project_id": project_id,
         "rfq_id": rfq_id,
         "sent_by": sent_by,
+        **provenance.fields(sent_by),
     }
     if session is not None:
         log_row["test_session_id"] = session.get("id")

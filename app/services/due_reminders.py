@@ -254,6 +254,47 @@ def _pg_ts(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def missing_quote_categories(sb, project_ids: list[str]) -> dict[str, list[str] | None]:
+    """Per project, the RFQ categories still lacking even one vendor quote.
+
+    None means the project has no RFQ categories yet; a list (possibly empty)
+    names the categories with no quote, selected or not. Shared by the
+    internal_bid reminder text (step 2b) and the assistant's missing_quotes
+    recipe (app/services/assistant_recipes.py).
+    """
+    missing_quotes_by_pid: dict[str, list[str] | None] = {
+        pid: None for pid in project_ids
+    }
+    if not project_ids:
+        return missing_quotes_by_pid
+    rfq_rows = _page_all(
+        lambda lo, hi: sb.table("rfqs")
+        .select("id, project_id, material_categories(name)")
+        .in_("project_id", list(project_ids))
+        .order("id")
+        .range(lo, hi)
+    )
+    rfq_ids = [r["id"] for r in rfq_rows]
+    quoted_rfq_ids: set[str] = set()
+    if rfq_ids:
+        quote_rows = _page_all(
+            lambda lo, hi: sb.table("quotes")
+            .select("rfq_id")
+            .in_("rfq_id", rfq_ids)
+            .order("rfq_id")
+            .range(lo, hi)
+        )
+        quoted_rfq_ids = {r["rfq_id"] for r in quote_rows}
+    for r in rfq_rows:
+        pid = r["project_id"]
+        if missing_quotes_by_pid.get(pid) is None:
+            missing_quotes_by_pid[pid] = []
+        if r["id"] not in quoted_rfq_ids:
+            name = (r.get("material_categories") or {}).get("name") or "a category"
+            missing_quotes_by_pid[pid].append(name)
+    return missing_quotes_by_pid
+
+
 def poll_once() -> None:
     settings = get_settings()
     sb = get_supabase()
@@ -387,35 +428,7 @@ def poll_once() -> None:
     internal_bid_pids = sorted(
         {p["id"] for p, k, _, _ in events if k.key == "internal_bid"}
     )
-    missing_quotes_by_pid: dict[str, list[str] | None] = {
-        pid: None for pid in internal_bid_pids
-    }
-    if internal_bid_pids:
-        rfq_rows = _page_all(
-            lambda lo, hi: sb.table("rfqs")
-            .select("id, project_id, material_categories(name)")
-            .in_("project_id", internal_bid_pids)
-            .order("id")
-            .range(lo, hi)
-        )
-        rfq_ids = [r["id"] for r in rfq_rows]
-        quoted_rfq_ids: set[str] = set()
-        if rfq_ids:
-            quote_rows = _page_all(
-                lambda lo, hi: sb.table("quotes")
-                .select("rfq_id")
-                .in_("rfq_id", rfq_ids)
-                .order("rfq_id")
-                .range(lo, hi)
-            )
-            quoted_rfq_ids = {r["rfq_id"] for r in quote_rows}
-        for r in rfq_rows:
-            pid = r["project_id"]
-            if missing_quotes_by_pid[pid] is None:
-                missing_quotes_by_pid[pid] = []
-            if r["id"] not in quoted_rfq_ids:
-                name = (r.get("material_categories") or {}).get("name") or "a category"
-                missing_quotes_by_pid[pid].append(name)
+    missing_quotes_by_pid = missing_quote_categories(sb, internal_bid_pids)
 
     # 3. Audience data: active profiles, stored prefs, estimator assignments.
     profiles = _page_all(

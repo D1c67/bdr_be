@@ -46,6 +46,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, field_validator
 from starlette.concurrency import run_in_threadpool
 
+from app.core import provenance
 from app.core.config import get_settings
 from app.core.deps import (
     CurrentUser,
@@ -545,7 +546,8 @@ async def upload_file(
         await run_in_threadpool(
             proposal_revisions.tag_revision_file, project_id, x_proposal_revision, row["id"]
         )
-    audit_payload = {"category": category}
+    # project_id lets evidence find this row after the file is deleted.
+    audit_payload = {"category": category, "project_id": project_id}
     if doc_type:
         audit_payload["doc_type"] = doc_type
     if category == ADDENDUM_CATEGORY:
@@ -582,7 +584,10 @@ def _insert_file_row(payload: dict, path: str) -> dict:
     """Insert the project_files row for an object already PUT at `path`
     (sync). A failed insert reclaims the object: without its row nothing
     would ever reclaim it (e.g. the project was discarded mid-upload, making
-    the insert fail its FK). Best-effort - the original error is the answer."""
+    the insert fail its FK). Best-effort - the original error is the answer.
+    The single choke point for a person's upload, so it adds the 0172
+    provenance pair (the contextvar survives run_in_threadpool)."""
+    payload = {**payload, **provenance.fields(payload.get("uploaded_by"))}
     try:
         return get_supabase().table("project_files").insert(payload).execute().data[0]
     except Exception:
@@ -676,7 +681,8 @@ def add_team_file(
     # The row is in: everything after it is best effort, so a caller never
     # reads a failure for a file that is stored.
     try:
-        audit(user.id, "file.upload", "project_file", row["id"], {"category": category, **(audit_extra or {})})
+        audit(user.id, "file.upload", "project_file", row["id"],
+              {"category": category, "project_id": project_id, **(audit_extra or {})})
     except Exception:  # noqa: BLE001
         logger.exception("files: audit failed for %s", row.get("id"))
     if convertible and background is not None:
@@ -1250,7 +1256,7 @@ def delete_file(
             pass
     if user.role != Role.ESTIMATOR:
         get_supabase().table("project_files").delete().eq("id", file_id).execute()
-    audit(user.id, "file.delete", "project_file", file_id, {"category": rec["category"]})
+    audit(user.id, "file.delete", "project_file", file_id, {"category": rec["category"], "project_id": project_id})
 
     # Removing a drawing after intake is a change downstream pricers must know about.
     if rec["category"] in DRAWING_CATEGORIES:

@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends
 
 from app.core.deps import CurrentUser, get_current_user
+from app.core.roles import Role
 from app.core.supabase_client import get_supabase
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
@@ -10,7 +11,7 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
 
 @router.get("")
 def my_notifications(user: CurrentUser = Depends(get_current_user)):
-    return (
+    rows = (
         get_supabase()
         .table("notifications")
         # Explicit list, not "*": the bell serves every role including the
@@ -30,6 +31,15 @@ def my_notifications(user: CurrentUser = Depends(get_current_user)):
         .limit(50)
         .execute()
     ).data or []
+    if user.role == Role.ESTIMATOR:
+        # A row created inside an assistant run carries the provenance pair
+        # in its metadata (0172); the run id is internal and never reaches
+        # the external estimator (actor_kind may).
+        for r in rows:
+            md = r.get("metadata")
+            if isinstance(md, dict) and "assistant_run_id" in md:
+                r["metadata"] = {k: v for k, v in md.items() if k != "assistant_run_id"}
+    return rows
 
 
 @router.post("/{notification_id}/read")

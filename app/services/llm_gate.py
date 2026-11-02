@@ -186,6 +186,15 @@ _PGRST_UNKNOWN_COLUMN = "PGRST204"
 _usage_columns_warned = False
 _SWEEP_COLUMN = "eval_sweep_id"
 _sweep_column_warned = False
+# The llm_call_log columns 0170 added (BDR Assistant attribution). Left out
+# of the retry when the database predates the migration.
+_ATTRIBUTION_COLUMNS = ("user_id", "assistant_run_id")
+_attribution_columns_warned = False
+# The llm_call_log column 0174 added (the assistant spend hold a call counts
+# against). Its own fallback group: a database with 0170 but not 0174 drops
+# only this stamp and keeps user_id and assistant_run_id.
+_RESERVATION_COLUMN = "spend_reservation_id"
+_reservation_column_warned = False
 
 
 def _eval_sweep_id() -> str | None:
@@ -196,6 +205,40 @@ def _eval_sweep_id() -> str | None:
         return eval_ledger.sweep_id_for_log(get_settings())
     except Exception:  # noqa: BLE001 - accounting must never break the call
         return None
+
+
+def _call_attribution():
+    """The (user_id, run_id) an assistant turn stamps on its calls (the
+    per-user daily cap sums llm_call_log by user_id), or None outside one.
+    Lazy import: the gate never depends on the assistant package at load."""
+    try:
+        from app.assistant.llm_messages import current_attribution
+
+        return current_attribution()
+    except Exception:  # noqa: BLE001 - accounting must never break the call
+        return None
+
+
+def _warn_attribution_columns_missing() -> None:
+    global _attribution_columns_warned
+    if _attribution_columns_warned:
+        return
+    _attribution_columns_warned = True
+    logger.warning(
+        "llm_call_log has no user_id/assistant_run_id columns (migration 0170 "
+        "not applied); logging assistant calls without them until it is."
+    )
+
+
+def _warn_reservation_column_missing() -> None:
+    global _reservation_column_warned
+    if _reservation_column_warned:
+        return
+    _reservation_column_warned = True
+    logger.warning(
+        "llm_call_log has no spend_reservation_id column (migration 0174 not "
+        "applied); logging assistant calls without the hold stamp until it is."
+    )
 
 
 def _warn_sweep_column_missing() -> None:
@@ -230,6 +273,8 @@ def _insert_with_fallback(sb, row: dict) -> None:
     groups: list[tuple[list[str], Callable[[], None]]] = [
         ([_SWEEP_COLUMN], _warn_sweep_column_missing),
         (list(_USAGE_COLUMNS), _warn_usage_columns_missing),
+        ([_RESERVATION_COLUMN], _warn_reservation_column_missing),
+        (list(_ATTRIBUTION_COLUMNS), _warn_attribution_columns_missing),
     ]
     while True:
         try:
@@ -300,6 +345,13 @@ def log_call(
             # and Decimal is not JSON serializable. numeric(12, 6) keeps the
             # 6 decimals cost_for rounds to.
             row["cost_usd"] = float(cost_usd)
+        attribution = _call_attribution()
+        if attribution is not None:
+            row["user_id"] = attribution.user_id
+            row["assistant_run_id"] = attribution.run_id
+            reservation_id = getattr(attribution, "reservation_id", None)
+            if reservation_id:
+                row[_RESERVATION_COLUMN] = reservation_id
         sweep_id = _eval_sweep_id()
         if sweep_id:
             row[_SWEEP_COLUMN] = sweep_id

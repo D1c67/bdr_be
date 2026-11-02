@@ -3,8 +3,9 @@ Send-out (10) lives in routers/proposals.py — per-GC proposal generation+email
 
 from decimal import Decimal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 
+from app.core import provenance
 from app.core.deps import CurrentUser, get_current_user, require_role, require_writer
 from app.core.revision_context import require_revision_context
 from app.core.roles import INTERNAL_ROLES, VERIFY_ROLES, Role
@@ -390,20 +391,66 @@ def get_labor(project_id: str, user: CurrentUser = Depends(get_current_user)):
     return _get_one("labor_reviews", project_id)
 
 
+# The assistant's compare-and-set on PUT labor (docs/ASSISTANT_PHASE1_PLAN.md
+# 3.11): the execute job sends the `updated_at` it read (or "none" when there
+# was no row), so a human save in between answers 409 instead of being
+# overwritten. Honored only for a bdra_ principal; a human save is the plain
+# upsert. app/assistant/tools/writes.py repeats the literal; a test asserts it.
+LABOR_EXPECTED_HEADER = "X-Assistant-Expected-Updated-At"
+LABOR_CHANGED = "labor_changed"
+
+
+def _labor_changed() -> HTTPException:
+    return HTTPException(
+        status.HTTP_409_CONFLICT,
+        detail={
+            "code": LABOR_CHANGED,
+            "message": "The labor numbers changed since the assistant read them.",
+        },
+        headers={"X-Error-Code": LABOR_CHANGED},
+    )
+
+
+def _is_unique_violation(exc: Exception) -> bool:
+    text = str(exc)
+    return getattr(exc, "code", None) == "23505" or "23505" in text or "duplicate key" in text
+
+
 @router.put("/labor", dependencies=[Depends(require_revision_context)])
 def set_labor(
-    project_id: str, body: LaborReviewIn, user: CurrentUser = Depends(require_writer)
+    project_id: str,
+    body: LaborReviewIn,
+    request: Request,
+    user: CurrentUser = Depends(require_writer),
 ):
     workflow.prepare_revision_cost_edit(project_id, user.id, "Labor numbers edited", get_supabase())
-    row = (
-        get_supabase()
-        .table("labor_reviews")
-        .upsert(
-            {"project_id": project_id, "reviewed_by": user.id, "updated_at": "now()", **body.model_dump(mode="json")},
-            on_conflict="project_id",
-        )
-        .execute()
-    ).data[0]
+    # stamp(), not fields(): the row records its LAST writer, so a human save
+    # after an assistant one must reset the tag (migration 0172).
+    values = {
+        "project_id": project_id, "reviewed_by": user.id, "updated_at": "now()",
+        **body.model_dump(mode="json"), **provenance.stamp(),
+    }
+    expected = request.headers.get(LABOR_EXPECTED_HEADER) if user.via_assistant_run_id else None
+    table = get_supabase().table("labor_reviews")
+    if expected is None:
+        row = table.upsert(values, on_conflict="project_id").execute().data[0]
+    elif expected.strip().lower() == "none":
+        try:
+            row = table.insert(values).execute().data[0]
+        except Exception as exc:  # noqa: BLE001 - a row appeared since the read
+            if _is_unique_violation(exc):
+                raise _labor_changed() from exc
+            raise
+    else:
+        rows = (
+            table.update(values)
+            .eq("project_id", project_id)
+            .eq("updated_at", expected.strip())
+            .execute()
+        ).data or []
+        if not rows:
+            raise _labor_changed()
+        row = rows[0]
     audit(user.id, "labor.review", "project", project_id, {"verified": body.verified})
     workflow.maybe_reopen_verify_after_edit(project_id, user.id, "Labor numbers edited", stale="labor")
     return row

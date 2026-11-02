@@ -608,6 +608,7 @@ def _patch_detail(monkeypatch):
     monkeypatch.setattr(projects_router, "_portal_sources", lambda ids: {})
     monkeypatch.setattr(projects_router, "_rfp_created_rows", lambda ids: {})
     monkeypatch.setattr(projects_router, "_pending_gc_pricing_counts", lambda ids: {})
+    monkeypatch.setattr(projects_router, "get_supabase", lambda: FakeDB({}))
 
 
 def test_get_project_flags_and_degrades(monkeypatch, fake_auto_send):

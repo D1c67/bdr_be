@@ -3,21 +3,34 @@
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from postgrest.exceptions import APIError
+from pydantic import BaseModel, Field
 
+from app.core import provenance
 from app.core.config import get_settings
 from app.core.deps import (
     CurrentUser,
     get_current_user,
     require_internal,
+    require_project_assignment,
     require_role,
     require_writer,
 )
 from app.core.error_codes import ErrorCode, RateLimitScope
 from app.core.features import SubApp, require_feature, require_rfp_ingest
-from app.core.ratelimit import check_outbound_email, rate_limit
+from app.core.ratelimit import check_outbound_email, rate_limit, upload_rate_limit
 from app.core.roles import (
     ACTUAL_BID_EDITOR_ROLES,
     ACTUAL_BID_VIEWER_ROLES,
@@ -29,6 +42,7 @@ from app.core.roles import (
 )
 from app.core.supabase_client import get_supabase
 from app.models.schemas import (
+    ASSISTANT_PROJECT_FIELDS,
     AbandonIn,
     FailedToBidIn,
     BidsTodayProjectOut,
@@ -142,6 +156,44 @@ _NUMBER_TAKEN = (
 # The PM and Certified Payroll routers (which still take a typed number) import
 # the classifier from here; it lives in services/project_numbers now.
 _is_duplicate_number = is_duplicate_number
+
+# The assistant's create key (docs/ASSISTANT_PHASE1_PLAN.md 3.11): the
+# approval id the execute job sends with POST /projects. Honored only for a
+# bdra_ principal; a retried create with the same key answers the project it
+# already made, and GET /projects/assistant-created/{key} finds it after a 5xx.
+# app/assistant/tools/writes.py repeats this literal (tools never import
+# routers); a test asserts the two match.
+ASSISTANT_IDEMPOTENCY_HEADER = "X-Assistant-Idempotency-Key"
+_ASSISTANT_KEY_INDEX = "projects_assistant_idempotency_key_uq"
+# PATCH /projects/{id} under a bdra_ principal: a key outside
+# ASSISTANT_PROJECT_FIELDS is refused with this code.
+ASSISTANT_FIELD_REFUSED = "assistant_field_refused"
+
+
+def _assistant_key(request: Request | None, user: CurrentUser) -> str | None:
+    """The create key of an assistant request, or None: a human's header is
+    ignored, and so is anything that is not a uuid."""
+    if not user.via_assistant_run_id or request is None:
+        return None
+    raw = (request.headers.get(ASSISTANT_IDEMPOTENCY_HEADER) or "").strip()
+    try:
+        return str(uuid.UUID(raw))
+    except ValueError:
+        return None
+
+
+def _assistant_created(key: str, user_id: str, select: str) -> dict | None:
+    """The caller's own project created with assistant key `key`, or None."""
+    rows = (
+        get_supabase()
+        .table("projects")
+        .select(select)
+        .eq("assistant_idempotency_key", key)
+        .eq("created_by", user_id)
+        .limit(1)
+        .execute()
+    ).data or []
+    return rows[0] if rows else None
 
 
 def _ingest():
@@ -529,6 +581,9 @@ def _present(
     if revision_number is not None and role != Role.ESTIMATOR:
         project["proposal_revision_open"] = True
         project["proposal_revision_number"] = revision_number
+    if role == Role.ESTIMATOR:
+        # The run id points into the internal assistant ledger (0172).
+        project.pop("assistant_run_id", None)
     return redact_for_role(project, role)
 
 
@@ -709,6 +764,97 @@ def next_project_number(_: CurrentUser = Depends(require_writer)) -> dict:
     return {"number": number, "budgetary_number": number + "B"}
 
 
+# ── Assistant reads (docs/ASSISTANT.md, Skills and tools) ──────────────────
+# Registered before the /{project_id} routes (literal-before-param rule), so
+# /projects/search and /projects/due-checks are never read as a project id.
+
+_SEARCH_PROJECT_SELECT = (
+    "id, name, number, current_stage, abandoned_at, failed_to_bid_at, "
+    "internal_bid_at, actual_bid_at, created_at, bid_outcomes(result)"
+)
+# PostgREST reserved characters dropped from a search value: a quote or a
+# backslash could close the quoted pattern, a comma or a parenthesis could
+# add a condition to the or=() filter, and the wildcards are ours to add.
+_SEARCH_STRIP = str.maketrans("", "", '"\\*%,()')
+SEARCH_LIMIT_MAX = 50
+
+
+def _search_term(q: str) -> str:
+    return " ".join(q.translate(_SEARCH_STRIP).split())
+
+
+@router.get("/search")
+def search_projects(
+    q: str = Query(min_length=1, max_length=120),
+    limit: int = Query(default=20, ge=1, le=SEARCH_LIMIT_MAX),
+    offset: int = Query(default=0, ge=0, le=10_000),
+    user: CurrentUser = Depends(require_internal),
+) -> dict:
+    """Name or number search over projects, plus GCs and vendors by name:
+    the assistant's app_search. Paginated by `limit` and `offset` (each list
+    separately); every project row passes `_present`, so the actual bid date
+    is redacted per role and `status` is derived like the dashboard. Legacy
+    payroll imports (cp_only) are not bids and stay out."""
+    term = _search_term(q)
+    if not term:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "q has no searchable characters")
+    sb = get_supabase()
+    quoted = f'"*{term}*"'
+    projects = (
+        sb.table("projects")
+        .select(_SEARCH_PROJECT_SELECT)
+        .or_(f"name.ilike.{quoted},number.ilike.{quoted}")
+        .neq("current_stage", "cp_only")
+        .order("created_at", desc=True)
+        .range(offset, offset + limit - 1)
+        .execute()
+    ).data or []
+    gcs = (
+        sb.table("general_contractors")
+        .select("id, name")
+        .ilike("name", f"*{term}*")
+        .order("name")
+        .range(offset, offset + limit - 1)
+        .execute()
+    ).data or []
+    vendors = (
+        sb.table("vendors")
+        .select("id, name")
+        .ilike("name", f"*{term}*")
+        .order("name")
+        .range(offset, offset + limit - 1)
+        .execute()
+    ).data or []
+    return {
+        "q": term,
+        "limit": limit,
+        "offset": offset,
+        "projects": [_present(p, user.role) for p in projects],
+        "gcs": gcs,
+        "vendors": vendors,
+    }
+
+
+@router.get("/due-checks", dependencies=_BIDDING_ONLY)
+def due_checks(user: CurrentUser = Depends(require_internal)) -> list[dict]:
+    """Today's bids (internal due date, office calendar) with the three
+    readiness checks of the 6:03 digest, at any hour: the assistant's
+    whats_due. Same membership as the digest (today only, never the overdue
+    carry-over of /today): `[{project, checks, severity}]`, the project row
+    passed through redact_for_role."""
+    from app.services import due_digest  # local: the digest imports the Graph sender
+
+    rows = due_digest.due_rows_for_today(get_supabase())
+    return [
+        {
+            "project": redact_for_role(dict(r["project"]), user.role),
+            "checks": r["checks"],
+            "severity": r["severity"],
+        }
+        for r in rows
+    ]
+
+
 # ── New Bid similar-projects check (docs/RFP_MATCHING.md 3.9) ──────────────
 # Registered before the /{project_id} routes (literal-before-param rule).
 
@@ -839,22 +985,52 @@ def similar_projects(
 def create_project(
     body: ProjectCreate,
     background: BackgroundTasks,
+    # Defaults only for the unit tests that call the function directly;
+    # FastAPI always injects both.
+    request: Request = None,  # type: ignore[assignment]
+    response: Response = None,  # type: ignore[assignment]
     user: CurrentUser = Depends(require_writer),
 ):
     """Create a project (typically the Estimating Admin). Starts in `intake`.
     The number is assigned here, not typed (docs/RFP_CREATE.md section 2):
-    `budgetary` only decides whether it carries the B marker."""
+    `budgetary` only decides whether it carries the B marker.
+
+    An assistant create (a bdra_ principal) may carry ASSISTANT_IDEMPOTENCY_HEADER:
+    a project this user already created with that key is answered as is (201,
+    X-Idempotent-Replay: true) instead of a second project."""
     sb = get_supabase()
+    key = _assistant_key(request, user)
+
+    def _replay(found: dict) -> dict:
+        if response is not None:
+            response.headers["X-Idempotent-Replay"] = "true"
+        return _present(found, user.role, workflow.load_category_state(found["id"]))
+
+    if key is not None:
+        found = _assistant_created(key, user.id, "*, bid_outcomes(result)")
+        if found is not None:
+            return _replay(found)
     payload = body.model_dump(exclude={"gcs", "budgetary"}, mode="json")
     payload["created_by"] = user.id
+    payload.update(provenance.fields(user.id))
     payload["current_stage"] = "intake"
     payload["current_owner_role"] = Role.ESTIMATING_ADMIN.value
+    if key is not None:
+        payload["assistant_idempotency_key"] = key
     try:
         created = project_numbers.insert_with_assigned_number(
             sb, payload, budgetary=body.budgetary
         )
     except project_numbers.NoFreeNumberError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except Exception as exc:
+        # Two creates with one key raced: the partial unique index let one in.
+        if key is None or _ASSISTANT_KEY_INDEX not in str(exc):
+            raise
+        found = _assistant_created(key, user.id, "*, bid_outcomes(result)")
+        if found is None:
+            raise
+        return _replay(found)
 
     # All-or-nothing from here: the statements below auto-commit one by one, so
     # a failure part-way would otherwise strand a live project the client was
@@ -868,7 +1044,8 @@ def create_project(
                 sb.table("project_gcs").insert(
                     [
                         {"project_id": created["id"], "gc_id": g.gc_id,
-                         "needs_by": g.needs_by.isoformat() if g.needs_by else None}
+                         "needs_by": g.needs_by.isoformat() if g.needs_by else None,
+                         **provenance.fields(user.id)}
                         for g in body.gcs
                     ]
                 ).execute()
@@ -889,7 +1066,7 @@ def create_project(
         # Record the initial stage event so analytics has a start timestamp.
         sb.table("stage_events").insert(
             {"project_id": created["id"], "from_stage": None, "to_stage": "intake",
-             "category": "intake", "actor_id": user.id}
+             "category": "intake", "actor_id": user.id, **provenance.fields(user.id)}
         ).execute()
         # Seed the 4-category state: intake active at its first task, the rest locked.
         sb.table("project_category_state").insert(
@@ -921,6 +1098,251 @@ def create_project(
     # often arrive before the project exists). Best-effort, never raises.
     background.add_task(email_ingest.rescan_unknown_for_project, created["id"])
     return _present(created, user.role, cat_state)
+
+
+# Declared above every /{project_id} route so the literal segment wins.
+@router.get("/assistant-created/{key}", dependencies=_BIDDING_ONLY)
+def assistant_created_project(key: str, user: CurrentUser = Depends(require_writer)) -> dict:
+    """The caller's project created by an assistant POST /projects with this
+    idempotency key: {id, number, name}. Only the assistant execute job uses
+    it, after a create answered 5xx, to learn whether the create committed
+    (docs/ASSISTANT_PHASE1_PLAN.md 3.8 step 11). A 404 for everyone else, for
+    a key that is not a uuid, and for another user's key."""
+    if not user.via_assistant_run_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+    try:
+        key = str(uuid.UUID(key))
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found") from exc
+    found = _assistant_created(key, user.id, "id, number, name")
+    if found is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+    return {"id": found["id"], "number": found["number"], "name": found["name"]}
+
+
+# ── Assistant splitter handoff (docs/ASSISTANT_PHASE2_PLAN.md 3.4) ──────────
+#
+# split-drop and attach-split-job answer only an approval-bound assistant
+# principal (the execute job of an approved card) whose
+# ASSISTANT_IDEMPOTENCY_HEADER equals the token's approval id: a human, a
+# turn principal and a header that differs all get 404, no task. That one
+# value is the replay key and the approval id. The recovery routes answer
+# only an assistant principal; the two previews answer humans too. Each
+# /preview is declared before its /by-key/{key} and /{job_id} siblings
+# (firewall.resolve_path_format takes the first full match). The service
+# (services/split_handoff) is imported on first use.
+
+SPLIT_REPLAY_HEADER = "X-Idempotent-Replay"
+IDEMPOTENCY_KEY_REQUIRED = "idempotency_key_required"
+SPLIT_DROP_ROUTE = "/projects/{project_id}/split-drop"
+SPLIT_DROP_PREVIEW_ROUTE = "/projects/{project_id}/split-drop/preview"
+SPLIT_DROP_BY_KEY_ROUTE = "/projects/{project_id}/split-drop/by-key/{key}"
+ATTACH_SPLIT_JOB_ROUTE = "/projects/{project_id}/attach-split-job"
+ATTACH_SPLIT_JOB_PREVIEW_ROUTE = "/projects/{project_id}/attach-split-job/preview"
+ATTACH_SPLIT_JOB_GET_ROUTE = "/projects/{project_id}/attach-split-job/{job_id}"
+
+
+class SplitDropIn(BaseModel):
+    """POST /projects/{id}/split-drop: the staged files and the card's
+    approved ceiling (a decimal string)."""
+
+    file_ids: list[str] = Field(default_factory=list, max_length=50)
+    max_usd: str = Field(pattern=r"^\d{1,6}(\.\d{1,6})?$")
+
+
+class AttachSplitJobIn(BaseModel):
+    job_id: str = Field(max_length=64)
+
+
+def _split_handoff():
+    from app.services import split_handoff
+
+    return split_handoff
+
+
+def _split_error(status_code: int, code: str, message: str, **detail) -> HTTPException:
+    return HTTPException(status_code, detail={"code": code, "message": message, **detail},
+                         headers={"X-Error-Code": code})
+
+
+def _split_refused(exc) -> HTTPException:
+    """split_handoff.SplitRefused as the phase 1 error shape."""
+    return _split_error(exc.status, exc.code, exc.message, **exc.detail)
+
+
+def _split_uuid_or_404(value: str | None) -> str:
+    try:
+        return str(uuid.UUID(str(value or "").strip()))
+    except ValueError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found") from None
+
+
+def _require_assistant_principal(user: CurrentUser) -> None:
+    if not user.via_assistant_run_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+
+
+def _approval_bound_key(request: Request, user: CurrentUser) -> str:
+    """The approval id of an approval-bound assistant request, which the
+    idempotency header must repeat. 404 for a human or a turn principal (no
+    approval) and for a header that differs; 400 idempotency_key_required
+    when the header is missing or not a uuid."""
+    actor = provenance.current()
+    if (not user.via_assistant_run_id or actor is None or not actor.approval_id
+            or actor.user_id != str(user.id)):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+    raw = (request.headers.get(ASSISTANT_IDEMPOTENCY_HEADER) or "").strip()
+    try:
+        key = str(uuid.UUID(raw))
+    except ValueError:
+        raise _split_error(status.HTTP_400_BAD_REQUEST, IDEMPOTENCY_KEY_REQUIRED,
+                           f"{ASSISTANT_IDEMPOTENCY_HEADER} must carry the approval id.") from None
+    if key != actor.approval_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+    return key
+
+
+def _require_split_project(sb, project_id: str) -> None:
+    if not (sb.table("projects").select("id").eq("id", project_id).limit(1).execute().data or []):
+        raise _split_error(status.HTTP_404_NOT_FOUND, "project_not_found", "Project not found.")
+
+
+@router.post("/{project_id}/split-drop", status_code=status.HTTP_201_CREATED,
+             dependencies=_BIDDING_ONLY + [Depends(upload_rate_limit), Depends(require_writer)])
+def assistant_split_drop(
+    project_id: str,
+    body: SplitDropIn,
+    request: Request,
+    response: Response,
+    user: CurrentUser = Depends(require_project_assignment),
+) -> dict:
+    """Split the caller's staged PDFs into the project (3.3.4): one new
+    splitter job, one queued run per file, one assistant task. 201
+    `split_drop_out`; a replay of the same approval answers 200 with the same
+    body and X-Idempotent-Replay. Refusals carry their code (5.3)."""
+    key = _approval_bound_key(request, user)
+    project_id = _split_uuid_or_404(project_id)
+    sb = get_supabase()
+    _require_split_project(sb, project_id)
+    svc = _split_handoff()
+    try:
+        out, replay = svc.split_drop(
+            sb, project_id, user, body.file_ids, approval_id=key,
+            run_id=user.via_assistant_run_id, max_usd=Decimal(body.max_usd),
+        )
+    except svc.SplitRefused as exc:
+        raise _split_refused(exc) from None
+    if replay:
+        response.status_code = status.HTTP_200_OK
+        response.headers[SPLIT_REPLAY_HEADER] = "true"
+    return out
+
+
+# The split card's read runs at least three times per card (the proposal,
+# the execute job's re-read before the write and its after read), and the
+# assistant's buckets get half the human limit, so ai_rate_limit (5 a
+# minute, 2 for the assistant) made the execute job's reads answer 429: the
+# after read was lost, and a turn with two split reads followed by a prompt
+# approve failed the card (live test 2026-10-22). Its own scope, at four
+# times the AI budget, still bounds the hashing it does.
+SPLIT_PREVIEW_RATE_SCOPE = "split_preview"
+SPLIT_PREVIEW_RATE_FACTOR = 4
+split_preview_rate_limit = rate_limit(
+    SPLIT_PREVIEW_RATE_SCOPE,
+    lambda: max(1, get_settings().ai_rate_limit_per_min) * SPLIT_PREVIEW_RATE_FACTOR,
+)
+
+
+@router.get("/{project_id}/split-drop/preview",
+            dependencies=_BIDDING_ONLY + [Depends(split_preview_rate_limit), Depends(require_writer)])
+def assistant_split_drop_preview(
+    project_id: str,
+    file_ids: str = Query(default="", max_length=2000),
+    user: CurrentUser = Depends(require_project_assignment),
+) -> dict:
+    """The split card's read (3.3.5): the files with their problems and
+    duplicates, the lock, the splitter, the estimate and the spend left.
+    `file_ids` is a comma-separated list of at most 10 staged file ids."""
+    project_id = _split_uuid_or_404(project_id)
+    ids = [part.strip() for part in file_ids.split(",") if part.strip()]
+    svc = _split_handoff()
+    try:
+        return svc.split_preview(get_supabase(), project_id, user, ids)
+    except svc.SplitRefused as exc:
+        raise _split_refused(exc) from None
+
+
+@router.get("/{project_id}/split-drop/by-key/{key}", dependencies=_BIDDING_ONLY)
+def assistant_split_drop_by_key(
+    project_id: str, key: str, user: CurrentUser = Depends(require_internal),
+) -> dict:
+    """The execute job's recovery after a 5xx: `split_drop_out` of the task
+    the approval `key` created on this project, once it has a job and is
+    past `pending`. 404 for everyone else."""
+    _require_assistant_principal(user)
+    project_id, key = _split_uuid_or_404(project_id), _split_uuid_or_404(key)
+    out = _split_handoff().recovered_split_drop(user, project_id, key)
+    if out is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+    return out
+
+
+@router.post("/{project_id}/attach-split-job",
+             dependencies=_BIDDING_ONLY + [Depends(require_writer)])
+def assistant_attach_split_job(
+    project_id: str,
+    body: AttachSplitJobIn,
+    request: Request,
+    response: Response,
+    user: CurrentUser = Depends(require_project_assignment),
+) -> dict:
+    """File a finished Bid Splitter job of the caller into the project
+    (3.3.6): `job_outcome`. A replay (the job already linked here) answers
+    the same with X-Idempotent-Replay."""
+    key = _approval_bound_key(request, user)
+    project_id = _split_uuid_or_404(project_id)
+    job_id = _split_uuid_or_404(body.job_id)
+    sb = get_supabase()
+    _require_split_project(sb, project_id)
+    svc = _split_handoff()
+    try:
+        out, replay = svc.attach(sb, project_id, user, job_id, idempotency_key=key)
+    except svc.SplitRefused as exc:
+        raise _split_refused(exc) from None
+    if replay:
+        response.headers[SPLIT_REPLAY_HEADER] = "true"
+    return out
+
+
+@router.get("/{project_id}/attach-split-job/preview",
+            dependencies=_BIDDING_ONLY + [Depends(require_internal)])
+def assistant_attach_split_job_preview(
+    project_id: str,
+    job_id: str = Query(default="", max_length=64),
+    user: CurrentUser = Depends(require_project_assignment),
+) -> dict:
+    """The attach card's read (3.4): the job, its files and the first
+    precondition it fails (`problem`), or null."""
+    project_id, job_id = _split_uuid_or_404(project_id), _split_uuid_or_404(job_id)
+    svc = _split_handoff()
+    try:
+        return svc.attach_preview(get_supabase(), project_id, user, job_id)
+    except svc.SplitRefused as exc:
+        raise _split_refused(exc) from None
+
+
+@router.get("/{project_id}/attach-split-job/{job_id}", dependencies=_BIDDING_ONLY)
+def assistant_attached_split_job(
+    project_id: str, job_id: str, user: CurrentUser = Depends(require_internal),
+) -> dict:
+    """The attach's recovery read: `job_outcome` when the caller's job is
+    linked to this project, else 404."""
+    _require_assistant_principal(user)
+    project_id, job_id = _split_uuid_or_404(project_id), _split_uuid_or_404(job_id)
+    out = _split_handoff().attached_outcome(get_supabase(), project_id, user, job_id)
+    if out is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+    return out
 
 
 _DISCARD_BLOCKED = (
@@ -1144,6 +1566,25 @@ def merge_project(
         raise _merge_error(exc) from exc
 
 
+def _creator_name(user_id: str) -> str | None:
+    """The creator's current full name for the project header's "Created by"
+    line (the client renders "<name>'s assistant" from actor_kind). Never
+    fails a project read: trouble logs and answers None."""
+    try:
+        rows = (
+            get_supabase()
+            .table("profiles")
+            .select("full_name")
+            .eq("id", user_id)
+            .limit(1)
+            .execute()
+        ).data or []
+    except Exception:  # noqa: BLE001 - a label, never a gate on the project page
+        logger.exception("projects: creator name lookup failed for %s", user_id)
+        return None
+    return (rows[0].get("full_name") or None) if rows else None
+
+
 @router.get("/{project_id}", response_model=ProjectOut)
 def get_project(project_id: str, user: CurrentUser = Depends(get_current_user)):
     if user.role not in INTERNAL_ROLES:
@@ -1156,6 +1597,8 @@ def get_project(project_id: str, user: CurrentUser = Depends(get_current_user)):
     row = created.get(project_id)
     if row is not None:
         row = {**row, "split_issue": _split_issue_for(row), "files_issue": _files_issue_for(row)}
+    if project.get("created_by"):
+        project["created_by_name"] = _creator_name(project["created_by"])
     return _present(
         project,
         user.role,
@@ -1251,6 +1694,17 @@ def update_project(
 ):
     # exclude_unset (not exclude_none) so an explicit null clears a field.
     patch = body.model_dump(exclude_unset=True, mode="json")
+    if user.via_assistant_run_id:
+        # The assistant edits only the allowlisted fields (docs/
+        # ASSISTANT_PHASE1_PLAN.md 3.11): never the Go/No-Go answers, the
+        # dates that email or rename, nor budgetary.
+        extra = sorted(set(patch) - ASSISTANT_PROJECT_FIELDS)
+        if extra:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                f"The assistant may not edit: {', '.join(extra)}",
+                headers={"X-Error-Code": ASSISTANT_FIELD_REFUSED},
+            )
     if not patch:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No fields to update")
     if patch.get("name", "") is None:
@@ -1307,6 +1761,10 @@ def update_project(
             bid_date_change_email.queue_internal_bid_date_change(
                 project_id, previous_bid_at, current_bid_at, user.id
             )
+    if user.via_assistant_run_id:
+        # No intake settling for the assistant: it would auto-Go the project
+        # (gono.auto_go_if_scored), a stage move the approval card never showed.
+        return _present(updated[0], user.role)
     if _settle_rfp_intake(project_id, updated[0], patch, user.id):
         return _present(_fetch_project_with_outcome(project_id), user.role)
     return _present(updated[0], user.role)
@@ -1690,10 +2148,14 @@ def add_project_gc(
         raise HTTPException(
             status.HTTP_409_CONFLICT, f"{gc[0]['name']} is already on this project"
         )
+    # Validate the contacts before the link insert: a 400 after it would
+    # leave the GC linked with no contacts and no audit row.
+    _assert_contacts_belong_to_gc(sb, body.gc_id, body.contact_ids or [])
     link = (
         sb.table("project_gcs").insert(
             {"project_id": project_id, "gc_id": body.gc_id,
-             "needs_by": body.needs_by.isoformat() if body.needs_by else None}
+             "needs_by": body.needs_by.isoformat() if body.needs_by else None,
+             **provenance.fields(user.id)}
         ).execute()
     ).data[0]
     if body.contact_ids:

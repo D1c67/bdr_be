@@ -220,8 +220,11 @@ def reset_my_mfa(user: CurrentUser = Depends(get_current_user)):
     correct. Declared before `PATCH /{user_id}` so the literal path wins.
     """
     _refuse_while_impersonating(user)
+    _revoke_browser_before_mfa_reset(user.id)
     _delete_user_factors(user.id)
     updated = sb_update(user.id, {"mfa_enrolled": False})
+    # The same assistant step as the admin reset (docs/ASSISTANT_PHASE3_PLAN.md D11).
+    _assistant_offboard(user.id, "mfa_reset", actor_id=user.id, ungated=True)
     audit(user.id, "user.mfa.self_reset", "profile", user.id, {})
     return updated
 
@@ -544,9 +547,13 @@ def reset_user_mfa(
     """
     user_id = _canonical_id(user_id)
     _load_profile(user_id)
+    _revoke_browser_before_mfa_reset(user_id)
     _delete_user_factors(user_id)
     updated = sb_update(user_id, {"mfa_enrolled": False})
     audit(admin.id, "user.mfa.admin_reset", "profile", user_id, {})
+    # A card proposed under the old session must not survive re-enrollment
+    # (docs/ASSISTANT_PHASE3_PLAN.md 3.10.2): revoke, expire, cancel, pause.
+    _assistant_offboard(user_id, "mfa_reset", actor_id=admin.id, ungated=True)
     if not _is_self(user_id, admin):
         _revoke_sessions(user_id, reason="mfa_reset", actor_id=admin.id)
     return updated
@@ -635,6 +642,8 @@ def switch_own_role(
     if not user.is_dev:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Dev account required")
     updated = sb_update(user.id, {"role": body.role.value})
+    # No assistant offboarding here (docs/ASSISTANT_PHASE3_PLAN.md D11): the
+    # scheduler's owner check pauses whatever the new role cannot run.
     audit(user.id, "user.dev_role_switch", "profile", user.id, {"role": body.role.value})
     return updated
 
@@ -754,6 +763,17 @@ def update_user(
         _set_auth_email(user_id, new_email)
         patch["email"] = new_email
 
+    # Assistant offboarding (docs/ASSISTANT_PHASE3_PLAN.md 3.10.4), decided
+    # once every guard has passed. An unchanged role in the body does
+    # nothing; reactivation does nothing (paused routines wait for the user).
+    deactivating = is_active is False and bool(target.get("is_active"))
+    role_change = role is not None and role.value != target.get("role")
+    demoting_out = role_change and role not in INTERNAL_ROLES
+    pre_revoked = 0
+    if deactivating or demoting_out:
+        # Before the profile write, so unattended work stops first.
+        pre_revoked = _assistant_revoke(user_id, "deactivated" if deactivating else "role_changed")
+
     try:
         updated = sb_update(user_id, patch)
     except Exception:
@@ -764,6 +784,17 @@ def update_user(
         raise
 
     audit(admin.id, "user.update", "profile", user_id, patch)
+    old_role = target.get("role")
+    if deactivating or demoting_out:
+        _assistant_offboard(
+            user_id, "deactivated" if deactivating else "demoted_external", actor_id=admin.id,
+            old_role=old_role, new_role=role.value if role is not None else old_role,
+            prior_revoked=pre_revoked,
+        )
+    elif role_change and _is_internal_role(old_role):
+        # Internal to internal: the reconcile only (no revoke, no routines).
+        _assistant_offboard(user_id, "role_changed", actor_id=admin.id, old_role=old_role,
+                            new_role=role.value if role is not None else None)
     if "is_dev" in patch and patch["is_dev"] != bool(target.get("is_dev")):
         audit(
             admin.id,
@@ -805,6 +836,9 @@ def delete_user(user_id: str, admin: CurrentUser = Depends(_MANAGE_USERS)):
         )
     target = _load_profile(user_id)
     _guard_admin_coverage(target, deleting=True)
+    # Assistant offboarding before the auth delete: afterwards every lookup by
+    # created_by is gone (docs/ASSISTANT_PHASE3_PLAN.md 3.10.4).
+    _assistant_offboard_for_delete(user_id, admin_id=admin.id)
 
     sb = get_supabase()
     try:
@@ -827,6 +861,131 @@ def delete_user(user_id: str, admin: CurrentUser = Depends(_MANAGE_USERS)):
         user_id,
         {"email": target.get("email"), "role": target.get("role")},
     )
+
+
+def _assistant_on() -> bool:
+    """Whether ASSISTANT_ENABLED is on. It gates only the deactivation and
+    role-change steps: with the assistant off nothing runs unattended, and
+    the nightly orphan sweep offboards anyone deactivated or demoted out
+    meanwhile once it is back on. An MFA reset and a hard delete run their
+    step whatever the flag says, because the sweep never catches an MFA
+    reset (the person stays active and internal) and cannot help a delete
+    (the cascade has already removed the rows); see _assistant_tables."""
+    return bool(getattr(get_settings(), "assistant_enabled", False))
+
+
+def _assistant_missing_table(exc: Exception) -> bool:
+    """A database without the assistant migrations (0170): PostgREST's
+    PGRST205 (table not in the schema cache) or Postgres's 42P01."""
+    code = getattr(exc, "code", None)
+    if code in ("PGRST205", "42P01"):
+        return True
+    text = str(exc)
+    return "PGRST205" in text or "42P01" in text
+
+
+def _assistant_tables(user_id: str) -> bool | None:
+    """The legal hold of this person's assistant data, read whatever
+    ASSISTANT_ENABLED says (the assistant tables exist either way). None
+    when the database has no assistant tables, so there is nothing to
+    offboard. Any other read failure raises."""
+    from app.assistant import repo
+
+    try:
+        return repo.legal_hold(user_id)
+    except Exception as exc:  # noqa: BLE001
+        if _assistant_missing_table(exc):
+            return None
+        raise
+
+
+def _is_internal_role(value: str | None) -> bool:
+    try:
+        return Role(value) in INTERNAL_ROLES
+    except ValueError:
+        return False
+
+
+def _assistant_revoke(user_id: str, reason: str) -> int:
+    """Revoke the assistant delegation (best effort: the offboarding after
+    the profile write revokes again). Returns the rows revoked (0 on any
+    failure), so the offboarding audit can count them."""
+    if not _assistant_on():
+        return 0
+    try:
+        from app.services import assistant_offboarding
+
+        return int(assistant_offboarding.revoke_delegation(user_id, reason) or 0)
+    except Exception:  # noqa: BLE001 - an account change always completes
+        logging.getLogger("bdr.users").exception("Assistant delegation revoke failed")
+        return 0
+
+
+def _revoke_browser_before_mfa_reset(user_id: str) -> None:
+    from app.services.assistant_browser import revoke_before_mfa_reset
+
+    try:
+        revoke_before_mfa_reset(user_id)
+    except Exception:
+        raise HTTPException(502, "Personal browser credentials could not be revoked. Try the reset again.",
+                            headers={"X-Error-Code": "offboarding_failed"}) from None
+
+
+def _assistant_offboard(user_id: str, mode: str, *, ungated: bool = False, **kw):
+    """assistant_offboarding.offboard, imported lazily. None (logged) on any
+    import or call error, so a lock-out or a deactivation always completes.
+    `ungated` (MFA resets) runs it while ASSISTANT_ENABLED is off too,
+    unless the database has no assistant tables."""
+    if not _assistant_on():
+        if not ungated:
+            return None
+        try:
+            if _assistant_tables(user_id) is None:
+                return None
+        except Exception:  # noqa: BLE001 - offboard below logs its own failures
+            pass
+    try:
+        from app.services import assistant_offboarding
+
+        return assistant_offboarding.offboard(user_id, mode, **kw)
+    except Exception:  # noqa: BLE001
+        logging.getLogger("bdr.users").exception("Assistant offboarding failed (%s)", mode)
+        return None
+
+
+def _assistant_offboard_for_delete(user_id: str, *, admin_id: str) -> None:
+    """The hard delete's assistant step: 409 legal_hold while the person's
+    assistant data is on legal hold, else offboard in mode 'deleted'; any
+    failure among the critical steps (or a step that could not run at all)
+    is 502 offboarding_failed and nothing is deleted. Runs whatever
+    ASSISTANT_ENABLED says: the profile delete cascades every assistant
+    row, so a held person's data would be destroyed and nothing could
+    catch up later. Skipped only on a database without the assistant
+    tables."""
+    try:
+        held = _assistant_tables(user_id)
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger("bdr.users").exception("Assistant legal hold read failed")
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "The assistant's data for this account could not be checked, so it was not deleted. Try again.",
+            headers={"X-Error-Code": "offboarding_failed"},
+        ) from exc
+    if held is None:
+        return
+    if held:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This account's assistant data is on legal hold, so the account cannot be deleted. Disable it instead.",
+            headers={"X-Error-Code": "legal_hold"},
+        )
+    result = _assistant_offboard(user_id, "deleted", actor_id=admin_id, ungated=True)
+    if result is None or not result.ok:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "The assistant's work for this account could not be stopped, so it was not deleted. Try again.",
+            headers={"X-Error-Code": "offboarding_failed"},
+        )
 
 
 def _assert_email_available(email: str, user_id: str) -> None:

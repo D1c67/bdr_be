@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
 
+from app.core import provenance
 from app.core.roles import Role
 from app.core.supabase_client import get_supabase
 from app.services.notifications import audit, notify_role
@@ -71,6 +72,7 @@ def append_pm_stage_event(
             "to_stage": to_stage,
             "actor_id": actor_id,
             "note": note,
+            **provenance.fields(actor_id),
         }
     ).execute()
 

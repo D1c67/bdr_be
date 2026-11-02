@@ -537,6 +537,45 @@ class ProjectUpdate(BaseModel):
         return _clean_bidding_url(v)
 
 
+class AssistantProjectUpdate(BaseModel):
+    """The ProjectUpdate fields the assistant may edit through PATCH
+    /projects/{id} (docs/ASSISTANT_PHASE1_PLAN.md 3.7 and 3.11), with the
+    same types and validators. Never used to parse a request: its field
+    names are ASSISTANT_PROJECT_FIELDS, which the route checks a bdra_
+    principal's patch against. Left out on purpose: the nine Go/No-Go
+    answers, internal_bid_at (its change emails every internal user), the
+    estimator and vendor due dates, actual_bid_at and budgetary (it renames
+    the number)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1)
+    address: str | None = None
+    est_start_date: date | None = None
+    est_finish_date: date | None = None
+    invitation_at: datetime | None = None
+    job_walk_at: datetime | None = None
+    labor_time: LaborTime | None = None
+    wage_type: WageType | None = None
+    labor_note: str | None = None
+    notes: str | None = None
+    bid_notes: str | None = None
+    bidding_url: str | None = None
+    no_bidding_url: bool | None = None
+    is_ngem: bool | None = None
+    is_rebid: bool | None = None
+    project_information: str | None = Field(default=None, max_length=PROJECT_TEXT_MAX_CHARS)
+    trade_instructions: str | None = Field(default=None, max_length=PROJECT_TEXT_MAX_CHARS)
+
+    @field_validator("bidding_url")
+    @classmethod
+    def _check_bidding_url(cls, v: str | None) -> str | None:
+        return _clean_bidding_url(v)
+
+
+ASSISTANT_PROJECT_FIELDS: frozenset[str] = frozenset(AssistantProjectUpdate.model_fields)
+
+
 class GcCreateIn(BaseModel):
     """The "Add a GC" half of a GC confirmation (docs/RFP_BUILDINGCONNECTED.md
     3.4): the GC's name and, optionally, its contact from the platform's lead."""
@@ -793,6 +832,13 @@ class ProjectOut(BaseModel):
     proposal_revision_open: bool = False
     proposal_revision_number: int | None = None
     created_by: str | None
+    # Actor provenance (migration 0172): who created the row, the human or
+    # their assistant. `assistant_run_id` is null for the estimator role (the
+    # router drops it), and `created_by_name` is the creator's current name,
+    # filled by the detail route only.
+    actor_kind: str = "human"
+    assistant_run_id: str | None = None
+    created_by_name: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -871,6 +917,10 @@ class TransitionIn(BaseModel):
     # thresholds decide, 'review' holds the project for a manual decision, and
     # 'go'/'no_go' push the outcome regardless of the score.
     gono_action: Literal["score", "review", "go", "no_go"] = "score"
+    # Compare-and-set for the assistant (docs/ASSISTANT_PHASE4_PLAN.md 3.12): the
+    # head task the caller saw. When set and the lane head moved since, /advance
+    # answers 409 lane_moved before any write. A human caller never sends it.
+    expected_task: str | None = Field(default=None, max_length=60)
 
 
 FailedToBidReason = Literal[

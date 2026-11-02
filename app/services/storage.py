@@ -325,6 +325,15 @@ def build_bid_split_source_path(job_id: str, filename: str) -> str:
     return f"bid-splits/{job_id}/source/{uuid.uuid4().hex}-{safe_key_component(filename)}"
 
 
+def build_assistant_staging_path(user_id: str, filename: str) -> str:
+    """Object path for a PDF staged in the assistant panel
+    (docs/ASSISTANT_PHASE2_PLAN.md 3.1.1). Same private bucket under the
+    reserved `assistant-files/` prefix, keyed by owner, so split-drop can
+    `copy_file` it into a splitter job server-side; `delete_project_prefix`
+    only walks `{project_id}/`, so it never touches these."""
+    return f"assistant-files/{user_id}/{uuid.uuid4()}-{safe_key_component(filename)}"
+
+
 def build_bid_split_output_path(job_id: str, filename: str) -> str:
     """Object path for one split output PDF (a segment of a source file)."""
     return f"bid-splits/{job_id}/output/{uuid.uuid4().hex}-{safe_key_component(filename)}"

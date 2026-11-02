@@ -68,7 +68,10 @@ def _ts(value: Any) -> datetime | None:
 
 def prepare(job: dict[str, Any]) -> PrepareResult:
     from app.services import pm_rfi_sync
+    from app.services.browser_agents import queue
 
+    if job.get("principal_kind", "org") != "org":
+        return PrepareResult.fail("unsupported", "Organization job required", notify=False)
     try:
         seed = protocol.RfiFromEmailInput.model_validate(job.get("input") or {})
     except ValidationError:
@@ -76,6 +79,9 @@ def prepare(job: dict[str, Any]) -> PrepareResult:
     project_id = job.get("project_id")
     if not project_id:
         return PrepareResult.fail("no_link", "The job names no BDR project", notify=False)
+    settings = queue.get_settings()
+    if not settings.pm_rfi_sync_active or not (settings.procore_login_email or "").strip():
+        return PrepareResult.fail("unsupported", "Organization RFI sync is not configured", notify=False)
     sb = _sb()
     link = pm_rfi_sync.get_link(sb, project_id)
     if not (

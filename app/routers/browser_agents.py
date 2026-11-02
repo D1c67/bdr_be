@@ -94,14 +94,14 @@ def _body(model: type[BaseModel], payload: Any) -> Any:
 
 def _help(help_id: uuid.UUID) -> dict[str, Any]:
     row = help_flow.get_help(str(help_id))
-    if not row:
+    if not row or row.get("principal_kind", "org") != "org":
         raise human_error(404, "not_found", "No such help request.")
     return row
 
 
 def _job(job_id: uuid.UUID) -> dict[str, Any]:
     row = admin.get_job(str(job_id))
-    if not row:
+    if not row or row.get("principal_kind", "org") != "org":
         raise human_error(404, "not_found", "No such job.")
     return row
 
@@ -170,6 +170,7 @@ class SecretIn(_In):
 
 
 class EnrollmentIn(_In):
+    principal_kind: Literal["org", "user"] = "org"
     worker_name: Annotated[str, Field(min_length=2, max_length=60)]
 
 
@@ -268,7 +269,7 @@ def list_help(
 ) -> dict[str, Any]:
     from app.core import supabase_client
 
-    q = supabase_client.get_supabase().table(help_flow.HELP).select("*")
+    q = supabase_client.get_supabase().table(help_flow.HELP).select("*").eq("principal_kind", "org")
     if status_:
         if status_ == "active":
             q = q.in_("status", help_flow.ACTIVE)
@@ -394,7 +395,7 @@ def _api_base(request: Request) -> str:
 @router.post("/admin/enrollments")
 def create_enrollment(request: Request, user: Admin, payload: Any = Body(default=None)) -> dict[str, Any]:
     body: EnrollmentIn = _body(EnrollmentIn, payload)
-    return admin.create_enrollment(body.worker_name, user, _api_base(request))
+    return admin.create_enrollment(body.worker_name, user, _api_base(request), principal_kind=body.principal_kind)
 
 
 @router.patch("/admin/workers/{worker_id}")

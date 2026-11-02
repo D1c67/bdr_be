@@ -84,6 +84,8 @@ def _fenced_job(lease: AgentLease, identity: str, host: str) -> dict:
     job = (data[0] if isinstance(data, list) and data else data) or {}
     if not job.get("id"):
         raise agent_error(ErrorCode.LEASE_LOST)
+    if job.get("principal_kind", "org") != "org":
+        raise agent_error(ErrorCode.IDOR, "Organization identity unavailable")
     try:
         spec = registry.get_type(job["agent_type"])
     except registry.UnknownAgentType:
@@ -98,7 +100,7 @@ def _fenced_job(lease: AgentLease, identity: str, host: str) -> dict:
 def open_login_help(identity: str) -> dict | None:
     rows = (
         _sb().table(HELP).select("id, holder_job_id, status, project_id")
-        .eq("scope_key", f"login:{identity}").in_("status", OPEN_HELP_STATUSES).limit(1).execute()
+        .eq("principal_kind", "org").eq("scope_key", f"login:{identity}").in_("status", OPEN_HELP_STATUSES).limit(1).execute()
     ).data or []
     return rows[0] if rows else None
 
@@ -403,11 +405,11 @@ def _auto_resolve_login_help(identity: str, job: dict, lease: AgentLease) -> int
         jid = str(w["job_id"])
         if jid == str(job["id"]):
             sb.table(queue.JOBS).update({"status": "running", "waiting_help_id": None, "hold_until": None}).eq(
-                "id", jid).eq("status", "waiting_help").eq("lease_owner", lease.worker.id).execute()
+                "id", jid).eq("principal_kind", "org").eq("status", "waiting_help").eq("lease_owner", lease.worker.id).execute()
             continue
         held = (
             sb.table(queue.JOBS).update({"status": "running", "waiting_help_id": None, "hold_until": None})
-            .eq("id", jid).eq("status", "waiting_help").eq("waiting_help_id", str(help_row["id"]))
+            .eq("principal_kind", "org").eq("id", jid).eq("status", "waiting_help").eq("waiting_help_id", str(help_row["id"]))
             .not_.is_("lease_owner", "null").execute()
         ).data or []
         if held:
@@ -419,7 +421,7 @@ def _auto_resolve_login_help(identity: str, job: dict, lease: AgentLease) -> int
             sb.table(queue.JOBS).update({
                 "status": "queued", "resume_reason": "help_answered", "priority": 10,
                 "waiting_help_id": None, "hold_until": None,
-            }).eq("id", jid).eq("status", "waiting_help").is_("lease_owner", "null").execute()
+            }).eq("principal_kind", "org").eq("id", jid).eq("status", "waiting_help").is_("lease_owner", "null").execute()
         ).data or []
         if rows:
             requeued += 1
@@ -453,6 +455,10 @@ def sweep_unreported_logins(now: datetime, settings_row: dict[str, Any]) -> int:
     counted = 0
     settings = get_settings()
     for row in rows:
+        parents = (sb.table(queue.JOBS).select("principal_kind").eq("id", str(row["job_id"]))
+                   .limit(1).execute()).data or []
+        if not parents or parents[0].get("principal_kind", "org") != "org":
+            continue
         claimed = (
             sb.table(ATTEMPTS).update({"reported_at": queue.iso(now), "outcome": "unreported",
                                        "counted_as_failure": True})

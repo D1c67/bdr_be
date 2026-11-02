@@ -26,6 +26,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, model_validator
 from starlette.concurrency import run_in_threadpool
 
+from app.core import provenance
 from app.core.config import get_settings
 from app.core.deps import CurrentUser, require_internal, require_writer
 from app.core.error_codes import ErrorCode, RateLimitScope
@@ -265,6 +266,7 @@ def create_job(body: BidSplitJobIn, user: CurrentUser = Depends(require_writer))
                 "file_count": body.file_count,
                 "model": llm.active_model("bid_split", s),
                 "created_by": user.id,
+                **provenance.fields(user.id),
             }
         )
         .execute()
@@ -843,7 +845,9 @@ def retry_file(
     forced_kind = None
     if rec.get("user_corrected") and rec.get("file_kind") in bid_split.SPLIT_KINDS:
         forced_kind = rec["file_kind"]
-    bid_split._mark(file_id, status="pending", error=None)
+    # A person's run: no assistant attribution, provenance or spend hold
+    # (docs/ASSISTANT_PHASE2_PLAN.md 3.5.5).
+    bid_split._mark(file_id, status="pending", error=None, assistant_run_id=None, spend_reservation_id=None)
     _dispatch(background, file_id, user.id, forced_kind=forced_kind)
     audit(user.id, "bid_split.retry", "bid_split_file", file_id, {"job_id": rec["job_id"]})
     return {"status": "pending"}
@@ -1086,7 +1090,9 @@ def reprocess_file(
         raise
     except Exception:  # noqa: BLE001 - queue lookup trouble must not block reprocessing
         logger.exception("bid_split active-job lookup failed")
-    bid_split._mark(file_id, status="pending", error=None)
+    # A person's run: no assistant attribution, provenance or spend hold
+    # (docs/ASSISTANT_PHASE2_PLAN.md 3.5.5).
+    bid_split._mark(file_id, status="pending", error=None, assistant_run_id=None, spend_reservation_id=None)
     _dispatch(background, file_id, user.id, forced_kind=rec["file_kind"])
     audit(
         user.id,

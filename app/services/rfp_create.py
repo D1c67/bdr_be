@@ -64,6 +64,7 @@ from datetime import datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from app.core import provenance
 from app.core.config import Settings, get_settings
 from app.core.roles import Role
 from app.services import (
@@ -1438,7 +1439,7 @@ def _seed_state(sb, project_id: str, actor_id: str | None) -> None:
     """The stage event and the 4-category seed, the same rows create_project writes."""
     sb.table("stage_events").insert(
         {"project_id": project_id, "from_stage": None, "to_stage": "intake",
-         "category": "intake", "actor_id": actor_id}
+         "category": "intake", "actor_id": actor_id, **provenance.fields(actor_id)}
     ).execute()
     sb.table("project_category_state").insert(
         [

@@ -48,6 +48,7 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
 
+from app.core import provenance
 from app.core.roles import INTERNAL_ROLES, Role
 from app.core.supabase_client import get_supabase
 from app.services import notifications
@@ -408,6 +409,7 @@ def _emit_event(
             "category": category,
             "actor_id": actor_id,
             "note": note,
+            **provenance.fields(actor_id),
         }
     ).execute()
 

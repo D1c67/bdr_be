@@ -6,6 +6,11 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
+# Locally built worker release bundles and public installer artifacts
+/dist/phase6-worker-*/
+/dist/phase6-sessions/
+/agent_worker/dist/phase6-worker-*/
+
 # Env / secrets (keep .env.example tracked)
 .env
 

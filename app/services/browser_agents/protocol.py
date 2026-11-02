@@ -312,6 +312,16 @@ CEILINGS: dict[str, dict[str, list[str]]] = {
         "login_hosts": [PROCORE_LOGIN_HOST],
         "login_challenge_hosts": ["challenges.cloudflare.com", "www.google.com", "www.gstatic.com"],
     },
+    "user_browser_read": {
+        "nav_hosts": ["app.procore.com", "us02.procore.com"],
+        "nav_paths": [
+            r"^/\d{1,20}/project/(home|rfi(/list)?|rfi/show/\d{1,20})/?$",
+            r"^/webclients/host/companies/\d{1,20}/projects/\d{1,20}/tools/(projecthome|hubs/project-hub/views/overview|rfis(/\d{1,20})?)/?$",
+        ],
+        "resource_hosts": ["app.procore.com", "login.procore.com", "us02.procore.com"],
+        "login_hosts": ["login.procore.com"],
+        "login_challenge_hosts": [],
+    },
     "canary": {
         "nav_hosts": ["$api_host"],
         "nav_paths": [r"^/agent-worker/v1/canary/page/?$"],
@@ -354,6 +364,7 @@ Url = Annotated[str, Field(max_length=URL_MAX)]
 
 
 class EnrollRequest(_Req):
+    expected_pool: Literal["org", "user"] = "org"
     code: Annotated[str, Field(pattern=ENROLL_CODE_RE.pattern)]
     hostname: Annotated[str, Field(min_length=1, max_length=255)]
     os_info: dict[str, Any] = Field(default_factory=dict)
@@ -361,6 +372,7 @@ class EnrollRequest(_Req):
 
 
 class EnrollResponse(_Resp):
+    principal_kind: Literal["org", "user"] = "org"
     worker_id: UUID
     token: Annotated[str, Field(pattern=WORKER_TOKEN_RE.pattern)]
     status: Literal["pending"]
@@ -395,6 +407,7 @@ class HelloResponse(_Resp):
 
 
 class WorkerConfig(_Resp):
+    principal_kind: Literal["org", "user"] = "org"
     status: Literal["pending", "active", "revoked"]
     max_slots: int
     draining: bool
@@ -538,7 +551,17 @@ class CanaryInput(BaseModel):
     expect_text: Annotated[str, Field(max_length=200)] = "BDR canary ok"
 
 
-INPUT_MODELS: dict[str, type[BaseModel]] = {"rfi_from_email": RfiFromEmailInput, "canary": CanaryInput}
+class UserBrowserReadInput(_Req):
+    """A frozen human-approved read request; credentials are never input."""
+    service: Literal["procore"]
+    url: Annotated[str, Field(min_length=1, max_length=URL_MAX)]
+    objective: Annotated[str, Field(min_length=1, max_length=2000)]
+
+
+INPUT_MODELS: dict[str, type[BaseModel]] = {
+    "rfi_from_email": RfiFromEmailInput, "canary": CanaryInput,
+    "user_browser_read": UserBrowserReadInput,
+}
 CHECKPOINT_MODELS: dict[str, type[BaseModel]] = {"rfi_from_email": RfiCheckpoint}
 
 
@@ -591,6 +614,8 @@ class ClaimRequest(_Req):
 class ClaimedJob(_Resp):
     job_id: UUID
     agent_type: str
+    principal_kind: Literal["org", "user"] = "org"
+    principal_user_id: UUID | None = None
     epoch: int
     lease_expires_at: datetime
     input: dict[str, Any]                # validate with parse_input(agent_type, input)
@@ -926,6 +951,51 @@ class ContributionsResponse(_Resp):
 # 13. POST /jobs/{id}/rfi-capture ---------------------------------------------------
 
 
+class UserSecretRef(SecretRef):
+    message_id: UUID
+
+
+class UserWorkerHelpMessage(WorkerHelpMessage):
+    id: UUID
+    secret_ref: UserSecretRef | None = None
+
+
+class UserHelpMessagesResponse(HelpMessagesResponse):
+    messages: list[UserWorkerHelpMessage] = Field(default_factory=list)
+
+
+class UserHelpOpenRequest(HelpOpenRequest):
+    login_attempt_id: UUID | None = None
+
+
+class UserHelpConsumeRequest(HelpConsumeRequest):
+    message_ids: Annotated[list[UUID], Field(min_length=1, max_length=100)]
+
+
+class UserHelpReplyResponse(HelpReplyResponse):
+    id: UUID
+
+
+class UserHelpSecretUseRequest(_Req):
+    login_attempt_id: UUID
+
+
+class UserTurnRequest(TurnRequest):
+    helper_message_ids_seen: list[UUID] = Field(default_factory=list)
+
+
+class UserSessionRequest(SessionRequest):
+    origin: Annotated[str, Field(min_length=1, max_length=200)]
+
+
+class UserLoginBeginRequest(LoginBeginRequest):
+    origin: Annotated[str, Field(min_length=1, max_length=200)]
+
+
+class UserLoginResultRequest(LoginResultRequest):
+    origin: Annotated[str, Field(min_length=1, max_length=200)]
+
+
 class RfiCaptureRequest(_Req):
     platform: Literal["procore"]
     detail_artifact_id: UUID
@@ -1014,6 +1084,37 @@ ENDPOINTS: dict[str, tuple[str, str, type[BaseModel] | None, Any, int]] = {
     "canary_page": ("GET", "/canary/page", None, None, 200),   # static HTML
 }
 # Reserved: /jobs/{job_id}/live returns 404 in v1 (live-view seam).
+# Personal jobs use a distinct encrypted backend path. No fallback to org endpoints.
+for _user_endpoint in (
+    "steps", "checkpoint", "artifacts", "turns", "help_open", "help_messages", "help_consume",
+    "help_reply", "help_secret_use", "park", "finish", "requeue",
+):
+    _method, _path, _request, _response, _status = ENDPOINTS[_user_endpoint]
+    ENDPOINTS["user_" + _user_endpoint] = (
+        _method, _path.replace("/jobs/{job_id}/", "/jobs/{job_id}/user/", 1), _request, _response, _status,
+    )
+for _user_endpoint, _request in (
+    ("identity_session", UserSessionRequest), ("login_begin", UserLoginBeginRequest),
+    ("login_result", UserLoginResultRequest),
+):
+    _method, _path, _old_request, _response, _status = ENDPOINTS[_user_endpoint]
+    ENDPOINTS["user_" + _user_endpoint] = (
+        _method, _path.replace("/identities/", "/user-identities/", 1), _request, _response, _status,
+    )
+
+ENDPOINTS["user_heartbeat"] = ("POST", "/user/heartbeat", HeartbeatRequest, HeartbeatResponse, 200)
+for _name, _request, _response in (
+    ("turns", UserTurnRequest, (TurnActionResponse, TurnPendingResponse, TurnStopResponse)),
+    ("help_open", UserHelpOpenRequest, HelpOpenResponse),
+    ("help_messages", None, UserHelpMessagesResponse),
+    ("help_consume", UserHelpConsumeRequest, None),
+    ("help_reply", HelpReplyRequest, UserHelpReplyResponse),
+    ("help_secret_use", UserHelpSecretUseRequest, HelpSecretUseResponse),
+):
+    _method, _path, _, _old_response, _status = ENDPOINTS["user_" + _name]
+    ENDPOINTS["user_" + _name] = (_method, _path, _request, _response, _status)
+
+
 JOB_SCOPED_ENDPOINTS = tuple(k for k, v in ENDPOINTS.items() if v[1].startswith("/jobs/"))
 NO_AUTH_ENDPOINTS = ("enroll",)
 PENDING_ALLOWED_ENDPOINTS = ("hello", "config")
@@ -1186,6 +1287,8 @@ FINISH_TOOLS = ("finish",)
 TOOLS_BY_TYPE: dict[str, tuple[str, ...]] = {
     "rfi_from_email": SITE_TOOLS_PROCORE + BROWSER_TOOLS + HELP_TOOLS + FINISH_TOOLS,
     "canary": ("navigate", "read_page", "find_text", "wait_for") + FINISH_TOOLS,
+    "user_browser_read": ("ensure_login", "navigate", "read_page", "find_text", "scroll", "go_back",
+                          "wait_for", "request_help", "reply_help", "finish"),
 }
 
 # Never exposed to a model: fill_secret, JS evaluation, uploads, downloads,

@@ -85,7 +85,7 @@ class Agent:
     def open_login_help(self, holder_job_id=None, project_id=None):
         help_id = str(uuid.uuid4())
         self.h.db.tables.setdefault("browser_agent_help_requests", []).append({
-            "id": help_id, "scope_key": "login:procore", "reason_code": "mfa", "title": "Procore code needed",
+            "id": help_id, "principal_kind": "org", "scope_key": "login:procore", "reason_code": "mfa", "title": "Procore code needed",
             "status": "open", "holder_job_id": holder_job_id, "project_id": project_id,
             "expires_at": iso(self.h.db.now + timedelta(hours=48)),
         })

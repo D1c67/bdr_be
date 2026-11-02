@@ -24,6 +24,7 @@ from contextlib import contextmanager
 
 from fastapi import Depends, HTTPException, status
 
+from app.core import provenance
 from app.core.config import get_settings
 from app.core.deps import CurrentUser, get_current_user
 from app.core.error_codes import ErrorCode, RateLimitScope
@@ -46,10 +47,29 @@ def _prune(current_window: int) -> None:
         del _buckets[k]
 
 
+# The assistant's own buckets (docs/ASSISTANT.md, Permissions item 12): keyed
+# on user_id + ":assistant" with a lower limit, so a chatty turn can never
+# spend the human's quota (and the other way round). The shim enters
+# provenance.acting_as_assistant around every in-process request, so the
+# limiter reads the contextvar instead of threading a new argument.
+ASSISTANT_BUCKET_SUFFIX = ":assistant"
+ASSISTANT_LIMIT_DIVISOR = 2
+
+
+def _bucket_id(user_id: str) -> str:
+    return f"{user_id}{ASSISTANT_BUCKET_SUFFIX}" if provenance.is_assistant() else user_id
+
+
+def _bucket_limit(limit: int) -> int:
+    return max(1, limit // ASSISTANT_LIMIT_DIVISOR) if provenance.is_assistant() else limit
+
+
 def _check(scope: str, user_id: str, limit: int, window_seconds: int = 60) -> None:
     """Record one hit for (scope, user_id); raise 429 if over the limit."""
     if not get_settings().rate_limit_enabled:
         return
+    user_id = _bucket_id(user_id)
+    limit = _bucket_limit(limit)
     now = time.time()
     window = int(now // window_seconds)
     w, count, prev = _buckets[(scope, user_id)]

@@ -1390,10 +1390,12 @@ def activity_log(
     project_id: str | None,
     limit: int,
     offset: int,
+    actor_kind: str = "all",
 ) -> dict:
     """One chronological feed of audit_log + stage_events within the window.
 
-    Filterable by actor, action and project; paginated in Python over the merged
+    Filterable by actor, action, project and actor kind (0172: "human" or
+    "assistant"; "all" applies no filter); paginated in Python over the merged
     list. Each source is capped (so a runaway window can't OOM) — `truncated` flags
     when a cap was hit so the UI can tell the user to narrow the range.
     """
@@ -1407,12 +1409,14 @@ def activity_log(
     if not action or action != "stage.advance":
         aq = (
             sb.table("audit_log")
-            .select("id, actor_id, action, entity, entity_id, payload, created_at")
+            .select("id, actor_id, action, entity, entity_id, payload, created_at, actor_kind")
             .gte("created_at", df_iso)
             .lte("created_at", dt_iso)
         )
         if actor_id:
             aq = aq.eq("actor_id", actor_id)
+        if actor_kind in ("human", "assistant"):
+            aq = aq.eq("actor_kind", actor_kind)
         if action:
             aq = aq.eq("action", action)
         if project_id:
@@ -1425,12 +1429,14 @@ def activity_log(
     if not action or action == "stage.advance":
         eq = (
             sb.table("stage_events")
-            .select("id, project_id, from_stage, to_stage, note, actor_id, entered_at")
+            .select("id, project_id, from_stage, to_stage, note, actor_id, entered_at, actor_kind")
             .gte("entered_at", df_iso)
             .lte("entered_at", dt_iso)
         )
         if actor_id:
             eq = eq.eq("actor_id", actor_id)
+        if actor_kind in ("human", "assistant"):
+            eq = eq.eq("actor_kind", actor_kind)
         if project_id:
             eq = eq.eq("project_id", project_id)
         events = eq.order("entered_at", desc=True).limit(CAP).execute().data or []
@@ -1454,12 +1460,14 @@ def activity_log(
         ).data or []
         projects = {p["id"]: p for p in prows}
 
-    def _row(rid, at, aid, act, entity, pid, detail) -> dict:
+    def _row(rid, at, aid, act, entity, pid, detail, kind=None) -> dict:
         prof = actors.get(aid) if aid else None
         return {
             "id": rid,
             "at": at,
             "actor_id": aid,
+            # A row read before 0172 counts as a human's.
+            "actor_kind": kind or "human",
             "actor_name": (prof or {}).get("full_name"),
             "actor_role": (prof or {}).get("role"),
             "action": act,
@@ -1474,7 +1482,8 @@ def activity_log(
     for r in audit_rows:
         pid = r["entity_id"] if r.get("entity") == "project" else None
         rows.append(
-            _row(r["id"], r["created_at"], r.get("actor_id"), r["action"], r.get("entity"), pid, r.get("payload"))
+            _row(r["id"], r["created_at"], r.get("actor_id"), r["action"], r.get("entity"), pid, r.get("payload"),
+                 r.get("actor_kind"))
         )
     for e in events:
         rows.append(
@@ -1486,6 +1495,7 @@ def activity_log(
                 "project",
                 e.get("project_id"),
                 {"from": e.get("from_stage"), "to": e.get("to_stage"), "note": e.get("note")},
+                e.get("actor_kind"),
             )
         )
 

@@ -195,6 +195,7 @@ class HeartbeatThread(threading.Thread):
     def __init__(self, client: SyncBdrClient, tracker: JobTracker, sink: HeartbeatSink, *,
                  boot_id: UUID, config_version: Callable[[], int],
                  slots_free: Callable[[], dict[str, int]], loop: Any = None,
+                 principal_kind: Callable[[], str] = lambda: "org",
                  interval: float = HEARTBEAT_SECONDS, probe_interval: float = 1.0,
                  stall_seconds: float = STALL_SECONDS, stall_exit_seconds: float = STALL_EXIT_SECONDS,
                  exit_fn: Callable[[int], None] = os._exit):
@@ -205,6 +206,7 @@ class HeartbeatThread(threading.Thread):
         self.boot_id = boot_id
         self._config_version = config_version
         self._slots_free = slots_free
+        self._principal_kind = principal_kind
         self.loop = loop
         self.interval = interval
         self.probe_interval = probe_interval
@@ -272,7 +274,10 @@ class HeartbeatThread(threading.Thread):
             jobs=self.tracker.beat_snapshot(),
         )
         try:
-            resp: HeartbeatResponse = self.client.heartbeat(req, retry=BEAT_RETRY)
+            if self._principal_kind() == "user":
+                resp = self.client.call("user_heartbeat", body=req, retry=BEAT_RETRY)
+            else:
+                resp = self.client.heartbeat(req, retry=BEAT_RETRY)
         except (StaleBoot, WorkerRevoked, WorkerUnauthorized) as exc:
             self.beats_failed += 1
             log.error("heartbeat refused: %s", exc.code)
@@ -316,8 +321,12 @@ class HeartbeatThread(threading.Thread):
             if claiming or key not in self._orphan_seen:
                 continue   # second consecutive sighting required
             try:
-                self.client.requeue(Lease(o.job_id, o.epoch), RequeueRequest(reason="interrupted"),
-                                    retry=ORPHAN_RETRY)
+                if self._principal_kind() == "user":
+                    self.client.call("user_requeue", lease=Lease(o.job_id, o.epoch),
+                                     body=RequeueRequest(reason="interrupted"), retry=ORPHAN_RETRY)
+                else:
+                    self.client.requeue(Lease(o.job_id, o.epoch), RequeueRequest(reason="interrupted"),
+                                        retry=ORPHAN_RETRY)
                 log.info("released orphan lease %s epoch %s", o.job_id, o.epoch)
                 seen_now.discard(key)
             except (BdrApiError, BdrUnreachable) as exc:

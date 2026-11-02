@@ -38,6 +38,7 @@ sync SDK: plain `def`, called from plain-`def` handlers (bdr-event-loop-blocking
 
 import logging
 
+from app.core import provenance
 from app.core.supabase_client import get_supabase
 
 logger = logging.getLogger(__name__)
@@ -90,6 +91,7 @@ def mirror_send_message(
                     "author_id": author_id,
                     "body": text,
                     "source": source,
+                    **provenance.fields(author_id),
                 }
             )
             .execute()

@@ -41,6 +41,9 @@ dependencies = [
     # only transitive through pyjwt[crypto]; now direct.
     "cryptography>=48.0",
     "jsonschema>=4.26.0",
+    # RFC 5545 rule expansion for assistant routines (app/assistant/rrules.py).
+    # Was only transitive through pandas; now direct.
+    "python-dateutil>=2.9,<3",
 ]
 
 [dependency-groups]

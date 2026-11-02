@@ -6,6 +6,14 @@ rather than under /pm. Reads are all internal roles (accountant read-only);
 assign/unassign are writer roles. The external estimator never reaches these
 routes (require_internal rejects it).
 
+Every list, count, detail, attachment, assign and unassign route is scoped by
+mailbox through app/services/mailbox_visibility (docs/ASSISTANT.md, "PM
+mailbox scoping fix"): a person sees their own mailboxes plus the shared set,
+Executives and IT Admins see everything except the exclusion list and leave an
+email.viewed_other_mailbox audit row whenever they open a detail row or an
+attachment outside their own plus shared set. A row outside the scope 404s
+with the same body a missing id gets.
+
 PM email classification (docs/EMAIL_CLASSIFICATION.md): the project list
 and the detail carry each email's `classification` (one extra query per
 page, never per row), and PM writers can correct the labels (PUT), drop a
@@ -24,6 +32,7 @@ from app.core.deps import CurrentUser, require_internal, require_pm_write, requi
 from app.core.supabase_client import get_supabase
 from app.models.schemas import EmailAssignIn, EmailClassificationIn
 from app.services import email_classification, email_ingest, file_access, storage
+from app.services import mailbox_visibility as visibility
 from app.services.notifications import audit
 
 logger = logging.getLogger(__name__)
@@ -79,6 +88,27 @@ def _search_filter(query, q: str | None):
     return query
 
 
+def _empty_envelope(offset: int, limit: int, **counts) -> dict:
+    """Zero rows without a query: a viewer with nothing mapped and no shared
+    mailbox configured may not see anything, and an empty `in_` filter is
+    not something anyone should send."""
+    return {"rows": [], "total": 0, "offset": offset, "limit": limit, **counts}
+
+
+def _audit_other_mailbox(email: dict, user: CurrentUser) -> None:
+    """The mandatory record of a full-view role (Executive, IT Admin) reading
+    outside its own plus shared set. Never skipped: the human UI path carries
+    the same trail the assistant's read_mailbox tool will."""
+    if visibility.is_other_mailbox(email, user):
+        audit(
+            user.id,
+            "email.viewed_other_mailbox",
+            entity="ingested_email",
+            entity_id=email["id"],
+            payload={"mailbox": email.get("mailbox"), "email_id": email["id"]},
+        )
+
+
 @router.get("")
 def list_project_emails(
     project_id: str,
@@ -92,12 +122,16 @@ def list_project_emails(
     _require_uuid(project_id, "Project")
     if direction is not None and direction not in ("inbound", "outbound"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown direction: {direction}")
+    if visibility.visible_mailboxes(user).allowed == frozenset():
+        return _empty_envelope(offset, limit)
     query = (
         get_supabase()
         .table("ingested_emails")
         .select(_LIST_SELECT, count="exact")
         .eq("project_id", project_id)
     )
+    # Scope before the search filter so `total` counts only visible rows.
+    query = visibility.apply_scope(query, user)
     if direction:
         query = query.eq("direction", direction)
     query = _search_filter(query, q)
@@ -126,7 +160,11 @@ def list_unknown_emails(
     user: CurrentUser = Depends(require_internal),
 ):
     """The Unknown pool: unassigned terminal emails (failed included so they
-    stay triageable), plus whole-mailbox pipeline-health counts."""
+    stay triageable), plus pipeline-health counts. Rows and both counts are
+    scoped to the viewer's mailboxes, so nobody learns another mailbox's
+    volume from the badges."""
+    if visibility.visible_mailboxes(user).allowed == frozenset():
+        return _empty_envelope(offset, limit, pending_count=0, failed_count=0)
     sb = get_supabase()
     statuses = _TERMINAL_STATUSES if include_failed else ["processed"]
     query = (
@@ -135,6 +173,7 @@ def list_unknown_emails(
         .is_("project_id", "null")
         .in_("status", statuses)
     )
+    query = visibility.apply_scope(query, user)
     query = _search_filter(query, q)
     resp = (
         query.order("message_at", desc=True)
@@ -144,17 +183,23 @@ def list_unknown_emails(
     )
 
     pending = (
-        sb.table("ingested_emails")
-        .select("id", count="exact")
-        .in_("status", _PENDING_STATUSES)
+        visibility.apply_scope(
+            sb.table("ingested_emails")
+            .select("id", count="exact")
+            .in_("status", _PENDING_STATUSES),
+            user,
+        )
         .limit(1)
         .execute()
     )
     failed = (
-        sb.table("ingested_emails")
-        .select("id", count="exact")
-        .is_("project_id", "null")
-        .eq("status", "failed")
+        visibility.apply_scope(
+            sb.table("ingested_emails")
+            .select("id", count="exact")
+            .is_("project_id", "null")
+            .eq("status", "failed"),
+            user,
+        )
         .limit(1)
         .execute()
     )
@@ -168,7 +213,10 @@ def list_unknown_emails(
     }
 
 
-def _fetch_email(email_id: str) -> dict:
+def _fetch_email(email_id: str, user: CurrentUser) -> dict:
+    """Load one row the viewer may see. A row outside the scope raises the
+    same 404 a missing id does (visibility.EMAIL_NOT_FOUND is this body, byte
+    for byte); a full-view read outside own plus shared is audited."""
     _require_uuid(email_id, "Email")
     rows = (
         get_supabase()
@@ -179,13 +227,16 @@ def _fetch_email(email_id: str) -> dict:
     ).data
     if not rows:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Email not found")
-    return rows[0]
+    email = rows[0]
+    visibility.assert_visible(email, user)
+    _audit_other_mailbox(email, user)
+    return email
 
 
 @router.get("/{email_id}")
 def get_email(email_id: str, user: CurrentUser = Depends(require_internal)):
     """Full email incl. body_text and attachment metadata."""
-    email = _fetch_email(email_id)
+    email = _fetch_email(email_id, user)
     attachments = (
         get_supabase()
         .table("ingested_email_attachments")
@@ -217,9 +268,22 @@ def download_attachment(
 ):
     _require_uuid(email_id, "Email")
     _require_uuid(attachment_id, "Attachment")
+    # The parent first: a refusal mints no signed URL and records no access,
+    # and the parent's project_id is what the access row needs anyway.
+    sb = get_supabase()
+    erows = (
+        sb.table("ingested_emails")
+        .select("id, mailbox, project_id")
+        .eq("id", email_id)
+        .execute()
+    ).data
+    if not erows:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Email not found")
+    email = erows[0]
+    visibility.assert_visible(email, user)
+    _audit_other_mailbox(email, user)
     rows = (
-        get_supabase()
-        .table("ingested_email_attachments")
+        sb.table("ingested_email_attachments")
         .select("id, filename, storage_path")
         .eq("id", attachment_id)
         .eq("email_id", email_id)
@@ -235,25 +299,12 @@ def download_attachment(
     # download= serves Content-Disposition: attachment, defusing stored
     # HTML/SVG masquerading as another type.
     url = storage.signed_url(att["storage_path"], download=att["filename"])
-    project_id = None
-    try:
-        erows = (
-            get_supabase()
-            .table("ingested_emails")
-            .select("project_id")
-            .eq("id", email_id)
-            .limit(1)
-            .execute()
-        ).data or []
-        project_id = erows[0].get("project_id") if erows else None
-    except Exception:  # noqa: BLE001 - tracking must never block the download
-        logger.exception("email project lookup failed for %s", email_id)
     file_access.record(
         user,
         action="download",
         source="email_attachment",
         file_id=attachment_id,
-        project_id=project_id,
+        project_id=email.get("project_id"),
         filename=att.get("filename"),
         detail={"email_id": email_id},
     )
@@ -269,7 +320,7 @@ def assign_email(
     """Manually assign an email to a project (learn-back: teaches the
     conversation map and retro-assigns the rest of the conversation)."""
     sb = get_supabase()
-    email = _fetch_email(email_id)
+    email = _fetch_email(email_id, user)
     _require_uuid(body.project_id, "Project")
     project = (
         sb.table("projects").select("id").eq("id", body.project_id).execute()
@@ -287,7 +338,7 @@ def unassign_email(
 ):
     """Return an email to the Unknown pool for re-triage."""
     sb = get_supabase()
-    email = _fetch_email(email_id)
+    email = _fetch_email(email_id, user)
     updated = email_ingest.unassign(sb, email, user.id)
     return {"email": updated}
 
@@ -298,7 +349,7 @@ def unassign_email(
 def _classified_email(email_id: str, user: CurrentUser) -> dict:
     """The email for a classification write: visible to the caller and filed
     to a PM project (409 otherwise: labels belong to PM mail)."""
-    email = _fetch_email(email_id)
+    email = _fetch_email(email_id, user)
     if not email_classification.is_pm_project(get_supabase(), email.get("project_id")):
         raise HTTPException(
             status.HTTP_409_CONFLICT, "This email is not filed to a Project Management project."

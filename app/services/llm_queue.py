@@ -112,6 +112,19 @@ JOB_PLANS_FACTS = "plans_reader_facts"
 PLANS_BATCH_JOB_TYPES = (JOB_PLANS_AGENT, JOB_PLANS_MAIN)
 PLANS_INTERACTIVE_JOB_TYPES = (JOB_PLANS_CHAT, JOB_PLANS_MODIFY, JOB_PLANS_FACTS)
 PLANS_JOB_TYPES = PLANS_BATCH_JOB_TYPES + PLANS_INTERACTIVE_JOB_TYPES
+# BDR Assistant (docs/ASSISTANT.md, Agent loop): one job per chat turn,
+# target = conversation id, claimed in its own pass with its own capacity.
+JOB_ASSISTANT_TURN = "assistant_turn"
+# Phase 1: one job per approved card (target = approval id, no model call),
+# enqueued at priority 40 so a click claims before turns (50); it shares
+# the assistant pass's capacity.
+JOB_ASSISTANT_APPROVAL_EXECUTE = "assistant_approval_execute"
+# Phase 2: one job per split task wake (target = task id, no model call),
+# enqueued by the bid_split hook and the task route's lazy repair with 3
+# attempts; it shares the assistant pass's capacity.
+JOB_ASSISTANT_CONTINUE = "assistant_continue"
+ASSISTANT_JOB_TYPES = (JOB_ASSISTANT_TURN, JOB_ASSISTANT_APPROVAL_EXECUTE, JOB_ASSISTANT_CONTINUE)
+ASSISTANT_DEFAULT_CONCURRENCY = 2
 # PM email classification (docs/EMAIL_CLASSIFICATION.md): one job per email
 # (target = ingested email id), self-hosted box only, claimed in its own pass
 # with its own small capacity (EMAIL_CLASSIFY_CONCURRENCY) so a backlog of
@@ -146,6 +159,9 @@ NON_LLM_JOB_TYPES = (JOB_RFP_INGEST,) + THIRD_PASS_JOB_TYPES
 # Every job type llm_jobs.job_type accepts (the CHECK in migration 0152,
 # plus plans_reader_facts from migration 0165, MC).
 ALL_JOB_TYPES = LLM_JOB_TYPES + PLANS_JOB_TYPES + NON_LLM_JOB_TYPES
+# The assistant types (ASSISTANT_JOB_TYPES, accepted by the CHECK once 0170
+# widens it) are kept out of ALL_JOB_TYPES on purpose: a test pins that
+# tuple to the 0165 list, and no app code reads it.
 
 # AI Estimating autonomous build (docs/AI_ESTIMATING_BUILD_SPEC.md 4.1):
 # the WS6 pricing job (LLM-capable through its quote fallback), claimed in
@@ -181,6 +197,9 @@ _FEATURE_BY_TYPE = {
     JOB_PLANS_CHAT: "plans_chat",
     JOB_PLANS_MODIFY: "plans_modify",
     JOB_PLANS_FACTS: "plans_facts",
+    JOB_ASSISTANT_TURN: "assistant",
+    JOB_ASSISTANT_APPROVAL_EXECUTE: "assistant_execute",
+    JOB_ASSISTANT_CONTINUE: "assistant_continue",
     JOB_EMAIL_CLASSIFY: "email_classify",
 }
 
@@ -462,6 +481,29 @@ def _spec(job_type: str) -> _JobSpec:
             ),
             lambda target: m.current_status(target),
         )
+    if job_type == JOB_ASSISTANT_TURN:
+        # One job per pending assistant message (target = conversation id,
+        # docs/ASSISTANT.md Agent loop). The body, marks and labels live in
+        # app/assistant/jobs.py; this module never imports app.assistant at
+        # load time.
+        from app.assistant import jobs as assistant_jobs
+
+        return _JobSpec(**assistant_jobs.spec_kwargs())
+    if job_type == JOB_ASSISTANT_APPROVAL_EXECUTE:
+        # One job per approved card (target = approval id): re-read,
+        # precondition, then exactly one write through the shim. No model
+        # call; the body and marks live in app/assistant/approvals_job.py.
+        from app.assistant import approvals_job
+
+        return _JobSpec(**approvals_job.spec_kwargs())
+    if job_type == JOB_ASSISTANT_CONTINUE:
+        # One job per split task wake (target = task id): checks that every
+        # file landed, posts the server-built result message, settles the
+        # hold. No model call; the body and marks live in
+        # app/assistant/continue_job.py (mark never fails a task).
+        from app.assistant import continue_job
+
+        return _JobSpec(**continue_job.spec_kwargs())
     if job_type == JOB_AI_PRICING:
         from app.services import pricing_run as m
 
@@ -893,6 +935,29 @@ def _plans_concurrency(s: Settings) -> int:
     return max(1, value)
 
 
+def _assistant_concurrency(s: Settings) -> int:
+    """Assistant turns this process runs at once (ASSISTANT_CONCURRENCY when
+    it exists; the design's capacity 2 otherwise)."""
+    try:
+        return max(1, int(getattr(s, "assistant_concurrency", ASSISTANT_DEFAULT_CONCURRENCY)))
+    except (TypeError, ValueError):
+        return ASSISTANT_DEFAULT_CONCURRENCY
+
+
+def _claim_assistant(s: Settings, types: list[str]) -> list[dict]:
+    """The assistant pass (docs/ASSISTANT.md, Agent loop), modeled on
+    _claim_plans: skipped while ASSISTANT_ENABLED is off (queued turns wait
+    for the flag or a cancel, never spending on a switched-off feature);
+    capacity 2 per process, independent of the pipeline and AI Estimating
+    slots. Every turn is interactive: someone is watching the panel."""
+    if not getattr(s, "assistant_enabled", False):
+        return []
+    free = _assistant_concurrency(s) - sum(1 for jt in types if jt in ASSISTANT_JOB_TYPES)
+    if free <= 0:
+        return []
+    return _claim_filtered(s, free, list(ASSISTANT_JOB_TYPES))
+
+
 def _claim_email_classify(s: Settings, types: list[str]) -> list[dict]:
     """The PM email classification pass: skipped while EMAIL_CLASSIFY_ENABLED
     is off (queued jobs wait for the flag or a cancel); capacity
@@ -956,6 +1021,7 @@ def enqueue(
     settings: Settings | None = None,
     raise_on_active: bool = False,
     next_attempt_at: datetime | str | None = None,
+    max_attempts_override: int | None = None,
 ) -> dict:
     """Queue a job. If an active job already exists for the same target the
     existing job is returned instead (double-clicks and racing tabs collapse
@@ -965,7 +1031,8 @@ def enqueue(
     `next_attempt_at` delays the first claim (the claim RPC only takes jobs
     due by now); None means due at once (the column default). AI Estimating
     uses it to pace group jobs against the account's tokens-per-minute
-    limit."""
+    limit. `max_attempts_override` pins the attempt count (the assistant's
+    chat turns use 1: a turn is never re-run, the user asks again)."""
     s = settings or get_settings()
     sb = get_supabase()
     row = {
@@ -976,7 +1043,11 @@ def enqueue(
         "payload": payload or {},
         "created_by": created_by,
         "priority": priority,
-        "max_attempts": 1 + len(s.llm_retry_delay_list),
+        "max_attempts": (
+            max(1, int(max_attempts_override))
+            if max_attempts_override is not None
+            else 1 + len(s.llm_retry_delay_list)
+        ),
     }
     if next_attempt_at is not None:
         row["next_attempt_at"] = (
@@ -1166,6 +1237,7 @@ def _claim_tick(s: Settings, running_types: Iterable[str]) -> list[dict]:
         if harvest_capacity > 0:
             claimed.extend(_claim_filtered(s, harvest_capacity, harvest_types))
     claimed.extend(_claim_plans(s, types))
+    claimed.extend(_claim_assistant(s, types))
     claimed.extend(_claim_email_classify(s, types))
     return claimed
 
@@ -1384,7 +1456,14 @@ def _handle_failure_inner(
     attempt = job.get("attempts") or 1
     delays = s.llm_retry_delay_list
 
-    if llm_errors.is_transient_kind(kind) and attempt <= len(delays):
+    # A transient error retries only while the row's own max_attempts allows
+    # it (the assistant's chat turns enqueue with max_attempts 1 and are
+    # never re-run); a row without the column keeps the ladder length.
+    if (
+        llm_errors.is_transient_kind(kind)
+        and attempt <= len(delays)
+        and attempt < (job.get("max_attempts") or 1 + len(delays))
+    ):
         delay = delays[attempt - 1]
         requeued = _cas_job(
             sb,

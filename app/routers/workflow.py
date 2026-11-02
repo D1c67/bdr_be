@@ -54,10 +54,20 @@ def advance(
     if not category or category not in workflow.CATEGORY_TASKS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "A valid `category` is required")
 
+    # The assistant may only move a lane with Go/No-Go forced to manual review and
+    # a compare-and-set on the head it previewed (docs/ASSISTANT_PHASE4_PLAN.md
+    # 3.12). The route enforces it, not only the tool's `build`. Human callers
+    # (via_assistant_run_id unset) are unchanged.
+    via_assistant = user.via_assistant_run_id is not None
+    if via_assistant and (body.gono_action != "review" or not body.expected_task):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, detail={"code": "assistant_advance_refused"}
+        )
+
     proj = (
         get_supabase()
         .table("projects")
-        .select("id, current_stage, abandoned_at")
+        .select("id, current_stage, abandoned_at, failed_to_bid_at")
         .eq("id", project_id)
         .single()
         .execute()
@@ -73,6 +83,10 @@ def advance(
             status.HTTP_409_CONFLICT,
             "This project is abandoned - reactivate it before advancing",
         )
+    if via_assistant and (
+        proj.get("failed_to_bid_at") or proj["current_stage"] in ("pm_only", "cp_only")
+    ):
+        raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "project_closed"})
 
     state = workflow.load_category_state(project_id)
     cs = state.get(category, {})
@@ -89,6 +103,12 @@ def advance(
             f"The {workflow.CATEGORY_LABELS[category]} category is not active yet",
         )
     head = cs["current_task"]
+    # Compare-and-set: the caller saw a different head than the lane has now
+    # (a teammate moved it). Refuse before any write.
+    if body.expected_task is not None and body.expected_task != head:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, detail={"code": "lane_moved", "head": head}
+        )
     if head in workflow.PANEL_OWNED_HEADS:
         raise HTTPException(
             status.HTTP_409_CONFLICT,

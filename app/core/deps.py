@@ -74,6 +74,18 @@ class CurrentUser:
     # the users the unit tests build by hand, which is the safe direction: an
     # empty tuple sees only the shared mailboxes.
     rfp_mailboxes: tuple[str, ...] = ()
+    # Set only by the bdra_ assistant principal (app/assistant/principal.py):
+    # the run (chat turn or approval execution) this request is acting in.
+    # None for every human request. Read by core/ratelimit (own buckets for
+    # the assistant) and by the writers that fill the provenance columns.
+    via_assistant_run_id: str | None = None
+
+
+def mfa_challenge_code(mfa_enrolled: bool) -> str:
+    """The 403 detail for a session below aal2. The FE maps it to the right
+    screen: enrolled users go to step-up (enter a code), un-enrolled users to
+    enrollment (QR). Shared with the assistant delegation gate."""
+    return "mfa_step_up_required" if mfa_enrolled else "mfa_enrollment_required"
 
 
 def get_current_user(
@@ -96,6 +108,16 @@ def get_current_user(
     if not authorization.lower().startswith("bearer "):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing bearer token")
     token = authorization.split(" ", 1)[1].strip()
+    # The assistant principal (app/assistant/principal.py): a bdra_ token is
+    # accepted only inside the in-process shim, which marks the ASGI scope
+    # bdr_internal. Over the network the marker is absent and the token is
+    # refused exactly like a bdrw_ token (same 401, same message). Imported
+    # here, not at module top: principal.py imports CurrentUser from this
+    # module, and app.main must never import app.assistant.
+    if token.startswith("bdra_"):
+        from app.assistant.principal import resolve_bdra_principal
+
+        return resolve_bdra_principal(request.scope, token, _load_profile)
     # A browser agent worker token (core/agent_auth) is never a user session.
     if token.startswith("bdrw_"):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
@@ -153,8 +175,7 @@ def get_current_user(
     ):
         # The FE maps these detail codes to the right screen: enrolled users are
         # sent to step-up (enter a code), un-enrolled users to enrollment (QR).
-        code = "mfa_step_up_required" if mfa_enrolled else "mfa_enrollment_required"
-        raise HTTPException(status.HTTP_403_FORBIDDEN, code)
+        raise HTTPException(status.HTTP_403_FORBIDDEN, mfa_challenge_code(mfa_enrolled))
 
     # Dev-only impersonation: honored strictly for is_dev callers — anyone else
     # sending the header just gets their own identity (no privilege to gain, and
@@ -182,6 +203,28 @@ def get_current_user(
             if isinstance(m, str) and m.strip()
         ),
     )
+
+
+PROFILE_COLUMNS = (
+    "id, email, role, is_active, is_dev, mfa_enrolled, "
+    "invite_accepted_at, rfp_mailboxes"
+)
+
+
+def _load_profile(user_id: str) -> dict | None:
+    """The caller's profiles row with the columns get_current_user reads, or
+    None. Plain def: the Supabase SDK is synchronous. Shared with the bdra_
+    assistant principal so the live-profile rule (docs/ASSISTANT.md,
+    Permissions item 1) re-reads exactly what a human session reads."""
+    rows = (
+        get_supabase()
+        .table("profiles")
+        .select(PROFILE_COLUMNS)
+        .eq("id", user_id)
+        .limit(1)
+        .execute()
+    ).data or []
+    return rows[0] if rows else None
 
 
 def _impersonated_estimator(

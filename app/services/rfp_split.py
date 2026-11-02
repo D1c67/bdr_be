@@ -52,6 +52,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from app.core import provenance
 from app.core.config import Settings, get_settings
 from app.core.redact import redact_text
 from app.sandbox import protocol
@@ -1640,6 +1641,10 @@ def _base_row(project_id: str, harvest_id: str | None, split_file: dict, key: st
         "bid_split_segment_id": None,
         "bid_split_file_id": split_file["id"],
         "is_source_set": False,
+        # Inside an assistant split run (bid_split._assistant_scope) or the
+        # assistant shim (attach-split-job): actor_kind='assistant' and the
+        # run id; {} otherwise (docs/ASSISTANT_PHASE2_PLAN.md 3.5.4).
+        **provenance.fields(),
     }
 
 
@@ -1658,7 +1663,7 @@ def _promote_segment(sb, project_id: str, harvest_id: str | None, split_file: di
     inserted = _insert_row(sb, row, key, source_name=split_file.get("filename"), by_person=by_person)
     if inserted is not None:
         audit(None, "file.upload", "project_file", inserted.get("id"),
-              {"category": category, "source": "rfp", "split": True})
+              {"category": category, "source": "rfp", "split": True, "project_id": project_id})
     return inserted
 
 
@@ -1684,7 +1689,7 @@ def _upload_original(
     if inserted is None:
         return None
     audit(None, "file.upload", "project_file", inserted.get("id"),
-          {"category": category, "source": "rfp", "source_set": bool(is_source_set)})
+          {"category": category, "source": "rfp", "source_set": bool(is_source_set), "project_id": project_id})
     if convertible:
         try:
             office_preview.generate_preview(inserted["id"])
@@ -2072,6 +2077,7 @@ def file_project_job_whole(sb, file_id: str, reason: str | None, *,
     if inserted is not None:
         audit(job.get("created_by"), "file.upload", "project_file", inserted.get("id"), {
             "category": category, "source": "rfp_files_drop", "whole": True, "bid_split_file_id": file_id,
+            "project_id": project_id,
             "reason": None if reason is None else _reason_clause(reason),
         })
     return inserted

@@ -7,7 +7,8 @@ ignore_https_errors), and serves:
 
   app.procore.com / us02.procore.com
     /auth/procore                 -> 302 login.procore.com/oauth/authorize
-    /auth/procore/callback        -> sets _session_id, 302 /
+    /auth/procore/callback        -> sets _session_id, 302 /account/select_company
+    /account/select_company       a company chooser page (where live Procore lands a fresh login)
     /rest/v1.0/companies, /rest/v1.0/projects/<id>[/rfis[/<rfi>]]
                                   REST JSON from tests/fixtures_pm_rfi; 401 without a session
     /<pid>/project/home           -> 302 to the webclient path (company id)
@@ -335,9 +336,12 @@ class ProcoreSite:
                 return self._html(400, "Error", "<p>bad code</p>")
             token = secrets.token_hex(16)
             st.sessions.add(token)
-            return self._redirect("/", [("Set-Cookie", f"_session_id={token}; Path=/; Secure; HttpOnly; SameSite=Lax")])
+            return self._redirect("/account/select_company",
+                                  [("Set-Cookie", f"_session_id={token}; Path=/; Secure; HttpOnly; SameSite=Lax")])
         if path == "/":
             return self._html(200, "Procore", "<h1>Welcome</h1>")
+        if path == "/account/select_company":
+            return self._html(200, "Select a company", "<h1>Select a company</h1>")
         logged_in = self._logged_in(seen)
         if path.startswith("/rest/"):
             return self._rest(seen, logged_in)

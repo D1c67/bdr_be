@@ -16,12 +16,15 @@ from .canary.runner import ceiling as canary_ceiling
 from .pm_apps.procore.ceiling import ceiling as procore_ceiling
 from .rfi_from_email.runner import RfiFromEmailRunner
 
+from .user_browser.runner import UserBrowserRunner
+
 REGISTRY: dict[str, Any] = {
     "rfi_from_email": RfiFromEmailRunner(),
     "canary": CanaryRunner(),
+    "user_browser_read": UserBrowserRunner(),
 }
 
-_CEILINGS = {"rfi_from_email": procore_ceiling, "canary": canary_ceiling}
+_CEILINGS = {"rfi_from_email": procore_ceiling, "canary": canary_ceiling, "user_browser_read": procore_ceiling}
 
 
 def ceiling_for(agent_type: str, api_host: str = "") -> Ceiling:

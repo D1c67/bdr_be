@@ -420,6 +420,8 @@ class FakeDB:
             row.setdefault("id", str(uuid.uuid4()) if table not in _IDENTITY_TABLES
                            else len(self.tables.get(table, [])) + 1)
         row.setdefault("created_at", self.stamp())
+        if table in ("browser_agent_jobs", "browser_agent_workers", "browser_agent_types", "browser_agent_help_requests"):
+            row.setdefault("principal_kind", "org")
         if table == "browser_agent_jobs":
             row.setdefault("updated_at", self.stamp())
         if table == "browser_agent_steps":

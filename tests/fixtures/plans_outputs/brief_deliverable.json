@@ -1,0 +1,50 @@
+{
+ "project_summary": "Deliverable brief project summary (edited).",
+ "electrical_scope_summary": "Main scope summary.",
+ "systems": [
+  {
+   "system": "Fire alarm",
+   "in_scope": "yes",
+   "notes": "New devices on E-201."
+  }
+ ],
+ "assumptions": [
+  "One phase of work."
+ ],
+ "exclusions": [
+  "No generator."
+ ],
+ "risks": [
+  {
+   "risk": "Deliverable risk.",
+   "severity": "medium",
+   "source": null
+  }
+ ],
+ "rfis": [
+  {
+   "question": "Provide CAD files.",
+   "source": "E-201"
+  }
+ ],
+ "missing_documents": [
+  "Fire alarm specification section 28 31 00."
+ ],
+ "other_trades_affecting_electrical": [
+  "Mechanical units need disconnects."
+ ],
+ "sheet_summaries": [
+  {
+   "sheet_number": "E-201",
+   "title": "FIRE ALARM PLAN",
+   "summary": "Horn strobes and pull stations."
+  }
+ ],
+ "spec_highlights": [
+  {
+   "section": "26 27 26",
+   "title": "Wiring devices",
+   "summary": "Hospital grade in patient rooms."
+  }
+ ]
+}

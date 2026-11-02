@@ -1,0 +1,1295 @@
+{
+ "plan": "bdr_be/docs/ASSISTANT_PHASE7_PLAN.md 11.6 item 9, 12.3, 12.4 wave 0",
+ "generated_at": "2026-10-30T10:53:24-07:00",
+ "root": "paths are relative to the BDR folder",
+ "read_only": {
+  "bdr_be/agent_worker/README_WINDOWS.md": {
+   "group": "phase6_backend",
+   "sha256": "4b3336b65064d528f4417e1c17c4060f3c6a8041e7e1b1101b014527049d6403",
+   "size": 22490
+  },
+  "bdr_be/agent_worker/bdr_agent.egg-info/PKG-INFO": {
+   "group": "phase6_backend",
+   "sha256": "431cb573aaa3a2875201b3dc0b5a588ba92de49af05610460e86d20d1de85e04",
+   "size": 384
+  },
+  "bdr_be/agent_worker/bdr_agent.egg-info/SOURCES.txt": {
+   "group": "phase6_backend",
+   "sha256": "51e5bce61dcf0d43e26e628384f41cb598e32f89bc13105cd7285fcbf8fa25cc",
+   "size": 2577
+  },
+  "bdr_be/agent_worker/bdr_agent.egg-info/dependency_links.txt": {
+   "group": "phase6_backend",
+   "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+   "size": 1
+  },
+  "bdr_be/agent_worker/bdr_agent.egg-info/entry_points.txt": {
+   "group": "phase6_backend",
+   "sha256": "22f33c7143fb7aff72fa91f111a00ecf14300a73562967918679d29248b36cc7",
+   "size": 54
+  },
+  "bdr_be/agent_worker/bdr_agent.egg-info/requires.txt": {
+   "group": "phase6_backend",
+   "sha256": "49006e3f1ed87d49de50ee93071076e18ff5e9b1456f79761e60dac73073a389",
+   "size": 114
+  },
+  "bdr_be/agent_worker/bdr_agent.egg-info/top_level.txt": {
+   "group": "phase6_backend",
+   "sha256": "81343f7bd6d994b0ee972c3102c3bb65d6ff6e9f0f9ce50b83b0b0147b5db6a4",
+   "size": 10
+  },
+  "bdr_be/agent_worker/bdr_agent/__init__.py": {
+   "group": "phase6_backend",
+   "sha256": "09d83f7d555cf673d6aacbb33ba5c39531a01d6f4b98b44a070a8af74220d201",
+   "size": 55
+  },
+  "bdr_be/agent_worker/bdr_agent/__main__.py": {
+   "group": "phase6_backend",
+   "sha256": "ea1df1a1280b947aaf7a92a47ae734c387f18bd70066ada04d4a83a13dd88b57",
+   "size": 11989
+  },
+  "bdr_be/agent_worker/bdr_agent/agent/__init__.py": {
+   "group": "phase6_backend",
+   "sha256": "a7e34a3c6c22b6143aed709d65268a7a98c5a955a8af60acb6ad8c49ed02344b",
+   "size": 75
+  },
+  "bdr_be/agent_worker/bdr_agent/agent/help.py": {
+   "group": "phase6_backend",
+   "sha256": "8ea05b9efcb5dfa3bd0232b705f9d0e52f5e99d68cf1c74f6e9b6b50aa31449d",
+   "size": 14812
+  },
+  "bdr_be/agent_worker/bdr_agent/agent/loop.py": {
+   "group": "phase6_backend",
+   "sha256": "2fa474cdefb81f14632a974e12a0694c3b588fcc78335f1f8d94595fda3d3a6d",
+   "size": 7828
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/__init__.py": {
+   "group": "phase6_backend",
+   "sha256": "a23ae29defaa9c695fce5f06109baa04841c1ca4ba946ef061d46ed66c888b6c",
+   "size": 1471
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/canary/__init__.py": {
+   "group": "phase6_backend",
+   "sha256": "767b8a6c430479cbc00d196922f8b8cdae4d87a4a0564885111a719517320615",
+   "size": 52
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/canary/runner.py": {
+   "group": "phase6_backend",
+   "sha256": "b6477d1f14f3a24a93b7c9b3b4c2158ebe86633a77b318fa1e4bd9a407fa0061",
+   "size": 2654
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/pm_apps/__init__.py": {
+   "group": "phase6_backend",
+   "sha256": "e28b7570efc77cded51c0c68b0c3b42f1aa6598a02b0c218ae5647f6c016c699",
+   "size": 69
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/pm_apps/procore/__init__.py": {
+   "group": "phase6_backend",
+   "sha256": "cd3c2feb205a5dce615f7d9b80b6bfbddccaa534364938b0f95b11eccce0ac8f",
+   "size": 115
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/pm_apps/procore/ceiling.py": {
+   "group": "phase6_backend",
+   "sha256": "294a13f9703f0fd60c44d7d9e4910506f77361c93515cd78c9b87227b0275121",
+   "size": 486
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/pm_apps/procore/identity.py": {
+   "group": "phase6_backend",
+   "sha256": "86fc16cc80e1356fcd34891c42914560290c55a7c639e3249bc22c60108722ac",
+   "size": 17506
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/pm_apps/procore/login.py": {
+   "group": "phase6_backend",
+   "sha256": "03a14a453157cd0e3a324b55553dbfc8c25dc03c777bb884e72ef5d80daeffe1",
+   "size": 11184
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/pm_apps/procore/paths.py": {
+   "group": "phase6_backend",
+   "sha256": "2f9504e8b5a5dd5b53c0c6649e7d9a3309983316a3ef2ce59578b2bdd5012a46",
+   "size": 2184
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/pm_apps/procore/rest.py": {
+   "group": "phase6_backend",
+   "sha256": "df5004be93dcbeddfc29c950bd9f52a781fa3213087558b5c46130e4d7b5426c",
+   "size": 7421
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/rfi_from_email/__init__.py": {
+   "group": "phase6_backend",
+   "sha256": "a8c6f34d0fc0bb705f00d704bbcb67c3b78eae25cfaf35558225bfa92428039c",
+   "size": 78
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/rfi_from_email/runner.py": {
+   "group": "phase6_backend",
+   "sha256": "9d868ee2f6dd4fecf426064bdc0949d3d6427baab66f53706b2547f8909d6bc1",
+   "size": 2513
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/rfi_from_email/tools.py": {
+   "group": "phase6_backend",
+   "sha256": "547f2d28ff6442fdd2bfe46859e71e030d81097eccfe73ef7386f3c118aae50d",
+   "size": 16259
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/user_browser/__init__.py": {
+   "group": "phase6_backend",
+   "sha256": "4845ef328acf3d92781f459c995f5cbfd692ac8b7f879723d42b8cfd56956ff5",
+   "size": 43
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/user_browser/client.py": {
+   "group": "phase6_backend",
+   "sha256": "e25f47bb9f6eedb9e824c03dd8996963cae38591aee7313908d6fcd2e3395e99",
+   "size": 4939
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/user_browser/diagnostics.py": {
+   "group": "phase6_backend",
+   "sha256": "9b9a996698854563725063ac8f33f652f6b1e611f5a04077403b94c28568ad59",
+   "size": 45026
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/user_browser/guard.py": {
+   "group": "phase6_backend",
+   "sha256": "7ac134d1e30b3bbd379fbdcebe224892edc7e979e329558f8201ae0ff2142f21",
+   "size": 37922
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/user_browser/help.py": {
+   "group": "phase6_backend",
+   "sha256": "0363ad6b888ef648bfa6acaa719611b286798b60c613f079ccb09a3f5dcfc9fb",
+   "size": 1574
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/user_browser/identity.py": {
+   "group": "phase6_backend",
+   "sha256": "dd6dbfc363d6a9ddfa1f56fa4886d0330ccad658a3eedef6d55ffc5da1dcc6e2",
+   "size": 6647
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/user_browser/progress.py": {
+   "group": "phase6_backend",
+   "sha256": "ad2e1f3872da933339e000ab56f1496186a1bed62def108b005ab087344092d8",
+   "size": 9530
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/user_browser/runner.py": {
+   "group": "phase6_backend",
+   "sha256": "5179b398b197100ce9a0c2be7668603e14c2f35bb0094f4aa1c7f5e956f1496c",
+   "size": 13685
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/user_browser/spool.py": {
+   "group": "phase6_backend",
+   "sha256": "8747af973d086840d3c9149bfa1edcff515c04ce661045aed644ff61150ab41d",
+   "size": 2149
+  },
+  "bdr_be/agent_worker/bdr_agent/atomicfile.py": {
+   "group": "phase6_backend",
+   "sha256": "a2196da917f1a9b313e8123d9b33c7f9f7b2ee9a82c880fec6e44a67243295a6",
+   "size": 3537
+  },
+  "bdr_be/agent_worker/bdr_agent/browser/__init__.py": {
+   "group": "phase6_backend",
+   "sha256": "ba404fe4f08b7e7cb06453e1a7e67bb0ac205b0cf948848bc6ae6f211efd9167",
+   "size": 141
+  },
+  "bdr_be/agent_worker/bdr_agent/browser/browser.py": {
+   "group": "phase6_backend",
+   "sha256": "9417a86437bcdbeca1985fbe527ebe52af38bfa81bcbcf60e10104b35924d4a3",
+   "size": 12657
+  },
+  "bdr_be/agent_worker/bdr_agent/browser/executor.py": {
+   "group": "phase6_backend",
+   "sha256": "b0c1bb898c8a3df6d9a5feb16ff7b74d6872a3fa97a15fa6b43a9b77877deb42",
+   "size": 21236
+  },
+  "bdr_be/agent_worker/bdr_agent/browser/guard.py": {
+   "group": "phase6_backend",
+   "sha256": "a8b20d1aebf6c7ae437aa635445a03ad031b96f8ff177cccf7108a01b67e3438",
+   "size": 19780
+  },
+  "bdr_be/agent_worker/bdr_agent/browser/snapshot.py": {
+   "group": "phase6_backend",
+   "sha256": "eef5ac94675fa1e630626b0ec8c6a058bb498dc31bafb0850ac48acee03b4d04",
+   "size": 9600
+  },
+  "bdr_be/agent_worker/bdr_agent/client.py": {
+   "group": "phase6_backend",
+   "sha256": "d3511f57a67cbf690c5670c421cb18db163436325dac5de692d6bdafa4192cca",
+   "size": 23110
+  },
+  "bdr_be/agent_worker/bdr_agent/heartbeat.py": {
+   "group": "phase6_backend",
+   "sha256": "4ef3255f1bee6572bf49946fc54d9339c3e96126cce86471f561693eb2c5b928",
+   "size": 15037
+  },
+  "bdr_be/agent_worker/bdr_agent/local_config.py": {
+   "group": "phase6_backend",
+   "sha256": "dbdbdd203c2adcbd8e5d2bce8fb4a7c2836a22c8a0c6b5a4648a01ed4eecf88c",
+   "size": 4944
+  },
+  "bdr_be/agent_worker/bdr_agent/protocol.py": {
+   "group": "phase6_backend",
+   "sha256": "0e4dde0f13db1297a8325ef8c1d18d6b4a87311402c031922fbd36f33890591e",
+   "size": 55588
+  },
+  "bdr_be/agent_worker/bdr_agent/redact.py": {
+   "group": "phase6_backend",
+   "sha256": "6a0bf603db90e54773d4a81035758d9ed52ba1a3973f020bd3f5f6550cb2b197",
+   "size": 5103
+  },
+  "bdr_be/agent_worker/bdr_agent/release_key.py": {
+   "group": "phase6_backend",
+   "sha256": "06e0414cb438d40afe201900fc19f89a4043cc8bb67bcf232c0829e075a065ae",
+   "size": 2675
+  },
+  "bdr_be/agent_worker/bdr_agent/seams/__init__.py": {
+   "group": "phase6_backend",
+   "sha256": "7a2638e6add3f2ca0d17f027be0cbd00ce0087310bddbca5be74e05eb81115d4",
+   "size": 62
+  },
+  "bdr_be/agent_worker/bdr_agent/seams/screencast.py": {
+   "group": "phase6_backend",
+   "sha256": "7c24fb64a56b2d0370ffc0d1a719487fea07efac35f75d51a4b1b9fa4e1c96ad",
+   "size": 898
+  },
+  "bdr_be/agent_worker/bdr_agent/slot.py": {
+   "group": "phase6_backend",
+   "sha256": "3d3015dbec79c640728879080426c8b9a0abe08ba3185233e5b870621a92b323",
+   "size": 21058
+  },
+  "bdr_be/agent_worker/bdr_agent/spool.py": {
+   "group": "phase6_backend",
+   "sha256": "43cf434b53a8803a25619170d34ded35e2fbee165624b7d37f8704db4449dca3",
+   "size": 14170
+  },
+  "bdr_be/agent_worker/bdr_agent/supervisor.py": {
+   "group": "phase6_backend",
+   "sha256": "556cf28b4e771e07826ceef67d4b38d4fec10d28475230760fb82c2eb4a7052b",
+   "size": 24454
+  },
+  "bdr_be/agent_worker/bdr_agent/tokenstore.py": {
+   "group": "phase6_backend",
+   "sha256": "73d7a793b9a6529387ba59572b327e06a92cad960e3910beb49f66200b1d9292",
+   "size": 5952
+  },
+  "bdr_be/agent_worker/bdr_agent/updater.py": {
+   "group": "phase6_backend",
+   "sha256": "6de38ec6a720d9ee7ed7ace4eb8b9fdd4069b95999b31ee03ef53e6a7f66e6e0",
+   "size": 12980
+  },
+  "bdr_be/agent_worker/dist/phase6-worker-1.0.1/bdr-agent-1.0.1.zip": {
+   "group": "phase6_backend",
+   "sha256": "6b1a8ef044b4341940b8b06e4914d59f508731bbca2a85ed41df83bcecdb6d07",
+   "size": 37287981
+  },
+  "bdr_be/agent_worker/install/install.ps1": {
+   "group": "phase6_backend",
+   "sha256": "6f0c9ff7dbd35456f01ebf7c4d69493a75ecec6935a425b480e2607935ca7a63",
+   "size": 32262
+  },
+  "bdr_be/agent_worker/install/release_key.pub": {
+   "group": "phase6_backend",
+   "sha256": "b76a0136b00522885186ceca8564234ef0a2d0d6ac9c34c55f9a860a167d72b2",
+   "size": 45
+  },
+  "bdr_be/agent_worker/install/setup_python_runtime.ps1": {
+   "group": "phase6_backend",
+   "sha256": "33eae57f2a57772108449602cb7f5ce9f5c0d62528bad1077590ca984ebe118a",
+   "size": 6579
+  },
+  "bdr_be/agent_worker/install/uninstall.ps1": {
+   "group": "phase6_backend",
+   "sha256": "8d912d169ba3e72a032033ece8e99bb9b0b4f8d9b4bc295269a7f14f70538055",
+   "size": 5425
+  },
+  "bdr_be/agent_worker/install/winsw/BDRAgent.xml": {
+   "group": "phase6_backend",
+   "sha256": "5e13a8def1bb6632edb2648cd1a7b5ea9c5e4d10ef972c6669682977c6fd170b",
+   "size": 2027
+  },
+  "bdr_be/agent_worker/launcher/bdr_launcher/__init__.py": {
+   "group": "phase6_backend",
+   "sha256": "2ff3bfd67b11c114fc8b21c2994127510717098d8601fea9fc3eef0eeb93035b",
+   "size": 83
+  },
+  "bdr_be/agent_worker/launcher/bdr_launcher/atomic.py": {
+   "group": "phase6_backend",
+   "sha256": "fa021e0333da5bae464270241e72930eaff70d88093e2083bc0cd3003a6c4a10",
+   "size": 2281
+  },
+  "bdr_be/agent_worker/launcher/bdr_launcher/cli.py": {
+   "group": "phase6_backend",
+   "sha256": "a195ce9b3c9a2bc4589b0befa1ddc329f3851e0314feadbda17bbc9f2d7593b8",
+   "size": 7946
+  },
+  "bdr_be/agent_worker/launcher/bdr_launcher/ed25519.py": {
+   "group": "phase6_backend",
+   "sha256": "490dd1be67c70438e1c2f8b7e1b632aeeb71833d40099b3d59a23f4e8cb0a68b",
+   "size": 3195
+  },
+  "bdr_be/agent_worker/launcher/bdr_launcher/paths.py": {
+   "group": "phase6_backend",
+   "sha256": "fc0a13cd82d5675a7368595fe0e3e9b22b76ef589e5078a9217129e3e7eab975",
+   "size": 2966
+  },
+  "bdr_be/agent_worker/launcher/bdr_launcher/release.py": {
+   "group": "phase6_backend",
+   "sha256": "37497f394c7df9e7d36ebb0143110319eb6f57a7cd3f17b5380fbad2bc913e71",
+   "size": 19970
+  },
+  "bdr_be/agent_worker/launcher/bdr_launcher/runner.py": {
+   "group": "phase6_backend",
+   "sha256": "f47c795ae1ab2375e8ffbc9500f6b0ebb43e15f0665c136c4011d277c6bc0427",
+   "size": 10210
+  },
+  "bdr_be/agent_worker/launcher/bdr_launcher/state.py": {
+   "group": "phase6_backend",
+   "sha256": "6bf80ebbb80b7c20e55f50b5f1d0da2641f521e7ff0f1f1b297c82470eb43a81",
+   "size": 10672
+  },
+  "bdr_be/agent_worker/launcher/launcher.py": {
+   "group": "phase6_backend",
+   "sha256": "d583c8f4b50bc603f62b0274a7b128e99d63b722dee7c7d9ab272134d05c86a3",
+   "size": 471
+  },
+  "bdr_be/agent_worker/pyproject.toml": {
+   "group": "phase6_backend",
+   "sha256": "f10a7467f67362915e96306996bc2261d5ea19bd3d2ec979afc4c2fa09e240fc",
+   "size": 930
+  },
+  "bdr_be/agent_worker/tests/__init__.py": {
+   "group": "phase6_backend",
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "size": 0
+  },
+  "bdr_be/agent_worker/tests/agent_bdr.py": {
+   "group": "phase6_backend",
+   "sha256": "9bea722e08064b36b7c49d9bb13bd711c2855a3256f75b25f4f1eac5a3e63ba1",
+   "size": 13792
+  },
+  "bdr_be/agent_worker/tests/agent_harness.py": {
+   "group": "phase6_backend",
+   "sha256": "9e8dcd337c031fa800175d765aaf811a7b6376ecf2efff023272e2b7d0c1c469",
+   "size": 3845
+  },
+  "bdr_be/agent_worker/tests/conftest.py": {
+   "group": "phase6_backend",
+   "sha256": "4781a9db24891facae71ceddc5a23b5fce6789108582456918b877492dc4d86e",
+   "size": 2146
+  },
+  "bdr_be/agent_worker/tests/mock_bdr.py": {
+   "group": "phase6_backend",
+   "sha256": "729cdecec547da4e1a0b212f3f25bd546e902eda67913a4fad3886d6425cb5ae",
+   "size": 23425
+  },
+  "bdr_be/agent_worker/tests/procore_site.py": {
+   "group": "phase6_backend",
+   "sha256": "1dbb5751fb3119401dce540e520ae2d9f1a9b104f0f315945da08ca965172ddc",
+   "size": 19390
+  },
+  "bdr_be/agent_worker/tests/release_helpers.py": {
+   "group": "phase6_backend",
+   "sha256": "c17f9e1d9a8857e641c8b5008c35ff9522ac5497341cdd1ba96a393c7052926a",
+   "size": 4667
+  },
+  "bdr_be/agent_worker/tests/test_agent_loop.py": {
+   "group": "phase6_backend",
+   "sha256": "68a32edb48fbbe241d12ef973b4b7e26715967078062d8b2563a1ece56f26da7",
+   "size": 5899
+  },
+  "bdr_be/agent_worker/tests/test_browser_executor.py": {
+   "group": "phase6_backend",
+   "sha256": "b86d0707255cecf720a97090bfa102d313be252d565737e616194339c0d40c13",
+   "size": 13721
+  },
+  "bdr_be/agent_worker/tests/test_browser_provider.py": {
+   "group": "phase6_backend",
+   "sha256": "0a9461ab7ec4d70c8411afe807d872da6f08c13029db59574e3d0b229bfeef26",
+   "size": 4061
+  },
+  "bdr_be/agent_worker/tests/test_canary_agent.py": {
+   "group": "phase6_backend",
+   "sha256": "efa584b1055873ba0977742c6979439a119dbbf16cca8c35dcd4fea87ffa134e",
+   "size": 3245
+  },
+  "bdr_be/agent_worker/tests/test_client.py": {
+   "group": "phase6_backend",
+   "sha256": "d39012bf26e5ba9de6cd878eac074bf3a2236c7d299c08f561ce482a63ea6d96",
+   "size": 8008
+  },
+  "bdr_be/agent_worker/tests/test_enroll.py": {
+   "group": "phase6_backend",
+   "sha256": "b255cefae64cf1a74ac19208b54c0a05fd5b65df9bd6886c62b44f43f341305e",
+   "size": 4966
+  },
+  "bdr_be/agent_worker/tests/test_guard_policy.py": {
+   "group": "phase6_backend",
+   "sha256": "0391616f29b95f864bfb364964fe73f066e3e246b606a259430a65601f328905",
+   "size": 5867
+  },
+  "bdr_be/agent_worker/tests/test_heartbeat.py": {
+   "group": "phase6_backend",
+   "sha256": "b8fdac3e69dd01b53a5b9af64cebde196eb5994d685b2e8000aa0469b0131f6e",
+   "size": 5651
+  },
+  "bdr_be/agent_worker/tests/test_installer_files.py": {
+   "group": "phase6_backend",
+   "sha256": "d662a53ac6145b46473a85c4e502514c04aeee63b6233a56cb4c29ca7027ff63",
+   "size": 11543
+  },
+  "bdr_be/agent_worker/tests/test_launcher_release.py": {
+   "group": "phase6_backend",
+   "sha256": "7fcb86de9dee94d8fc4107bfe58883ef07ee9fd5e32b639c57568aa1c5cee54e",
+   "size": 17562
+  },
+  "bdr_be/agent_worker/tests/test_launcher_rollback.py": {
+   "group": "phase6_backend",
+   "sha256": "9cb9c5872a370545e575c38886520d762c2bdae6b743d8e7fbe8b7387b9d5ca4",
+   "size": 13852
+  },
+  "bdr_be/agent_worker/tests/test_local_files.py": {
+   "group": "phase6_backend",
+   "sha256": "ef6b6e2c944a854e319f9efe12e27f585c6d4817fa4b2186f81f374d5152b437",
+   "size": 4496
+  },
+  "bdr_be/agent_worker/tests/test_procore_paths_drift.py": {
+   "group": "phase6_backend",
+   "sha256": "a8112957fe832b46d4f9511932bbed664e2322e46724878589d1ff7b4192a861",
+   "size": 2246
+  },
+  "bdr_be/agent_worker/tests/test_redact.py": {
+   "group": "phase6_backend",
+   "sha256": "6f1ad95d3ced451bcad44ef140e2eb1ef51d97ab2b19d79fa37149da90dc5f68",
+   "size": 2347
+  },
+  "bdr_be/agent_worker/tests/test_release_bundle_inputs.py": {
+   "group": "phase6_backend",
+   "sha256": "06c2b99feb0cb390a0833df0f803eef563eff1052bf1807fe75fec5adfe59ef7",
+   "size": 3283
+  },
+  "bdr_be/agent_worker/tests/test_rfi_agent.py": {
+   "group": "phase6_backend",
+   "sha256": "c8111599637c60a73a257054f04e3761ae69f62496a268632eeb2ebf72ec0f5e",
+   "size": 28380
+  },
+  "bdr_be/agent_worker/tests/test_slot.py": {
+   "group": "phase6_backend",
+   "sha256": "f3f61157f741109c4229ddc6a5e1675c97c7f08c97c226d98bca0b3548770f97",
+   "size": 4292
+  },
+  "bdr_be/agent_worker/tests/test_spool.py": {
+   "group": "phase6_backend",
+   "sha256": "d8e923db3f26e37a035d915bcf8ba158b00b39baac2798f2394a1d1e6c857b9c",
+   "size": 5756
+  },
+  "bdr_be/agent_worker/tests/test_supervisor.py": {
+   "group": "phase6_backend",
+   "sha256": "0058f2bb6f284d13ea8d6da50a4f25f54ee02bea8a9cf130ffc773cad1813c5c",
+   "size": 18983
+  },
+  "bdr_be/agent_worker/tests/test_updater.py": {
+   "group": "phase6_backend",
+   "sha256": "3b216ad678abab0d527bd16529df695fe4617fa7e66ba9313dc55323f783250f",
+   "size": 14324
+  },
+  "bdr_be/agent_worker/tests/test_user_browser.py": {
+   "group": "phase6_backend",
+   "sha256": "da09024e440c3e4d52d217b6487237a303612412187562a4b71d3a0d1c170b4f",
+   "size": 10058
+  },
+  "bdr_be/agent_worker/tests/test_user_browser_allow_106.py": {
+   "group": "phase6_backend",
+   "sha256": "101c2d890b656cf65d16162b53774f2c84ee66455ff1605b42e63d82cd4d7996",
+   "size": 32046
+  },
+  "bdr_be/agent_worker/tests/test_user_browser_assets.py": {
+   "group": "phase6_backend",
+   "sha256": "a4cf7c6578f1464f20b66026a37bb66ac21d874b3d0f42be6c326a1d5d2fc488",
+   "size": 23602
+  },
+  "bdr_be/agent_worker/tests/test_user_browser_diag_106.py": {
+   "group": "phase6_backend",
+   "sha256": "b16dc7fcfe2059278fb59fb177fb1412144264b409081972a151d2c6a78ed546",
+   "size": 18689
+  },
+  "bdr_be/agent_worker/tests/test_user_browser_diagnostics.py": {
+   "group": "phase6_backend",
+   "sha256": "259e8c712b23a4f8bf646ebf27d7913657c376023029622ec4742bc61cf65cb9",
+   "size": 32920
+  },
+  "bdr_be/agent_worker/tests/test_user_browser_driver_headers.py": {
+   "group": "phase6_backend",
+   "sha256": "caa6f3947dc570e76eaaec25d14e2b1047b43c75f4d46c61c1958f74942ea9fe",
+   "size": 5199
+  },
+  "bdr_be/agent_worker/tests/test_user_browser_flags_106.py": {
+   "group": "phase6_backend",
+   "sha256": "26a19f05dbf9eb99096e4efe861993247d1cc85578848c65f8a3563e2589932d",
+   "size": 18506
+  },
+  "bdr_be/agent_worker/tests/test_user_browser_live.py": {
+   "group": "phase6_backend",
+   "sha256": "1de90859b1674b9fe87b0ca5e0ffe7782b3a6620b8ba80d40b92874b1e5790c8",
+   "size": 5069
+  },
+  "bdr_be/agent_worker/tests/test_user_browser_progress.py": {
+   "group": "phase6_backend",
+   "sha256": "694d5bccaf694fdb5309df6fbdeea05f5ce3cea6dc3c4737c684f41354a96bfa",
+   "size": 30646
+  },
+  "bdr_be/agent_worker/tests/test_user_browser_regional.py": {
+   "group": "phase6_backend",
+   "sha256": "817f290d139bec83e519e32f6a38573a41388b9b1635aa41a81d674937397ef4",
+   "size": 10667
+  },
+  "bdr_be/agent_worker/tests/test_user_browser_shell_live.py": {
+   "group": "phase6_backend",
+   "sha256": "157131a86aebc4dedf5179e553eafbec3bdebcfa3b54bc783fb73f3aaee38c28",
+   "size": 12352
+  },
+  "bdr_be/agent_worker/tools/build_release_bundle.py": {
+   "group": "phase6_backend",
+   "sha256": "b2527d34582c74ae58a8721472bb16eed23cef97862fe562e0bdbb5759441759",
+   "size": 10222
+  },
+  "bdr_be/agent_worker/tools/render_installer.py": {
+   "group": "phase6_backend",
+   "sha256": "cf76d4b53f9f07d37958b95d9778c03fc64d0a67fa92075f1b90af655a9fe78d",
+   "size": 5117
+  },
+  "bdr_be/agent_worker/uv.lock": {
+   "group": "phase6_backend",
+   "sha256": "9d25c98a5f104bf362456cc4435b017b1f6def412e94de322b480a2061f4ee24",
+   "size": 41205
+  },
+  "bdr_be/app/assistant/tools/browser.py": {
+   "group": "phase6_backend",
+   "sha256": "228bffc313f5d3b68a823918f73babc5fc2c1b097a134298f21989d6d6d2f058",
+   "size": 4729
+  },
+  "bdr_be/app/routers/assistant_browser.py": {
+   "group": "phase6_backend",
+   "sha256": "fc267fe868551698678ce6f0e269e2653eacae1a43b3c80d9f70e4e430f2cca6",
+   "size": 5522
+  },
+  "bdr_be/app/routers/assistant_browser_views.py": {
+   "group": "phase6_backend",
+   "sha256": "70d52bbcc094600e472cdae4c735ae2fde28cbba516dce1a6bdf4c46194cb708",
+   "size": 5376
+  },
+  "bdr_be/app/routers/browser_agents.py": {
+   "group": "phase6_backend",
+   "sha256": "a350027eca88a766a6c0f6c9234fd963c6017c770333a883e2e3692d578dce1c",
+   "size": 18036
+  },
+  "bdr_be/app/routers/notes.py": {
+   "group": "backend_routers",
+   "sha256": "a80598db5b622e972819b72b44029e1050cf2c2f9e9ffab22f5af376191a8913",
+   "size": 14309
+  },
+  "bdr_be/app/routers/notification_routing.py": {
+   "group": "backend_routers",
+   "sha256": "e282ea04de0e2dd3ae32fc0e45fc4561a2a8b33f2a2a00518c7d429db5dbdab4",
+   "size": 2017
+  },
+  "bdr_be/app/routers/projects.py": {
+   "group": "backend_routers",
+   "sha256": "be3e34009b64fdece174644ae7a1276727ff0afed65cff78acd5e0c4010f4251",
+   "size": 115022
+  },
+  "bdr_be/app/routers/rfqs.py": {
+   "group": "backend_routers",
+   "sha256": "612f9f33152b0b0ef7cdbb6362d3ed02db92513df43ccba51baa1ee976b20fae",
+   "size": 60415
+  },
+  "bdr_be/app/services/assistant_browser.py": {
+   "group": "phase6_backend",
+   "sha256": "570de565d607cb704511de557a0a22aa43e47b03d49a220e6166c6bf6e6239f9",
+   "size": 10049
+  },
+  "bdr_be/app/services/assistant_browser_help.py": {
+   "group": "phase6_backend",
+   "sha256": "7e72210c7be7056f0b798a8643ce1d56d55229dbb413061618c3ccb5a25e678f",
+   "size": 9715
+  },
+  "bdr_be/app/services/assistant_browser_records.py": {
+   "group": "phase6_backend",
+   "sha256": "91470e0a8af618b231468fb33ad8e93711fbb67fa2b56bd30072b10f08000a25",
+   "size": 11625
+  },
+  "bdr_be/app/services/assistant_browser_redaction.py": {
+   "group": "phase6_backend",
+   "sha256": "2b96c1db0e54b7c9f24733a77e3c3e03d67f6310c2559f178896e06d119812d9",
+   "size": 2319
+  },
+  "bdr_be/app/services/assistant_browser_runtime.py": {
+   "group": "phase6_backend",
+   "sha256": "f16add5daaba3ba4083c7c23d6d1d7b9d4ed90d8b0e942d682299c2fdc51e4d8",
+   "size": 20481
+  },
+  "bdr_be/app/services/assistant_browser_sites.py": {
+   "group": "phase6_backend",
+   "sha256": "0d987d2e5a4400e2a95b379d96af908f73c2f1be73b11263562f607acd65fe76",
+   "size": 2663
+  },
+  "bdr_be/app/services/assistant_browser_vault.py": {
+   "group": "phase6_backend",
+   "sha256": "4dab3dcea7dc4312760169fff08bae932522c6cfefbd8f65957be4865a7c6108",
+   "size": 4478
+  },
+  "bdr_be/app/services/assistant_recipes.py": {
+   "group": "backend_services",
+   "sha256": "f57cfac296c4a5b86810a4db42a5d196498257ae277633a3264de15c297da1a6",
+   "size": 32047
+  },
+  "bdr_be/app/services/assistant_scheduler.py": {
+   "group": "backend_services",
+   "sha256": "1e665c5841a781a4517bfdf4e7e07ad280da297c4ebd7112ebf3d0f161ecc84a",
+   "size": 38301
+  },
+  "bdr_be/app/services/auto_send.py": {
+   "group": "backend_services",
+   "sha256": "68316068ea74626d1ff78dbf0da7e5f7ddf6baf5d3407a6f944e0617886c2e7b",
+   "size": 79025
+  },
+  "bdr_be/app/services/auto_send_emails.py": {
+   "group": "backend_services",
+   "sha256": "5e9d74fee82d5dbd54d5432fd8b941a7081f7578cfb58e1c72136e808177debc",
+   "size": 17236
+  },
+  "bdr_be/app/services/auto_send_estimate.py": {
+   "group": "backend_services",
+   "sha256": "574af3f1d350fc94c700fa33a0cdee6bf3df45cbad6810753bbee93ac1b716af",
+   "size": 27381
+  },
+  "bdr_be/app/services/auto_send_hooks.py": {
+   "group": "backend_services",
+   "sha256": "72a1b300691f4cb9bd93c66d37de3d1c43bb2de66358cabd8406983a091e29d2",
+   "size": 4136
+  },
+  "bdr_be/app/services/auto_send_scheduler.py": {
+   "group": "backend_services",
+   "sha256": "4b19e656c72509af53b2cdef77252eaddc6a633d3ea98b588c46166aae1cfbc3",
+   "size": 22517
+  },
+  "bdr_be/app/services/browser_agents/__init__.py": {
+   "group": "phase6_backend",
+   "sha256": "83673c4096ba81ec2f615e205cc8d966c6b3561e9869cc7add2ef2ed87b594bb",
+   "size": 232
+  },
+  "bdr_be/app/services/browser_agents/admin.py": {
+   "group": "phase6_backend",
+   "sha256": "e9a167335f968dc3fc5b02839170b93417da5709debba0dd0e8aa0d7acbfe319",
+   "size": 50023
+  },
+  "bdr_be/app/services/browser_agents/artifacts.py": {
+   "group": "phase6_backend",
+   "sha256": "462615c4d3b9a8f86e64f8c83be1315a429ec6831a86924f756c52658e760730",
+   "size": 10136
+  },
+  "bdr_be/app/services/browser_agents/contributions.py": {
+   "group": "phase6_backend",
+   "sha256": "b04bb5d294681921ab15394e6cbaad11bfb2c708efda1b3a6e8cc3798bd6f781",
+   "size": 7687
+  },
+  "bdr_be/app/services/browser_agents/help.py": {
+   "group": "phase6_backend",
+   "sha256": "88e1fb4804cd8bb119546ed1c03763e61e6d1fed390e5358125a00dc3b471d02",
+   "size": 79455
+  },
+  "bdr_be/app/services/browser_agents/identities.py": {
+   "group": "phase6_backend",
+   "sha256": "1c7ea290e5cb974352367162ee686189602514cec889add9dbf8afa974d98cee",
+   "size": 24885
+  },
+  "bdr_be/app/services/browser_agents/llm/__init__.py": {
+   "group": "phase6_backend",
+   "sha256": "130f410174ea1b3caa4b71f7f198b2831ac0f64af13317618825703242d2a664",
+   "size": 5193
+  },
+  "bdr_be/app/services/browser_agents/llm/anthropic_.py": {
+   "group": "phase6_backend",
+   "sha256": "53dff650d314534de7156302a48121069da75e106804a412cb912341d9ab561f",
+   "size": 4964
+  },
+  "bdr_be/app/services/browser_agents/llm/base.py": {
+   "group": "phase6_backend",
+   "sha256": "9e6d57ae89979b0d8f63a8572e71b8f70b8605a346b413e79345c070c28e6b4d",
+   "size": 10272
+  },
+  "bdr_be/app/services/browser_agents/llm/compat.py": {
+   "group": "phase6_backend",
+   "sha256": "0baf7f06685bd8d6a2bd2806b28b5c15da9186949b52cc0070b01cf951974c64",
+   "size": 4940
+  },
+  "bdr_be/app/services/browser_agents/llm/google_.py": {
+   "group": "phase6_backend",
+   "sha256": "62463368aac16b13d92e0dc5e88a2cc848022b9b516bcbc985735ad8df3df1e2",
+   "size": 6947
+  },
+  "bdr_be/app/services/browser_agents/llm/models.py": {
+   "group": "phase6_backend",
+   "sha256": "80d3e22295eb163a684755d3de2c83be0d561191ddf2540df26afb932c72203f",
+   "size": 9771
+  },
+  "bdr_be/app/services/browser_agents/llm/openai_.py": {
+   "group": "phase6_backend",
+   "sha256": "aec79426affdfe56eb242013ab178b32b75501b0ae3b06ba3946444319ba8a06",
+   "size": 5587
+  },
+  "bdr_be/app/services/browser_agents/pm_apps/__init__.py": {
+   "group": "phase6_backend",
+   "sha256": "0e83753fea945119e4ffe94353d25b71bf1c184c2c16987bdfc671c177e53026",
+   "size": 75
+  },
+  "bdr_be/app/services/browser_agents/pm_apps/procore.py": {
+   "group": "phase6_backend",
+   "sha256": "c6d6794177e84570b41e13387caed9e8dd152085ff7dc8ad85a6a98701c810cd",
+   "size": 10993
+  },
+  "bdr_be/app/services/browser_agents/prompts.py": {
+   "group": "phase6_backend",
+   "sha256": "158876bcbe1b04c594486d71511e6dc98b6646775f8065d4cdce5c8152101889",
+   "size": 5935
+  },
+  "bdr_be/app/services/browser_agents/protocol.py": {
+   "group": "phase6_backend",
+   "sha256": "0e4dde0f13db1297a8325ef8c1d18d6b4a87311402c031922fbd36f33890591e",
+   "size": 55588
+  },
+  "bdr_be/app/services/browser_agents/queue.py": {
+   "group": "phase6_backend",
+   "sha256": "059e587c45f8d3468dfc9a57b97f47b0876023108f3b2f800b6e6ed1faebf37e",
+   "size": 41571
+  },
+  "bdr_be/app/services/browser_agents/redaction.py": {
+   "group": "phase6_backend",
+   "sha256": "2629f41db79f282a30aacf38150ffaaf993826a9b0658276602229738644e496",
+   "size": 11388
+  },
+  "bdr_be/app/services/browser_agents/registry.py": {
+   "group": "phase6_backend",
+   "sha256": "4aa15cecef1237595fe15e95c80d84065ed3c3433ffcd3d8fcbd35ca4cebc0c2",
+   "size": 7364
+  },
+  "bdr_be/app/services/browser_agents/rfi_session.py": {
+   "group": "phase6_backend",
+   "sha256": "9d5192e5c5e9284ff2f1c23a8b04267b7401bab94d068cc559835404d4315ffd",
+   "size": 7755
+  },
+  "bdr_be/app/services/browser_agents/scan.py": {
+   "group": "phase6_backend",
+   "sha256": "9ec861a298d1b4c12f361da405e5b67708dc4bb617a732e2e480447430dff345",
+   "size": 718
+  },
+  "bdr_be/app/services/browser_agents/secrets.py": {
+   "group": "phase6_backend",
+   "sha256": "374d9914abc14a7121df97e93baab09e1f9e3aee45ddaba27b21683b4e1fcb81",
+   "size": 14615
+  },
+  "bdr_be/app/services/browser_agents/turns.py": {
+   "group": "phase6_backend",
+   "sha256": "8d877615f8e5717b81f3a57dd9f91826e2f530964df27a1b95069332cd4edc0f",
+   "size": 66809
+  },
+  "bdr_be/app/services/browser_agents/types/__init__.py": {
+   "group": "phase6_backend",
+   "sha256": "54f3612af23ccabec6f74fe678e23bf59a388daa7be02ed54a6436d37e5e6384",
+   "size": 79
+  },
+  "bdr_be/app/services/browser_agents/types/canary.py": {
+   "group": "phase6_backend",
+   "sha256": "45592313094b1a1d9913653fcc4e51b8a10f4007f240c7d1e5961d761f9ff416",
+   "size": 3912
+  },
+  "bdr_be/app/services/browser_agents/types/rfi_from_email.py": {
+   "group": "phase6_backend",
+   "sha256": "c05b889d0c579d61fbd16ee90bbd795590d9f31ea5ce482c73d45fb36543dd4d",
+   "size": 12596
+  },
+  "bdr_be/app/services/browser_agents/types/user_browser_read.py": {
+   "group": "phase6_backend",
+   "sha256": "85008af42a87dc88c9cb5600c8b49c299da2c71f3f75aa22d5caa9e31201054c",
+   "size": 1690
+  },
+  "bdr_be/app/services/calling_in.py": {
+   "group": "backend_services",
+   "sha256": "1501acd16a01a28149df98ad5698fa9aefd697184e1767082eccf6f6dfbf50ce",
+   "size": 48772
+  },
+  "bdr_be/app/services/due_digest.py": {
+   "group": "backend_services",
+   "sha256": "d5d3e8281c2170c3367fc26e93f8b7e0ea91ec70887bc9a3661c1984bedc0624",
+   "size": 18253
+  },
+  "bdr_be/app/services/due_reminders.py": {
+   "group": "backend_services",
+   "sha256": "7f513b16d440642678a12adf0cf3d8cfb52c6c322d3126c1d92a72772fbc8db4",
+   "size": 22055
+  },
+  "bdr_be/app/services/email_branding.py": {
+   "group": "backend_services",
+   "sha256": "fdb8f5b59c7ceef1dbaaf795c7dc89d35580f33c58121ee29e38b6f0ea1fcc83",
+   "size": 15543
+  },
+  "bdr_be/app/services/graph_email.py": {
+   "group": "backend_services",
+   "sha256": "f36c4fca3787d62dbdabc5be482901b74a88f83ce40e46e6eb542a12d429b194",
+   "size": 22557
+  },
+  "bdr_be/app/services/notification_routing.py": {
+   "group": "backend_services",
+   "sha256": "34c3ae739eabb1697e60eefef898d2127d39008ff59d63dfc4bc36f5bf89bd99",
+   "size": 18089
+  },
+  "bdr_be/app/services/notifications.py": {
+   "group": "backend_services",
+   "sha256": "505d8a49d2164008ce2813d2d7a169fb03aa148a976e3e1047d6fa0dfe611bef",
+   "size": 11616
+  },
+  "bdr_be/app/services/rfp_test.py": {
+   "group": "backend_services",
+   "sha256": "1789e58a8f35a30b2104bc92fed966e004dee3dceccc391a2638d2c0cef7b0f3",
+   "size": 57207
+  },
+  "bdr_be/app/services/teams_alerts.py": {
+   "group": "backend_services",
+   "sha256": "6a6f14337f5d2a725310150400f55e3911b812c2ae2eeb7c189751cbd1b94010",
+   "size": 22788
+  },
+  "bdr_be/app/services/workflow.py": {
+   "group": "backend_services",
+   "sha256": "8b1da857440d26d73afbfc4388f8e70bfa1f306eda717064424b3a7b5166ee6f",
+   "size": 37383
+  },
+  "bdr_be/dist/phase6-worker-1.0.1/bdr-agent-1.0.1.zip": {
+   "group": "phase6_backend",
+   "sha256": "6b1a8ef044b4341940b8b06e4914d59f508731bbca2a85ed41df83bcecdb6d07",
+   "size": 37287981
+  },
+  "bdr_be/dist/phase6-worker-1.0.1/bdr-install-template.ps1": {
+   "group": "phase6_backend",
+   "sha256": "3b2df5158129cf603d3e30258ad36338a589f78aaae8a218c6a8415a8710852e",
+   "size": 65597
+  },
+  "bdr_be/dist/phase6-worker-1.0.1/python-catalog.json": {
+   "group": "phase6_backend",
+   "sha256": "ce1c003eaf35c6681a91000756cc685e4293b1e3c92485502650dc8d10ec0606",
+   "size": 428588
+  },
+  "bdr_be/dist/phase6-worker-1.0.1/python.3.12.10.nupkg": {
+   "group": "phase6_backend",
+   "sha256": "0eb85c2dfccccf1b17352de4c397f69194035b7d37149eacc16f1147d93de3b8",
+   "size": 14515433
+  },
+  "bdr_be/dist/phase6-worker-1.0.1/release-1.0.1.json": {
+   "group": "phase6_backend",
+   "sha256": "ec588f09b5aa9560a0d1dde429cf43bb7db00767a293d9465e9c47b588a0c850",
+   "size": 711
+  },
+  "bdr_be/dist/phase6-worker-1.0.1/setup-python-runtime.ps1": {
+   "group": "phase6_backend",
+   "sha256": "696ec659cbbc789556c3ad61148158b1c596c5a3473de6cfc2697ec946fd3423",
+   "size": 6620
+  },
+  "bdr_be/dist/phase6-worker-1.0.2/bdr-agent-1.0.2.zip": {
+   "group": "phase6_backend",
+   "sha256": "d6d30df1f8c31d0659fad140cb47f313ac347f8e3285fc5b6212ef1c9170929d",
+   "size": 37288464
+  },
+  "bdr_be/dist/phase6-worker-1.0.2/bdr-install-template.ps1": {
+   "group": "phase6_backend",
+   "sha256": "3b2df5158129cf603d3e30258ad36338a589f78aaae8a218c6a8415a8710852e",
+   "size": 65597
+  },
+  "bdr_be/dist/phase6-worker-1.0.2/release-1.0.2.json": {
+   "group": "phase6_backend",
+   "sha256": "b416702e35dda1601a52fa7489b9550de2bbab65a034bb32af4f09d5d1f3cc28",
+   "size": 705
+  },
+  "bdr_be/dist/phase6-worker-1.0.2/upload-state.json": {
+   "group": "phase6_backend",
+   "sha256": "303054a879c50cc1c233a15a0067d341a821825b16927533531bd64f14a296cb",
+   "size": 491
+  },
+  "bdr_be/dist/phase6-worker-1.0.2/upload-state.json.lock": {
+   "group": "phase6_backend",
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "size": 0
+  },
+  "bdr_be/dist/phase6-worker-1.0.2/wheels/annotated_types-0.8.0-py3-none-any.whl": {
+   "group": "phase6_backend",
+   "sha256": "f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0",
+   "size": 13427
+  },
+  "bdr_be/dist/phase6-worker-1.0.2/wheels/anyio-4.15.1-py3-none-any.whl": {
+   "group": "phase6_backend",
+   "sha256": "6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101",
+   "size": 132079
+  },
+  "bdr_be/dist/phase6-worker-1.0.2/wheels/certifi-2026.10.23-py3-none-any.whl": {
+   "group": "phase6_backend",
+   "sha256": "e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1",
+   "size": 135082
+  },
+  "bdr_be/dist/phase6-worker-1.0.2/wheels/cffi-2.1.1-cp312-cp312-win_amd64.whl": {
+   "group": "phase6_backend",
+   "sha256": "f53e442b08449d42821fa4a4fba000095af9f62742a500f978a9f557ec44339a",
+   "size": 185919
+  },
+  "bdr_be/dist/phase6-worker-1.0.2/wheels/cryptography-48.0.0-cp311-abi3-win_amd64.whl": {
+   "group": "phase6_backend",
+   "sha256": "5b012212e08b8dd5edc78ef54da83dd9892fd9105323b3993eff6bea65dc21d7",
+   "size": 3817107
+  },
+  "bdr_be/dist/phase6-worker-1.0.2/wheels/greenlet-3.1.1-cp312-cp312-win_amd64.whl": {
+   "group": "phase6_backend",
+   "sha256": "7124e16b4c55d417577c2077be379514321916d5790fa287c9ed6f23bd2ffd01",
+   "size": 299655
+  },
+  "bdr_be/dist/phase6-worker-1.0.2/wheels/h11-0.16.0-py3-none-any.whl": {
+   "group": "phase6_backend",
+   "sha256": "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86",
+   "size": 37515
+  },
+  "bdr_be/dist/phase6-worker-1.0.2/wheels/httpcore-1.0.9-py3-none-any.whl": {
+   "group": "phase6_backend",
+   "sha256": "2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55",
+   "size": 78784
+  },
+  "bdr_be/dist/phase6-worker-1.0.2/wheels/httpx-0.28.1-py3-none-any.whl": {
+   "group": "phase6_backend",
+   "sha256": "d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad",
+   "size": 73517
+  },
+  "bdr_be/dist/phase6-worker-1.0.2/wheels/idna-3.20-py3-none-any.whl": {
+   "group": "phase6_backend",
+   "sha256": "ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c",
+   "size": 69583
+  },
+  "bdr_be/dist/phase6-worker-1.0.2/wheels/playwright-1.48.0-py3-none-win_amd64.whl": {
+   "group": "phase6_backend",
+   "sha256": "e0e87b0c4dc8fce83c725dd851aec37bc4e882bb225ec8a96bd83cf32d4f1623",
+   "size": 29983099
+  },
+  "bdr_be/dist/phase6-worker-1.0.2/wheels/pycparser-3.12-py3-none-any.whl": {
+   "group": "phase6_backend",
+   "sha256": "a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e",
+   "size": 62600
+  },
+  "bdr_be/dist/phase6-worker-1.0.2/wheels/pydantic-2.13.4-py3-none-any.whl": {
+   "group": "phase6_backend",
+   "sha256": "45a282cde31d808236fd7ea9d919b128653c8b38b393d1c4ab335c62924d9aba",
+   "size": 472262
+  },
+  "bdr_be/dist/phase6-worker-1.0.2/wheels/pydantic_core-2.46.4-cp312-cp312-win_amd64.whl": {
+   "group": "phase6_backend",
+   "sha256": "e9c26f834c65f5752f3f06cb08cb86a913ceb7274d0db6e267808a708b46bc89",
+   "size": 2072919
+  },
+  "bdr_be/dist/phase6-worker-1.0.2/wheels/pyee-12.0.0-py3-none-any.whl": {
+   "group": "phase6_backend",
+   "sha256": "7b14b74320600049ccc7d0e0b1becd3b4bd0a03c745758225e31a59f4095c990",
+   "size": 14831
+  },
+  "bdr_be/dist/phase6-worker-1.0.2/wheels/typing_extensions-4.16.0-py3-none-any.whl": {
+   "group": "phase6_backend",
+   "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+   "size": 45571
+  },
+  "bdr_be/dist/phase6-worker-1.0.2/wheels/typing_inspection-0.4.4-py3-none-any.whl": {
+   "group": "phase6_backend",
+   "sha256": "65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147",
+   "size": 14750
+  },
+  "bdr_be/dist/phase6-worker-1.0.3/bdr-agent-1.0.3.zip": {
+   "group": "phase6_backend",
+   "sha256": "e81e3bd233723b27292d88d82f68a203f027f8fb7c49a8e865519ab0e97b165b",
+   "size": 37290329
+  },
+  "bdr_be/dist/phase6-worker-1.0.3/release-1.0.3.json": {
+   "group": "phase6_backend",
+   "sha256": "44e9bacd6da815cba5ca9015e9d549bee82e6d407c7a8798f27a45202d89ca7a",
+   "size": 710
+  },
+  "bdr_be/dist/phase6-worker-1.0.3/upload-state.json": {
+   "group": "phase6_backend",
+   "sha256": "1365179d98af3caca3e5d02dac1b78725814d3c4799b16fa5a5c29488ad6de86",
+   "size": 491
+  },
+  "bdr_be/dist/phase6-worker-1.0.3/upload-state.json.lock": {
+   "group": "phase6_backend",
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "size": 0
+  },
+  "bdr_be/dist/phase6-worker-1.0.4/bdr-agent-1.0.4.zip": {
+   "group": "phase6_backend",
+   "sha256": "a627c90b3b4da99821655c0c9477a29435f9dc93510742d76b99b1263f711da2",
+   "size": 37291118
+  },
+  "bdr_be/dist/phase6-worker-1.0.4/release-1.0.4.json": {
+   "group": "phase6_backend",
+   "sha256": "d8f133e819fa831f1248bf57739d32568e692e6fdeae18013b9c917eb47178ae",
+   "size": 724
+  },
+  "bdr_be/dist/phase6-worker-1.0.4/upload-state.json": {
+   "group": "phase6_backend",
+   "sha256": "ca46fbe7848670cd9e8eca0468a4ef6ffa2220aaa9ac01fb454e0e4af5391208",
+   "size": 491
+  },
+  "bdr_be/dist/phase6-worker-1.0.4/upload-state.json.lock": {
+   "group": "phase6_backend",
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "size": 0
+  },
+  "bdr_be/dist/phase6-worker-1.0.5/bdr-agent-1.0.5.zip": {
+   "group": "phase6_backend",
+   "sha256": "bfa40427d70b8e10fd7460e8185e5f515e677e4d2c8daecdaad8ad18c434ef54",
+   "size": 37309227
+  },
+  "bdr_be/dist/phase6-worker-1.0.5/release-1.0.5.json": {
+   "group": "phase6_backend",
+   "sha256": "663eb0efaae081c4b3f0ffaae1b9cdc669913f8257791d370c62ad5d6b9818e6",
+   "size": 745
+  },
+  "bdr_be/dist/phase6-worker-1.0.5/upload-state.json": {
+   "group": "phase6_backend",
+   "sha256": "a605b5b42597b9bc767c8e85c8119a7e60b3937e122a6501b9ac2f384e5e6060",
+   "size": 491
+  },
+  "bdr_be/dist/phase6-worker-1.0.5/upload-state.json.lock": {
+   "group": "phase6_backend",
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "size": 0
+  },
+  "bdr_be/dist/phase6-worker-1.0.6/bdr-agent-1.0.6.zip": {
+   "group": "phase6_backend",
+   "sha256": "eedfe39c02d7b9baabf9468aadda071cc5fa72cf79e65ffa716eace416811ff8",
+   "size": 37317761
+  },
+  "bdr_be/dist/phase6-worker-1.0.6/release-1.0.6.json": {
+   "group": "phase6_backend",
+   "sha256": "3e2af1f42127f1c1c461afcd3337d0a093023ae10461b0897f07b9d1e92c73b7",
+   "size": 1014
+  },
+  "bdr_be/dist/phase6-worker-1.0.6/upload-state.json": {
+   "group": "phase6_backend",
+   "sha256": "60d5701a2461f2b1feac1357438a248d83fbab5142d7c31899c5ab24ef424457",
+   "size": 491
+  },
+  "bdr_be/dist/phase6-worker-1.0.6/upload-state.json.lock": {
+   "group": "phase6_backend",
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "size": 0
+  },
+  "bdr_be/supabase/migrations/0177_notification_routing.sql": {
+   "group": "migrations",
+   "sha256": "9e108a9b39c43d7298d19faff205a4cc73a8bd62437ebb7486c6b270fdb6321d",
+   "size": 1184
+  },
+  "bdr_be/supabase/migrations/0184_assistant_mail_operations.sql": {
+   "group": "migrations",
+   "sha256": "be13436b3efffca1105b74a20ba726c5a5ceeae0e7c4ade8a3ce16bc6b3acae8",
+   "size": 29997
+  },
+  "bdr_be/supabase/migrations/0186_assistant_browser_foundation.sql": {
+   "group": "migrations",
+   "sha256": "7f343efdf946e4057869c77edc0a5333c0a480d644e2cc8cc50a7eb54a008e3e",
+   "size": 37367
+  },
+  "bdr_be/supabase/migrations/0187_assistant_browser_runtime.sql": {
+   "group": "migrations",
+   "sha256": "366d15dde5130be5c5a595d2d16a53d7a5c70ad18aeb2dd0aa4c500cc0f92e16",
+   "size": 40177
+  },
+  "bdr_be/supabase/migrations/0188_assistant_browser_claims.sql": {
+   "group": "migrations",
+   "sha256": "3d7c99c93ffae85bc1718f385399ee534ab9f242e8449789a6a98ac59fdcd521",
+   "size": 26819
+  },
+  "bdr_be/supabase/migrations/0189_assistant_browser_regional_procore.sql": {
+   "group": "migrations",
+   "sha256": "af4b5cf8098af253fd0b5c82db7f24a511497bad73cbee7e8cb29f298d7a90fe",
+   "size": 19433
+  },
+  "bdr_fe/app/(app)/assistant/browser/[id]/page.tsx": {
+   "group": "phase6_frontend",
+   "sha256": "d0d200c7507ba1910e4731e56f28de1b4bf1511d182e2d9fe5202a3e60f9139d",
+   "size": 1253
+  },
+  "bdr_fe/app/(app)/settings/assistant/browser-inspection/page.tsx": {
+   "group": "phase6_frontend",
+   "sha256": "c08ec6f134ca2ec7fa5c73f2ff6db4538710aea1e3d0fafceb94b0e9dfd16c35",
+   "size": 774
+  },
+  "bdr_fe/app/(app)/settings/browser-agents/page.tsx": {
+   "group": "phase6_frontend",
+   "sha256": "3632ebd8638245d73d05ed9fa83c3e26354046818a1507646104357b5aa07cb9",
+   "size": 4582
+  },
+  "bdr_fe/components/BrowserAgentSettings.tsx": {
+   "group": "phase6_frontend",
+   "sha256": "2cd3bac5184a5f1f02d81ae0c57d0b7e28be81768fb86f8cf4319b2b3368f0db",
+   "size": 3473
+  },
+  "bdr_fe/components/TeamsAlertsSection.tsx": {
+   "group": "frontend",
+   "sha256": "3e827b62613ef019489eb6e124cb2527ce5f6110f453b553868495a49457b380",
+   "size": 5330
+  },
+  "bdr_fe/components/assistant/AssistantBrowserCredentials.tsx": {
+   "group": "phase6_frontend",
+   "sha256": "fb7b9f464d9f865052a583b9c82cd83ab0fdbf91e479ae839c0d2fdf8e36ccb5",
+   "size": 7486
+  },
+  "bdr_fe/components/assistant/AssistantBrowserHelp.tsx": {
+   "group": "phase6_frontend",
+   "sha256": "79a2729013b71b4146c1c212ccdb33303e4acfb319683d40049e8b57de74285c",
+   "size": 6502
+  },
+  "bdr_fe/components/assistant/AssistantBrowserInspection.tsx": {
+   "group": "phase6_frontend",
+   "sha256": "9686afcda7ec3cba22c2ef7db319ab83370ab729e1368072fe4b8891e783726d",
+   "size": 3189
+  },
+  "bdr_fe/components/assistant/AssistantBrowserTasks.tsx": {
+   "group": "phase6_frontend",
+   "sha256": "29635469c91ac794ec9ee6d06c505851db86ea415f0a5172bdc9993c935b51c5",
+   "size": 5760
+  },
+  "bdr_fe/components/assistant/AssistantBrowserTrace.tsx": {
+   "group": "phase6_frontend",
+   "sha256": "db8d0bfa2204bcba4b5d1095d0f0a73a451daa95ce09ce8d83b0943550ffe180",
+   "size": 5472
+  },
+  "bdr_fe/components/browserAgents/AgentActivityProvider.tsx": {
+   "group": "phase6_frontend",
+   "sha256": "2357b90905a813456cab4b1ea4b8a2387e10ea7631bd00268d54e6206884c7ab",
+   "size": 3358
+  },
+  "bdr_fe/components/browserAgents/AgentGlobalSection.tsx": {
+   "group": "phase6_frontend",
+   "sha256": "283f1a2ba769bcc6d01a151662109e3e6673cca312aebb62578a778c8399ec77",
+   "size": 9220
+  },
+  "bdr_fe/components/browserAgents/AgentHelpChat.tsx": {
+   "group": "phase6_frontend",
+   "sha256": "cb2fe50ab4d2e0ce019ede0a9bdc5c194765d7bd388405975e970a10f69bde00",
+   "size": 30698
+  },
+  "bdr_fe/components/browserAgents/AgentReleaseSection.tsx": {
+   "group": "phase6_frontend",
+   "sha256": "988e9aa89a8ee8743559a6489b21283722924d8e5fc5812e5a574c52be24e27d",
+   "size": 4593
+  },
+  "bdr_fe/components/browserAgents/AgentSecretsSection.tsx": {
+   "group": "phase6_frontend",
+   "sha256": "78b5c31ef3de63c57d7a04459c73a65508def57bcbb4161f58be5b45f7e4f0b9",
+   "size": 9654
+  },
+  "bdr_fe/components/browserAgents/AgentSettingsHistory.tsx": {
+   "group": "phase6_frontend",
+   "sha256": "252762c2bcae1697ad438ad47b11bbf68478c5a45b931b7cd8b2d1ef01d964d7",
+   "size": 4096
+  },
+  "bdr_fe/components/browserAgents/AgentSpendSection.tsx": {
+   "group": "phase6_frontend",
+   "sha256": "b38e98db374fa4375efe6ead013a344a5406d8610b08c03640d296dcb78867d8",
+   "size": 11877
+  },
+  "bdr_fe/components/browserAgents/AgentTimeline.tsx": {
+   "group": "phase6_frontend",
+   "sha256": "4afddf0ba7d60f225e387f4deb25e0ef08954c3b402448596fd1fa4402fc51ae",
+   "size": 10315
+  },
+  "bdr_fe/components/browserAgents/AgentTypesSection.tsx": {
+   "group": "phase6_frontend",
+   "sha256": "9ea154e06b92047b14f3b1c53d6446ac0084c7ffa4c3de3f4f8e34a7ef0983d0",
+   "size": 23318
+  },
+  "bdr_fe/components/browserAgents/AgentWorkersSection.tsx": {
+   "group": "phase6_frontend",
+   "sha256": "1ba35790db336805f5efa06f850c384a046c9abdd70547303dfd0237100cd63d",
+   "size": 24318
+  },
+  "bdr_fe/components/browserAgents/adminShared.ts": {
+   "group": "phase6_frontend",
+   "sha256": "f25d1bc075bd08944c3e258a6037b5f9a2f079a56a94e44fd86a3cf6fca4da97",
+   "size": 1624
+  },
+  "bdr_fe/components/browserAgents/agentShared.tsx": {
+   "group": "phase6_frontend",
+   "sha256": "1eaceb33448ed1f057a4e293f84158283fa3939b355ce5f719f0d28d5f1367ce",
+   "size": 5432
+  },
+  "bdr_fe/lib/__tests__/assistantBrowser.test.mjs": {
+   "group": "phase6_frontend",
+   "sha256": "0e79c5d376ad2ddd818675907f6e77e39c7de79cbd94976983428a37fce31e7b",
+   "size": 5700
+  },
+  "bdr_fe/lib/__tests__/browserAgentsSettingsView.test.mjs": {
+   "group": "phase6_frontend",
+   "sha256": "137c41f97701817b525c97039b03eff67039361a28361aa97e1409c54a04c655",
+   "size": 19298
+  },
+  "bdr_fe/lib/__tests__/browserAgentsView.test.mjs": {
+   "group": "phase6_frontend",
+   "sha256": "10599caef2727acf5ea09cfc04d8b69a7c4d63bd8756b53e0559a5453bbed2f4",
+   "size": 22488
+  },
+  "bdr_fe/lib/assistantBrowser.ts": {
+   "group": "phase6_frontend",
+   "sha256": "f71956cb99e2c82b11fc52e1ca7579f9d0fbf2dc5f055a366171ecdecd2b0346",
+   "size": 4435
+  },
+  "bdr_fe/lib/assistantBrowserApi.ts": {
+   "group": "phase6_frontend",
+   "sha256": "ce626241b5442908ad8a560a636b48023346ae9b4420abacd7e3008dcc833299",
+   "size": 3086
+  },
+  "bdr_fe/lib/browserAgents.ts": {
+   "group": "phase6_frontend",
+   "sha256": "cb3c8f5601afca9558b9b65238f8c766957bdd30d5609194e86f8d3d5c2203d9",
+   "size": 22463
+  },
+  "bdr_fe/lib/browserAgentsSettingsView.ts": {
+   "group": "phase6_frontend",
+   "sha256": "4487c3f13f0ec5c4c94296f557f2511aaee7f6e304ad4fb95b6f6b00c19e4594",
+   "size": 20760
+  },
+  "bdr_fe/lib/browserAgentsView.ts": {
+   "group": "phase6_frontend",
+   "sha256": "cdba5cad75feab5009a3139b71522511a07c124ed24d3b00cf814fb78f2406d7",
+   "size": 18234
+  }
+ },
+ "expected_to_change": [
+  {
+   "path": "bdr_be/app/services/rfq_inbox.py",
+   "status": "expected to change",
+   "changed_by": "WI-10",
+   "sha256_before": "99b16bacd60ba338b541759f699bfe30a3e80bbccf735896b6f8b4a67d175fe5",
+   "sha256_after": "40abc17f9d6fff42df4d0944ad6c45bdafa664627c654f03eba6b8d076c83b78",
+   "urgent_tree_sha256": "99b16bacd60ba338b541759f699bfe30a3e80bbccf735896b6f8b4a67d175fe5",
+   "note": "records WI-1's hash at build start; the gate fails if any other item changes it or the diff is wider than the plan's edit (4.5, 10.1, 10.2)"
+  },
+  {
+   "path": "bdr_be/app/services/notification_email.py",
+   "status": "expected to change",
+   "changed_by": "WI-6",
+   "sha256_before": "1877a83458e84016f32aff40a553dd5ea9f7f8a7e22320c60e4ea57f2fc59f72",
+   "sha256_after": "89c21cee66a21023c4d6fb6a145cf55dc47ea44ca0d6f2399a91909d677d5c9b",
+   "urgent_tree_sha256": "936eed7b9ae829a79c9923c2ba5c92fd1e331a4f48b1e646951d6ab01502e371",
+   "note": "records WI-1's hash at build start; the gate fails if any other item changes it or the diff is wider than the plan's edit (4.5, 10.1, 10.2)"
+  },
+  {
+   "path": "bdr_fe/components/NotificationRoutingSettings.tsx",
+   "status": "expected to change",
+   "changed_by": "WI-7",
+   "sha256_before": "5bf727f40e656da2f6942d53cd0e697a41026679c76310d5559605abe8c5b259",
+   "sha256_after": "a943e38beedecf5e00c6fa40af59e94dd7f06b5a4a28a9bf20b674bb799f096f",
+   "urgent_tree_sha256": "5bf727f40e656da2f6942d53cd0e697a41026679c76310d5559605abe8c5b259",
+   "note": "records WI-1's hash at build start; the gate fails if any other item changes it or the diff is wider than the plan's edit (4.5, 10.1, 10.2)"
+  },
+  {
+   "path": "bdr_fe/components/NotificationsBell.tsx",
+   "status": "expected to change",
+   "changed_by": "WI-7",
+   "sha256_before": "24f08068258bb9a5730c69ddbc19fec8b6cbf6827f8ec8a17fda800fa8ceef9d",
+   "sha256_after": "65eff9970362eca10582afb238dbd1e31982545b3e1ca8a825f6c724d590994a",
+   "urgent_tree_sha256": "34f55f6224a780a377e1313c4342a42a515304b2eb62cb4c100f284d1dfc101c",
+   "note": "records WI-1's hash at build start; the gate fails if any other item changes it or the diff is wider than the plan's edit (4.5, 10.1, 10.2)"
+  }
+ ]
+}

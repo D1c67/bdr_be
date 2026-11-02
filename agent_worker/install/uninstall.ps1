@@ -23,6 +23,8 @@
 #>
 [CmdletBinding()]
 param(
+    [ValidateSet('org', 'user')]
+    [string]$Pool = 'org',
     [string]$InstallRoot = (Join-Path $env:ProgramData 'BDRAgent'),
     [switch]$KeepData,
     [switch]$KeepPython
@@ -33,6 +35,23 @@ Set-StrictMode -Version 3.0
 
 $ServiceId   = 'BDRAgent'
 $ServiceUser = 'bdr-agent'
+if ($Pool -eq 'user') {
+    $ServiceId = 'BDRAgentUser'
+    $ServiceUser = 'bdr-agent-user'
+    if (-not $PSBoundParameters.ContainsKey('InstallRoot')) {
+        $InstallRoot = Join-Path $env:ProgramData 'BDRAgentUser'
+    }
+}
+# A second pool must never share credentials, writable data or a service account.
+$otherRoot = Join-Path $env:ProgramData $(if ($Pool -eq 'user') { 'BDRAgent' } else { 'BDRAgentUser' })
+$installFull = [IO.Path]::GetFullPath($InstallRoot).TrimEnd('\')
+$otherFull = [IO.Path]::GetFullPath($otherRoot).TrimEnd('\')
+if ($installFull.Equals($otherFull, [StringComparison]::OrdinalIgnoreCase) -or
+    $installFull.StartsWith($otherFull + '\', [StringComparison]::OrdinalIgnoreCase) -or
+    $otherFull.StartsWith($installFull + '\', [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Worker pool installation roots must not overlap.'
+}
+
 
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {

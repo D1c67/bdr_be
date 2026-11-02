@@ -97,3 +97,12 @@ def test_fingerprint_command_and_manifest_signature(paths, capsys):
 
 def test_normalize_code():
     assert normalize_code(" abcd-efgh jkmn pqrs 2345 ") == CODE
+
+
+def test_user_service_refuses_org_enrollment_response_before_saving_token(bdr,paths):
+    _priv,fp=_write_key(paths)
+    bdr.add_enroll_code(CODE)
+    result=cmd_enroll(_args(paths,'--code',CODE,'--fingerprint',fp,'--pool','user'),transport=bdr.transport())
+    assert result==2
+    assert bdr.calls_to('enroll')[0].body['expected_pool']=='user'
+    assert TokenStore(paths.token_file).load() is None

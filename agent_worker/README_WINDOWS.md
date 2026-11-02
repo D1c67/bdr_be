@@ -386,3 +386,115 @@ Worker exit codes, as seen in `launcher.log`:
 | 3 | another copy took over; restarts at once |
 | 4 | revoked; re-enroll |
 | 5 | update staged; restarts into it |
+
+### Personal browser worker pool
+
+The personal worker runs as a second Windows service and local account. Use a
+separate enrollment code minted for the user pool; a code for the org pool does
+not authorize personal tasks. Do not reuse an installed worker token.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\bdr-install.ps1 -Pool user -Code <USER_POOL_CODE>
+```
+
+Personal workers require signed release **1.0.1 or later** selected by BDR.
+An installer carrying 1.0.0 stops before changing the service or its files.
+
+On a PC whose org worker owns `C:\ProgramData\BDRAgent\python`, the Python
+3.12 MSI cannot create another installation of the same runtime at a second
+path. The installer stops before changing either worker. Prepare the official
+Python 3.12.10 x64 NuGet runtime in an administrator-managed directory under
+Program Files, then pass its executable with `-PythonPath`. This standalone
+runtime avoids MSI installation and leaves the org worker's runtime and HKLM
+registration in place. The NuGet package includes `venv`, `ensurepip` and pip;
+the launcher creates its own virtual environment from this runtime.
+The installer checks signature, ownership, ACLs, reparse points, architecture
+and required modules before using it. It never copies the org runtime or its data.
+The shared runtime is not owned or removed by the personal service uninstaller.
+For an existing protected runtime registered in HKLM, `-UseExistingPython`
+remains available; `-PythonPath` bypasses that registry lookup.
+
+For the current development setup, run
+`bash scripts/prepare_phase6_windows_install.sh` on the backend Mac. It verifies
+the published release and Python package, publishes the runtime setup and
+installer, then prints the exact Windows commands. Keep that Mac terminal open
+to retain the development tunnel. Use a fresh **Personal tasks** enrollment
+code and verify the release fingerprint against the trusted copy. The runtime
+setup checks a real virtual environment and pip before installing its directory.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\bdr-install.ps1 -Pool user -PythonPath 'C:\Program Files\BDR Python 3.12.10\tools\python.exe' -Code <USER_POOL_CODE>
+```
+
+The installer selects service `BDRAgentUser`, account `bdr-agent-user`, and data
+home `C:\ProgramData\BDRAgentUser`. Its DPAPI token, Chromium process, temporary
+profile, logs, release state and ACLs are separate from `BDRAgent` / `bdr-agent`.
+The signed release can contain both adapters; the authenticated server pool and
+allowed types determine which one runs. The org pool keeps `rfi_from_email` and
+`canary`; the user pool receives only `user_browser_read`. Pool identity cannot
+be changed by the worker or by editing local settings.
+
+After enrollment, approve the personal worker and allow **Personal browser
+read**. **Run self-test** runs the organization canary and does not apply to
+the personal pool. An organization self-test requires an online organization
+worker with `canary` allowed and the **Worker self-test** type enabled. If the PC
+is powered on but BDR still shows Offline, inspect the appropriate Windows
+service and its `logs\worker.log`;
+power alone does not confirm a connection to the configured BDR API.
+
+In the type settings, a successful **Test model** does not fill in prices.
+Use **Edit** to save both input and output prices per million tokens before
+**Enable** becomes available. Enabling the type alone does not complete
+personal browser setup: the backend feature configuration, encryption key,
+personal worker release and owner credential must also be ready. The Procore
+password in organization Browser agents settings does not populate the
+owner's personal credential vault.
+
+Personal task steps spool only in bounded process memory and upload to the
+private API. A crash loses unacknowledged steps. Personal screenshots, help and
+model traces use encrypted owner records on BDR. Password login runs on a
+dedicated page with the fixed Procore origin/path checks; no login screenshots
+are uploaded. Microsoft login, SSO, external redirects and arbitrary form tools
+are unavailable. Browser caches are ephemeral and the prior temporary profile
+is removed at process startup; Windows disk encryption and service ACL checks
+remain deployment acceptance items.
+
+Re-enroll or uninstall the personal service with the same pool selection:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\bdr-install.ps1 -Pool user -Reenroll -Code <USER_POOL_CODE>
+powershell -ExecutionPolicy Bypass -File .\uninstall.ps1 -Pool user
+```
+
+Feature flags remain off until the dedicated service is installed, pool
+enrollment is verified, and the local Chromium fixture plus real-account
+read-only acceptance checks pass. The fixture commands are:
+
+```powershell
+python -m pytest tests/test_user_browser.py tests/test_user_browser_live.py -q
+```
+
+The live fixture uses a loopback TLS proxy and no external credentials. A test
+host must permit local socket binding and Chromium process startup. Its checks
+include a refused redirect that never reaches the destination server and the
+personal login/read flow using only private worker endpoints.
+
+### Prepare release 1.0.1 on the build Mac
+
+From `bdr_be`, use a build environment with pip and packaging explicitly
+available; a uv project environment does not necessarily contain pip:
+
+```sh
+UV_CACHE_DIR=/private/tmp/bdr-release-uv uv run --with pip --with packaging python agent_worker/tools/build_release_bundle.py --version 1.0.1 --out /private/tmp/bdr-agent-release-1.0.1
+```
+
+This downloads CPython 3.12 Windows x64 wheels and validates the exact project
+pins, Windows ABI/platform tags, metadata, and complete transitive dependency
+closure before creating the zip. Existing Windows wheels can be supplied with
+`--wheels-dir <directory>`; `--check-wheels` validates them without creating a
+bundle. Missing packages, incompatible wheels, and unexpected extra packages
+are refused. The zip contains a hash-pinned offline requirements file.
+
+The build prints the local artifact path and SHA-256. Signing and publishing
+are separate steps; producing the zip does not change BDR's selected release.
+Rebuilding with the same source and wheel bytes produces the same artifact.

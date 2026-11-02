@@ -82,7 +82,9 @@ class AgentLoop:
                     title = (await page.title())[:300] or None
                 except Exception:
                     title = None
-            req = TurnRequest(prev_turn_no=prev, tool_results=tool_results, screenshot_artifact_id=shot_id,
+            from ..protocol import UserTurnRequest
+            request_model = UserTurnRequest if ctx.job.principal_kind == "user" else TurnRequest
+            req = request_model(prev_turn_no=prev, tool_results=tool_results, screenshot_artifact_id=shot_id,
                               url=strip_query(url) if url else None, title=title,
                               helper_message_ids_seen=seen)
             resp = await self._turn(req)

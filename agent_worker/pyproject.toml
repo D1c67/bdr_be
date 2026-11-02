@@ -1,6 +1,6 @@
 [project]
 name = "bdr-agent"
-version = "1.0.0"
+version = "1.0.6"
 description = "BDR browser agent worker (Windows service)"
 requires-python = ">=3.12,<3.13"
 # Exact pins. The release bundle installs with uv pip install --require-hashes

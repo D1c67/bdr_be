@@ -21,6 +21,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
+from app.core import provenance
 from app.core.supabase_client import get_supabase
 
 logger = logging.getLogger(__name__)
@@ -49,8 +50,16 @@ FILE_EVENTS_LIMIT = 50
 
 _EVENT_COLUMNS = (
     "id, created_at, actor_id, actor_role, project_id, source, file_id, "
-    "filename, category, action, export_id, detail"
+    "filename, category, action, export_id, detail, actor_kind"
 )
+
+# The actor_kind filter values the reports accept (0172); "all" applies none.
+ACTOR_KIND_FILTERS = ("human", "assistant")
+
+
+def _kind(r: dict) -> str:
+    """A row's actor_kind; a row read before 0172 counts as a human's."""
+    return r.get("actor_kind") or "human"
 
 
 def _missing_table(exc: Exception) -> bool:
@@ -99,6 +108,7 @@ def _row(
         "action": action,
         "export_id": str(export_id) if export_id else None,
         "detail": extra or None,
+        **provenance.fields(getattr(user, "id", None)),
     }
 
 
@@ -184,6 +194,7 @@ def _fetch_events(
     action: str | None = None,
     include_prefetch: bool = False,
     cap: int = SCAN_CAP,
+    actor_kind: str = "all",
 ) -> tuple[list[dict], bool]:
     """Matching rows newest first, at most `cap`; the bool is True when the
     cap was hit. A database without 0161 reads as empty."""
@@ -208,6 +219,8 @@ def _fetch_events(
                 q = q.eq("action", action)
             elif not include_prefetch:
                 q = q.neq("action", "prefetch")
+            if actor_kind in ACTOR_KIND_FILTERS:
+                q = q.eq("actor_kind", actor_kind)
             end = min(start + _PAGE, cap) - 1
             page = (
                 q.order("created_at", desc=True)
@@ -272,6 +285,7 @@ def _event_out(r: dict, actors: dict[str, dict], projects: dict[str, dict]) -> d
         "id": r.get("id"),
         "created_at": r.get("created_at"),
         "actor_id": aid,
+        "actor_kind": _kind(r),
         "actor_name": (prof or {}).get("full_name"),
         # The role recorded at access time; the profile's current role only
         # when the row carries none.
@@ -331,7 +345,8 @@ def _finish(group: dict) -> dict:
 
 
 def summarize(rows: list[dict]) -> list[dict]:
-    """Group rows by (project, source, file, actor); a row with no file id (a
+    """Group rows by (project, source, file, actor, actor_kind): a person and
+    their assistant are separate rows. A row with no file id (a
     deliverable, a backfilled export) groups by its filename instead. Rows
     arrive newest first, so the first row of a group supplies its filename and
     category snapshot. Sorted last_at desc. Names are resolved by the caller."""
@@ -344,6 +359,7 @@ def summarize(rows: list[dict]) -> list[dict]:
             fid,
             None if fid else r.get("filename"),
             r.get("actor_id"),
+            _kind(r),
         )
         g = groups.get(key)
         if g is None:
@@ -354,6 +370,7 @@ def summarize(rows: list[dict]) -> list[dict]:
                 "filename": r.get("filename"),
                 "category": r.get("category"),
                 "actor_id": r.get("actor_id"),
+                "actor_kind": _kind(r),
                 **_new_counts(),
             }
             groups[key] = g
@@ -375,6 +392,7 @@ def access_report(
     include_prefetch: bool = False,
     limit: int = 100,
     offset: int = 0,
+    actor_kind: str = "all",
 ) -> dict:
     """GET /analytics/file-access: a per (project, file, user) summary plus a
     paginated newest-first event feed over the same filtered rows."""
@@ -389,6 +407,7 @@ def access_report(
         source=source,
         action=action,
         include_prefetch=include_prefetch,
+        actor_kind=actor_kind,
     )
     summary = summarize(rows)
     page = rows[offset : offset + limit]
@@ -423,19 +442,22 @@ def file_access(project_id: str, file_id: str, filename: str | None = None) -> d
     rows, _ = _fetch_events(
         sb, project_id=project_id, file_id=file_id, source="project_file"
     )
+    # Keyed (actor_id, actor_kind): a person and their assistant are two rows.
     by_actor: dict[Any, dict] = {}
     for r in rows:
         aid = r.get("actor_id")
-        g = by_actor.get(aid)
+        key = (aid, _kind(r))
+        g = by_actor.get(key)
         if g is None:
-            g = {"actor_id": aid, "actor_role": r.get("actor_role"), **_new_counts()}
-            by_actor[aid] = g
+            g = {"actor_id": aid, "actor_kind": key[1], "actor_role": r.get("actor_role"),
+                 **_new_counts()}
+            by_actor[key] = g
         _bump(g, r)
     users = [_finish(g) for g in by_actor.values()]
     for g in users:
         g.pop("prefetches", None)
 
-    actors = _profiles(sb, {str(a) for a in by_actor if a})
+    actors = _profiles(sb, {str(a) for a, _ in by_actor if a})
     projects = _projects(sb, {project_id})
     for g in users:
         prof = actors.get(str(g["actor_id"])) if g.get("actor_id") else None

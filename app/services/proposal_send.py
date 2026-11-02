@@ -32,6 +32,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from postgrest.exceptions import APIError
 
+from app.core import provenance
 from app.core.config import get_settings
 from app.core.roles import VERIFY_ROLES, Role
 from app.core.supabase_client import get_supabase
@@ -1997,6 +1998,7 @@ def record_send_event(
         "email_log_id": email_log_id,
         "sent_at": datetime.now(timezone.utc).isoformat(),
         "sent_by": user_id,
+        **provenance.fields(user_id),
     }
     # A GC added and bid while a revised proposal was open: its initial
     # transmission is listed under that revision's history (0178).
@@ -2802,6 +2804,7 @@ def resend_proposals(
                         "cc_recipients": cc_snapshot,
                         "status": "sending",
                         "sent_by": user_id,
+                        **provenance.fields(user_id),
                     }
                 )
                 .execute()

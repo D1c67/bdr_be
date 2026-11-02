@@ -55,7 +55,7 @@ ENROLL_CODE_LENGTH = 20
 TOKEN_PREFIX_LENGTH = len(WORKER_TOKEN_PREFIX) + 8
 WORKER_COLUMNS = (
     "id, name, status, token_hash, token_prefix, draining, max_slots, allowed_types, "
-    "allowed_ips, boot_id, version, capabilities, bad_versions, last_seen_at"
+    "allowed_ips, boot_id, version, capabilities, bad_versions, last_seen_at, principal_kind"
 )
 RATE_LIMIT_SCOPE = "agent_worker"
 _ERROR_CODE_VALUES = frozenset(c.value for c in ErrorCode)
@@ -197,6 +197,7 @@ class AgentWorker:
     version: str | None
     capabilities: dict[str, Any] = field(default_factory=dict)
     ip: str | None = None
+    principal_kind: str = "org"
 
 
 def _bearer(authorization: str) -> str:
@@ -259,6 +260,7 @@ def authenticate(request: Request, authorization: str, *, allow_pending: bool) -
         version=row.get("version"),
         capabilities=row.get("capabilities") or {},
         ip=ip,
+        principal_kind=row.get("principal_kind", "org"),
     )
 
 
@@ -338,7 +340,13 @@ def require_agent_lease(
     left to the RPC on purpose: an old-epoch late step from a previous boot
     is still accepted when a claim step proves that boot held the epoch."""
     worker = authenticate(request, authorization, allow_pending=False)
+    if worker.principal_kind != "org":
+        raise agent_error(ErrorCode.IDOR, "user_browser_execution_unavailable")
     jid = str(job_id)
     epoch = parse_lease(x_agent_lease, jid)
     boot = parse_boot(x_agent_boot, required=True)
+    rows = (supabase_client.get_supabase().table("browser_agent_jobs")
+            .select("principal_kind").eq("id", jid).limit(1).execute()).data or []
+    if rows and rows[0].get("principal_kind", "org") != "org":
+        raise agent_error(ErrorCode.IDOR, "user_browser_execution_unavailable")
     return AgentLease(worker=worker, job_id=jid, epoch=epoch, boot_id=boot)

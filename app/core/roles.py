@@ -77,6 +77,13 @@ ACTUAL_BID_EDITOR_ROLES = frozenset(
     {Role.ESTIMATING_ADMIN, Role.EXECUTIVE, Role.IT_ADMIN}
 )
 
+# Who may read per-person and per-project evidence through the assistant
+# (docs/ASSISTANT.md decision 15; docs/ASSISTANT_PHASE4_PLAN.md 3.1). Every
+# per-person view also needs a sensitive_read card with a typed reason. A
+# subset of ACTUAL_BID_VIEWER_ROLES, so evidence never needs amount redaction
+# (tests/test_assistant_migration_0180.py pins both sets).
+EVIDENCE_ROLES = frozenset({Role.EXECUTIVE, Role.IT_ADMIN})
+
 # Who works the RFP Ingestion review queue (docs/RFP_EMAIL_INGESTION.md section
 # 1): the Estimating Admin primarily, with the IT Admin, the Executive and both
 # engineer focuses able to act. routers/rfp_emails.py keeps REVIEW_QUEUE_ROLES

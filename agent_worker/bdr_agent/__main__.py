@@ -157,7 +157,7 @@ def cmd_enroll(args: argparse.Namespace, *, transport: Any = None) -> int:
                            retry=RetryPolicy(max_attempts=3, cap_s=5.0))
     try:
         resp = client.enroll(EnrollRequest(code=code, hostname=(args.hostname or socket.gethostname())[:255],
-                                           os_info=os_info(), version=__version__))
+                                           os_info=os_info(), version=__version__, expected_pool=getattr(args, "pool", "org")))
     except BdrApiError as exc:
         print(f"Enrollment refused ({exc.code or exc.status}). Ask IT Admin for a new code.", file=sys.stderr)
         return EXIT_SETUP
@@ -166,6 +166,9 @@ def cmd_enroll(args: argparse.Namespace, *, transport: Any = None) -> int:
         return EXIT_SETUP
     finally:
         client.close()
+    if resp.principal_kind != getattr(args, "pool", "org"):
+        print("Enrollment returned another worker pool; token was not saved.", file=sys.stderr)
+        return EXIT_SETUP
     # Token first: if power drops before worker.json is written, `enroll --force`
     # with a fresh code repairs it; the reverse order would leave a worker id
     # with no way to authenticate.
@@ -260,6 +263,7 @@ def build_parser() -> argparse.ArgumentParser:
     e = sub.add_parser("enroll", help="enroll this PC with a one-time code from IT Admin")
     e.add_argument("--api", required=True, help="BDR API base URL, https://...")
     e.add_argument("--code", required=True, help="20-character enrollment code")
+    e.add_argument("--pool", choices=("org", "user"), default="org", help="expected code pool")
     e.add_argument("--fingerprint", help="expected release key fingerprint (from the password manager)")
     e.add_argument("--release-key", help="path to the release public key (default: <home>/release_key.pub)")
     e.add_argument("--hostname", help="override the reported hostname")

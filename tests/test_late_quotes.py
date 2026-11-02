@@ -440,12 +440,18 @@ def test_vendor_selection_carries_the_tag(env):
 # ── 5. Ingestion ────────────────────────────────────────────────────────────
 
 
-def _ingest(monkeypatch, head):
+def _ingest(monkeypatch, head, bells=None):
     db = _db(head)
     monkeypatch.setattr(rfq_inbox, "extract_quote_from_pdf",
                         lambda *a, **k: {"total_amount": 777, "confidence": 0.99})
     monkeypatch.setattr(rfq_inbox, "_valid_extracted_amount", lambda r: True)
-    monkeypatch.setattr(rfq_inbox, "notify_roles", lambda *a, **k: None)
+    # Capture the bell type (a is roles, project, type, message); audit would
+    # otherwise reach the real client from the local .env.
+    monkeypatch.setattr(
+        rfq_inbox, "notify_roles",
+        lambda *a, **k: bells.append(a[2]) if bells is not None else None,
+    )
+    monkeypatch.setattr(rfq_inbox, "audit", lambda *a, **k: None)
     send = {
         "id": "s1",
         "rfqs": {"id": "r-fix", "project_id": PID, "material_categories": {"name": "Fixtures"},
@@ -461,15 +467,19 @@ def _ingest(monkeypatch, head):
 
 
 def test_an_ingested_quote_after_submission_is_tagged_and_never_bounces(monkeypatch):
-    quote, so = _ingest(monkeypatch, "submitted")
+    bells = []
+    quote, so = _ingest(monkeypatch, "submitted", bells)
     assert quote["received_after_submission"] is True
+    assert bells == ["late_quote.received"]
     assert not quote.get("is_selected")
     assert so["current_task"] == "submitted"
 
 
 def test_an_ingested_quote_before_submission_is_not_tagged(monkeypatch):
-    quote, _ = _ingest(monkeypatch, "send_out")
+    bells = []
+    quote, _ = _ingest(monkeypatch, "send_out", bells)
     assert "received_after_submission" not in quote
+    assert bells == ["quote.received"]
 
 
 # ── 6. General Material ──────────────────────────────────────────────────────

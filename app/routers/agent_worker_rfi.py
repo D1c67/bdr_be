@@ -117,7 +117,7 @@ def rfi_capture(payload: Any = Body(default=None), lease: AgentLease = Depends(r
         spec = registry.get_type(job["agent_type"])
     except registry.UnknownAgentType:
         raise agent_error(ErrorCode.INVALID_REQUEST, "unknown agent type") from None
-    if not spec.allows_capture or spec.platform != body.platform:
+    if job.get("principal_kind", "org") != "org" or not spec.allows_capture or spec.platform != body.platform:
         raise agent_error(ErrorCode.INVALID_REQUEST, "this job type does not capture RFIs")
     if job.get("status") == "applying" and job.get("sync_run_id") and int(job.get("lease_epoch") or 0) == lease.epoch:
         runs = sb.table("pm_rfi_sync_runs").select("id, agent_job_id, detail_artifact_id").eq(

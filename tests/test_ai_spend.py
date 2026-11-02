@@ -562,7 +562,7 @@ def test_notice_claim_filter_literal(sent):
     ]
 
 
-def test_spend_cap_reached_is_runtime_error_and_ascii():
+def test_spend_cap_reached_is_runtime_error_and_ascii(sent):
     exc = ai_spend.SpendCapReached("x", cap_usd=Decimal("1"), spent_usd=Decimal("1"))
     assert isinstance(exc, RuntimeError)
     db = _db([_call(pt(2026, 10, 17, 9), "1000")])

@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from app.core import provenance
 from app.core.config import Settings, get_settings
 from app.services import bid_split, llm, rfp_file_issues, rfp_split, storage
 from app.services.notifications import audit
@@ -201,6 +202,10 @@ def _parse_ts(value: Any) -> datetime | None:
 
 
 def _reusable(job: dict, project_id: str, now: datetime) -> bool:
+    if job.get("assistant_task_id"):
+        # An assistant split's job (docs/ASSISTANT_PHASE2_PLAN.md 3.5.5): a
+        # human drop never joins it, so its task counts only its own files.
+        return False
     if str(job.get("project_id") or "") != project_id or job.get("source") != rfp_split.SOURCE_PROJECT:
         return False
     if job.get("status") == "processing":
@@ -211,11 +216,14 @@ def _reusable(job: dict, project_id: str, now: datetime) -> bool:
 
 def drop_job(
     sb, project_id: str, user_id: str | None, job_id: str | None, settings: Settings,
+    extra: dict | None = None,
 ) -> tuple[dict, bool]:
     """`(job, opened)`: the job this file joins, `job_id` when it is this
     project's drop job, still processing or settled within
     DROP_JOB_REUSE_SECONDS, and below the per-job file cap (`opened` False);
-    otherwise a new `project` job linked to the project (`opened` True)."""
+    otherwise a new `project` job linked to the project (`opened` True).
+    `extra` columns go on a new job's insert (the assistant's split-drop:
+    assistant_task_id and spend_reservation_id)."""
     if job_id:
         try:
             uuid.UUID(str(job_id))
@@ -238,6 +246,8 @@ def drop_job(
         "created_by": user_id,
         "source": rfp_split.SOURCE_PROJECT,
         "project_id": project_id,
+        **provenance.fields(user_id),
+        **(extra or {}),
     }).execute().data[0]
     return job, True
 

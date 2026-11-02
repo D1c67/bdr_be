@@ -8,6 +8,7 @@ routes (multipart needs `await file.read()`); every Supabase/storage touch
 inside them goes through run_in_threadpool — the pm_documents.py shape.
 """
 
+from datetime import date
 from typing import get_args
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -19,7 +20,7 @@ from app.core.ratelimit import upload_rate_limit
 from app.core.supabase_client import get_supabase
 from app.models.schemas import CpPayrollStatus, CpReportCreate
 from app.routers.files import _read_capped
-from app.services import payroll_matching, payroll_reports
+from app.services import cp_summary, payroll_matching, payroll_reports
 from app.services.notifications import audit
 
 router = APIRouter(prefix="/payroll/reports", tags=["payroll"])
@@ -67,6 +68,21 @@ def list_reports(
     if status_filter is not None:
         query = query.eq("status", status_filter)
     return query.order("week_start_date", desc=True).execute().data or []
+
+
+@router.get("/summary")
+def week_summary(
+    week_start: date = Query(...),
+    user: CurrentUser = Depends(require_cp_read),
+):
+    """A week's totals with no employee, wage or file detail (the assistant's
+    payroll aggregate read). Any date snaps to its Sunday-to-Saturday week.
+    Declared before `/{report_id}`, which would otherwise swallow it."""
+    start, _ = payroll_reports.get_week_dates(week_start)
+    summary = cp_summary.week_summary(get_supabase(), start)
+    if summary is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "no_report"})
+    return summary
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)

@@ -363,7 +363,7 @@ def test_summary_counts_and_excludes_prefetch(report_sb):
     assert set(ev) == {
         "id", "created_at", "actor_id", "actor_name", "actor_role", "project_id",
         "project_number", "project_name", "source", "file_id", "filename", "category",
-        "action", "export_id", "detail",
+        "action", "export_id", "detail", "actor_kind",
     }
 
 

@@ -94,6 +94,8 @@ FEATURE_LABELS: dict[str, str] = {
     "plans_main": "AI Estimating: main agent",
     "plans_modify": "AI Estimating: deliverable changes",
     "plans_chat": "AI Estimating: chat",
+    "assistant": "BDR Assistant",
+    "assistant_extract": "BDR Assistant: text extraction",
 }
 
 _PROVIDER_LABELS = {

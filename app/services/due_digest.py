@@ -267,19 +267,19 @@ def render_digest_email(
     return render_branded_html(body, subtitle="DAILY BID DIGEST")
 
 
-def poll_once() -> None:
-    settings = get_settings()
-    now = _now()
-    local = now.astimezone(DIGEST_TZ)
-    if not in_send_window(local, settings):
-        return
-    sb = get_supabase()
-
+def day_bounds(local: datetime) -> tuple[datetime, datetime]:
+    """(start, end) of the office day `local` falls in, as aware UTC."""
     day_start = datetime.combine(local.date(), time.min, tzinfo=DIGEST_TZ).astimezone(
         timezone.utc
     )
-    day_end = day_start + timedelta(days=1)
-    projects = _page_all(
+    return day_start, day_start + timedelta(days=1)
+
+
+def due_today_projects(sb, day_start: datetime, day_end: datetime) -> list[dict]:
+    """The digest's membership query (module docstring): live bids whose
+    internal due date falls inside [day_start, day_end). Shared with the
+    assistant's GET /projects/due-checks (docs/ASSISTANT.md)."""
+    return _page_all(
         lambda lo, hi: sb.table("projects")
         .select("id, name, number, internal_bid_at, current_stage")
         .not_.in_("current_stage", list(EXCLUDED_STAGES))
@@ -289,12 +289,16 @@ def poll_once() -> None:
         .order("internal_bid_at")
         .range(lo, hi)
     )
-    if not projects:
-        return
-    pids = [p["id"] for p in projects]
 
-    # Check data, batched. Paging matters: a truncated rfqs response could drop
-    # a quote-less category and flip a red row green.
+
+def readiness_rows(sb, projects: list[dict]) -> list[dict]:
+    """[{project, checks, severity}] for `projects`, from the underlying
+    tables (never from lane flags). Batched; paging matters: a truncated
+    rfqs response could drop a quote-less category and flip a red row
+    green."""
+    if not projects:
+        return []
+    pids = [p["id"] for p in projects]
     rfq_rows = _page_all(
         lambda lo, hi: sb.table("rfqs")
         .select("id, project_id, material_categories(pricing_section), quotes(id)")
@@ -325,16 +329,38 @@ def poll_once() -> None:
     )
     markup_by_pid = {r["project_id"]: r for r in markup_rows}
 
-    digest_rows = []
+    rows = []
     for project in projects:
         checks = compute_checks(
             rfqs_by_pid.get(project["id"], []),
             labor_by_pid.get(project["id"]),
             markup_by_pid.get(project["id"]),
         )
-        digest_rows.append(
-            {"project": project, "checks": checks, "severity": severity(checks)}
-        )
+        rows.append({"project": project, "checks": checks, "severity": severity(checks)})
+    return rows
+
+
+def due_rows_for_today(sb, now: datetime | None = None) -> list[dict]:
+    """The digest rows for the current office day, at any hour (the route
+    behind the assistant's whats_due): membership plus readiness."""
+    local = (now or _now()).astimezone(DIGEST_TZ)
+    day_start, day_end = day_bounds(local)
+    return readiness_rows(sb, due_today_projects(sb, day_start, day_end))
+
+
+def poll_once() -> None:
+    settings = get_settings()
+    now = _now()
+    local = now.astimezone(DIGEST_TZ)
+    if not in_send_window(local, settings):
+        return
+    sb = get_supabase()
+
+    day_start, day_end = day_bounds(local)
+    projects = due_today_projects(sb, day_start, day_end)
+    if not projects:
+        return
+    digest_rows = readiness_rows(sb, projects)
 
     # Audience: every active internal user except accountants (and except the
     # external estimator role, which INTERNAL_ROLES already excludes).

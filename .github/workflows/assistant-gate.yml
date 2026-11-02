@@ -1,0 +1,29 @@
+# The assistant's offline injection gate (docs/ASSISTANT_PHASE3_PLAN.md 3.14
+# item 5). No secrets and no live runs: the Tier 1 replay, the grader tests
+# and the eval file check. The live Tier 3 run stays a release step
+# (scripts/check_eval_report.py). Written into the tree; not pushed until the
+# owner says so (owner question 24).
+name: assistant-gate
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install
+        run: uv sync --frozen
+      - name: Tier 1 injection gate and grader tests
+        run: uv run pytest tests/test_assistant_injection_gate.py tests/test_assistant_evals_harness.py -q
+      - name: Application mail, review, calendar and web boundaries
+        run: uv run pytest tests/test_assistant_mail*.py tests/test_assistant_calendar.py tests/test_assistant_web.py tests/test_assistant_phase5_integration.py tests/test_assistant_inspection_routes.py -q
+      - name: Eval files
+        run: uv run python -m app.assistant.evals.run_evals --check
+      - name: Personal browser runtime and isolation
+        run: uv run pytest tests/test_assistant_browser_*.py tests/test_agent_worker_user.py tests/test_assistant_migration_0186.py tests/test_assistant_migration_0187.py tests/test_assistant_offboarding.py tests/test_users_assistant_offboarding.py -q

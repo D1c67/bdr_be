@@ -10,7 +10,7 @@ under the same /pm/projects/{id} prefix.
 
 from decimal import Decimal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
 from app.core.deps import CurrentUser, require_pm_read, require_pm_write
 from app.core.roles import Role
@@ -21,7 +21,7 @@ from app.models.schemas import (
     PMStageTransitionIn,
 )
 from app.routers.projects import _NUMBER_TAKEN, _is_duplicate_number, redact_for_role
-from app.services import email_ingest, pm, pm_workflow
+from app.services import email_ingest, pm, pm_aggregates, pm_workflow
 from app.services.notifications import audit
 from app.services.project_status import derive_status
 
@@ -90,6 +90,24 @@ def list_pm_projects(
         query = query.is_("pm_completed_at", "null")
     resp = query.order("created_at", desc=True).execute()
     return [_present_pm(p, user.role) for p in resp.data or []]
+
+
+@router.get("/rfis/open")
+def open_rfis_across_projects(
+    limit: int = Query(200, ge=1, le=200),
+    user: CurrentUser = Depends(require_pm_read),
+):
+    """Open RFIs across the live PM projects in one call (the assistant's
+    "open RFIs across my jobs"). Declared before the `/projects/...` patterns."""
+    return pm_aggregates.open_rfis(get_supabase(), limit=limit)
+
+
+@router.get("/billing/summary")
+def billing_summary_across_projects(user: CurrentUser = Depends(require_pm_read)):
+    """The financials headline of every live PM project in one pass (contract
+    value, billed to date, retainage). Same figures as each project's
+    `/financials` route."""
+    return pm_aggregates.billing_summary(get_supabase())
 
 
 @router.post("/projects", status_code=status.HTTP_201_CREATED)

@@ -674,7 +674,7 @@ def transfer_draft(
             # notification is deliberately absent - files.py itself suppresses
             # it until intake completes, and a transfer lands on a project at
             # intake.
-            audit_payload: dict = {"category": f["category"]}
+            audit_payload: dict = {"category": f["category"], "project_id": project_id}
             if f.get("doc_type"):
                 audit_payload["doc_type"] = f["doc_type"]
             if f["category"] == ADDENDUM_CATEGORY:

@@ -56,6 +56,11 @@ def _parse_schedule_times(raw: str) -> list[tuple[int, int]]:
     return out
 
 
+# The dev Supabase project ref: the only project the Phase 7 live-test email
+# override may run against (docs/ASSISTANT_PHASE7_PLAN.md 12.1).
+_PHASE7_DEV_SUPABASE_REF = "bpidntbyvoooqvaispup"
+
+
 def _parse_hhmm(raw: str, env_name: str) -> tuple[int, int]:
     """One `HH:MM` time on the 24 h clock (RFP_BC_FULL_SYNC_TIME) as an
     (hour, minute) pair. Anything else, a list included, raises a ValueError
@@ -147,6 +152,123 @@ class Settings(BaseSettings):
     bidding_enabled: bool = True
     pm_enabled: bool = True
     certified_payroll_enabled: bool = True
+
+    # ── BDR Assistant (docs/ASSISTANT.md) ──────────────────────────────────
+    # Master switch for the per-user assistant: routes, worker claim pass,
+    # bdra_ principal. Off = the assistant does not exist (GET /features
+    # reports assistant=false, every /assistant route 404s).
+    assistant_enabled: bool = False
+    # The schedule loop (phase 3). Needs ASSISTANT_ENABLED.
+    assistant_scheduler_enabled: bool = False
+    # Routine knobs (docs/ASSISTANT_PHASE3_PLAN.md 3.4, 3.16). The loop polls
+    # every assistant_scheduler_poll_seconds (15 to 600); an occurrence older
+    # than the catch-up window is recorded as missed; one claim takes at most
+    # assistant_schedule_claim_batch runs (1 to 50). A routine pauses after
+    # max_failures failed runs in a row or max_unread unseen deliveries; a run
+    # open longer than stale_run_minutes is failed by the reaper; Run now waits
+    # run_now_min_seconds between clicks; routine email to self stops at
+    # max_emails_per_day per Pacific day (0 to 200; 0 turns it off).
+    assistant_scheduler_poll_seconds: int = 60
+    assistant_schedule_catchup_hours: int = 3
+    assistant_schedule_claim_batch: int = 20
+    assistant_schedule_max_failures: int = 3
+    assistant_schedule_max_unread: int = 10
+    assistant_schedule_stale_run_minutes: int = 15
+    assistant_run_now_min_seconds: int = 300
+    assistant_schedule_max_emails_per_day: int = 20
+    # The loop's maintenance riders (approval expiry, staging and task sweeps,
+    # the nightly memory and tool-result step, the orphan sweep). Off, the
+    # scheduler runs routines only.
+    assistant_maintenance_enabled: bool = True
+    # HMAC-SHA256 key for the short-lived bdra_ tokens the worker mints
+    # (app/assistant/principal.py). At least 32 characters; Railway env only,
+    # never in a table. Rotating it invalidates in-flight runs (5 min TTL).
+    assistant_token_secret: str = ""
+    # The assistant feature is openai_only. With FULL_SELF_HOSTED_LLMS_ENABLED
+    # on, the assistant refuses to boot unless the owner sets this (owner
+    # authorized 2026-10-21, decisions log).
+    assistant_allow_openai_in_self_hosted: bool = False
+    # Spend caps in USD per calendar day (Pacific). The per-user default is
+    # overridable per person in assistant_profiles.daily_cost_cap_usd; the
+    # global cap is assistant_settings.global_daily_cap_usd's seed value.
+    assistant_daily_cap_usd: float = 5.0
+    assistant_global_daily_cap_usd: float = 50.0
+    # The planner model (OpenAI only; services/llm_pricing.PRICES must hold
+    # a row for it, or every assistant call logs cost NULL) and its default
+    # reasoning effort. assistant_settings.model overrides the model per
+    # deployment from IT Admin Settings.
+    assistant_model: str = "gpt-5.4"
+    assistant_reasoning_effort: str = "low"
+    # Assistant turns one worker process runs at once (the design's capacity 2).
+    assistant_concurrency: int = 2
+    # Phase 5 uses the existing MS_* application identity. BDR enforces
+    # the current user's mailbox scope and approved sender on every call.
+    assistant_outlook_enabled: bool = False
+    assistant_calendar_enabled: bool = False
+    assistant_web_enabled: bool = False
+    assistant_web_api_url: str = ""
+    assistant_web_api_key: str = ""
+    # Personal browser access has a separate encryption boundary and pool.
+    assistant_browser_enabled: bool = False
+    user_cred_kek: str = ""
+    user_cred_kek_id: str = "u1"
+    user_cred_old_keys: str = ""
+    # Phase 4 knobs (docs/ASSISTANT_PHASE4_PLAN.md 3.21). Page reads: pages
+    # per card (1 to 12), the run-details context assumed per read, the hold
+    # factor over the estimate (1 to 3) and the page-read task timeout. AE
+    # runs started by the assistant: hold TTL in seconds (30 to 43,200, the
+    # 0174 reserve guard and spend.MAX_TTL_SECONDS), file and page caps.
+    # Reports: file lifetime in days (1 to 30) and rows per workbook.
+    # Evidence: default and maximum window in days. Certified payroll: the
+    # smallest employee count a per-project cell may show. Ranges are checked
+    # at boot while the assistant is on.
+    assistant_plans_pages_per_card: int = 6
+    assistant_plans_context_tokens: int = 24000
+    assistant_plans_hold_factor: float = 1.5
+    assistant_plans_page_read_timeout_minutes: int = 120
+    assistant_ae_run_hold_ttl_seconds: int = 43200
+    assistant_ae_run_max_files: int = 15
+    assistant_ae_run_max_pages: int = 400
+    assistant_report_ttl_days: int = 7
+    assistant_report_max_rows: int = 20000
+    assistant_evidence_default_days: int = 90
+    assistant_evidence_max_days: int = 400
+    assistant_cp_small_cell_min: int = 3
+    # Phase 7 proactive router (docs/ASSISTANT_PHASE7_PLAN.md 12.1). Off by
+    # default. The loop needs ASSISTANT_ENABLED; the DB company switch
+    # (assistant_settings.proactive_enabled) is a second, reversible gate.
+    # Poll seconds 10 to 300, claim batch 1 to 200. Digest slots are two
+    # HH:MM Pacific times; each slot plus its catch-up window (1 to 5 hours)
+    # must stay clear of quiet hours (quiet start and end, HH:MM Pacific,
+    # router only). A tail cursor older than cursor_max_lag_minutes (5 to
+    # 1440) is reseeded. External sends (Teams for high and urgent items,
+    # digest email) need their own switch on top of the global
+    # NOTIFICATION_EMAILS_ENABLED and TEAMS_ALERTS_ENABLED; the send step
+    # claims send_poll_batch ledger rows per tick (1 to 50) under a lease of
+    # send_lease_seconds (60 to 900). Retention days (7 to 3650): inbox rows,
+    # processed events, digests and slot ledger, send ledger. The allowlist
+    # (profile ids or emails, comma separated) limits both the router and the
+    # Inbox to those people during a pilot. test_email_to is the live-test
+    # recipient override: set only on the tick script's command line, never
+    # in .env or on a server; dev project only, one address, allowlist
+    # required.
+    assistant_proactive_enabled: bool = False
+    assistant_proactive_poll_seconds: int = 30
+    assistant_proactive_claim_batch: int = 50
+    assistant_proactive_digest_times: str = "07:00,13:00"
+    assistant_proactive_digest_catchup_hours: int = 3
+    assistant_proactive_quiet_start: str = "18:00"
+    assistant_proactive_quiet_end: str = "06:00"
+    assistant_proactive_cursor_max_lag_minutes: int = 60
+    assistant_proactive_external_enabled: bool = False
+    assistant_proactive_send_poll_batch: int = 20
+    assistant_proactive_send_lease_seconds: int = 600
+    assistant_proactive_inbox_retention_days: int = 90
+    assistant_proactive_event_retention_days: int = 90
+    assistant_proactive_digest_retention_days: int = 365
+    assistant_proactive_send_retention_days: int = 90
+    assistant_proactive_user_allowlist: str = ""
+    assistant_proactive_test_email_to: str = ""
 
     # ── LLMs (routing lives in app/services/llm.py) ───────────────────────────
     # Master switch: when true EVERY AI feature routes to the self-hosted
@@ -813,6 +935,26 @@ class Settings(BaseSettings):
     # and everyone internal sees what lands in it. The external estimator
     # never reaches this surface at all. Comma-separated addresses.
     rfp_email_ingestion_shared_mailboxes: str = "bids@g3electrical.com"
+    # PM mailbox scoping (docs/ASSISTANT.md, "PM mailbox scoping fix"). The
+    # mailboxes every internal role may see through PM Emails on top of their
+    # own (profiles.email plus profiles.rfp_mailboxes), and the mailboxes
+    # nobody sees unless it is their own, Executive and IT Admin included.
+    # Comma-separated addresses; the owner edits both in Railway.
+    shared_mailboxes: str = (
+        "bids@g3electrical.com,office@g3electrical.com,adminassistant@g3electrical.com"
+    )
+    mailbox_exclusions: str = ""
+
+    @property
+    def shared_mailbox_set(self) -> set[str]:
+        """SHARED_MAILBOXES, lowercased, blanks dropped."""
+        return {m.strip().lower() for m in self.shared_mailboxes.split(",") if m.strip()}
+
+    @property
+    def mailbox_exclusion_set(self) -> set[str]:
+        """MAILBOX_EXCLUSIONS, lowercased, blanks dropped."""
+        return {m.strip().lower() for m in self.mailbox_exclusions.split(",") if m.strip()}
+
     # LLM classify step. The threshold is an env knob so a larger model can be
     # tuned without a code change.
     rfp_email_ingestion_confidence_threshold: float = 0.85
@@ -1231,18 +1373,36 @@ class Settings(BaseSettings):
             raise ValueError(
                 "BROWSER_AGENT_SECRETS_OLD_KEYS must not reuse BROWSER_AGENT_SECRETS_KEY_ID."
             )
-        if not self.procore_login_email.strip():
-            raise ValueError("BROWSER_AGENTS_ENABLED=true needs PROCORE_LOGIN_EMAIL.")
-        if not self.pm_rfi_sync_active:
-            raise ValueError(
-                "BROWSER_AGENTS_ENABLED=true needs the PM RFI sync (PM_ENABLED and "
-                "PM_RFI_SYNC_ENABLED): agent captures are applied through it."
-            )
+        # Browser pools also serve standalone read tasks. The org RFI type
+        # checks its own PM integration and identity when preparing a job.
         if self.is_production and not self.trust_forwarded_for:
             raise ValueError(
                 "BROWSER_AGENTS_ENABLED=true in production needs TRUST_FORWARDED_FOR=true "
                 "(the worker IP allowlist and the enrollment counter read the client IP)."
             )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_personal_browser(self) -> "Settings":
+        if not self.assistant_browser_enabled:
+            return self
+        if not self.assistant_enabled or not self.browser_agents_enabled:
+            raise ValueError("ASSISTANT_BROWSER_ENABLED needs assistant and browser agents enabled.")
+        key = _b64_key(self.user_cred_kek, "USER_CRED_KEK")
+        for other in (self.browser_agent_secrets_key, self.browser_agent_fingerprint_key):
+            if other.strip() and key == _b64_key(other, "browser agent key"):
+                raise ValueError("USER_CRED_KEK must differ from organization browser keys.")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,20}", self.user_cred_kek_id):
+            raise ValueError("USER_CRED_KEK_ID must be 1 to 20 letters, digits, _ or -.")
+        seen = {self.user_cred_kek_id}
+        for entry in self.user_cred_old_keys.split(","):
+            if not entry.strip():
+                continue
+            name, sep, value = entry.strip().partition(":")
+            if not sep or not re.fullmatch(r"[A-Za-z0-9_-]{1,20}", name) or name in seen:
+                raise ValueError("USER_CRED_OLD_KEYS contains an invalid or duplicate key id.")
+            seen.add(name)
+            _b64_key(value, "USER_CRED_OLD_KEYS")
         return self
 
     @property
@@ -1541,6 +1701,175 @@ class Settings(BaseSettings):
                     "in production. Use SELF_HOSTED_LLM_CA_BUNDLE for private CAs "
                     "and re-enable SELF_HOSTED_LLM_VERIFY_TLS."
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_assistant(self) -> "Settings":
+        """Refuse to boot on an assistant configuration that could only fail
+        at run time (docs/ASSISTANT.md, Architecture): no token secret, an
+        OpenAI-only feature under the self-hosted master switch without the
+        owner's explicit allow, a scheduler without an assistant, caps that
+        cannot be enforced, or routine knobs out of range. Only enforced while ASSISTANT_ENABLED is on (the
+        scheduler check runs always, since it is meaningless on its own)."""
+        if self.assistant_scheduler_enabled and not self.assistant_enabled:
+            raise ValueError(
+                "ASSISTANT_SCHEDULER_ENABLED=true needs ASSISTANT_ENABLED=true."
+            )
+        if self.assistant_proactive_enabled and not self.assistant_enabled:
+            raise ValueError("ASSISTANT_PROACTIVE_ENABLED=true needs ASSISTANT_ENABLED=true.")
+        if self.assistant_proactive_external_enabled and not self.assistant_proactive_enabled:
+            raise ValueError(
+                "ASSISTANT_PROACTIVE_EXTERNAL_ENABLED=true needs ASSISTANT_PROACTIVE_ENABLED=true."
+            )
+        self._check_proactive_test_email()
+        if not self.assistant_enabled:
+            return self
+        if len((self.assistant_token_secret or "").strip()) < 32:
+            raise ValueError(
+                "Refusing to boot: ASSISTANT_ENABLED=true but ASSISTANT_TOKEN_SECRET "
+                "is missing or shorter than 32 characters. Generate one with "
+                "`python -c 'import secrets; print(secrets.token_urlsafe(48))'`."
+            )
+        if self.full_self_hosted_llms_enabled and not self.assistant_allow_openai_in_self_hosted:
+            raise ValueError(
+                "Refusing to boot: ASSISTANT_ENABLED=true while "
+                "FULL_SELF_HOSTED_LLMS_ENABLED=true. The assistant runs on OpenAI "
+                "only; set ASSISTANT_ALLOW_OPENAI_IN_SELF_HOSTED=true (owner "
+                "authorized) or turn the assistant off."
+            )
+        if self.assistant_daily_cap_usd <= 0 or self.assistant_global_daily_cap_usd <= 0:
+            raise ValueError(
+                "ASSISTANT_DAILY_CAP_USD and ASSISTANT_GLOBAL_DAILY_CAP_USD must be "
+                "greater than zero."
+            )
+        if self.assistant_daily_cap_usd > self.assistant_global_daily_cap_usd:
+            raise ValueError(
+                "ASSISTANT_DAILY_CAP_USD must not exceed ASSISTANT_GLOBAL_DAILY_CAP_USD."
+            )
+        if self.assistant_reasoning_effort not in ("minimal", "low", "medium", "high"):
+            raise ValueError("ASSISTANT_REASONING_EFFORT must be minimal, low, medium or high.")
+        if self.assistant_concurrency < 1:
+            raise ValueError("ASSISTANT_CONCURRENCY must be at least 1.")
+        for name, low, high in (
+            ("assistant_scheduler_poll_seconds", 15, 600),
+            ("assistant_schedule_catchup_hours", 1, 24),
+            ("assistant_schedule_claim_batch", 1, 50),
+            ("assistant_schedule_max_failures", 1, 20),
+            ("assistant_schedule_max_unread", 1, 100),
+            ("assistant_schedule_stale_run_minutes", 5, 120),
+            ("assistant_run_now_min_seconds", 0, 3600),
+            ("assistant_schedule_max_emails_per_day", 0, 200),
+            ("assistant_proactive_poll_seconds", 10, 300),
+            ("assistant_proactive_claim_batch", 1, 200),
+            ("assistant_proactive_digest_catchup_hours", 1, 5),
+            ("assistant_proactive_cursor_max_lag_minutes", 5, 1440),
+            ("assistant_proactive_send_poll_batch", 1, 50),
+            ("assistant_proactive_send_lease_seconds", 60, 900),
+            ("assistant_proactive_inbox_retention_days", 7, 3650),
+            ("assistant_proactive_event_retention_days", 7, 3650),
+            ("assistant_proactive_digest_retention_days", 7, 3650),
+            ("assistant_proactive_send_retention_days", 7, 3650),
+        ):
+            if not low <= getattr(self, name) <= high:
+                raise ValueError(f"{name.upper()} must be between {low} and {high}.")
+        self._check_proactive_times()
+        from app.services import llm_pricing  # local: config must stay import-light
+
+        if llm_pricing.price_for(self.assistant_model) is None:
+            raise ValueError(
+                f"ASSISTANT_MODEL={self.assistant_model!r} has no row in services/llm_pricing.PRICES; "
+                "add the price before enabling the assistant (spend caps need it)."
+            )
+        return self
+
+    def _check_proactive_times(self) -> None:
+        """Phase 7 digest slots and quiet hours (plan 12.1): exactly two
+        distinct HH:MM slots at least catch-up hours apart, and no slot's
+        delivery window (slot to slot + catch-up hours) touches quiet hours,
+        so the AM slot is at or after the quiet end and each slot plus its
+        window is at or before the quiet start."""
+        raw = (self.assistant_proactive_digest_times or "").split(",")
+        if len(raw) != 2:
+            raise ValueError(
+                "ASSISTANT_PROACTIVE_DIGEST_TIMES must list exactly two HH:MM times."
+            )
+        slots = sorted(
+            h * 60 + m
+            for h, m in (_parse_hhmm(part, "ASSISTANT_PROACTIVE_DIGEST_TIMES") for part in raw)
+        )
+        qs_h, qs_m = _parse_hhmm(self.assistant_proactive_quiet_start, "ASSISTANT_PROACTIVE_QUIET_START")
+        qe_h, qe_m = _parse_hhmm(self.assistant_proactive_quiet_end, "ASSISTANT_PROACTIVE_QUIET_END")
+        catchup = self.assistant_proactive_digest_catchup_hours * 60
+        if slots[0] == slots[1]:
+            raise ValueError("ASSISTANT_PROACTIVE_DIGEST_TIMES lists the same time twice.")
+        if slots[1] - slots[0] < catchup:
+            raise ValueError(
+                "ASSISTANT_PROACTIVE_DIGEST_TIMES slots must be at least "
+                "ASSISTANT_PROACTIVE_DIGEST_CATCHUP_HOURS apart."
+            )
+        quiet_start, quiet_end = qs_h * 60 + qs_m, qe_h * 60 + qe_m
+        quiet = {(quiet_start + i) % 1440 for i in range((quiet_end - quiet_start) % 1440)}
+        for slot in slots:
+            if any((slot + i) % 1440 in quiet for i in range(catchup)):
+                raise ValueError(
+                    "ASSISTANT_PROACTIVE_DIGEST_TIMES: each slot plus the catch-up window must "
+                    "stay outside quiet hours (ASSISTANT_PROACTIVE_QUIET_START to _END)."
+                )
+
+    def _check_proactive_test_email(self) -> None:
+        """The live-test recipient override (plan 12.1, owner question 38):
+        one address, an allowlist required, and only on the dev Supabase
+        project, so it can never exist on a prod-like server."""
+        raw = (self.assistant_proactive_test_email_to or "").strip()
+        if not raw:
+            return
+        if len(raw.split()) != 1 or any(c in raw for c in ",;<>") or raw.count("@") != 1:
+            raise ValueError(
+                "ASSISTANT_PROACTIVE_TEST_EMAIL_TO must be exactly one email address."
+            )
+        local, _, domain = raw.partition("@")
+        if not local or "." not in domain:
+            raise ValueError(
+                "ASSISTANT_PROACTIVE_TEST_EMAIL_TO must be exactly one email address."
+            )
+        if not (self.assistant_proactive_user_allowlist or "").strip(" ,"):
+            raise ValueError(
+                "ASSISTANT_PROACTIVE_TEST_EMAIL_TO needs ASSISTANT_PROACTIVE_USER_ALLOWLIST."
+            )
+        url = (self.supabase_url or "").strip()
+        if url and _PHASE7_DEV_SUPABASE_REF not in url:
+            raise ValueError(
+                "ASSISTANT_PROACTIVE_TEST_EMAIL_TO is allowed only on the dev Supabase project."
+            )
+
+    @model_validator(mode="after")
+    def _validate_assistant_phase4(self) -> "Settings":
+        """Phase 4 ranges (docs/ASSISTANT_PHASE4_PLAN.md 3.21), checked only
+        while ASSISTANT_ENABLED is on, like the phase 3 knobs. The AE run hold
+        TTL stops at 43,200 seconds because the 0174 reserve guard refuses a
+        longer hold."""
+        if not self.assistant_enabled:
+            return self
+        for name, low, high in (
+            ("assistant_plans_pages_per_card", 1, 12),
+            ("assistant_plans_context_tokens", 0, 200000),
+            ("assistant_plans_hold_factor", 1, 3),
+            ("assistant_plans_page_read_timeout_minutes", 10, 720),
+            ("assistant_ae_run_hold_ttl_seconds", 30, 43200),
+            ("assistant_ae_run_max_files", 1, 40),
+            ("assistant_ae_run_max_pages", 1, 1500),
+            ("assistant_report_ttl_days", 1, 30),
+            ("assistant_report_max_rows", 1, 20000),
+            ("assistant_evidence_default_days", 1, 400),
+            ("assistant_evidence_max_days", 1, 400),
+            ("assistant_cp_small_cell_min", 3, 50),
+        ):
+            if not low <= getattr(self, name) <= high:
+                raise ValueError(f"{name.upper()} must be between {low} and {high}.")
+        if self.assistant_evidence_default_days > self.assistant_evidence_max_days:
+            raise ValueError(
+                "ASSISTANT_EVIDENCE_DEFAULT_DAYS must not exceed ASSISTANT_EVIDENCE_MAX_DAYS."
+            )
         return self
 
     @model_validator(mode="after")

@@ -137,6 +137,7 @@ Caps { daily_cap_usd: number; per_job_cap_usd: number; window_started_at: string
 
 TypeCfg {
   key: string; label: string; enabled: boolean; identity: string | null;
+  principal_kind: "org" | "user"; // Read-only registry value; filter worker allowed-type options by pool.
   provider: Provider | null; model: string | null;
   price_in_per_mtok: number | null; price_out_per_mtok: number | null; model_probe_ok_at: string | null;
   max_concurrency: number; max_attempts: number; max_interruptions: number; max_steps: number;
@@ -146,6 +147,7 @@ TypeCfg {
 
 Worker {
   id; name: string; status: "pending" | "active" | "revoked"; online: boolean; draining: boolean;
+  principal_kind: "org" | "user"; // Fixed at enrollment; both pools can run as separate services on one PC.
   max_slots: number; allowed_types: string[]; allowed_ips: string[];
   version: string | null; bad_versions: string[]; hostname: string | null; chromium_version: string | null;
   chromium_stale: boolean;          // Chromium build older than 30 days
@@ -235,7 +237,7 @@ Secret values never appear in any response: secrets are `{set, fingerprint}`, he
 | POST | `/browser-agents/admin/types/{key}/probe` | `{provider: Provider, model: string}` | `{ok: boolean, latency_ms: number, error: string \| null, probed_at: string}` (one forced tool call plus a 1x1 PNG; sets `model_probe_ok_at` on success) |
 | PUT | `/browser-agents/admin/secrets/{name}` | `{value: string<=200}` | `SecretRow` (never echoes; resets the procore lock, audited) |
 | DELETE | `/browser-agents/admin/secrets/{name}` | none | 204 |
-| POST | `/browser-agents/admin/enrollments` | `{worker_name: string 2..60}` | `{code: string, expires_at: string, install_command: string, key_fingerprint: string}` (20-char base32 code, single use, 30 min) |
+| POST | `/browser-agents/admin/enrollments` | `{worker_name: string 2..60, principal_kind?: "org" \| "user"}` | `{code: string, expires_at: string, install_command: string, key_fingerprint: string, principal_kind: "org" \| "user"}` (20-char base32 code, single use, 30 min; command includes the current API address) |
 | PATCH | `/browser-agents/admin/workers/{id}` | `{name?, draining?, max_slots? 1..8, allowed_types?: string[], allowed_ips?: string[] (CIDR)}` | `Worker` |
 | POST | `/browser-agents/admin/workers/{id}/approve` | none | `Worker` |
 | POST | `/browser-agents/admin/workers/{id}/revoke` | none | `Worker` (instant; token hash cleared) |

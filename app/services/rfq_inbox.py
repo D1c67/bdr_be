@@ -32,6 +32,7 @@ from app.services import (
     cloud_links,
     graph_email,
     graph_inbox,
+    late_quote,
     office_preview,
     storage,
     workflow,
@@ -489,7 +490,8 @@ def _ingest_message(
     )
     pdf_files.extend(link_pdfs)
     status = _run_extraction(
-        sb, send, row, pdf_files, link_failures, attachment_skips=attachment_skips
+        sb, send, row, pdf_files, link_failures, attachment_skips=attachment_skips,
+        internet_message_id=internet_message_id,
     )
 
     rfq = send["rfqs"]
@@ -501,6 +503,7 @@ def _ingest_message(
         f"{rfq['material_categories']['name']} RFQ for {rfq['projects']['name']}",
         rfq_id=rfq["id"],
         mirror_email=True,
+        metadata=_email_ids(send, row, internet_message_id) or None,
     )
     return status
 
@@ -788,6 +791,21 @@ def _ingest_cloud_links(
     return pdfs, failures
 
 
+def _email_ids(send: dict, message_row: dict, internet_message_id: str | None = None) -> dict:
+    """The ids that tie a vendor-email bell to its email (Phase 7 decision E).
+    Every key is read with .get() and a missing value is left out."""
+    return {
+        k: v
+        for k, v in {
+            "rfq_message_id": message_row.get("id"),
+            "graph_message_id": message_row.get("graph_message_id"),
+            "conversation_id": send.get("conversation_id"),
+            "internet_message_id": internet_message_id,
+        }.items()
+        if v
+    }
+
+
 def _post_submission(sb, project_id: str | None) -> bool:
     """Best-effort window check: a failed lookup must never lose a quote."""
     if not project_id:
@@ -807,6 +825,7 @@ def _run_extraction(
     link_failures: list[tuple[cloud_links.CloudLink, str]] | None = None,
     *,
     attachment_skips: list[tuple[str, str]] | None = None,
+    internet_message_id: str | None = None,
 ) -> str:
     """Extract a quote amount from the reply's PDFs (attached or link-fetched)
     and record the outcome on the message. Returns the final status."""
@@ -908,24 +927,69 @@ def _run_extraction(
         # A quote arriving after the bid was submitted is on record only (0138):
         # tagged so it never competes for "lowest" or feeds analytics. Nothing
         # here selects it or bounces the bid, so the sent price is untouched.
-        if _post_submission(sb, rfq.get("project_id") or project.get("id")):
+        late = _post_submission(sb, rfq.get("project_id") or project.get("id"))
+        if late:
             quote_row["received_after_submission"] = True
-        sb.table("quotes").insert(quote_row).execute()
+        inserted = sb.table("quotes").insert(quote_row).execute()
         sb.table("rfqs").update({"status": "quotes_in"}).eq("id", rfq["id"]).execute()
         sb.table("rfq_sends").update(
             {"quote_received_at": _now().isoformat(), "polling_active": False}
         ).eq("id", send["id"]).execute()
         extraction_status = "done"
-        notify_roles(
-            QUOTE_NEWS_ROLES,
-            rfq["project_id"],
-            "quote.received",
-            f"Quote received from {_sender_name(contact, message_row.get('from_addr'))} "
-            f"for {rfq['material_categories']['name']} on {project['name']}: "
-            f"${result['total_amount']}",
-            rfq_id=rfq["id"],
-            mirror_email=True,
-        )
+        ids = _email_ids(send, message_row, internet_message_id)
+        # The quote is saved: a bell or audit failure must never skip the
+        # extraction_status write below (a re-read would insert a duplicate).
+        try:
+            if late:
+                # One bell, never both: a late quote is the late_quote event
+                # (both engineering focuses), like the manual paths.
+                notify_roles(
+                    QUOTE_NEWS_ROLES,
+                    rfq["project_id"],
+                    "late_quote.received",
+                    late_quote.late_quote_message(
+                        project,
+                        (contact.get("vendors") or {}).get("name"),
+                        rfq["material_categories"]["name"],
+                    ),
+                    rfq_id=rfq["id"],
+                    mirror_email=True,
+                    metadata=ids or None,
+                )
+            else:
+                notify_roles(
+                    QUOTE_NEWS_ROLES,
+                    rfq["project_id"],
+                    "quote.received",
+                    f"Quote received from {_sender_name(contact, message_row.get('from_addr'))} "
+                    f"for {rfq['material_categories']['name']} on {project['name']}: "
+                    f"${result['total_amount']}",
+                    rfq_id=rfq["id"],
+                    mirror_email=True,
+                    metadata=ids or None,
+                )
+        except Exception:  # noqa: BLE001 - the quote is saved; the bell is best-effort
+            logger.exception("Quote notification failed for rfq %s", rfq["id"])
+        if late:
+            try:
+                new_quote = (getattr(inserted, "data", None) or [{}])[0]
+                audit(
+                    None,
+                    "quote.late_add",
+                    "quote",
+                    new_quote.get("id"),
+                    {
+                        "rfq_id": rfq["id"],
+                        "via": "ai",
+                        "origin": new_quote.get("origin"),
+                        "vendor_id": quote_row["vendor_id"],
+                        "amount": quote_row["amount"],
+                        "tax_included": new_quote.get("tax_included"),
+                        "quote_file_id": quote_row["quote_file_id"],
+                    },
+                )
+            except Exception:  # noqa: BLE001 - the quote is saved; the audit is best-effort
+                logger.exception("Late-quote audit failed for rfq %s", rfq["id"])
         break  # one quote per reply; remaining PDFs are still saved as files
 
     extraction_error = {

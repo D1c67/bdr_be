@@ -148,6 +148,13 @@ def notify_it_admin(type_: str, message: str, metadata: dict[str, Any], *,
 
 
 def notify_job_failed(job: dict[str, Any], error_kind: str, why: str) -> None:
+    if job.get("principal_kind", "org") != "org":
+        owner = job.get("principal_user_id")
+        if owner:
+            notifications.notify_user(str(owner), None, "browser_agent.job_failed",
+                                      "Your browser task did not finish.",
+                                      metadata={"job_id": str(job["id"])})
+        return
     notify_it_admin(
         "browser_agent.job_failed",
         f"Browser agent job failed ({error_kind}): {why}",
@@ -186,6 +193,8 @@ def enqueue(
     ValueError for a seed that does not fit the type's input model; both are
     programming errors at the call site, never a worker's doing."""
     spec = registry.get_type(agent_type)
+    if spec.principal_kind != "org":
+        raise ValueError("User jobs require an assistant approval")
     if not dedupe_key or len(dedupe_key) > 300:
         raise ValueError("dedupe_key must be 1 to 300 characters")
     try:
@@ -356,6 +365,13 @@ def _release_after_prepare_error(row: dict[str, Any], worker_id: str, boot_id: s
     """A prepare that raised must not cost the job an attempt: hand the
     lease back as 'interrupted' (fenced; fails past max_interruptions)."""
     try:
+        if row.get("principal_kind") == "user":
+            from app.assistant import repo
+            repo.browser_rpc(row["principal_user_id"], "assistant_browser_job_requeue", {
+                "p_job": str(row["id"]), "p_worker": worker_id, "p_boot": boot_id,
+                "p_epoch": int(row["lease_epoch"]),
+            })
+            return
         _sb().rpc("browser_agent_requeue", {
             "p_job": str(row["id"]), "p_worker": worker_id, "p_boot": boot_id,
             "p_epoch": int(row["lease_epoch"]), "p_reason": "interrupted",
@@ -367,6 +383,14 @@ def _release_after_prepare_error(row: dict[str, Any], worker_id: str, boot_id: s
 
 
 def _finish_prepared(row: dict[str, Any], worker_id: str, boot_id: str, result: registry.PrepareResult) -> None:
+    if row.get("principal_kind") == "user":
+        from app.assistant import repo
+        repo.browser_rpc(row["principal_user_id"], "assistant_browser_job_finish", {
+            "p_job": str(row["id"]), "p_worker": worker_id, "p_boot": boot_id,
+            "p_epoch": int(row["lease_epoch"]), "p_status": result.status,
+            "p_result_record": None, "p_error_code": "authority_unavailable",
+        })
+        return
     data = _sb().rpc("browser_agent_finish", {
         "p_job": str(row["id"]), "p_worker": worker_id, "p_boot": boot_id,
         "p_epoch": int(row["lease_epoch"]), "p_status": result.status,
@@ -380,11 +404,16 @@ def _finish_prepared(row: dict[str, Any], worker_id: str, boot_id: str, result: 
         notify_job_failed(row, result.error_kind or "other", result.summary)
 
 
-def claim(worker_id: str, boot_id: str, capacity: dict[str, int], *, max_slots: int) -> list[protocol.ClaimedJob]:
+def claim(worker_id: str, boot_id: str, capacity: dict[str, int], *, max_slots: int, principal_kind: str = "org") -> list[protocol.ClaimedJob]:
     """POST /claim. RPC errors (stale_boot, revoked) propagate to the caller
     as APIError; the router maps them. Draining or a kill switch: []."""
     from app.core.agent_auth import rpc
 
+    from app.services.browser_agents.types.user_browser_read import enabled as user_enabled
+    if principal_kind not in ("org", "user") or (principal_kind == "user" and not user_enabled()):
+        return []
+    capacity = {key: value for key, value in capacity.items()
+                if registry.has_type(key) and registry.get_type(key).principal_kind == principal_kind}
     want = trim_capacity(capacity, max_slots=max_slots, held=_held_leases(worker_id))
     if not want:
         return []
@@ -405,6 +434,8 @@ def claim(worker_id: str, boot_id: str, capacity: dict[str, int], *, max_slots: 
             continue
         try:
             spec = registry.get_type(row["agent_type"])
+            if row.get("principal_kind", "org") != principal_kind or spec.principal_kind != principal_kind:
+                raise ValueError("Job principal does not match its type")
             result = spec.prepare(row)
         except Exception:  # noqa: BLE001 - any prepare failure releases uncharged
             logger.exception("browser agents: prepare failed for job %s", row.get("id"))
@@ -418,16 +449,20 @@ def claim(worker_id: str, boot_id: str, capacity: dict[str, int], *, max_slots: 
                 _release_after_prepare_error(row, worker_id, boot_id)
             continue
         ready.append(row)
-    helps = unconsumed_help([str(r["id"]) for r in ready])
-    issued = issued_turn_counts([str(r["id"]) for r in ready])
+    org_ids = [str(r["id"]) for r in ready if r.get("principal_kind", "org") == "org"]
+    helps = unconsumed_help(org_ids) if org_ids else {}
+    issued = issued_turn_counts(org_ids) if org_ids else {}
     return [
         protocol.ClaimedJob(
             job_id=r["id"],
             agent_type=r["agent_type"],
+            principal_kind=r.get("principal_kind", "org"),
+            principal_user_id=r.get("principal_user_id"),
             epoch=int(r["lease_epoch"]),
             lease_expires_at=r["lease_expires_at"],
-            input=r.get("input") or {},
-            checkpoint=r.get("checkpoint") or {},
+            input=({key: (r.get("input") or {}).get(key) for key in ("service", "url", "objective")}
+                   if r.get("principal_kind") == "user" else r.get("input") or {}),
+            checkpoint={} if r.get("principal_kind") == "user" else r.get("checkpoint") or {},
             checkpoint_seq=int(r.get("checkpoint_seq") or 0),
             attempts=int(r.get("attempts") or 0),
             last_resume_reason=r.get("last_resume_reason"),
@@ -494,7 +529,9 @@ def _cas_job(job: dict[str, Any], patch: dict[str, Any], *, status: str | list[s
     without touching those columns, so the lease steps also pass
     `expired_before`: a lease renewed in between is no longer expired and
     the write matches nothing."""
-    q = _sb().table(JOBS).update(patch).eq("id", job["id"]).eq("lease_epoch", job["lease_epoch"])
+    if job.get("principal_kind", "org") != "org":
+        return False
+    q = _sb().table(JOBS).update(patch).eq("principal_kind", "org").eq("id", job["id"]).eq("lease_epoch", job["lease_epoch"])
     q = q.in_("status", status) if isinstance(status, list) else q.eq("status", status)
     q = q.eq("lease_owner", job["lease_owner"]) if job.get("lease_owner") else q.is_("lease_owner", "null")
     if expired_before is not None:
@@ -515,7 +552,7 @@ def reclaim_expired(now: datetime, settings_row: dict[str, Any]) -> int:
     if in_startup_grace(lease):
         return 0
     jobs = (
-        _sb().table(JOBS).select(JOB_COLUMNS).eq("status", "running").not_.is_("lease_owner", "null")
+        _sb().table(JOBS).select(JOB_COLUMNS).eq("principal_kind", "org").eq("status", "running").not_.is_("lease_owner", "null")
         .lt("lease_expires_at", iso(now)).limit(SWEEP_BATCH).execute()
     ).data or []
     if not jobs:
@@ -561,7 +598,7 @@ def park_lapsed_holds(now: datetime, settings_row: dict[str, Any]) -> int:
     if in_startup_grace(lease):
         return 0
     jobs = (
-        _sb().table(JOBS).select(JOB_COLUMNS).eq("status", "waiting_help").not_.is_("lease_owner", "null")
+        _sb().table(JOBS).select(JOB_COLUMNS).eq("principal_kind", "org").eq("status", "waiting_help").not_.is_("lease_owner", "null")
         .lt("lease_expires_at", iso(now)).limit(SWEEP_BATCH).execute()
     ).data or []
     if not jobs:
@@ -588,7 +625,7 @@ def reconcile_applying(now: datetime, settings_row: dict[str, Any]) -> int:
     -> succeeded (outcome from run.stats.agent_outcome, else applied);
     failed -> failed/apply_failed; a run that disappeared -> failed too."""
     jobs = (
-        _sb().table(JOBS).select(JOB_COLUMNS).eq("status", "applying").order("updated_at")
+        _sb().table(JOBS).select(JOB_COLUMNS).eq("principal_kind", "org").eq("status", "applying").order("updated_at")
         .limit(SWEEP_BATCH).execute()
     ).data or []
     if not jobs:
@@ -634,7 +671,7 @@ def fail_exhausted_retries(now: datetime, settings_row: dict[str, Any]) -> int:
     requeue RPC fails a crash at the cap itself; this catches every other
     path (a manual retry, an edited cap)."""
     jobs = (
-        _sb().table(JOBS).select(JOB_COLUMNS).eq("status", "queued").eq("resume_reason", "retry")
+        _sb().table(JOBS).select(JOB_COLUMNS).eq("principal_kind", "org").eq("status", "queued").eq("resume_reason", "retry")
         .limit(SWEEP_BATCH).execute()
     ).data or []
     if not jobs:
@@ -659,7 +696,7 @@ def expire_stale(now: datetime, settings_row: dict[str, Any]) -> int:
     """Step 5: queued jobs nobody claimed before expires_at (PC off for a
     week, type disabled) become expired."""
     jobs = (
-        _sb().table(JOBS).select(JOB_COLUMNS).eq("status", "queued").lt("expires_at", iso(now))
+        _sb().table(JOBS).select(JOB_COLUMNS).eq("principal_kind", "org").eq("status", "queued").lt("expires_at", iso(now))
         .limit(SWEEP_BATCH).execute()
     ).data or []
     done = 0
@@ -676,7 +713,7 @@ def finish_cancels(now: datetime, settings_row: dict[str, Any]) -> int:
     """Step 6: a cancel is delivered to the holder by its heartbeat; once no
     live lease remains (never leased, parked, or lapsed) BDR closes it."""
     jobs = (
-        _sb().table(JOBS).select(JOB_COLUMNS).not_.is_("cancel_requested_at", "null")
+        _sb().table(JOBS).select(JOB_COLUMNS).eq("principal_kind", "org").not_.is_("cancel_requested_at", "null")
         .in_("status", ["queued", "running", "waiting_help"]).limit(SWEEP_BATCH).execute()
     ).data or []
     done = 0
@@ -736,7 +773,7 @@ def worker_offline(now: datetime, settings_row: dict[str, Any]) -> int:
     sb = _sb()
     alert_after = timedelta(minutes=int(settings_row.get("worker_offline_alert_minutes") or 60))
     email_after = timedelta(hours=int(settings_row.get("worker_offline_email_hours") or 4))
-    workers = sb.table("browser_agent_workers").select("id, last_seen_at").eq("status", "active").execute().data or []
+    workers = sb.table("browser_agent_workers").select("id, last_seen_at").eq("principal_kind", "org").eq("status", "active").execute().data or []
     last_seen = max((parse_ts(w.get("last_seen_at")) for w in workers if w.get("last_seen_at")), default=None)
     state_rows = sb.table("browser_agent_runtime_state").select(
         "offline_notified_at, offline_emailed_at"
@@ -749,7 +786,7 @@ def worker_offline(now: datetime, settings_row: dict[str, Any]) -> int:
             ).eq("id", 1).execute()
         return 0
     waiting = (
-        sb.table(JOBS).select("id").eq("status", "queued").lt("created_at", iso(now - alert_after))
+        sb.table(JOBS).select("id").eq("principal_kind", "org").eq("status", "queued").lt("created_at", iso(now - alert_after))
         .limit(1).execute()
     ).data or []
     if not waiting:

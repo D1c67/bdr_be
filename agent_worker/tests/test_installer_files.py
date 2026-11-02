@@ -184,3 +184,39 @@ def test_icacls_never_strips_inheritance_recursively():
         for line in f.read_text(encoding="utf-8").splitlines():
             if "icacls" in line and "/inheritance:r" in line:
                 assert "/T" not in line.split(), (f.name, line)
+
+
+def test_second_pool_runtime_prerequisite_is_checked_before_mutations():
+    text=(INSTALL/'install.ps1').read_text()
+    preflight=text.index('$ExistingPython = Resolve-MachinePython')
+    first_mutation=min(text.index(value) for value in (
+        "New-Item -ItemType Directory -Path (Join-Path $InstallRoot",
+        'Set-LocalUser -Name $ServiceUser', 'Remove-Item -LiteralPath $LauncherDir'))
+    assert preflight < first_mutation
+    assert 'Windows cannot install the same MSI into a second home' in text
+    assert 'HKLM:\\SOFTWARE\\Python\\PythonCore\\3.12\\InstallPath' in text
+    assert '& py.exe' not in text
+    assert 'Python Software Foundation' in text and 'ReparsePoint' in text
+    assert 'must not be writable by non-administrators' in text
+    assert 'Personal workers require release 1.0.1 or later' in text
+    assert text.index('Personal workers require release 1.0.1 or later') < first_mutation
+
+
+def test_explicit_shared_python_path_keeps_registry_and_worker_runtime_separate():
+    text = (INSTALL / 'install.ps1').read_text()
+    resolver = text[text.index('function Resolve-MachinePython'):text.index('# 0. Preconditions')]
+    assert '[string]$PythonPath' in text
+    assert 'if ($PythonPath) { $UseExistingPython = $true }' in text
+    assert 'Resolve-MachinePython -ExplicitPath $PythonPath' in text
+    assert resolver.index('if ($ExplicitPath)') < resolver.index("$key = 'HKLM:")
+    assert '-PythonPath must be an absolute local path' in resolver
+    assert "GetFileName($found) -ine 'python.exe'" in resolver
+    assert '$entries = $ancestors +' in resolver
+    assert 'sysconfig, venv, ensurepip' in resolver
+    assert "'3.12|win-amd64'" in resolver
+    assert resolver.index('Get-AuthenticodeSignature') < resolver.index('& $found -I -S')
+    runtime = text[text.index('$pythonInstalledByUs = $false'):text.index('# 6.')]
+    assert 'if ($UseExistingPython)' in runtime
+    assert '$script:Python = $ExistingPython' in runtime
+    assert runtime.index('$script:Python = $ExistingPython') < runtime.index('$pythonInstalledByUs = $true')
+    assert 'Set-ItemProperty' not in resolver and 'New-ItemProperty' not in resolver

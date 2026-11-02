@@ -28,8 +28,9 @@ from app.services import graph_email, invite_email
 class _Query:
     """Enough of the PostgREST builder to run the router's real filters."""
 
-    def __init__(self, store):
+    def __init__(self, store, table="profiles"):
         self._store = store
+        self._table = table
         self._op = "select"
         self._patch: dict | None = None
         self._filters: list[tuple[str, str, object]] = []
@@ -76,7 +77,7 @@ class _Query:
         return True
 
     def execute(self):
-        rows = [r for r in self._store["profiles"].values() if self._matches(r)]
+        rows = [r for r in self._store[self._table].values() if self._matches(r)]
         if self._op == "update":
             if self._store.get("update_fails"):
                 raise RuntimeError("profiles update blew up")
@@ -128,7 +129,12 @@ class _SB:
         )
 
     def table(self, name):
-        return _Query(self._store)
+        if name == "assistant_credentials":
+            self._store.setdefault(name, {})
+            return _Query(self._store, name)
+        if name != "profiles":
+            raise AssertionError(f"Unsupported user-test table: {name}")
+        return _Query(self._store, name)
 
     def rpc(self, name, params):
         self._store["rpcs"].append((name, params))
@@ -166,6 +172,8 @@ def _setup(monkeypatch, *rows, graph=True, send_raises=False):
         "graph_mail": [],
     }
     monkeypatch.setattr(users, "get_supabase", lambda: _SB(store))
+    from app.core import supabase_client
+    monkeypatch.setattr(supabase_client, "get_supabase", lambda: _SB(store))
     monkeypatch.setattr(
         users, "audit", lambda *a, **k: store["audits"].append((a, k))
     )

@@ -302,6 +302,12 @@ def notify_helpers(help_row: dict[str, Any], type_: str, message: str, *, job_id
     instead when no active Estimating Admin exists (notify_role created 0)."""
     metadata = {"help_id": str(help_row["id"]), "job_id": str(job_id or help_row.get("opened_by_job_id") or ""),
                 "reason": help_row.get("reason_code"), "scope_key": help_row.get("scope_key")}
+    if help_row.get("principal_kind", "org") != "org":
+        owner = help_row.get("principal_user_id")
+        if owner:
+            notifications.notify_user(str(owner), None, type_, "Your browser task needs your attention.",
+                                      metadata={"help_id": str(help_row["id"])})
+        return
     created = _notify_role(Role.ESTIMATING_ADMIN, help_row, type_, message, metadata)
     if is_login_scope(help_row.get("scope_key")) or created == 0:
         _notify_role(Role.IT_ADMIN, help_row, type_, message, metadata)
@@ -355,7 +361,7 @@ def waiter_ids(help_id: str) -> list[str]:
 def _jobs(ids: list[str]) -> list[dict[str, Any]]:
     if not ids:
         return []
-    return _sb().table(JOBS).select("*").in_("id", ids).execute().data or []
+    return _sb().table(JOBS).select("*").eq("principal_kind", "org").in_("id", ids).execute().data or []
 
 
 def _files(artifact_ids: set[str]) -> dict[str, dict[str, Any]]:
@@ -411,6 +417,8 @@ def human_messages(help_id: str, after_id: int = 0) -> list[dict[str, Any]]:
 
 
 def _cas_job(job: dict[str, Any], patch: dict[str, Any], statuses: list[str]) -> dict[str, Any] | None:
+    if job.get("principal_kind", "org") != "org":
+        return None
     rows = (
         _sb().table(JOBS).update(patch).eq("id", str(job["id"])).eq("lease_epoch", int(job.get("lease_epoch") or 0))
         .in_("status", statuses).execute()
@@ -522,6 +530,8 @@ def _fence(lease: AgentLease, statuses: list[str]) -> dict[str, Any]:
     job = _one(rpc("browser_agent_fence", {**lease.params(), "p_statuses": statuses}))
     if not job.get("id"):
         raise agent_error(ErrorCode.LEASE_LOST)
+    if job.get("principal_kind", "org") != "org":
+        raise agent_error(ErrorCode.IDOR, "user_browser_execution_unavailable")
     return job
 
 
@@ -529,7 +539,7 @@ def _waited_help(job_id: str, help_id: str) -> dict[str, Any]:
     """IDOR: the help request must be one this job waits (or waited) on."""
     rows = _sb().table(WAITERS).select("help_id").eq("help_id", str(help_id)).eq("job_id", job_id).limit(1).execute().data
     help_row = get_help(str(help_id)) if rows else None
-    if not help_row:
+    if not help_row or help_row.get("principal_kind", "org") != "org":
         raise agent_error(ErrorCode.IDOR, "help request does not belong to this job")
     return help_row
 
@@ -838,6 +848,8 @@ def contributions(lease: AgentLease, req: protocol.ContributionsRequest) -> prot
     from app.services.browser_agents import contributions as contrib
 
     job = _fence(lease, ["running", "waiting_help"])
+    if job.get("principal_kind", "org") != "org":
+        raise agent_error(ErrorCode.IDOR, "User tasks cannot contribute to BDR records")
     help_row = _waited_help(lease.job_id, str(req.help_id))
     if not job.get("project_id") or not job.get("platform"):
         raise agent_error(ErrorCode.INVALID_REQUEST, "this job has no linked project")
@@ -945,6 +957,8 @@ def _requeue_parked_if_unread(job: dict[str, Any], now: datetime) -> bool:
 
 
 def _require_active(help_row: dict[str, Any]) -> None:
+    if help_row.get("principal_kind", "org") != "org":
+        raise human_error(404, "not_found", "No such help request.")
     if help_row.get("status") not in ACTIVE:
         raise human_error(status.HTTP_409_CONFLICT, "help_closed", "This help request is closed.")
 
@@ -1059,6 +1073,8 @@ def _view_one(m: dict[str, Any]) -> dict[str, Any]:
 def post_message(help_row: dict[str, Any], user: Any, msg: HumanMessage) -> dict[str, Any]:
     """A helper's message or button. Idempotent on client_msg_id: a resend
     returns the first message and does nothing again."""
+    if help_row.get("principal_kind", "org") != "org":
+        raise human_error(404, "not_found", "No such help request.")
     help_id = str(help_row["id"])
     existing = _existing_message(help_id, msg.client_msg_id)
     if existing:
@@ -1331,7 +1347,7 @@ def sweep_reminders(now: datetime, settings_row: dict[str, Any]) -> int:
     unclaimed, at most 3 (compare-and-set on reminder_count)."""
     every = timedelta(minutes=int(settings_row.get("help_reminder_minutes") or 120))
     rows = (
-        _sb().table(HELP).select("*").eq("status", "open").is_("claimed_by", "null")
+        _sb().table(HELP).select("*").eq("principal_kind", "org").eq("status", "open").is_("claimed_by", "null")
         .lt("reminder_count", MAX_REMINDERS).not_.is_("notified_at", "null")
         .limit(queue.SWEEP_BATCH).execute()
     ).data or []
@@ -1356,7 +1372,7 @@ def sweep_claim_lapse(now: datetime, settings_row: dict[str, Any]) -> int:
     the request is unclaimed and its reminders re-arm (one goes out now)."""
     lapse = timedelta(minutes=int(settings_row.get("help_claim_lapse_minutes") or 30))
     rows = (
-        _sb().table(HELP).select("*").in_("status", ACTIVE).not_.is_("claimed_by", "null")
+        _sb().table(HELP).select("*").eq("principal_kind", "org").in_("status", ACTIVE).not_.is_("claimed_by", "null")
         .limit(queue.SWEEP_BATCH).execute()
     ).data or []
     done = 0
@@ -1380,7 +1396,7 @@ def sweep_resolve_finished(now: datetime, settings_row: dict[str, Any]) -> int:
     applying) is resolved (agent_continued). Login requests resolve on the
     next good login instead (identities.py)."""
     rows = (
-        _sb().table(HELP).select("*").in_("status", ACTIVE).limit(queue.SWEEP_BATCH).execute()
+        _sb().table(HELP).select("*").eq("principal_kind", "org").in_("status", ACTIVE).limit(queue.SWEEP_BATCH).execute()
     ).data or []
     done = 0
     for row in rows:
@@ -1416,7 +1432,7 @@ def sweep_expire(now: datetime, settings_row: dict[str, Any]) -> int:
     while the account is locked or the last login needed a code or a check:
     IT Admin gets one email instead (compare-and-set on expiry_emailed_at)."""
     rows = (
-        _sb().table(HELP).select("*").in_("status", ACTIVE).lt("expires_at", _iso(now))
+        _sb().table(HELP).select("*").eq("principal_kind", "org").in_("status", ACTIVE).lt("expires_at", _iso(now))
         .limit(queue.SWEEP_BATCH).execute()
     ).data or []
     done = 0
@@ -1473,21 +1489,27 @@ def sweep_secret_purge(now: datetime, settings_row: dict[str, Any]) -> int:
     sb = _sb()
     done = 0
     stale = (
-        sb.table(MESSAGES).select("id").eq("is_secret", True).is_("secret_consumed_at", "null")
+        sb.table(MESSAGES).select("id, help_id").eq("is_secret", True).is_("secret_consumed_at", "null")
         .is_("secret_purged_at", "null").lt("created_at", _iso(now - timedelta(minutes=SECRET_PURGE_MINUTES)))
         .limit(queue.SWEEP_BATCH).execute()
     ).data or []
     for m in stale:
+        parent = get_help(str(m.get("help_id") or ""))
+        if not parent or parent.get("principal_kind", "org") != "org":
+            continue
         moved = (
             sb.table(MESSAGES).update({"secret_ciphertext": None, "secret_nonce": None, "secret_purged_at": _iso(now)})
             .eq("id", m["id"]).is_("secret_consumed_at", "null").is_("secret_purged_at", "null").execute()
         ).data or []
         done += len(moved)
     old = (
-        sb.table(MESSAGES).select("id").eq("is_secret", True).not_.is_("secret_hmac", "null")
+        sb.table(MESSAGES).select("id, help_id").eq("is_secret", True).not_.is_("secret_hmac", "null")
         .lt("created_at", _iso(now - timedelta(days=SECRET_HMAC_KEEP_DAYS))).limit(queue.SWEEP_BATCH).execute()
     ).data or []
     for m in old:
+        parent = get_help(str(m.get("help_id") or ""))
+        if not parent or parent.get("principal_kind", "org") != "org":
+            continue
         sb.table(MESSAGES).update({"secret_hmac": None, "secret_ciphertext": None, "secret_nonce": None}).eq(
             "id", m["id"]).execute()
         done += 1
@@ -1497,7 +1519,7 @@ def sweep_secret_purge(now: datetime, settings_row: dict[str, Any]) -> int:
 def sweep_answered_parked(now: datetime, settings_row: dict[str, Any]) -> int:
     """Parked waiters of an answered request whose answer they never read."""
     jobs = (
-        _sb().table(JOBS).select("*").eq("status", "waiting_help").is_("lease_owner", "null")
+        _sb().table(JOBS).select("*").eq("principal_kind", "org").eq("status", "waiting_help").is_("lease_owner", "null")
         .not_.is_("waiting_help_id", "null").limit(queue.SWEEP_BATCH).execute()
     ).data or []
     return sum(1 for j in jobs if _requeue_parked_if_unread(j, now))
@@ -1513,7 +1535,7 @@ def sweep_parked_closed_help(now: datetime, settings_row: dict[str, Any]) -> int
     (help_answered). A request closed in the last two minutes is left to the
     path that closed it (Retry now requeues its waiters itself)."""
     jobs = (
-        _sb().table(JOBS).select("*").eq("status", "waiting_help").is_("lease_owner", "null")
+        _sb().table(JOBS).select("*").eq("principal_kind", "org").eq("status", "waiting_help").is_("lease_owner", "null")
         .limit(queue.SWEEP_BATCH).execute()
     ).data or []
     done = 0
@@ -1540,7 +1562,7 @@ def sweep_dead_login_holders(now: datetime, settings_row: dict[str, Any]) -> int
     waiters are requeued: the first to ask for the session takes the
     request over (identities._blocking_help) and logs in."""
     rows = (
-        _sb().table(HELP).select("*").in_("status", ACTIVE).like("scope_key", "login:%")
+        _sb().table(HELP).select("*").eq("principal_kind", "org").in_("status", ACTIVE).like("scope_key", "login:%")
         .limit(queue.SWEEP_BATCH).execute()
     ).data or []
     done = 0
