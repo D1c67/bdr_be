@@ -32,6 +32,8 @@ NAMESPACE_MODULES = (
     "app.assistant.tools.web",
     "app.assistant.tools.mail",
     "app.assistant.tools.browser",
+    # Phase 8 (docs/ASSISTANT_PHASE8_PLAN.md 6.1): inbox_list.
+    "app.assistant.tools.inbox",
 )
 
 

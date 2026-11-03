@@ -319,7 +319,10 @@ def test_spend_and_continue_job_never_hold_a_client():
 
 def test_phase4_kinds():
     assert spend.KIND_PLANS_PAGES == "plans_pages" and spend.KIND_AI_ESTIMATE == "ai_estimate"
-    assert spend.KINDS == ("turn_call", "split_task", "plans_pages", "ai_estimate", "browser_task")
+    # Phase 8 (docs/ASSISTANT_PHASE8_PLAN.md 5.4, MC-9, F8): six kinds; triage
+    # stays out of the external-actual branch (its call carries the hold).
+    assert spend.KINDS == ("turn_call", "split_task", "plans_pages", "ai_estimate", "browser_task", "triage")
+    assert spend.KIND_TRIAGE == "triage"
     assert spend.EXTERNAL_KINDS == ("plans_pages", "ai_estimate", "browser_task")
 
 
@@ -372,3 +375,88 @@ def test_settle_external_release_and_refusals(db):
             spend.settle_external(USER, "h4", bad)
     assert _hold(db, "h4")["status"] == "active"
     assert spend.settle_external(USER, "h4", 0) is True
+
+
+# ── phase 8: the company spend identity (docs/ASSISTANT_PHASE8_PLAN.md 4.1 A2a, 5.4) ──
+
+COMPANY = "00000000-0000-0000-0000-000000000001"   # 0196 assistant_company_spend_id()
+
+
+def test_the_company_spend_id_is_the_0196_value_and_not_a_v4_uuid():
+    assert spend.COMPANY_SPEND_ID == COMPANY == spend.repo.COMPANY_SPEND_ID
+    assert COMPANY[14] == "0"   # version nibble 0: gen_random_uuid() never yields it
+
+
+@pytest.mark.parametrize("user_id, kind", [
+    (USER, "triage"),                     # a person never holds a triage hold
+    (None, "triage"),
+    ("", "triage"),
+    (COMPANY, "turn_call"),               # the company id holds nothing else
+    (COMPANY, "split_task"),
+    (COMPANY, "plans_pages"),
+    (COMPANY, "ai_estimate"),
+    (COMPANY, "browser_task"),
+    (COMPANY.upper(), "turn_call"),       # any spelling of the company id
+])
+def test_reserve_refuses_a_bad_kind_and_id_pairing_before_the_rpc(db, monkeypatch, user_id, kind):
+    calls = []
+    monkeypatch.setattr(spend.repo, "rpc_spend_reserve", lambda *a, **kw: calls.append(kw) or {"ok": True, "id": "h"})
+    with pytest.raises(ValueError, match="company spend identity"):
+        spend.reserve(user_id, kind=kind, amount=Decimal("0.01"), ttl=330)
+    assert calls == []
+
+
+def test_reserve_takes_a_triage_hold_under_the_company_id(db):
+    hold = spend.reserve(COMPANY, kind=spend.KIND_TRIAGE, amount=Decimal("0.0012"), ttl=330, run_id=RUN)
+    row = _hold(db, hold)
+    assert row["user_id"] == COMPANY and row["kind"] == "triage" and row["run_id"] == RUN
+
+
+def test_a_triage_hold_skips_the_per_person_cap_and_counts_only_globally(db):
+    # A person at their cap does not stop triage (owner question 12 (b)) ...
+    db.tables["assistant_profiles"].append({"user_id": USER, "daily_cost_cap_usd": 0})
+    with pytest.raises(spend.SpendRefused) as refused:
+        spend.reserve(USER, kind="turn_call", amount=Decimal("0.01"), ttl=600)
+    assert refused.value.scope == spend.SCOPE_USER
+    hold = spend.reserve(COMPANY, kind="triage", amount=Decimal("1"), ttl=330, run_id=RUN)
+    # ... its live hold is in the company's held and in no person's held.
+    person = spend.state(USER)
+    assert person.user_held == 0 and person.global_held == Decimal("1")
+    # A settled triage call logged under the company id raises global_spent
+    # and leaves the person's user_spent unchanged (A2a).
+    _log(db, 0.25, user=COMPANY, feature="assistant_triage", run=RUN, hold=hold)
+    spend.settle(COMPANY, hold)
+    after = spend.state(USER)
+    assert after.user_spent == 0 and after.global_spent == Decimal("0.25") and after.global_held == 0
+    assert _hold(db, hold)["status"] == "settled" and Decimal(str(_hold(db, hold)["actual_usd"])) == Decimal("0.25")
+
+
+def test_a_triage_hold_is_refused_at_the_company_cap_with_scope_global(db):
+    # Pure sharing, no floor (owner question 11 (b)): spent + held + amount >= cap.
+    _log(db, 49.5, user=OTHER, run=RUN)
+    # A queued browser task's live hold counts in the company's held (2.1 item 11).
+    from tests.assistant_fakes import reservation
+
+    db.tables["assistant_spend_reservations"].append(reservation(
+        id="b0b0b0b0-b0b0-4b0b-8b0b-b0b0b0b0b0b0", user_id=USER, kind="browser_task", amount_usd="0.3",
+        expires_at=(NOW + timedelta(hours=8)).isoformat()))
+    with pytest.raises(spend.SpendRefused) as refused:
+        spend.reserve(COMPANY, kind="triage", amount=Decimal("0.2"), ttl=330)
+    assert refused.value.scope == spend.SCOPE_GLOBAL
+    assert spend.reserve(COMPANY, kind="triage", amount=Decimal("0.19"), ttl=330)
+
+
+def test_the_fake_reserve_mirrors_0196_b2_refusals(db):
+    from tests.assistant_fakes import CheckViolation
+
+    for user_id, kind in ((USER, "triage"), (COMPANY, "turn_call"), (COMPANY, "browser_task")):
+        with pytest.raises(CheckViolation):
+            db.rpc("assistant_spend_reserve", {
+                "p_user_id": user_id, "p_kind": kind, "p_amount": "0.01", "p_ttl_seconds": 330,
+                "p_user_cap_default": "5", "p_global_cap_default": "50", "p_run_id": None, "p_task_id": None,
+                "p_approval_id": None}).execute()
+
+
+def test_the_per_person_spend_state_refuses_the_company_id(db):
+    with pytest.raises(ValueError, match="company spend id"):
+        spend.state(COMPANY)

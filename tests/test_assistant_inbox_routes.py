@@ -69,6 +69,7 @@ USER_ROUTES = [
     ("PUT", "/assistant/alerts/todo.due", {"mode": "inbox"}),
     ("POST", "/assistant/alerts/todo.due/reset", None),
     ("POST", f"/assistant/alerts/mutes/{PROJECT}/remove", None),
+    ("PUT", "/assistant/alerts/me/digest-email", {"enabled": True}),
 ]
 ADMIN_ROUTES = [
     ("GET", "/assistant/alerts/defaults", None),
@@ -76,6 +77,8 @@ ADMIN_ROUTES = [
     ("POST", "/assistant/alerts/defaults/executive/todo.due/reset", None),
     ("GET", "/assistant/alerts/company", None),
     ("PUT", "/assistant/alerts/company", {"enabled": True}),
+    ("GET", "/assistant/alerts/company/triage", None),
+    ("PUT", "/assistant/alerts/company/triage", {"enabled": True}),
     ("GET", "/assistant/inbox/feedback-report", None),
 ]
 
@@ -340,6 +343,7 @@ def test_the_list_shapes_a_router_row_with_its_project_and_buttons(api):
         "project": {"id": PROJECT, "number": "26.10.7301", "name": "Alpha Clinic"}, "digest_id": None,
         "created_at": P7_T0.isoformat(), "delivered_at": P7_T0.isoformat(), "read": False, "feedback": None,
         "actions": ["useful", "not_useful", "mute", "mute_project", "snooze", "dismiss"],
+        "triage": None,
     }
 
 
@@ -668,7 +672,7 @@ def test_alerts_view_shape_and_channels(api):
     assert body["channels"] == {
         "teams": {"available": True, "enabled": True, "connected": True,
                   "last_sent_at": "2026-10-30T15:00:00+00:00", "last_error_at": None},
-        "email": {"available": True}}
+        "email": {"available": True, "enabled": True}}
     kinds = {k["event_type"]: k for k in body["kinds"]}
     assert kinds["bid.due_not_ready"] == {
         "event_type": "bid.due_not_ready", "group": "Bidding", "label": "Bid due and your part is missing",
@@ -978,7 +982,11 @@ def test_the_one_system_read_is_the_feedback_report():
     text = (ROOT / "app/routers/assistant_inbox.py").read_text()
     calls = [(m.start(), m.group(0)) for m in re.finditer(r"repo\.\w+\(\s*None\b", text)]
     names = sorted(g.split("(")[0] for _, g in calls)
-    assert names == ["repo.inbox_feedback_report"]
+    # Phase 8 (plan 8.1): the admin triage block reads the counts RPC once, as
+    # a system read (tests/test_assistant_repo_isolation.py pins the caller).
+    assert names == ["repo.inbox_feedback_report", "repo.triage_counts"]
+    triage_view = text[text.index("def _triage_company_view"):text.index("@router.get(\"/alerts/company/triage\")")]
+    assert triage_view.count("repo.triage_counts(None") == 1
     report = text[text.index("def feedback_report"):]
     assert "repo.inbox_feedback_report(None" in report
 

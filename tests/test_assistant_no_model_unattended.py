@@ -6,7 +6,14 @@ riders call no model, and offboarding calls none either; the phase 7 router,
 its sender and its rules (docs/ASSISTANT_PHASE7_PLAN.md 12.3) call none. A source scan pins
 it: none of these modules names the model message builder, the turn loop,
 the model service or its completion call, in any import form. The registry
-still knows only the two turn modes (no unattended mode was added)."""
+still knows only the two turn modes (no unattended mode was added).
+
+Phase 8 (docs/ASSISTANT_PHASE8_PLAN.md D1, decisions log entry 24): triage
+makes one unattended model call per batch of items, not per item. assistant_triage is scanned so it
+never names the model service, the turn loop or the message builder itself;
+its one model call goes only through assistant_triage_model.classify.
+tests/test_assistant_triage_pins.py pins that only assistant_triage_model
+makes that call."""
 
 from __future__ import annotations
 
@@ -22,11 +29,13 @@ from app.services import (
     assistant_proactive,
     assistant_recipes,
     assistant_scheduler,
+    assistant_triage,
 )
 
 MODULES = (
     assistant_scheduler, assistant_maintenance, assistant_recipes, recipes, assistant_offboarding,
     assistant_proactive, assistant_delivery, proactive,
+    assistant_triage,
 )
 FORBIDDEN_TEXT = (
     re.compile(r"\bllm_messages\b"),

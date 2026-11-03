@@ -81,6 +81,8 @@ ALLOWED_METHODS: frozenset[str] = frozenset({"GET", "POST", "PUT", "PATCH"})
 SUB_APPS: frozenset[str] = frozenset({"bidding", "pm", "certified_payroll", "ai_estimating"})
 NAMESPACES: frozenset[str] = frozenset({
     "core", "bidding", "pm", "payroll", "memory", "schedule", "plans", "evidence", "report", "mail", "web", "browser",
+    # Phase 8 (plan 6.1): the inbox_list read tool. Not an own-row namespace.
+    "inbox",
 })
 # The namespaces whose tools change only the user's own assistant rows. A
 # housekeeping tool lives in one of them; Mailbox review drops them and

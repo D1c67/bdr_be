@@ -160,7 +160,7 @@ def human(monkeypatch):
 
 def test_every_tool_route_answers_a_human_with_404(human):
     tool_routes = [(m, r) for m, r in _assistant_routes() if r.path_format.startswith("/assistant/tools/")]
-    assert len(tool_routes) == 11  # phase 4 adds find, memory/search and reports
+    assert len(tool_routes) == 12  # phase 4 adds find, memory/search and reports; phase 8 adds the inbox read
     for method, route in tool_routes:
         path = route.path_format.replace("{schedule_id}", SCHEDULE).replace("{memory_id}", MEMORY)
         body = {"kind": "preference", "title": "x"} if path.endswith("/save") else {}

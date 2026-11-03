@@ -16,9 +16,12 @@ every pair too). Two gates:
                 back on stays reachable.
 
 Every admin write (switch, role default, reset) writes its audit row first, ids
-and enums only. Assistant tables are reached only through
-app/assistant/repo.py. The one request handler allowed a `None` system read is
-`feedback_report` (9.3); the cursor reseed on an off to on flip goes through
+and enums only. Phase 8 (docs/ASSISTANT_PHASE8_PLAN.md 8.1) adds triage on the
+items, `PUT /alerts/me/digest-email` and the two company triage routes (admin).
+Assistant tables are reached only through app/assistant/repo.py. The request
+handlers allowed a `None` system read are `feedback_report` (9.3) and the
+company triage view's counts read (the triage counts function, counts
+only); the cursor reseed on an off to on flip goes through
 `assistant_proactive.reseed_tails`, which owns the system call and counts the
 skipped rows (10.1, 4.1). Errors use the
 `_error(status, code, message)` shape of assistant_routines.py.
@@ -30,11 +33,12 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from app.assistant import access, proactive, repo
+from app.assistant import access, proactive, repo, triage
 from app.assistant.tools._common import is_uuid
 from app.core.config import get_settings
 from app.core.deps import CurrentUser, require_internal
@@ -102,10 +106,22 @@ REPORT_DAYS_MAX = 90
 CURSOR_SEP = "|"
 SWITCH_WORKER = "admin_switch"
 SWITCH_AUDIT = "assistant.proactive_switch"
+TRIAGE_SWITCH_AUDIT = "assistant.triage_switch"
+DIGEST_EMAIL_AUDIT = "assistant.digest_email"
+PROFILES_ENTITY = "assistant_profiles"
 DEFAULT_UPDATE_AUDIT = "assistant.alert_default.update"
 DEFAULT_RESET_AUDIT = "assistant.alert_default.reset"
 AUDIT_ENTITY = "assistant_subscriptions"
 SETTINGS_ENTITY = "assistant_settings"
+_AUDIT_ENTITIES = {
+    SWITCH_AUDIT: SETTINGS_ENTITY,
+    TRIAGE_SWITCH_AUDIT: SETTINGS_ENTITY,
+    DIGEST_EMAIL_AUDIT: PROFILES_ENTITY,
+}
+PT = ZoneInfo("America/Los_Angeles")
+# The two modes the Alerts card shows for the triage escalation kind (plan
+# 5.6, P8R-4): on is "no own row", off is an own row with enabled false.
+TRIAGE_KIND_MODES = ("on", "off")
 
 # Kinds the phase 5 and 6 writers put straight in the inbox (delivery direct).
 DIRECT_LABELS = {
@@ -194,6 +210,48 @@ def proactive_admin_flag(user: CurrentUser) -> bool:
         return False
 
 
+def _triage_allowlist() -> list[str]:
+    raw = getattr(get_settings(), "assistant_triage_user_allowlist", "") or ""
+    return [part.strip().lower() for part in raw.split(",") if part.strip()]
+
+
+def _on_triage_allowlist(user: CurrentUser) -> bool:
+    """True with no triage allowlist set (the rollout lever, plan 13);
+    otherwise the caller's profile id or email must be listed."""
+    entries = _triage_allowlist()
+    if not entries:
+        return True
+    return str(user.id).lower() in entries or str(getattr(user, "email", "") or "").lower() in entries
+
+
+def triage_available() -> bool:
+    """ASSISTANT_TRIAGE_ENABLED (with the proactive router it needs)."""
+    settings = get_settings()
+    return bool(getattr(settings, "assistant_triage_enabled", False)) and bool(
+        getattr(settings, "assistant_proactive_enabled", False)
+    )
+
+
+def triage_flag(user: CurrentUser, *, inbox_on: bool | None = None) -> bool:
+    """The `assistant_triage` key of GET /features and the `on` of the Alerts
+    card's triage line (plan 8.1, owner question 14 (b)): the env flag, the
+    company switch, the person on the triage allowlist when one is set, and
+    the inbox flag true. There is no personal switch. Fails closed. A caller
+    that already computed the inbox flag (GET /features, the Alerts card
+    behind `_user_gate`) passes it as `inbox_on` and saves the re-read."""
+    if not triage_available():
+        return False
+    try:
+        if not (features_flag(user) if inbox_on is None else inbox_on):
+            return False
+        if not bool((repo.settings_row(user.id) or {}).get("triage_enabled")):
+            return False
+        return _on_triage_allowlist(user)
+    except Exception:  # noqa: BLE001 - a flag read must never break the shell
+        logger.exception("assistant triage features flag: read failed")
+        return False
+
+
 def _user_gate(user: CurrentUser) -> None:
     _refuse_assistant_principal(user)
     if not features_flag(user):
@@ -211,7 +269,7 @@ def _audit(user: CurrentUser, action: str, payload: dict[str, Any]) -> None:
     log cannot record does not happen."""
     from app.services import notifications
 
-    notifications.audit(user.id, action, AUDIT_ENTITY if action != SWITCH_AUDIT else SETTINGS_ENTITY, None, payload)
+    notifications.audit(user.id, action, _AUDIT_ENTITIES.get(action, AUDIT_ENTITY), None, payload)
 
 
 # -- Inbox rows ---------------------------------------------------------------
@@ -286,7 +344,7 @@ def _actions(row: dict) -> list[str]:
         return ["useful", "not_useful", "dismiss"]
     out = ["useful", "not_useful"]
     et = row.get("event_type")
-    if et and (et == proactive.APPROVAL_EXPIRING or not str(et).startswith("assistant.")):
+    if et and (et in (proactive.APPROVAL_EXPIRING, proactive.TRIAGE_ESCALATION) or not str(et).startswith("assistant.")):
         out.append("mute")
     if row.get("project_id"):
         out.append("mute_project")
@@ -296,11 +354,86 @@ def _actions(row: dict) -> list[str]:
     return out
 
 
-def _item(row: dict, states: dict[str, dict], projects: dict[str, dict], role: Any = None) -> dict[str, Any]:
+def _sentence(text: str | None) -> str | None:
+    return text[:1].upper() + text[1:] if text else None
+
+
+def _triage_out(found: dict | None, number: Any, escalation_inbox_id: str | None = None) -> dict[str, Any] | None:
+    """The `triage` object of an Inbox item (plan 8.1): enums from the stored
+    row, labels and the "Work on this" text rendered here from the fixed
+    catalogs in app/assistant/triage.py. No free text reaches it. A stored
+    value outside the catalogs renders no label rather than failing the page."""
+    if not found:
+        return None
+    reason, action = found.get("reason"), found.get("action")
+    work_prompt = None
+    if action in triage.ACTIONS:
+        work_prompt = triage.action_prompt(str(action), number=number)
+    return {
+        "status": found.get("status"),
+        "decision": found.get("decision"),
+        "reason": reason,
+        "action": action,
+        "reason_label": _sentence(triage.REASON_HELP.get(str(reason))) if reason else None,
+        "action_label": _sentence(triage.ACTION_HELP.get(str(action))) if action else None,
+        "work_prompt": work_prompt,
+        "decided_at": found.get("decided_at"),
+        "severity_hint": found.get("severity_hint"),
+        "escalation_inbox_id": escalation_inbox_id,
+    }
+
+
+def _triage_for(user: CurrentUser, rows: list[dict]) -> tuple[dict[str, dict], dict[str, str]]:
+    """The triage items of the record rows in `rows` (one batched read) and,
+    for the escalated ones, the Inbox id of the escalation row. Best effort:
+    a failed read shows the items without triage, never an error."""
+    ids = [str(r["id"]) for r in rows if r.get("delivery") == "record" and r.get("id")]
+    if not ids:
+        return {}, {}
+    try:
+        found = repo.triage_items_for_inbox(user.id, ids)
+    except Exception:  # noqa: BLE001 - the Inbox renders without triage
+        logger.exception("assistant inbox: triage items could not be read")
+        return {}, {}
+    links: dict[str, str] = {}
+    # The escalation rows of the escalated items, one batched read (WI9-3).
+    keys: dict[str, str] = {}
+    for inbox_id, item in found.items():
+        if item.get("status") == "decided" and item.get("decision") == "escalate":
+            try:
+                keys[inbox_id] = proactive.event_dedupe_key(proactive.TRIAGE_ESCALATION, {"inbox_id": inbox_id})
+            except Exception:  # noqa: BLE001 - the link is optional
+                logger.exception("assistant inbox: escalation key could not be built")
+    if not keys:
+        return found, links
+    try:
+        by_key = repo.inbox_rows_by_keys(user.id, list(keys.values()))
+    except Exception:  # noqa: BLE001 - the links are optional
+        logger.exception("assistant inbox: escalation rows could not be read")
+        return found, links
+    for inbox_id, key in keys.items():
+        esc = by_key.get(key)
+        if esc and esc.get("id"):
+            links[inbox_id] = str(esc["id"])
+    return found, links
+
+
+def _item(
+    row: dict, states: dict[str, dict], projects: dict[str, dict], role: Any = None,
+    triage_item: dict | None = None, escalation_inbox_id: str | None = None,
+) -> dict[str, Any]:
     pid = str(row["project_id"]) if row.get("project_id") else None
     # A due line reads for the Pacific day it was delivered on (a snoozed row
     # returning in a later digest says "overdue", S9-3), as in the email.
     title, why = proactive.digest_text(row, row.get("delivered_at"), role)
+    triage_out = _triage_out(
+        triage_item, (projects.get(pid) or {}).get("number") if pid else None, escalation_inbox_id,
+    )
+    if triage_out and triage_out["action"] not in triage.allowed_actions(row.get("event_type"), role):
+        # A role change after the decision (an Accountant is never offered
+        # write work, owner question 23 (a)): the stored action stays on the
+        # row, the viewer sees none of it.
+        triage_out["action"] = triage_out["action_label"] = triage_out["work_prompt"] = None
     return {
         "id": str(row["id"]),
         "event_type": row.get("event_type"),
@@ -318,13 +451,15 @@ def _item(row: dict, states: dict[str, dict], projects: dict[str, dict], role: A
         "read": _read(row, states),
         "feedback": row.get("feedback"),
         "actions": _actions(row),
+        "triage": triage_out,
     }
 
 
 def _items(user: CurrentUser, rows: list[dict], states: dict[str, dict] | None = None) -> list[dict[str, Any]]:
     states = _bell_states(user, rows) if states is None else states
     projects = _project_refs(user, [r.get("project_id") for r in rows])
-    return [_item(r, states, projects, user.role) for r in rows]
+    found, links = _triage_for(user, rows)
+    return [_item(r, states, projects, user.role, found.get(str(r["id"])), links.get(str(r["id"]))) for r in rows]
 
 
 def _one_item(user: CurrentUser, inbox_id: str) -> dict[str, Any]:
@@ -364,6 +499,12 @@ def _parse_cursor(value: str | None) -> tuple[str, str] | None:
     return parsed.astimezone(timezone.utc).isoformat(), str(uuid.UUID(ident))
 
 
+def parse_cursor(value: str | None) -> tuple[str, str] | None:
+    """The public cursor parser (the tool route's `before`); same answers and
+    the same coded 422 as the human route."""
+    return _parse_cursor(value)
+
+
 def _cursor_of(row: dict) -> str:
     """"<UTC time>|<id>", with a Z suffix so no character needs escaping in a
     query string (a bare plus sign would read back as a space)."""
@@ -372,12 +513,17 @@ def _cursor_of(row: dict) -> str:
     return f"{text}{CURSOR_SEP}{row['id']}"
 
 
-def _page(user: CurrentUser, segment: str, cursor: tuple[str, str] | None, limit: int) -> tuple[list[dict], dict, str | None]:
+def _page(
+    user: CurrentUser, segment: str, cursor: tuple[str, str] | None, limit: int,
+    kind: str | None = None, project_id: str | None = None,
+) -> tuple[list[dict], dict, str | None]:
     """Up to `limit` visible rows, newest first, the bell states they were
     judged on and the cursor of the next page. Hidden rows (a record row whose
     source bell was dismissed) and, in the unread segment, router rows whose
-    own bell was read are skipped; the scan is bounded, and a bounded scan that
-    ends short still hands out a cursor past what it covered."""
+    own bell was read are skipped, and so are rows that miss the optional
+    `kind` or `project_id` filter (the inbox_list tool, 6.1); the scan is
+    bounded, and a bounded scan that ends short still hands out a cursor past
+    what it covered."""
     batch = min(201, limit * 3 + 1)
     out: list[dict] = []
     states: dict[str, dict] = {}
@@ -390,7 +536,12 @@ def _page(user: CurrentUser, segment: str, cursor: tuple[str, str] | None, limit
         batch_states = _bell_states(user, rows)
         states.update(batch_states)
         for row in rows:
-            if _hidden(row, batch_states) or (segment == "unread" and _read(row, batch_states)):
+            if (
+                _hidden(row, batch_states)
+                or (segment == "unread" and _read(row, batch_states))
+                or (kind is not None and row.get("event_type") != kind)
+                or (project_id is not None and str(row.get("project_id") or "") != project_id)
+            ):
                 last = row
                 continue
             if len(out) == limit:
@@ -409,15 +560,18 @@ def _page(user: CurrentUser, segment: str, cursor: tuple[str, str] | None, limit
     return out, states, (_cursor_of(last) if more and last is not None else None)
 
 
-@router.get("/inbox")
-def list_inbox(
-    segment: str = Query(default="unread", pattern="^(unread|all|digests)$"),
-    before: str | None = Query(default=None, max_length=96),
-    limit: int = Query(default=20, ge=1, le=LIST_MAX),
-    user: CurrentUser = Depends(require_internal),
+def page_for(
+    user: CurrentUser, segment: str, cursor: tuple[str, str] | None, limit: int,
+    kind: str | None = None, project_id: str | None = None,
 ) -> dict[str, Any]:
-    _user_gate(user)
-    rows, states, nxt = _page(user, segment, _parse_cursor(before), limit)
+    """One page of the caller's Inbox as the route body: `{items, next}` and,
+    for the digests segment, `digests`. The one shared path for the human
+    route and the assistant's read-only inbox route
+    (app/routers/assistant_inbox_tools.py), so the visibility rules (hidden
+    and dismissed rows, the source bell's read state) are never copied. It
+    reads only: nothing is marked read or dismissed here. The caller has
+    already passed `_user_gate` or its assistant-side twin."""
+    rows, states, nxt = _page(user, segment, cursor, limit, kind, project_id)
     out: dict[str, Any] = {"items": _items(user, rows, states), "next": nxt}
     if segment == "digests":
         seen: dict[str, dict] = {}
@@ -429,6 +583,17 @@ def list_inbox(
                     seen[did] = _digest_out(found, _notices(user, found))
         out["digests"] = list(seen.values())
     return out
+
+
+@router.get("/inbox")
+def list_inbox(
+    segment: str = Query(default="unread", pattern="^(unread|all|digests)$"),
+    before: str | None = Query(default=None, max_length=96),
+    limit: int = Query(default=20, ge=1, le=LIST_MAX),
+    user: CurrentUser = Depends(require_internal),
+) -> dict[str, Any]:
+    _user_gate(user)
+    return page_for(user, segment, _parse_cursor(before), limit)
 
 
 @router.get("/inbox/summary")
@@ -557,8 +722,12 @@ def _kind_row(user: CurrentUser, event_type: str, user_rows: dict[str, dict], ro
         return None
     effective = proactive.effective_subscription(event_type, user.role, user_row, role_row)
     record = entry["kind"] == "record"
+    triage_kind = event_type == proactive.TRIAGE_ESCALATION
 
     def mode(sub: dict) -> str:
+        if triage_kind:
+            # On or off only (plan 5.6, 19.1 FQ2): the severity is the model's.
+            return "on" if sub["enabled"] else "off"
         if record and sub["enabled"]:
             return "inbox"
         return proactive.mode_for_severity(sub["severity"], sub["enabled"])
@@ -573,7 +742,7 @@ def _kind_row(user: CurrentUser, event_type: str, user_rows: dict[str, dict], ro
         "label": entry["label"],
         "description": entry["description"],
         "kind": entry["kind"],
-        "modes": list(RECORD_MODES if record else ROUTER_MODES),
+        "modes": list(TRIAGE_KIND_MODES if triage_kind else RECORD_MODES if record else ROUTER_MODES),
         "role_default": mode(base),
         "override": override,
         "effective_mode": mode(effective),
@@ -600,13 +769,23 @@ def _kind_or_404(user: CurrentUser, event_type: str) -> dict[str, Any]:
     return row
 
 
+def _digest_email_on(user: CurrentUser) -> bool:
+    """The person's own digest email switch (0196 A1): an absent profile row
+    means on. A failed read shows on, the column default."""
+    try:
+        return (repo.profile_row(user.id) or {}).get("digest_email_enabled") is not False
+    except Exception:  # noqa: BLE001 - the card renders without it
+        logger.exception("assistant alerts: digest email switch could not be read")
+        return True
+
+
 def _channels(user: CurrentUser) -> dict[str, Any]:
     """The read-only channel state, from assistant_delivery (which reads the
     Teams status without its error text). A failed read shows both channels as
     unavailable instead of failing the card."""
     out: dict[str, Any] = {
         "teams": {"available": False, "enabled": False, "connected": False, "last_sent_at": None, "last_error_at": None},
-        "email": {"available": False},
+        "email": {"available": False, "enabled": True},
     }
     try:
         from app.services import assistant_delivery
@@ -616,12 +795,44 @@ def _channels(user: CurrentUser) -> dict[str, Any]:
         for key in out["teams"]:
             if key in teams:
                 out["teams"][key] = teams[key]
-        out["email"]["available"] = bool((found.get("email") or {}).get("available"))
+        email = found.get("email") or {}
+        out["email"]["available"] = bool(email.get("available"))
+        if "enabled" in email:
+            out["email"]["enabled"] = bool(email.get("enabled"))
+        else:
+            out["email"]["enabled"] = _digest_email_on(user)
     except Exception:  # noqa: BLE001 - the card still renders without channel state
         logger.exception("assistant alerts: channel state could not be read")
     external = bool(getattr(get_settings(), "assistant_proactive_external_enabled", False))
     out["teams"]["available"] = bool(out["teams"]["available"]) and external
     out["email"]["available"] = bool(out["email"]["available"]) and external
+    return out
+
+
+def _pacific_midnight(now: datetime) -> datetime:
+    local = now.astimezone(PT)
+    return local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+
+
+def _triage_state(user: CurrentUser) -> dict[str, Any]:
+    """The read-only triage line of the Alerts card (plan 8.1): `available`
+    is the env flag, `on` adds the company switch and the allowlist, and the
+    counts are this person's own for the Pacific day (no cost: triage spends
+    company money, not the person's, P12). Nothing here can change triage;
+    there is no per-person switch."""
+    out: dict[str, Any] = {"available": triage_available(), "on": False, "last_run_at": None,
+                           "today": {"decided": 0, "escalations": 0}}
+    if not out["available"]:
+        return out
+    out["on"] = triage_flag(user, inbox_on=True)   # behind _user_gate
+    if out["on"]:
+        try:
+            summary = repo.triage_person_summary(user.id, _pacific_midnight(_now()))
+            out["last_run_at"] = summary.get("last_run_at")
+            out["today"] = {"decided": int(summary.get("decided") or 0),
+                            "escalations": int(summary.get("escalations") or 0)}
+        except Exception:  # noqa: BLE001 - the card still renders
+            logger.exception("assistant alerts: triage summary could not be read")
     return out
 
 
@@ -640,6 +851,7 @@ def get_alerts(user: CurrentUser = Depends(require_internal)) -> dict[str, Any]:
         },
         "digest_times": [times[k] for k in ("am", "pm") if k in times],
         "channels": _channels(user),
+        "triage": _triage_state(user),
         "kinds": _kinds(user),
         "project_mutes": [
             {"project_id": str(m["project_id"]), "number": (refs.get(str(m["project_id"])) or {}).get("number")}
@@ -684,6 +896,107 @@ def set_company(body: CompanyIn, user: CurrentUser = Depends(require_inbox_admin
         except Exception:  # noqa: BLE001 - the switch is saved; the lag guard covers a stale cursor
             logger.exception("assistant proactive: cursor reseed failed")
     return {"enabled": bool(saved.get("proactive_enabled"))}
+
+
+class DigestEmailIn(BaseModel):
+    enabled: bool
+
+
+# Two segments on purpose: a one-segment `PUT /alerts/digest-email` would be
+# captured by `PUT /alerts/{event_type}` (plan 8.1).
+@router.put("/alerts/me/digest-email")
+def set_digest_email(body: DigestEmailIn, user: CurrentUser = Depends(require_internal)) -> dict[str, bool]:
+    """The person's own switch for the assistant digest email only (owner
+    question 17 (a)); the in-app digest and the bell stay. The audit row
+    leads: a write the log cannot record does not happen."""
+    _user_gate(user)
+    enabled = bool(body.enabled)
+    _audit(user, DIGEST_EMAIL_AUDIT, {"enabled": enabled})
+    saved = repo.update_profile(user.id, {"digest_email_enabled": enabled})
+    return {"enabled": saved.get("digest_email_enabled") is not False}
+
+
+# -- Company triage switch (admin; plan 8.1) ---------------------------------
+
+_TRIAGE_COUNT_KEYS = ("status", "decision", "reason", "severity_hint", "skip_reason", "error_kind", "runs",
+                      "cost_usd", "fuse")
+
+
+def _triage_process_health() -> dict[str, Any]:
+    """The per-process breaker and cap pause the triage service keeps
+    (plan 5.1, 5.7), as `health()` on the service module. Absent or failing,
+    both read as not paused: this block informs, it never gates."""
+    found: dict[str, Any] = {}
+    try:
+        from app.services import assistant_triage
+
+        fn = getattr(assistant_triage, "health", None)
+        found = (fn() if callable(fn) else {}) or {}
+    except Exception:  # noqa: BLE001 - the admin block renders without it
+        logger.exception("assistant triage: process health could not be read")
+    breaker = found.get("breaker") if isinstance(found.get("breaker"), dict) else {}
+    paused = found.get("cap_paused") if isinstance(found.get("cap_paused"), dict) else {}
+    return {
+        "breaker": {"open": bool(breaker.get("open")), "next_probe_at": breaker.get("next_probe_at")},
+        "cap_paused": {"paused": bool(paused.get("paused")), "until": paused.get("until")},
+    }
+
+
+def _triage_company_view(user: CurrentUser) -> dict[str, Any]:
+    """The admin block's state: the switch row, the fuse latch, the Pacific
+    day's counts and spend (counts only, from assistant_triage_counts, which
+    also carries the company triage spend) and the process health. The one
+    place a request handler reads the counts RPC, as a system read."""
+    row = repo.settings_row(user.id) or {}
+    now = _now()
+    counts: dict[str, Any] | None = None
+    spend: dict[str, Any] | None = None
+    pending = 0
+    try:
+        data = repo.triage_counts(None, _pacific_midnight(now), now)
+        counts = {key: data.get(key) for key in _TRIAGE_COUNT_KEYS}
+        pending = int(data.get("cap_deferred_pending") or 0)
+        sp = data.get("spend") or {}
+        spend = {
+            "global_cap": sp.get("global_cap"), "global_spent": sp.get("global_spent"),
+            "global_held": sp.get("global_held"), "browser_task_held": sp.get("browser_held"),
+            "triage_spent_today": sp.get("triage_spent"), "triage_held": sp.get("triage_held"),
+        }
+    except Exception:  # noqa: BLE001 - the switch still works without the numbers
+        logger.exception("assistant triage: counts could not be read")
+    health = _triage_process_health()
+    return {
+        "enabled": bool(row.get("triage_enabled")),
+        "enabled_at": row.get("triage_enabled_at"),
+        "fuse_tripped": row.get("triage_fuse_tripped_at") is not None,
+        "fuse_tripped_at": row.get("triage_fuse_tripped_at"),
+        "breaker": health["breaker"],
+        "cap_paused": health["cap_paused"],
+        "counts": counts,
+        "cap_deferred_pending": pending,
+        "spend": spend,
+    }
+
+
+@router.get("/alerts/company/triage")
+def get_company_triage(user: CurrentUser = Depends(require_inbox_admin)) -> dict[str, Any]:
+    _admin_gate(user)
+    return _triage_company_view(user)
+
+
+@router.put("/alerts/company/triage")
+def set_company_triage(body: CompanyIn, user: CurrentUser = Depends(require_inbox_admin)) -> dict[str, Any]:
+    """The company triage switch (assistant_settings.triage_enabled), reachable
+    with the switch off. The audit row leads. A flip from off to on writes
+    triage_enabled_at and clears the fuse latch in one update (the only way
+    to clear a tripped fuse); a flip to off needs nothing more here, the
+    service skips the pending items on its next tick (5.1 step 1). Answers
+    the same body as the GET."""
+    _admin_gate(user)
+    enabled = bool(body.enabled)
+    _audit(user, TRIAGE_SWITCH_AUDIT, {"enabled": enabled})
+    repo.set_triage_enabled(user.id, enabled)
+    return _triage_company_view(user)
 
 
 @router.get("/alerts/defaults")
@@ -734,8 +1047,15 @@ def _role_or_422(value: str) -> Role:
     return role
 
 
+def _grid_kinds() -> tuple[str, ...]:
+    """The router kinds the admin role grid lists and its routes accept. A
+    catalog entry with `grid: False` (the triage escalation, whose severity is
+    the model's and not an admin choice) is skipped everywhere."""
+    return tuple(et for et in proactive.ROUTER_KINDS if proactive.EVENT_TYPES[et].get("grid", True))
+
+
 def _router_kind_or_404(event_type: str) -> None:
-    if event_type not in proactive.ROUTER_KINDS:
+    if event_type not in _grid_kinds():
         raise _coded(UNKNOWN_KIND)
 
 
@@ -754,7 +1074,7 @@ def _grid(admin: CurrentUser, only: Role | None = None) -> dict[str, Any]:
     rows = repo.role_subscriptions(admin.id, role=only.value if only is not None else None)
     by_key = {(str(r["role"]), str(r["event_type"])): r for r in rows}
     kinds: list[dict[str, Any]] = []
-    for et in proactive.ROUTER_KINDS:
+    for et in _grid_kinds():
         entry = proactive.EVENT_TYPES[et]
         cells: dict[str, dict[str, str]] = {}
         for role in roles:
@@ -779,6 +1099,11 @@ def set_alert_mode(event_type: str, body: ModeIn, user: CurrentUser = Depends(re
     entry = _catalog(event_type)
     _kind_or_404(user, event_type)
     if body.mode not in proactive.USER_MODES:
+        raise _coded(INVALID_MODE)
+    if event_type == proactive.TRIAGE_ESCALATION and body.mode != "off":
+        # On or off only (P8R-4): an own row exists only while the kind is
+        # off, so it can never block the third "not useful" mark's
+        # feedback_auto row. Turning it on is POST /alerts/{event_type}/reset.
         raise _coded(INVALID_MODE)
     enabled = body.mode != "off"
     severity = "normal" if not enabled else ("low" if entry["kind"] == "record" else proactive.severity_for_mode(body.mode))

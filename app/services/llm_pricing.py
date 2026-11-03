@@ -15,6 +15,10 @@ visibly "unknown". Rows and their check dates:
   were added by the AI Estimating build (docs/AI_ESTIMATING_BUILD_SPEC.md
   1.3 forbids a live model without a verified row; before 2026-10-21 their
   calls logged a NULL cost).
+- OpenAI (developers.openai.com/api/docs/pricing, checked 2026-11-02):
+  gpt-6-luna (0.10 input, 0.01 cached input, 0.50 output per 1M tokens),
+  added by Phase 8 triage (docs/ASSISTANT_PHASE8_PLAN.md 5.4). Re-check
+  the page on the day the model is first used live.
 - Anthropic (platform.claude.com/docs/en/about-claude/pricing, checked
   2026-10-21): claude-opus-5-5, claude-sonnet-5-5, claude-opus-5 (the
   splitter model). Cache writes bill at 1.25x the input price for the
@@ -44,7 +48,7 @@ Billing rules encoded per row:
   and bill at input x the row's write multiplier; they are never also
   billed as uncached input.
 - Long context: when a request's input_tokens exceed the row's threshold
-  (272,000 for gpt-6-astra and gpt-5.4) the WHOLE request bills at the
+  (272,000 for gpt-6-astra, gpt-6-luna and gpt-5.4) the WHOLE request bills at the
   long-context multipliers (2x input and cached input, 1.5x output), not
   just the tokens over the line. The plans reader packs groups under
   240,000 tokens for exactly this reason.
@@ -100,6 +104,18 @@ PRICES: dict[str, ModelPrice] = {
         input=Decimal("10"),
         cached_input=Decimal("1"),
         output=Decimal("50"),
+        long_context_threshold=272_000,
+        long_input_multiplier=Decimal(2),
+        long_output_multiplier=Decimal("1.5"),
+    ),
+    # Checked 2026-11-02 against developers.openai.com/api/docs/pricing; the
+    # Phase 8 triage model. Prompts above 272K input tokens bill the whole
+    # request at 2x input and cached input and 1.5x output (a triage call
+    # stays under 6,000 input tokens, so the tier never applies in practice).
+    "gpt-6-luna": ModelPrice(
+        input=Decimal("0.1"),
+        cached_input=Decimal("0.01"),
+        output=Decimal("0.5"),
         long_context_threshold=272_000,
         long_input_multiplier=Decimal(2),
         long_output_multiplier=Decimal("1.5"),

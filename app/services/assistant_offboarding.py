@@ -587,6 +587,48 @@ def phase7_offboard(user_id: str, mode: str) -> dict:
 HOOKS.append(phase7_offboard)
 
 
+# ── Phase 8 hook (docs/ASSISTANT_PHASE8_PLAN.md 11, WI-13) ───────────────────
+
+TRIAGE_SKIP_ROUNDS = 10
+# The page size of the SQL function assistant_triage_skip_user (0196: `limit
+# 500`). A test reads the migration and pins this to it.
+TRIAGE_SKIP_PAGE = 500
+
+
+def phase8_offboard(user_id: str, mode: str) -> dict:
+    """The phase 8 offboarding hook (plan 11). Acts only in the leaving modes
+    that keep the profile row (deactivated, demoted_external, sweep): a hard
+    delete relies on the cascade, and mfa_reset and role_changed do nothing
+    (with no delegation behind triage, owner question 15 (c), there is
+    nothing to stop, exactly as Phase 7 keeps delivering the Inbox). The
+    person's pending and claimed triage items are skipped `offboarded`, and
+    the RPC fails their claimed runs first, so a late finish emits nothing.
+    The RPC settles at most 500 items per call, so the step repeats up to
+    TRIAGE_SKIP_ROUNDS times while a full page comes back; a bigger backlog
+    finishes on a later sweep (so does a short page that `for update skip
+    locked` returns while rows are still locked: the daily orphan sweep
+    retries through phase7_owners_with_open_state). Returns {triage_items_skipped}, plus
+    phase8_unfinished when the step failed (counts only). Idempotent."""
+    from app.assistant import repo
+
+    if mode not in LEAVING_MODES or mode == "deleted":
+        return {}
+    skipped = 0
+    try:
+        for _ in range(TRIAGE_SKIP_ROUNDS):
+            settled = int(repo.triage_skip_user(user_id, "offboarded"))
+            skipped += settled
+            if settled < TRIAGE_SKIP_PAGE:
+                break
+    except Exception:  # noqa: BLE001 - counted, never raised
+        logger.exception("assistant offboarding: phase 8 triage skip failed for %s", user_id)
+        return {"triage_items_skipped": skipped, "phase8_unfinished": 1}
+    return {"triage_items_skipped": skipped}
+
+
+HOOKS.append(phase8_offboard)
+
+
 # ── The entry point ──────────────────────────────────────────────────────────
 
 
@@ -596,9 +638,17 @@ def offboard(user_id: str, mode: str, *, actor_id: str | None,
     """Run the steps of 3.10.2 for `mode` (one of MODES), in order. Never
     raises; failures are listed in the result and the audit row.
     `prior_revoked` is the delegations update_user already revoked before
-    the profile write, so the audit counts them (step 1 then finds none)."""
+    the profile write, so the audit counts them (step 1 then finds none).
+
+    The one exception to "never raises": the company spend identity
+    (spend.COMPANY_SPEND_ID, phase 8 triage's own budget id) is not a person,
+    so it raises ValueError before any step or hook runs (MC-1, F3): the
+    orphan sweep must never release a live triage hold through it."""
+    from app.assistant import repo as _guard_repo
     from app.services import llm_queue
 
+    if _guard_repo.is_company_spend_id(user_id):
+        raise ValueError("assistant offboarding: the company spend id is not a person")
     user_id = str(user_id)
     result = OffboardResult(ok=True)
     if mode not in MODES:

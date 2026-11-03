@@ -49,7 +49,16 @@ KIND_SPLIT_TASK = "split_task"
 KIND_PLANS_PAGES = "plans_pages"
 KIND_AI_ESTIMATE = "ai_estimate"
 KIND_BROWSER_TASK = "browser_task"
-KINDS = (KIND_TURN_CALL, KIND_SPLIT_TASK, KIND_PLANS_PAGES, KIND_AI_ESTIMATE, KIND_BROWSER_TASK)
+# Phase 8 (docs/ASSISTANT_PHASE8_PLAN.md 4.1 A2a, 5.4; owner questions 11 (b)
+# and 12 (b)): model triage spends company money. A triage hold is held only
+# by the company spend identity (0196 assistant_company_spend_id(), mirrored
+# as COMPANY_SPEND_ID), which holds no other kind; reserve refuses either
+# pairing before the RPC (0196 B2 refuses it too) and the RPC checks only the
+# company cap for it. Triage is not an external kind: its call carries the
+# hold, so settle closes it at the logged cost.
+KIND_TRIAGE = "triage"
+COMPANY_SPEND_ID = repo.COMPANY_SPEND_ID
+KINDS = (KIND_TURN_CALL, KIND_SPLIT_TASK, KIND_PLANS_PAGES, KIND_AI_ESTIMATE, KIND_BROWSER_TASK, KIND_TRIAGE)
 EXTERNAL_KINDS = (KIND_PLANS_PAGES, KIND_AI_ESTIMATE, KIND_BROWSER_TASK)
 TURN_CALL_TTL_SECONDS = 600
 MIN_TTL_SECONDS, MAX_TTL_SECONDS = 30, 43200   # the function's argument check
@@ -155,6 +164,9 @@ def reserve(
     spent + held < cap). Any other failure propagates: callers fail closed."""
     if kind not in KINDS:
         raise ValueError(f"unknown reservation kind {kind!r}")
+    if (kind == KIND_TRIAGE) != repo.is_company_spend_id(user_id):
+        # A triage hold is the company's; the company id holds nothing else.
+        raise ValueError("a triage hold is held only by the company spend identity, which holds no other kind")
     amount = _dec(amount)
     if amount < _ZERO:
         raise ValueError("a reservation amount is never negative")

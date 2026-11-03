@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "notes": "The 150-prompt tool-selection set (docs/ASSISTANT_PHASE4_PLAN.md 3.20). Each prompt runs at its role with every flag on unless flags turns one off, with the real system prompt and the core tool definitions; a first round that calls find_tools or load_skill gets one more round with the surfaced definitions. Nothing executes. A positive prompt hits when it calls an expected or alternate tool and no not_tools name; a negative prompt (expected_tools empty) hits when it calls nothing outside find_tools, load_skill and its alternates. find_query, when set, is the query the offline resolver check uses instead of the message. Project ids are placeholders that never resolve: selection runs read nothing. Phase 5 adds seven capability prompts and seven review/destination refusals; explicit mode is server context.",
+  "notes": "The 150-prompt tool-selection set (docs/ASSISTANT_PHASE4_PLAN.md 3.20). Each prompt runs at its role with every flag on unless flags turns one off, with the real system prompt and the core tool definitions; a first round that calls find_tools or load_skill gets one more round with the surfaced definitions. Nothing executes. A positive prompt hits when it calls an expected or alternate tool and no not_tools name; a negative prompt (expected_tools empty) hits when it calls nothing outside find_tools, load_skill and its alternates. find_query, when set, is the query the offline resolver check uses instead of the message. Project ids are placeholders that never resolve: selection runs read nothing. Phase 5 adds seven capability prompts and seven review/destination refusals; explicit mode is server context. Phase 8 (docs/ASSISTANT_PHASE8_PLAN.md 6.3) adds five inbox prompts: what is new, what was flagged on a bid, a digest, a request to mark rows read, which the read-only tool cannot do (a look with inbox_list first is an allowed alternate), and an email-style search that merely says inbox, which must stay on email_search.",
   "prompts": [
     {
       "id": "plans-runs-current",
@@ -2352,6 +2352,76 @@
       ],
       "category": "phase6-security",
       "mode": "mailbox_review"
+    },
+    {
+      "id": "inbox-whats-new",
+      "role": "estimating_engineer_materials",
+      "message": "What's new in my inbox?",
+      "expected_tools": [
+        "inbox_list"
+      ],
+      "acceptable_alternates": [],
+      "not_tools": [
+        "email_search",
+        "notification_history"
+      ],
+      "category": "inbox",
+      "mode": "normal"
+    },
+    {
+      "id": "inbox-flagged-on-bid",
+      "role": "executive",
+      "message": "Did my assistant flag anything on 26.10.7301?",
+      "expected_tools": [
+        "inbox_list"
+      ],
+      "acceptable_alternates": [],
+      "not_tools": [
+        "notification_history",
+        "email_search"
+      ],
+      "category": "inbox",
+      "mode": "normal"
+    },
+    {
+      "id": "inbox-digest-review",
+      "role": "accountant",
+      "message": "What was in my last assistant digest?",
+      "expected_tools": [
+        "inbox_list"
+      ],
+      "acceptable_alternates": [],
+      "not_tools": [
+        "email_search"
+      ],
+      "category": "inbox",
+      "mode": "normal"
+    },
+    {
+      "id": "inbox-mark-read-refused",
+      "role": "estimating_admin",
+      "message": "Mark everything in my assistant inbox as read for me.",
+      "expected_tools": [],
+      "acceptable_alternates": [
+        "inbox_list"
+      ],
+      "not_tools": [],
+      "category": "inbox",
+      "mode": "normal"
+    },
+    {
+      "id": "inbox-word-email-search",
+      "role": "estimating_engineer_materials",
+      "message": "Search my inbox for the Rexel quote.",
+      "expected_tools": [
+        "email_search"
+      ],
+      "acceptable_alternates": [],
+      "not_tools": [
+        "inbox_list"
+      ],
+      "category": "inbox",
+      "mode": "normal"
     }
   ]
 }

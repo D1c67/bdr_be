@@ -147,6 +147,20 @@ async def lifespan(_: FastAPI):
         from app.services import assistant_proactive
 
         assistant_proactive_task = asyncio.create_task(assistant_proactive.polling_loop())
+    # Assistant model triage (docs/ASSISTANT_PHASE8_PLAN.md 5.1): a separate
+    # loop that claims per-person batches of bell-sourced Inbox rows and has
+    # one small model decide none, suggest or escalate. Needs the router (its
+    # escalations go through it) and its own env flag; the company switch and
+    # the fuse latch are read from the database on every tick. Multi-worker
+    # safe: the claim RPC's row locks and fences live in Postgres.
+    assistant_triage_task: asyncio.Task | None = None
+    if (
+        settings.assistant_enabled and settings.assistant_proactive_enabled and settings.assistant_triage_enabled
+        and settings.assistant_triage_loop_enabled and settings.supabase_url
+    ):
+        from app.services import assistant_triage
+
+        assistant_triage_task = asyncio.create_task(assistant_triage.polling_loop())
     # Calling In (docs/CALLING_IN.md section 5): claims a call_in_entries row
     # when a project lands on a call list and notifies Executive + Estimating
     # Engineer Labor once, then closes the row when the project leaves.
@@ -342,7 +356,7 @@ async def lifespan(_: FastAPI):
         poll_task, reminder_task, digest_task, email_task, rfp_email_task,
         rfp_portal_task, llm_health_task, llm_queue_task, call_in_task, llm_target_task,
         pm_rfi_sync_task, browser_agents_task, auto_send_task, assistant_scheduler_task, assistant_calendar_task,
-        assistant_proactive_task,
+        assistant_proactive_task, assistant_triage_task,
     ):
         if task:
             task.cancel()
@@ -642,6 +656,10 @@ def features(user: CurrentUser = Depends(get_current_user)) -> dict[str, bool]:
     # block that stays visible with the company switch off.
     flags["assistant_inbox"] = assistant_inbox.features_flag(user)
     flags["assistant_proactive_admin"] = assistant_inbox.proactive_admin_flag(user)
+    # Phase 8 (docs/ASSISTANT_PHASE8_PLAN.md 8.1): triage is on for everyone
+    # who has the assistant once the env flag, the company switch and the
+    # inbox flag are on (the optional allowlist narrows it); no personal switch.
+    flags["assistant_triage"] = assistant_inbox.triage_flag(user, inbox_on=flags["assistant_inbox"])
     return flags
 
 
@@ -658,6 +676,7 @@ from app.routers import (  # noqa: E402
     analytics_evidence,
     assistant,
     assistant_inbox,
+    assistant_inbox_tools,
     assistant_memory,
     assistant_outlook,
     assistant_phase5,
@@ -777,6 +796,8 @@ app.include_router(assistant_routines.router)
 app.include_router(assistant_memory.router)
 # Phase 7: the proactive router's Inbox, Alerts and admin routes.
 app.include_router(assistant_inbox.router)
+# Phase 8: the assistant-only read route behind the chat tool inbox_list.
+app.include_router(assistant_inbox_tools.router)
 app.include_router(assistant_outlook.router)
 app.include_router(assistant_phase5.router)
 app.include_router(assistant_browser.router)

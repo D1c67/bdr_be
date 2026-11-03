@@ -401,6 +401,45 @@ def test_complete_json_openai_logs_usage_and_cost(monkeypatch, logged):
     assert llm.last_cost_usd() == Decimal("0.015000")
 
 
+def test_complete_json_sends_a_reasoning_effort_only_when_given(monkeypatch, logged):
+    # Phase 8 P8L-3: the triage call passes assistant_triage_reasoning_effort (empty by
+    # default, so nothing is sent); every other caller sends none.
+    requests: list[dict] = []
+    client = SimpleNamespace(responses=SimpleNamespace(
+        create=lambda **kw: requests.append(kw) or _resp('{"a": 1}', usage=_usage(10, 0, 5, 0))))
+    client.with_options = lambda **kw: client
+    _install(monkeypatch, client)
+    s = _s(openai_proposal_model="gpt-6-astra-2026-09-03")
+    msgs = [{"role": "user", "content": "x"}]
+    llm.complete_json("proposal", system="s", messages=msgs, settings=s)
+    llm.complete_json("proposal", system="s", messages=msgs, settings=s, reasoning_effort="low")
+    assert "reasoning" not in requests[0]
+    assert requests[1]["reasoning"] == {"effort": "low"}
+
+
+def test_complete_json_incomplete_still_logs_the_sdk_usage(monkeypatch, logged):
+    # Phase 8 P8L-4: a real cut-off reply's usage, as the openai SDK types it
+    # (a dev probe on 2026-11-03), reaches the log row and last_usage().
+    from openai.types.responses import ResponseUsage
+
+    usage = ResponseUsage.model_validate({
+        "input_tokens": 1047, "input_tokens_details": {"cached_tokens": 1044, "cache_write_tokens": 0},
+        "output_tokens": 120, "output_tokens_details": {"reasoning_tokens": 120}, "total_tokens": 1167})
+    client = SimpleNamespace(responses=SimpleNamespace(
+        create=lambda **kw: _resp("", usage=usage, status="incomplete", reason="max_output_tokens")))
+    client.with_options = lambda **kw: client
+    _install(monkeypatch, client)
+    s = _s(openai_proposal_model="gpt-6-astra-2026-09-03")
+    with pytest.raises(llm.LlmBadOutput, match="cut off"):
+        llm.complete_json("proposal", system="s", messages=[{"role": "user", "content": "x"}], settings=s)
+    row = logged[0]
+    assert row["ok"] is False
+    assert (row["input_tokens"], row["cached_tokens"], row["output_tokens"], row["reasoning_tokens"]) == (
+        1047, 1044, 120, 120)
+    assert row["cost_usd"] is not None and row["cost_usd"] > 0
+    assert llm.last_usage() == llm.LlmUsage(1047, 1044, 120, 120)
+
+
 def test_anthropic_usage_is_normalized_to_include_cache_reads(monkeypatch, logged):
     resp = SimpleNamespace(
         content=[SimpleNamespace(type="text", text="hello")],

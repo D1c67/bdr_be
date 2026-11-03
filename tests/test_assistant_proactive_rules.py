@@ -68,9 +68,11 @@ def all_strings(value):
 # ── catalog integrity ────────────────────────────────────────────────────────
 
 
-def test_exactly_three_router_owned_kinds():
+def test_exactly_four_router_owned_kinds():
     router = [k for k, v in P.EVENT_TYPES.items() if v["kind"] == "router"]
-    assert sorted(router) == ["assistant.approval_expiring", "bid.due_not_ready", "todo.due"]
+    assert sorted(router) == [
+        "assistant.approval_expiring", "assistant.triage_escalation", "bid.due_not_ready", "todo.due",
+    ]
     assert tuple(router) == P.ROUTER_KINDS
     assert "quote.late" not in P.EVENT_TYPES
     assert not any(k.startswith("quote.") for k in P.EVENT_TYPES)
@@ -81,7 +83,7 @@ def test_every_kind_has_the_required_parts():
         assert re.match(r"^[a-z][a-z0-9_.]{2,63}$", name), name
         assert e["kind"] in ("router", "record")
         assert e["sub_app"] in ("bidding", "pm", "none", "card"), name
-        assert e["source"] in ("sweeper", "bell_tail", "audit_tail"), name
+        assert e["source"] in ("sweeper", "bell_tail", "audit_tail", "emit"), name
         assert e["label"] and e["group"] and e["description"], name
         assert e["payload"], name
         assert {"title", "why"} <= set(e["templates"]) or {"title", "title_project"} <= set(e["templates"])
@@ -442,6 +444,8 @@ def test_subscription_precedence_user_over_admin_over_default():
     assert P.effective_subscription(et, EXE, {"enabled": True, "severity": "urgent"})["severity"] == "high"
     # admin urgent is allowed for the router kinds (owner question 39, b) and never for record kinds
     for kind in P.ROUTER_KINDS:
+        if kind == P.TRIAGE_ESCALATION:
+            continue  # urgent comes only from the model's hint (plan 5.6)
         assert P.effective_subscription(kind, EXE, role_row={"enabled": True, "severity": "urgent"})["severity"] == "urgent"
     got = P.effective_subscription("bell.verify", EXE, role_row={"enabled": True, "severity": "urgent"})
     assert got["source"] == "default" and got["severity"] == "low"
@@ -1338,3 +1342,300 @@ def test_configured_digest_times_and_quiet_window_reach_every_slot_function():
     # the default path is unchanged
     base = P.render(bid_event(slot="pm"), "executive", {"now": pt(2026, 10, 30, 13, 0, 5)})
     assert base["deliver_after"] == pt(2026, 10, 30, 13, 0)
+
+
+# ── Phase 8: the triage escalation kind (docs/ASSISTANT_PHASE8_PLAN.md 5.6, WI-8a) ─────────
+
+ESC = "assistant.triage_escalation"
+DUE_AT = pt(2026, 10, 30, 14, 30)          # Friday 2:30 PM Pacific
+BELL_AT = pt(2026, 10, 28, 9, 5)           # Wednesday 9:05 AM Pacific
+TUE_EVENING = pt(2026, 11, 3, 19, 30)
+SAT_EVENING = pt(2026, 10, 31, 19, 30)
+SAT_MORNING = pt(2026, 10, 31, 10, 0)
+HOLIDAY_EVENING = pt(2026, 11, 26, 19, 30)
+
+
+def esc_event(reason="due_soon_part_missing", hint="high", **over):
+    payload = {
+        "inbox_id": U1, "triage_item_id": U2, "run_id": U3, "reason": reason, "severity_hint": hint,
+        "source_kind": "bell.quote_received", "emitted_at": "2026-10-30T15:00:00+00:00",
+    }
+    payload.update(over)
+    return {"event_type": ESC, "payload": payload, "project_id": U3}
+
+
+def esc_facts(**over):
+    facts = {
+        "project_number": "26.10.7301", "now": pt(2026, 10, 30, 9, 0), "internal_bid_at": DUE_AT,
+        "role_owns_missing_part": True, "source_bell_unread": True, "source_bell_at": BELL_AT,
+    }
+    facts.update(over)
+    return facts
+
+
+def esc(reason="due_soon_part_missing", hint="high", role="executive", **facts):
+    return P.render(esc_event(reason, hint), role, esc_facts(**facts))
+
+
+def test_escalation_catalog_entry():
+    entry = P.EVENT_TYPES[ESC]
+    assert entry["kind"] == "router" and entry["source"] == "emit" and entry["sub_app"] == "none"
+    assert entry["label"] == "Assistant flagged an update" and entry["group"] == "Assistant"
+    assert entry["grid"] is False and entry["urgent_allowed"] is False
+    assert entry["audience"] == INTERNAL_ROLES and set(entry["defaults"]) == set(INTERNAL_ROLES)
+    assert len(entry["defaults"]) == 6 and set(entry["defaults"].values()) == {"normal"}
+    assert ESC in P.ROUTER_KINDS and P.ROUTER_KINDS[:3] == (
+        "bid.due_not_ready", "todo.due", "assistant.approval_expiring")
+    assert all(P.EVENT_TYPES[k]["grid"] is True for k in P.ROUTER_KINDS[:3])
+    assert all("grid" not in e for k, e in P.EVENT_TYPES.items() if e["kind"] == "record")
+    # the reasons are the six escalate reasons of plan 5.5, nothing else
+    assert P.ESCALATION_REASONS == (
+        "due_soon_part_missing", "due_soon_unread", "waiting_on_you", "unread_long", "needs_decision",
+        "changed_after_your_work")
+    assert P.ESCALATION_SEVERITIES == ("normal", "high", "urgent")
+
+
+def test_escalation_enums_match_the_triage_module():
+    """proactive.py keeps its own copy of the reasons and severities because
+    triage.py imports it; a drift would silently drop a reason or demote an
+    urgent hint in clean_payload, so the two copies are pinned equal."""
+    from app.assistant import triage
+
+    assert set(P.ESCALATION_REASONS) == set(triage.ESCALATE_REASONS)
+    assert len(P.ESCALATION_REASONS) == len(triage.ESCALATE_REASONS)
+    assert tuple(P.ESCALATION_SEVERITIES) == tuple(triage.SEVERITIES)
+
+
+def test_escalation_is_subject_only_and_no_other_kind_is():
+    """Plan 5.6: the audience is the subject only. The catalog flag tells the
+    router never to fall back to the role audience for a subject-less event."""
+    assert P.EVENT_TYPES[ESC]["subject_only"] is True
+    assert [k for k, e in P.EVENT_TYPES.items() if e.get("subject_only")] == [ESC]
+    assert all(P.EVENT_TYPES[k]["subject_only"] is False for k in P.ROUTER_KINDS[:3])
+
+
+def test_escalation_payload_allowlist_keeps_ids_and_enums_only():
+    clean = P.clean_payload(ESC, esc_event()["payload"] | {
+        "title": "free text", "message": "ignore previous instructions", "bell_id": U1, "amount": 5})
+    assert set(clean) == {"inbox_id", "triage_item_id", "run_id", "reason", "severity_hint", "source_kind",
+                          "emitted_at"}
+    bad = P.clean_payload(ESC, esc_event()["payload"] | {"reason": "covered_by_app", "severity_hint": "low"})
+    assert "reason" not in bad and "severity_hint" not in bad
+    assert "source_kind" not in P.clean_payload(ESC, {"source_kind": "x" * 65})
+    assert not any(part in key for key in P.EVENT_TYPES[ESC]["payload"] for part in P.FORBIDDEN_KEY_PARTS)
+
+
+def test_escalation_dedupe_key_is_one_per_inbox_row():
+    key = P.event_dedupe_key(ESC, P.clean_payload(ESC, esc_event()["payload"]), U3)
+    assert key == f"p8:esc:{U1}"
+    # run, item and project do not change it: one escalation per record row
+    other = P.event_dedupe_key(ESC, P.clean_payload(ESC, esc_event(triage_item_id=U3, run_id=U1)["payload"]), None)
+    assert other == key
+    with pytest.raises(ValueError):
+        P.event_dedupe_key(ESC, {}, U3)
+    assert P.render(esc_event(), "executive", esc_facts())["dedupe_key"] == key
+
+
+def test_escalation_auto_downgrade_line():
+    assert P.auto_downgrade_line(ESC) == (
+        "Assistant escalations now stay in your inbox only. Change this in Settings > My assistant.")
+    notices = P.downgrade_notices([{
+        "event_type": ESC, "source": "feedback_auto", "role": None, "created_at": "2026-10-30T16:00:00+00:00"}])
+    assert notices == [P.auto_downgrade_line(ESC)]
+
+
+def test_escalation_templates_per_reason_use_absolute_pacific_times():
+    assert esc("due_soon_part_missing")["title"] == (
+        "Bid 26.10.7301 is due Fri Oct 30, 2:30 PM PT and your part is still missing")
+    assert esc("due_soon_unread")["title"] == (
+        "Bid 26.10.7301 is due Fri Oct 30, 2:30 PM PT and an update is still unread")
+    assert esc("unread_long")["title"] == "An update on bid 26.10.7301 has waited unread since Wed Oct 28, 9:05 AM PT"
+    assert esc("waiting_on_you")["title"] == "Your assistant flagged bid 26.10.7301 as waiting on you"
+    assert esc("needs_decision")["title"] == "Your assistant flagged a decision on bid 26.10.7301"
+    assert esc("changed_after_your_work")["title"] == (
+        "Your assistant flagged a change on bid 26.10.7301 after your work")
+    for reason in P.ESCALATION_REASONS:
+        out = esc(reason)
+        assert out["why"] == "Your assistant flagged this. BDR already sent you the original notice."
+        assert out["kind_label"] == "Assistant flagged an update"
+        assert out["payload"]["project_number"] == "26.10.7301"
+        # no relative-hours slot: the text never counts hours or says today or tomorrow
+        assert not re.search(r"\bin \d+ hours?\b|\btoday\b|\btomorrow\b", out["title"]), out["title"]
+
+
+def test_escalation_overdue_variant():
+    late = dict(now=pt(2026, 10, 30, 16, 0))
+    for reason in ("due_soon_part_missing", "due_soon_unread"):
+        assert esc(reason, **late)["title"] == "Bid 26.10.7301 was due Fri Oct 30, 2:30 PM PT"
+    # a due time exactly now is overdue too
+    assert esc("due_soon_unread", now=DUE_AT)["title"].startswith("Bid 26.10.7301 was due")
+    # no project number: the numberless variants
+    assert esc("due_soon_part_missing", project_number=None, **late)["title"] == "A bid was due Fri Oct 30, 2:30 PM PT"
+    assert esc("due_soon_part_missing", project_number=None)["title"] == (
+        "A bid is due Fri Oct 30, 2:30 PM PT and your part is still missing")
+    assert esc("needs_decision", project_number=None)["title"] == "Your assistant flagged a decision"
+
+
+def test_escalation_part_clause_only_when_the_router_says_the_part_is_missing():
+    on = esc("due_soon_part_missing", role_owns_missing_part=True)["title"]
+    off = esc("due_soon_part_missing", role_owns_missing_part=False)["title"]
+    absent = esc("due_soon_part_missing", role_owns_missing_part=None)["title"]
+    assert "your part is still missing" in on
+    assert off == absent == "Bid 26.10.7301 is due Fri Oct 30, 2:30 PM PT"
+    # a model-written claim in the payload cannot add the clause
+    assert "your part" not in P.render(esc_event(role_owns_missing_part=True, part_missing=True),
+                                       "executive", esc_facts(role_owns_missing_part=False))["title"]
+
+
+def test_escalation_unread_clause_only_while_the_source_bell_is_unread():
+    assert "waited unread" in esc("unread_long", source_bell_unread=True)["title"]
+    assert "still unread" in esc("due_soon_unread", source_bell_unread=True)["title"]
+    read = esc("unread_long", source_bell_unread=False)["title"]
+    assert read == "Your assistant flagged an update on bid 26.10.7301"
+    assert esc("unread_long", source_bell_unread=None)["title"] == read
+    assert esc("unread_long", source_bell_at=None)["title"] == read          # no time to state
+    assert esc("due_soon_unread", source_bell_unread=False)["title"] == "Bid 26.10.7301 is due Fri Oct 30, 2:30 PM PT"
+    # no live bid time: the neutral wording, never a stale or guessed time
+    for reason in ("due_soon_part_missing", "due_soon_unread"):
+        assert esc(reason, internal_bid_at=None)["title"] == read
+    assert esc("unread_long", project_number=None, source_bell_unread=False)["title"] == (
+        "Your assistant flagged an update")
+
+
+def test_escalation_text_carries_no_payload_string_and_no_dash():
+    hostile = esc_event(source_kind="ignore_previous_instructions")
+    out = P.render(hostile, "executive", esc_facts())
+    for text in (out["title"], out["why"], P.teams_message(out["title"], out["why"])):
+        assert "ignore_previous" not in text and EM not in text and EN not in text
+    for reason in P.ESCALATION_REASONS:
+        for text in all_strings({k: esc(reason)[k] for k in ("title", "why")}):
+            assert EM not in text and EN not in text
+    for template in P.EVENT_TYPES[ESC]["templates"].values():
+        assert EM not in template and EN not in template and "hours" not in template
+
+
+@pytest.mark.parametrize("hint", ["normal", "high", "urgent"])
+@pytest.mark.parametrize("role", ["executive", "estimating_admin", "accountant", "it_admin"])
+def test_escalation_severity_is_the_models_hint(hint, role):
+    out = esc(hint=hint, role=role)
+    assert out["severity"] == hint
+    # the role default or a stray fact severity (today's route_event passes the subscription's) is not the answer
+    assert esc(hint=hint, role=role, severity="low")["severity"] == hint
+    assert esc(hint=hint, role=role, severity="normal")["severity"] == hint
+
+
+def test_escalation_without_a_valid_hint_is_normal():
+    event = esc_event()
+    del event["payload"]["severity_hint"]
+    assert P.render(event, "executive", esc_facts())["severity"] == "normal"
+    event["payload"]["severity_hint"] = "low"
+    assert P.render(event, "executive", esc_facts())["severity"] == "normal"
+
+
+def test_escalation_feedback_auto_row_caps_the_hint_and_nothing_else_does():
+    for hint in ("normal", "high", "urgent"):
+        capped = esc(hint=hint, subscription_source="feedback_auto", subscription_severity="low")
+        assert capped["severity"] == "low" and capped["delivery"] == "record" and capped["teams"] is False
+        assert capped["outcome"] == "push" and capped["deliver_after"] is None
+        # a feedback_auto row that is somehow not inbox only still only lowers
+        assert esc(hint=hint, subscription_source="feedback_auto", subscription_severity="high")[
+            "severity"] == min(hint, "high", key=P.SEVERITIES.index)
+        # no subscription severity passed: the row is inbox only by construction
+        assert esc(hint=hint, subscription_source="feedback_auto")["severity"] == "low"
+        # an admin role row, a manual user severity row and the role default never cap
+        for source in ("admin", "user", "default", "none", None):
+            assert esc(hint=hint, subscription_source=source, subscription_severity="low")["severity"] == hint
+    # the cap never raises a lower hint
+    assert esc(hint="normal", subscription_source="feedback_auto", subscription_severity="urgent")[
+        "severity"] == "normal"
+
+
+def test_escalation_ignores_every_subscription_severity_but_the_feedback_auto_mark():
+    user_row = {"enabled": True, "severity": "low"}
+    sub = P.effective_subscription(ESC, EXE, user_row)
+    assert sub["source"] == "user" and sub["enabled"] is True
+    out = esc(hint="urgent", severity=sub["severity"], subscription_source=sub["source"],
+              subscription_severity=sub["severity"])
+    assert out["severity"] == "urgent"
+    admin = P.effective_subscription(ESC, EXE, role_row={"enabled": True, "severity": "urgent"})
+    assert admin["severity"] == "normal" and admin["source"] == "default"      # urgent_allowed is False
+    auto = P.effective_subscription(ESC, EXE, {"enabled": True, "severity": "low", "source": "feedback_auto"})
+    assert auto["source"] == "feedback_auto"
+    assert esc(hint="high", subscription_source=auto["source"], subscription_severity=auto["severity"])[
+        "severity"] == "low"
+
+
+def test_escalation_follows_the_existing_router_rules():
+    # R25: a disabled user row (mute) suppresses; so does a muted project
+    off = esc(subscription_enabled=False)
+    assert (off["precedence"], off["outcome"], off["reason"], off["delivery"]) == ("R25", "suppress", "muted", None)
+    assert off["dedupe_key"] is None
+    assert esc(project_muted=True)["reason"] == "project_muted"
+    # R24 (19.1 FQ1): a closed project suppresses it like every router kind
+    closed = esc(project_closed=True)
+    assert (closed["precedence"], closed["outcome"], closed["reason"]) == ("R24", "suppress", "project_closed")
+    assert ev(ESC, project_closed=True)["id"] == "R24"
+    assert P._r_closed(ESC, {}, {"project_closed": True})["reason"] == "project_closed"
+    # R23: the person's Teams switch is a channel choice for high and urgent
+    for hint in ("high", "urgent"):
+        out = esc(hint=hint, teams_enabled=False)
+        assert out["precedence"] == "R23" and out["teams"] is False and out["delivery"] == "immediate"
+    assert esc(hint="normal", teams_enabled=False)["precedence"] is None
+    assert ev(ESC, bell_type="assistant.inbox")["id"] is None
+    # no triage-specific precedence rule exists (owner questions 6 (c) and 28 (c))
+    for rid in ("R27", "R28", "R31", "R32"):
+        assert rid not in P.RULE_IDS
+    assert not any(ESC in row["kinds"] for row in P.PRECEDENCE if row["id"] not in ("R25", "R24", "R23", "R21"))
+
+
+def test_escalation_delivery_plan_urgent_breaks_quiet_hours_on_any_day():
+    for moment in (TUE_EVENING, SAT_EVENING, HOLIDAY_EVENING):
+        plan = P.delivery_plan(ESC, "urgent", moment, HOLIDAYS)
+        assert plan["delivery"] == "immediate" and plan["held"] is False
+        assert plan["deliver_after"] == moment.astimezone(UTC) and plan["teams_not_before"] is None
+        out = esc(hint="urgent", now=moment, holidays=HOLIDAYS)
+        assert out["delivery"] == "immediate" and out["held"] is False and out["teams"] is True
+        assert out["deliver_after"] == moment.astimezone(UTC) and out["teams_not_before"] is None
+        assert not P.is_held({"delivery": "immediate", "severity": "urgent", "event_type": ESC,
+                              "deliver_after": out["deliver_after"], "created_at": moment})
+
+
+def test_escalation_delivery_plan_high_is_held_overnight_and_folds_on_a_workday():
+    out = esc(hint="high", now=TUE_EVENING, holidays=HOLIDAYS)
+    assert out["delivery"] == "immediate" and out["held"] is True and out["teams"] is True
+    assert out["deliver_after"] == pt(2026, 11, 4, 6, 0)
+    row = {"delivery": "immediate", "severity": "high", "event_type": ESC,
+           "deliver_after": out["deliver_after"], "created_at": TUE_EVENING}
+    assert P.is_held(row)
+    day, am_slot, until = P.fold_params(out["deliver_after"], HOLIDAYS)
+    assert (day, am_slot, until) == (date(2026, 11, 4), pt(2026, 11, 4, 7, 0), pt(2026, 11, 4, 10, 0))
+
+
+def test_escalation_delivery_plan_high_over_a_weekend_or_holiday_is_held_with_no_digest_to_fold_into():
+    out = esc(hint="high", now=SAT_EVENING, holidays=HOLIDAYS)
+    assert out["held"] is True and out["deliver_after"] == pt(2026, 11, 1, 6, 0)
+    assert P.fold_params(out["deliver_after"], HOLIDAYS) is None
+    thanksgiving = esc(hint="high", now=HOLIDAY_EVENING, holidays=HOLIDAYS)
+    assert thanksgiving["held"] is True and thanksgiving["deliver_after"] == pt(2026, 11, 27, 6, 0)
+    assert P.fold_params(thanksgiving["deliver_after"], HOLIDAYS) is None
+    # the in-app-only release is built and tested in WI-8b (_deliver, P8R-5)
+
+
+def test_escalation_delivery_plan_daytime_and_normal():
+    out = esc(hint="high", now=SAT_MORNING, holidays=HOLIDAYS)
+    assert out["held"] is False and out["teams"] is True and out["delivery"] == "immediate"
+    assert out["deliver_after"] == SAT_MORNING.astimezone(UTC)
+    mon = esc(hint="normal", now=SAT_MORNING, holidays=HOLIDAYS)
+    assert mon["delivery"] == "digest" and mon["teams"] is False and mon["held"] is False
+    assert mon["deliver_after"] == pt(2026, 11, 2, 7, 0)
+    after_holiday = esc(hint="normal", now=HOLIDAY_EVENING, holidays=HOLIDAYS)
+    assert after_holiday["deliver_after"] == pt(2026, 11, 30, 7, 0)
+
+
+def test_escalation_is_never_a_bell_tail_record():
+    # the router's own bell type is assistant.inbox: the loop guard
+    for routing_event in (*P.BELL_EVENTS, None, "other"):
+        assert P.bell_recordable("assistant.inbox", routing_event) is False
+    assert P.bell_recordable("assistant.digest", "personal") is False
+    assert P.bell_metadata(ESC, "26.10.7301")["actor_kind"] == "system"
+    assert P.bell_message("x" * 400) == "x" * 300

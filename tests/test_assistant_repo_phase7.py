@@ -111,9 +111,10 @@ def _phase7_functions() -> dict[str, object]:
 
 PUBLIC_API = {
     "set_proactive_enabled", "insert_events", "events_by_dedupe_keys", "events_claim", "event_finish",
-    "insert_inbox_row", "inbox_row", "inbox_row_by_key", "inbox_due_immediate", "inbox_folded_pending",
+    "insert_inbox_row", "inbox_row", "inbox_row_by_key", "inbox_rows_by_keys", "inbox_due_immediate",
+    "inbox_folded_pending",
     "inbox_pending_digest_users", "inbox_pending_digest", "inbox_digest_items", "inbox_list",
-    "inbox_unread_rows", "notification_states", "inbox_supersede_due_not_ready", "inbox_deliver",
+    "inbox_unread_rows", "notification_states", "inbox_supersede_due_not_ready", "inbox_retitle", "inbox_deliver",
     "digest_deliver", "inbox_mark_read", "inbox_feedback", "inbox_snooze", "inbox_dismiss", "inbox_link_bell",
     "inbox_fold", "user_subscriptions", "role_subscriptions", "subscription_set", "role_subscription_set",
     "subscription_reset", "role_subscription_reset", "project_mutes", "project_mute_add", "project_mute_remove",
@@ -492,6 +493,66 @@ def test_insert_inbox_row_is_per_person_and_ignores_a_duplicate(db):
     assert repo.inbox_row(USER, made["id"])["dedupe_key"] == made["dedupe_key"]
     assert repo.inbox_row(P7_OTHER, made["id"]) is None
     assert repo.inbox_row_by_key(P7_OTHER, made["dedupe_key"])["id"] == other["id"]
+
+
+def test_inbox_rows_by_keys_is_per_person_batched_and_skips_missing_keys(db, monkeypatch):
+    mine = [repo.insert_inbox_row(USER, _router_row(dedupe_key=f"p7:todo.due:t{n}:2026-10-30"), now=at())
+            for n in range(3)]
+    other = repo.insert_inbox_row(P7_OTHER, _router_row(dedupe_key="p7:todo.due:t0:2026-10-30"), now=at())
+    reads: list[str] = []
+    real = db.table
+    monkeypatch.setattr(db, "table", lambda name: reads.append(name) or real(name))
+    keys = [r["dedupe_key"] for r in mine] + ["p7:todo.due:missing:2026-10-30", mine[0]["dedupe_key"], ""]
+    found = repo.inbox_rows_by_keys(USER, keys)
+    assert reads == ["assistant_inbox"]                   # one read for the whole page
+    assert {k: r["id"] for k, r in found.items()} == {r["dedupe_key"]: r["id"] for r in mine}
+    theirs = repo.inbox_rows_by_keys(P7_OTHER, keys)
+    assert {k: r["id"] for k, r in theirs.items()} == {other["dedupe_key"]: other["id"]}
+    reads.clear()
+    assert repo.inbox_rows_by_keys(USER, []) == {} and reads == []
+
+
+def test_inbox_rows_by_keys_reads_one_chunk_per_hundred_keys(db, monkeypatch):
+    reads: list[str] = []
+    real = db.table
+    monkeypatch.setattr(db, "table", lambda name: reads.append(name) or real(name))
+    repo.inbox_rows_by_keys(USER, [f"p7:x:{n}" for n in range(150)])
+    assert reads == ["assistant_inbox", "assistant_inbox"]
+
+
+def test_the_inbox_list_links_escalations_with_one_batched_read(db, monkeypatch):
+    """WI9-3: _triage_for reads the escalation rows of a page of escalated
+    items in one call, never one inbox_row_by_key per item."""
+    from types import SimpleNamespace
+
+    from app.assistant import proactive
+    from app.routers import assistant_inbox as inbox_router
+
+    ids = [f"9d9d9d9d-9d9d-49d9-89d9-{n:012d}" for n in range(50)]
+    found = {i: {"inbox_id": i, "status": "decided", "decision": "escalate"} for i in ids}
+    found["9d9d9d9d-9d9d-49d9-89d9-999999999999"] = {"status": "decided", "decision": "none"}
+    monkeypatch.setattr(repo, "triage_items_for_inbox", lambda user_id, inbox_ids: dict(found))
+    monkeypatch.setattr(repo, "inbox_row_by_key", lambda *a, **k: pytest.fail("one read per item"))
+    batches: list[list[str]] = []
+
+    def by_keys(user_id, keys):
+        assert user_id == USER
+        batches.append(list(keys))
+        key = proactive.event_dedupe_key(proactive.TRIAGE_ESCALATION, {"inbox_id": ids[7]})
+        return {key: {"id": INBOX2, "dedupe_key": key}}
+
+    monkeypatch.setattr(repo, "inbox_rows_by_keys", by_keys)
+    rows = [{"id": i, "delivery": "record"} for i in found]
+    got, links = inbox_router._triage_for(SimpleNamespace(id=USER), rows)
+    assert len(batches) == 1 and len(batches[0]) == 50
+    assert got == found and links == {ids[7]: INBOX2}
+
+    def boom(user_id, keys):
+        raise RuntimeError("inbox read failed")
+
+    monkeypatch.setattr(repo, "inbox_rows_by_keys", boom)
+    got, links = inbox_router._triage_for(SimpleNamespace(id=USER), rows)
+    assert got == found and links == {}                    # the links are optional
 
 
 @pytest.mark.parametrize("override", [

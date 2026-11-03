@@ -463,6 +463,7 @@ def send_mail(
     rfq_id: str | None = None,
     sent_by: str | None = None,
     importance: str | None = None,
+    actor_kind: str | None = None,
 ) -> dict:
     """Send an email from the shared mailbox and record it in email_log.
 
@@ -473,7 +474,22 @@ def send_mail(
     `create_draft`). `importance` maps to Graph's message importance
     ("low"/"normal"/"high") — omit for normal mail; "high" shows the red "!"
     marker in Outlook. Returns the email_log row.
+
+    `actor_kind` stamps the log row's provenance. `None` (the default) keeps
+    the behaviour of every existing caller. `"system"` logs a router email
+    (the assistant digest) as `system` with no assistant run id; it is refused
+    inside an assistant run (a model-driven send must never be logged as
+    `system`) and when `sent_by` is set (a system email has no human sender).
+    Any other value is refused. All three refusals raise ValueError before
+    anything is written.
     """
+    if actor_kind is not None:
+        if actor_kind != provenance.ACTOR_SYSTEM:
+            raise ValueError(f"actor_kind must be None or 'system', got {actor_kind!r}")
+        if provenance.is_assistant():
+            raise ValueError("actor_kind='system' is refused inside an assistant run")
+        if sent_by is not None:
+            raise ValueError("actor_kind='system' cannot carry sent_by")
     settings = get_settings()
     sb = get_supabase()
     session = _active_test_session(sb)
@@ -493,6 +509,10 @@ def send_mail(
         "sent_by": sent_by,
         **provenance.fields(sent_by),
     }
+    if actor_kind == provenance.ACTOR_SYSTEM:
+        # After the provenance spread so nothing else can win.
+        log_row["actor_kind"] = provenance.ACTOR_SYSTEM
+        log_row["assistant_run_id"] = None
     if session is not None:
         log_row["test_session_id"] = session.get("id")
         log_row["redirected_to"] = (session.get("redirect_to") or "").strip() or None

@@ -417,6 +417,19 @@ _FEATURES: dict[str, _Feature] = {
         lambda s: s.assistant_model,
         lambda s: "",
     ),
+    # Phase 8 triage of the inbox feed (docs/ASSISTANT_PHASE8_PLAN.md 5.4):
+    # facts-only batches classified by gpt-6-luna, paid by the company spend
+    # identity. Pinned to OpenAI like the planner, because a self-hosted
+    # fallthrough would log a NULL cost (app/services/assistant_triage_model
+    # refuses any non-OpenAI or unpriced route before it reserves). The
+    # getattr default keeps every resolve working until the
+    # assistant_triage_model setting lands in core/config (WI-6, F5).
+    "assistant_triage": _Feature(
+        "openai",
+        lambda s: getattr(s, "assistant_triage_model", "gpt-6-luna"),
+        lambda s: "",
+        openai_pinned=True,
+    ),
 }
 
 PLANS_FEATURES: tuple[str, ...] = tuple(
@@ -780,14 +793,14 @@ def _int(value: Any) -> int:
     return max(0, int(value))
 
 
-def _openai_usage(resp: Any) -> LlmUsage | None:
+def _openai_usage(resp: Any, request: dict | None = None) -> LlmUsage | None:
     """Responses API usage: input_tokens (incl. cached), output_tokens (incl.
-    reasoning) and the two detail counts. Never raises."""
+    reasoning) and the two detail counts. A cut-off that reports no output
+    is floored (_floor_cut_off). `request` is the kwargs that were sent.
+    Never raises."""
     try:
         u = _get(resp, "usage")
-        if u is None:
-            return None
-        return LlmUsage(
+        usage = None if u is None else LlmUsage(
             input_tokens=_int(_get(u, "input_tokens")),
             cached_tokens=_int(_get(_get(u, "input_tokens_details"), "cached_tokens")),
             output_tokens=_int(_get(u, "output_tokens")),
@@ -795,6 +808,64 @@ def _openai_usage(resp: Any) -> LlmUsage | None:
         )
     except Exception:  # noqa: BLE001 - accounting must never break the call
         return None
+    try:
+        return _floor_cut_off(resp, usage, request)
+    except Exception as exc:  # noqa: BLE001 - a failed floor keeps the provider's numbers
+        logger.warning("llm: flooring a cut-off usage failed (%s)", type(exc).__name__)
+        return usage
+
+
+# String values under these request keys are base64 payloads or opaque
+# blobs, not prompt text, so the input estimate skips them.
+_UNPRICED_REQUEST_KEYS = frozenset({"image_url", "file_data", "encrypted_content"})
+
+
+def _request_chars(value: Any) -> int:
+    """Characters of prompt text in a Responses request (keys and string
+    values, payload blobs skipped)."""
+    if isinstance(value, str):
+        return len(value)
+    if isinstance(value, dict):
+        return sum(len(str(k)) + _request_chars(v) for k, v in value.items()
+                   if k not in _UNPRICED_REQUEST_KEYS)
+    if isinstance(value, (list, tuple)):
+        return sum(_request_chars(v) for v in value)
+    return 0
+
+
+def _floor_cut_off(resp: Any, usage: LlmUsage | None, request: dict | None) -> LlmUsage | None:
+    """P8L-4: a Responses call cut off at max_output_tokens produced about
+    max_output_tokens output tokens and is billed, so a usage that reads 0
+    output tokens (or none at all) for it would log a free call
+    (llm_call_log 6bd16e16, 2026-11-03) and the caps that sum
+    llm_call_log would under-count it. Such a usage records the allowance
+    (the request's max_output_tokens, else the one the response echoes)
+    as output, and, when no input was reported, the request text at one
+    token per four characters (images and files skipped, so it errs low).
+    Any other usage is returned unchanged; without a known allowance
+    nothing is floored."""
+    if _get(resp, "status") != "incomplete":
+        return usage
+    if _get(_get(resp, "incomplete_details"), "reason") != "max_output_tokens":
+        return usage
+    if usage is not None and usage.output_tokens > 0:
+        return usage
+    allowance = _int(_get(request, "max_output_tokens") or _get(resp, "max_output_tokens"))
+    if allowance <= 0:
+        return usage
+    base = usage or LlmUsage()
+    input_tokens = base.input_tokens
+    if input_tokens <= 0 and request is not None:
+        chars = _request_chars({k: request.get(k) for k in ("instructions", "input", "tools", "text")})
+        input_tokens = -(-chars // 4)
+    logger.warning("llm: a cut-off call reported no output tokens; logging the "
+                   "max_output_tokens allowance instead (P8L-4)")
+    return LlmUsage(
+        input_tokens=input_tokens,
+        cached_tokens=min(base.cached_tokens, input_tokens),
+        output_tokens=allowance,
+        reasoning_tokens=min(base.reasoning_tokens, allowance),
+    )
 
 
 def _anthropic_usage(resp: Any) -> LlmUsage | None:
@@ -875,10 +946,13 @@ def _openai_call(
     schema: dict | None,
     schema_name: str,
     json_output: bool,
+    reasoning_effort: str | None = None,
 ) -> str:
     kwargs: dict[str, Any] = {"model": model, "instructions": system, "input": input_}
     if max_tokens is not None:
         kwargs["max_output_tokens"] = max_tokens
+    if reasoning_effort:
+        kwargs["reasoning"] = {"effort": reasoning_effort}
     if json_output and schema is not None:
         kwargs["text"] = {
             "format": {
@@ -889,14 +963,14 @@ def _openai_call(
             }
         }
     resp = client.responses.create(**kwargs)
-    _raise_if_incomplete(resp)
+    _raise_if_incomplete(resp, kwargs)
     return resp.output_text or ""
 
 
-def _raise_if_incomplete(resp: Any) -> None:
+def _raise_if_incomplete(resp: Any, request: dict | None = None) -> None:
     """Record the usage (an incomplete response still bills) and raise
     LlmBadOutput when the Responses API cut the answer off."""
-    _record_usage(_openai_usage(resp))
+    _record_usage(_openai_usage(resp, request))
     if getattr(resp, "status", None) == "incomplete":
         reason = getattr(getattr(resp, "incomplete_details", None), "reason", "unknown")
         raise LlmBadOutput(f"Model response was cut off ({reason}). Retry the generation.")
@@ -1088,11 +1162,15 @@ def complete_json(
     max_tokens: int | None = None,
     timeout: float | None = None,
     settings: Settings | None = None,
+    reasoning_effort: str | None = None,
 ) -> Any:
     """JSON completion → parsed object. With `schema`, OpenAI/self-hosted use
     structured outputs; without one (the Claude extractions, whose prompts
     define the shape), the reply is tolerantly parsed. Domain validation stays
-    with the caller."""
+    with the caller. `reasoning_effort` (OpenAI Responses only; ignored on the
+    other providers) sends {"reasoning": {"effort": ...}}; None sends nothing,
+    so the model's own default applies (Phase 8 triage passes
+    assistant_triage_reasoning_effort, empty by default, so nothing is sent)."""
     _reset_last()
     route, s = _require_route(feature, settings)
     client = _with_timeout(_client_for(route, s), timeout)
@@ -1113,7 +1191,8 @@ def complete_json(
         elif route.provider == "openai":
             input_ = messages if len(messages) > 1 else messages[0]["content"]
             text = _openai_call(
-                client, route.model, system, input_, max_tokens, schema, schema_name, True
+                client, route.model, system, input_, max_tokens, schema, schema_name, True,
+                reasoning_effort=reasoning_effort,
             )
         else:
             text = _self_hosted_call(
@@ -1125,6 +1204,9 @@ def complete_json(
         "op": "json", "system": system, "messages": messages, "schema": schema,
         "schema_name": schema_name, "max_tokens": max_tokens,
     }
+    if reasoning_effort and route.provider == "openai":
+        # Only when sent, so every existing cassette fingerprint stays the same.
+        request["reasoning_effort"] = reasoning_effort
     return _guarded(feature, route, s, call, request=request)
 
 
@@ -1389,13 +1471,13 @@ def _refusal_text(resp: Any) -> str | None:
     return None
 
 
-def _raise_if_unusable_parts(resp: Any) -> None:
+def _raise_if_unusable_parts(resp: Any, request: dict | None = None) -> None:
     """complete_parts' version of _raise_if_incomplete: records usage (an
     incomplete or refused response still bills), then raises
     LlmBadOutputPermanent for a cut-off at the output limit, a content
     filter stop or a refusal, and plain LlmBadOutput (retried) for any
     other incomplete reason."""
-    _record_usage(_openai_usage(resp))
+    _record_usage(_openai_usage(resp, request))
     if getattr(resp, "status", None) == "incomplete":
         reason = getattr(getattr(resp, "incomplete_details", None), "reason", None) or "unknown"
         if reason == "max_output_tokens":
@@ -1524,7 +1606,7 @@ def complete_parts(
 
     def call() -> LlmResult:
         resp = _send_responses(client, kwargs)
-        _raise_if_unusable_parts(resp)
+        _raise_if_unusable_parts(resp, kwargs)
         usage = _openai_usage(resp)
         text = getattr(resp, "output_text", None) or ""
         tool_calls = _parse_tool_calls(resp)
@@ -1665,7 +1747,7 @@ def _openai_turn(client: Any, kwargs: dict, req: llm_parts.ModelRequest, route: 
     it into a forced final round); a content filter stop or a refusal is
     LlmBadOutputPermanent; any other incomplete reason is retryable."""
     resp = _send_responses(client, kwargs)
-    usage = _openai_usage(resp)
+    usage = _openai_usage(resp, kwargs)
     _record_usage(usage)
     stop = "final"
     if getattr(resp, "status", None) == "incomplete":

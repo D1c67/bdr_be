@@ -33,11 +33,19 @@ Invariants pinned here:
              the person's own subscription overrides and project mutes;
              deleted (the cascade), mfa_reset and role_changed do nothing;
              a failing step is counted phase7_unfinished and the rest run.
+  phase 8 (WI-13, plan 11) deactivated, demoted_external and sweep skip the
+             person's pending and claimed triage items `offboarded` and fail
+             their claimed runs; deleted relies on the cascade; mfa_reset and
+             role_changed do nothing; the hook is registered last, is
+             idempotent, repeats while a full page of 500 comes back, and a
+             failing step is counted phase8_unfinished; offboard() raises
+             for the company spend id before any step or hook runs (MC-1, F3).
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -76,6 +84,8 @@ from tests.assistant_fakes import (
     subscription_row,
     task,
     inbox_row,
+    triage_item_row,
+    triage_run_row,
 )
 
 EM_DASH = chr(0x2014)
@@ -823,7 +833,7 @@ def test_phase7_mfa_reset_and_role_changed_leave_the_router_alone(world, mode, n
 
 
 def test_phase7_hook_is_registered_after_phase_4_and_is_idempotent(world):
-    assert off.HOOKS[-1] is off.phase7_offboard
+    assert off.HOOKS.index(off.phase7_offboard) == off.HOOKS.index(off.phase8_offboard) - 1
     assert off.HOOKS.index(off.phase4_offboard) < off.HOOKS.index(off.phase7_offboard)
     _seed_p7(world)
     assert off.phase7_offboard(USER, "deactivated") == P7_COUNTS
@@ -844,3 +854,180 @@ def test_phase7_a_failing_step_is_counted_and_the_rest_still_run(world, monkeypa
     assert result.counts["phase7_unfinished"] == 1
     assert result.counts["inbox_dismissed"] == 2 and result.counts["subscriptions_deleted"] == 2
     assert _p7_state(world)["sends"][SEND] == ("pending", None)
+# ── Phase 8 hook (plan 11, WI-13) ────────────────────────────────────────────
+
+T_PEND, T_CLAIMED, T_DONE, T_OTHER, T_OTHER2 = (f"7a000000-0000-4000-8000-00000000000{i}" for i in range(1, 6))
+T_RUN, T_OTHER_RUN = "7b000000-0000-4000-8000-000000000001", "7b000000-0000-4000-8000-000000000002"
+P8_OTHER = P7_OTHER
+
+
+def _seed_p8(world) -> None:
+    """The person's pending, claimed and finished triage items and one
+    claimed run, and the same for someone else."""
+    t = world.db.tables
+    t["assistant_triage_items"] = [
+        triage_item_row(id=T_PEND),
+        triage_item_row(id=T_CLAIMED, status="claimed", run_id=T_RUN),
+        triage_item_row(id=T_DONE, status="decided", decision="none"),
+        triage_item_row(id=T_OTHER, user_id=P8_OTHER),
+        triage_item_row(id=T_OTHER2, user_id=P8_OTHER, status="claimed", run_id=T_OTHER_RUN),
+    ]
+    t["assistant_triage_runs"] = [
+        triage_run_row(id=T_RUN),
+        triage_run_row(id=T_OTHER_RUN, user_id=P8_OTHER),
+    ]
+
+
+def _p8_state(world) -> dict:
+    t = world.db.tables
+    return {
+        "items": {r["id"]: (r["status"], r["skip_reason"]) for r in t["assistant_triage_items"]},
+        "runs": {r["id"]: (r["status"], r["error_kind"]) for r in t["assistant_triage_runs"]},
+    }
+
+
+P8_UNTOUCHED = {
+    "items": {T_PEND: ("pending", None), T_CLAIMED: ("claimed", None), T_DONE: ("decided", None),
+              T_OTHER: ("pending", None), T_OTHER2: ("claimed", None)},
+    "runs": {T_RUN: ("claimed", None), T_OTHER_RUN: ("claimed", None)},
+}
+
+
+@pytest.mark.parametrize("mode", ["deactivated", "demoted_external", "sweep"])
+def test_phase8_leaving_modes_skip_the_triage_work_of_the_person_only(world, mode):
+    _seed_p8(world)
+    result = off.offboard(USER, mode, actor_id=None if mode == "sweep" else "admin")
+    assert result.ok and result.failures == []
+    assert _p8_state(world) == {
+        "items": {T_PEND: ("skipped", "offboarded"), T_CLAIMED: ("skipped", "offboarded"),
+                  T_DONE: ("decided", None), T_OTHER: ("pending", None), T_OTHER2: ("claimed", None)},
+        # The claimed run fails first, so a late finish emits nothing; the other person's run is untouched.
+        "runs": {T_RUN: ("failed", "switched_off"), T_OTHER_RUN: ("claimed", None)},
+    }
+    assert result.counts["triage_items_skipped"] == 2
+    assert "phase8_unfinished" not in result.counts
+    assert world.audits[-1]["payload"]["triage_items_skipped"] == 2
+
+
+def test_phase8_deleted_relies_on_the_cascade(world):
+    _seed_p8(world)
+    result = off.offboard(USER, "deleted", actor_id="admin")
+    assert result.ok
+    assert _p8_state(world) == P8_UNTOUCHED
+    assert "triage_items_skipped" not in result.counts and off.phase8_offboard(USER, "deleted") == {}
+
+
+@pytest.mark.parametrize("mode,new_role", [("mfa_reset", None), ("role_changed", "accountant"),
+                                           ("role_changed", "estimating_admin")])
+def test_phase8_mfa_reset_and_role_changed_leave_triage_alone(world, mode, new_role):
+    _seed_p8(world)
+    result = off.offboard(USER, mode, actor_id="admin", old_role="executive", new_role=new_role)
+    assert result.ok
+    assert _p8_state(world) == P8_UNTOUCHED
+    assert "triage_items_skipped" not in result.counts and "phase8_unfinished" not in result.counts
+    assert off.phase8_offboard(USER, mode) == {}
+    assert not [c for c in world.db.rpc_calls if c[0] == "assistant_triage_skip_user"]
+
+
+def test_phase8_hook_is_registered_last_and_is_idempotent(world):
+    assert off.HOOKS[-1] is off.phase8_offboard
+    assert off.HOOKS.index(off.phase7_offboard) < off.HOOKS.index(off.phase8_offboard)
+    _seed_p8(world)
+    assert off.phase8_offboard(USER, "deactivated") == {"triage_items_skipped": 2}
+    assert off.phase8_offboard(USER, "sweep") == {"triage_items_skipped": 0}
+    assert off.phase8_offboard(USER, "deactivated") == {"triage_items_skipped": 0}
+
+
+def test_phase8_the_rpc_is_called_for_the_person_with_the_offboarded_reason(world):
+    _seed_p8(world)
+    off.phase8_offboard(USER, "deactivated")
+    calls = [p for name, p in world.db.rpc_calls if name == "assistant_triage_skip_user"]
+    assert len(calls) == 1
+    assert calls[0]["p_user_id"] == USER and calls[0]["p_reason"] == "offboarded"
+
+
+def test_phase8_page_size_matches_the_sql_limit():
+    import re
+    from pathlib import Path
+
+    sql = (Path(__file__).resolve().parents[1] / "supabase" / "migrations" / "0196_assistant_phase8.sql").read_text()
+    start = sql.index("create or replace function public.assistant_triage_skip_user(")
+    nxt = sql.find("create or replace function", start + 10)
+    body = sql[start:nxt if nxt != -1 else len(sql)]
+    limits = {int(n) for n in re.findall(r"\blimit\s+(\d+)", body)}
+    assert limits == {off.TRIAGE_SKIP_PAGE}
+
+
+def test_phase8_a_full_page_repeats_until_the_backlog_is_gone(world, monkeypatch):
+    from app.assistant import repo
+
+    pages = iter([500, 500, 120])
+    seen: list[str] = []
+    monkeypatch.setattr(repo, "triage_skip_user", lambda user_id, reason, now=None: seen.append(reason) or next(pages))
+    assert off.phase8_offboard(USER, "sweep") == {"triage_items_skipped": 1120}
+    assert seen == ["offboarded"] * 3
+
+
+def test_phase8_a_backlog_beyond_the_rounds_is_left_for_the_next_sweep(world, monkeypatch):
+    from app.assistant import repo
+
+    calls: list[int] = []
+    monkeypatch.setattr(repo, "triage_skip_user", lambda *a, **k: calls.append(1) or 500)
+    result = off.phase8_offboard(USER, "sweep")
+    assert len(calls) == off.TRIAGE_SKIP_ROUNDS
+    assert result == {"triage_items_skipped": 500 * off.TRIAGE_SKIP_ROUNDS}
+
+
+def test_phase8_a_failing_step_is_counted_and_never_raised(world, monkeypatch):
+    from app.assistant import repo
+
+    _seed_p8(world)
+
+    def boom(*a, **k):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(repo, "triage_skip_user", boom)
+    result = off.offboard(USER, "deactivated", actor_id="admin")
+    assert result.ok and result.failures == []          # never a critical step, never a failed step
+    assert result.counts["phase8_unfinished"] == 1
+    assert _p8_state(world) == P8_UNTOUCHED
+    # The Phase 7 hook still ran.
+    assert "inbox_dismissed" in result.counts
+
+
+def test_offboard_refuses_the_company_spend_id_before_any_step_or_hook(world, monkeypatch):
+    seen: list[tuple] = []
+    monkeypatch.setattr(off, "HOOKS", [lambda u, m: seen.append((u, m)) or {}])
+    _seed(world)
+    _seed_p8(world)
+    before = [(c[0], c[1]) for c in world.db.calls]
+    for mode in off.MODES:
+        for spelling in (spend.COMPANY_SPEND_ID, spend.COMPANY_SPEND_ID.upper()):
+            with pytest.raises(ValueError):
+                off.offboard(spelling, mode, actor_id="admin")
+    assert seen == []
+    assert world.audits == [] and world.bells == []
+    assert [(c[0], c[1]) for c in world.db.calls] == before
+    assert world.db.rpc_calls == []
+    assert _p8_state(world) == P8_UNTOUCHED
+
+
+def test_the_sweep_of_a_live_triage_hold_never_offboards_the_company_id(world, monkeypatch):
+    """A fake active triage hold under the company id: the owners read never
+    lists it, and offboard refuses it even if a caller passes it anyway."""
+    from app.assistant import repo
+
+    world.db.tables["assistant_spend_reservations"] = [
+        reservation(user_id=spend.COMPANY_SPEND_ID, id="5a000000-0000-4000-8000-0000000000aa", kind="triage"),
+    ]
+    assert spend.COMPANY_SPEND_ID not in repo.owners_with_open_state(None)
+    with pytest.raises(ValueError):
+        off.offboard(spend.COMPANY_SPEND_ID, "sweep", actor_id=None)
+    assert [r["status"] for r in world.db.tables["assistant_spend_reservations"]] == ["active"]
+
+
+def test_the_phase8_hook_carries_no_em_dash():
+    text = Path(off.__file__).read_text(encoding="utf-8")
+    start = text.index("# ── Phase 8 hook")
+    end = text.index("# ── The entry point")
+    assert EM_DASH not in text[start:end] and chr(0x2013) not in text[start:end]

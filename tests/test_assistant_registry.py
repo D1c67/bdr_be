@@ -153,23 +153,28 @@ PHASE_FOUR_DEFERRED = (PHASE_FOUR_PLANS | PHASE_FOUR_PM | PHASE_FOUR_REPORTS | P
 
 PHASE_FIVE_DEFERRED = {"email_search", "email_read", "email_attachment_to_staging", "email_draft", "read_mailbox", "web_search", "web_fetch"}
 PHASE_SIX_DEFERRED = {"user_browser_task", "user_browser_status"}
+# Phase 8 (docs/ASSISTANT_PHASE8_PLAN.md 6.1): the one deferred inbox read tool.
+PHASE_EIGHT_DEFERRED = {"inbox_list"}
 
 
 def test_registered_set_is_pinned():
     tools = registry.all_tools()
     offered_names = (PHASE_ZERO_READS | PHASE_ONE_READS | PHASE_ONE_WRITES | PHASE_TWO_READS | PHASE_TWO_CONFIRMS
                      | PHASE_THREE_READS | PHASE_THREE_CONFIRMS | PHASE_THREE_HOUSEKEEPING
-                     | PHASE_FOUR_ALWAYS | PHASE_FOUR_DEFERRED | PHASE_FIVE_DEFERRED | PHASE_SIX_DEFERRED)
+                     | PHASE_FOUR_ALWAYS | PHASE_FOUR_DEFERRED | PHASE_FIVE_DEFERRED | PHASE_SIX_DEFERRED
+                     | PHASE_EIGHT_DEFERRED)
     assert set(tools) == offered_names | HIDDEN
     offered = {name for name, spec in tools.items() if spec.offered}
-    assert offered == offered_names and len(offered) == 64
+    assert offered == offered_names and len(offered) == 65
     assert {name for name, spec in tools.items() if not spec.offered} == HIDDEN
 
 
 def test_phase_four_deferral_is_pinned():
     tools = registry.all_tools()
     assert len(PHASE_FOUR_DEFERRED) == 25
-    assert {name for name, spec in tools.items() if spec.deferred} == PHASE_FOUR_DEFERRED | PHASE_FIVE_DEFERRED | PHASE_SIX_DEFERRED
+    assert {name for name, spec in tools.items() if spec.deferred} == (
+        PHASE_FOUR_DEFERRED | PHASE_FIVE_DEFERRED | PHASE_SIX_DEFERRED | PHASE_EIGHT_DEFERRED
+    )
     for name in PHASE_FOUR_ALWAYS:
         assert not tools[name].deferred and tools[name].roles == INTERNAL_ROLES
     assert tools["find_tools"].namespace == "core" and tools["memory_search"].namespace == "memory"
@@ -282,6 +287,8 @@ def test_request_builders_stay_inside_declared_routes():
         "run_report": {"report": "overview"},
         "coded_report": {"recipe": "quote_readiness"},
         "plans_get_output": {"category": "main", "section": "brief"},
+        "inbox_list": {"segment": "all", "kind": "bell.verify", "project": "26.10.7301",
+                       "before": "2026-11-02T10:00:00.000000Z|55555555-5555-4555-8555-555555555555"},
     }
     for spec in tools.values():
         if spec.effect != "read":

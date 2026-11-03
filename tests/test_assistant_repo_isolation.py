@@ -38,6 +38,10 @@ ALLOWED_TABLE_USERS = {
     APP / "assistant" / "repo.py",
     APP / "assistant" / "principal.py",
     APP / "assistant" / "evals" / "run_evals.py",
+    # The phase 8 triage eval runner (docs/ASSISTANT_PHASE8_PLAN.md 16.4, WI-14a):
+    # a dev-only runner like run_evals.py, which reads its own triage runs'
+    # llm_call_log rows and refuses to run beside a claimed triage run.
+    APP / "assistant" / "evals" / "run_triage_evals.py",
 }
 _TABLE_RE = re.compile(r"""\.table\(\s*["']assistant_""")
 _CONST_RE = re.compile(r"""["']assistant_[a-z_]+["']""")
@@ -371,3 +375,86 @@ def test_no_em_dash_in_the_package():
             offenders.append(path.name)
     assert em not in (APP / "routers" / "assistant.py").read_text(encoding="utf-8")
     assert offenders == []
+# ── Phase 8: model triage (docs/ASSISTANT_PHASE8_PLAN.md 16.1, WI-5) ─────────
+#
+# The triage system sweeps take user_id None as "every user" and refuse a
+# person's id (the _p7_system_only guard). Their callers are pinned by module,
+# like the phase 4 riders, because the work loop's helpers are named by WI-7:
+# the triage service (the loop and its purge step), the model module (the
+# live-test cap's company spend read) and the Inbox routes (the admin health
+# block). repo.py itself reads the counts for the fuse inputs. Every other
+# phase 8 function takes a real person's id and refuses the company spend id.
+
+_P8_MARKER = "# ── Phase 8: model triage"
+_P4_MARKER = "# ── Phase 4 (0180)"
+_TRIAGE = "services/assistant_triage.py"
+_TRIAGE_MODEL = "services/assistant_triage_model.py"
+PHASE8_SYSTEM_SWEEP_MODULES = {
+    "triage_enqueue": {_TRIAGE},
+    "triage_claim": {_TRIAGE},
+    "triage_finish": {_TRIAGE},
+    "triage_skip_all": {_TRIAGE},
+    "triage_purge": {_TRIAGE},
+    "triage_expired_company_holds": {_TRIAGE},
+    "triage_fuse_inputs": {_TRIAGE, _INBOX_ROUTES},
+    "triage_counts": {_TRIAGE, _INBOX_ROUTES, _REPO},
+    "triage_company_spend": {_TRIAGE_MODEL, _TRIAGE, _INBOX_ROUTES},
+}
+
+
+def _p8_repo_functions() -> dict[str, ast.FunctionDef]:
+    source = (APP / "assistant" / "repo.py").read_text(encoding="utf-8")
+    # The block sits between the phase 3 offboarding reads and phase 4.
+    start, end = source.index(_P8_MARKER), source.index(_P4_MARKER)
+    assert start < end
+    out: dict[str, ast.FunctionDef] = {}
+    for node in ast.parse(source).body:
+        if not isinstance(node, ast.FunctionDef) or node.name.startswith("_"):
+            continue
+        offset = sum(len(line) + 1 for line in source.splitlines()[: node.lineno - 1])
+        if start <= offset < end:
+            out[node.name] = node
+    return out
+
+
+def test_the_phase8_system_sweeps_take_an_optional_user_id_first_and_refuse_a_person():
+    functions = _p8_repo_functions()
+    optional = {n for n, node in functions.items()
+                if "None" in ast.unparse(node.args.args[0].annotation or ast.Constant(value=""))}
+    assert optional == set(PHASE8_SYSTEM_SWEEP_MODULES), optional
+    source = (APP / "assistant" / "repo.py").read_text(encoding="utf-8")
+    for name in PHASE8_SYSTEM_SWEEP_MODULES:
+        fn = getattr(repo, name)
+        param = next(iter(inspect.signature(fn).parameters.values()))
+        assert param.name == "user_id" and "None" in str(param.annotation), name
+        assert "system sweep" in (fn.__doc__ or "").lower(), name
+        assert "_p7_system_only(user_id," in ast.get_source_segment(source, functions[name]), name
+
+
+def test_the_phase8_system_sweeps_have_only_the_planned_caller_modules():
+    offenders = {}
+    for name, modules in PHASE8_SYSTEM_SWEEP_MODULES.items():
+        system = {mod for mod, _fn, call in _calls(name) if _passes_none_user(call)}
+        if not system <= modules:
+            offenders[name] = sorted(system - modules)
+        # A person's id never reaches a system sweep.
+        assert {mod for mod, _fn, call in _calls(name) if not _passes_none_user(call)} == set(), name
+    assert offenders == {}, offenders
+
+
+def test_every_phase8_per_person_function_filters_by_owner_and_refuses_the_company_id():
+    source = (APP / "assistant" / "repo.py").read_text(encoding="utf-8")
+    functions = _p8_repo_functions()
+    people = {n: node for n, node in functions.items() if n not in PHASE8_SYSTEM_SWEEP_MODULES}
+    assert len(people) >= 9, sorted(people)
+    offenders = []
+    for name, node in people.items():
+        text = ast.get_source_segment(source, node)
+        assert [a.arg for a in node.args.args][0] == "user_id", name
+        if "_refuse_company(user_id," not in text:
+            offenders.append((name, "no company id refusal"))
+        if ".table(" in text and '.eq("user_id", user_id)' not in text and "SETTINGS_TABLE" not in text:
+            offenders.append((name, "table access without an owner filter"))
+        if ".rpc(" in text and '"p_user_id"' not in text:
+            offenders.append((name, "rpc without the owner"))
+    assert offenders == [], offenders

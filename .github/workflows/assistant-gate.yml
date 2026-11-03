@@ -27,3 +27,5 @@ jobs:
         run: uv run python -m app.assistant.evals.run_evals --check
       - name: Personal browser runtime and isolation
         run: uv run pytest tests/test_assistant_browser_*.py tests/test_agent_worker_user.py tests/test_assistant_migration_0186.py tests/test_assistant_migration_0187.py tests/test_assistant_offboarding.py tests/test_users_assistant_offboarding.py -q
+      - name: Triage eval files, injection corpus and gate tests
+        run: uv run python -m app.assistant.evals.run_triage_evals --check && uv run python -m app.assistant.evals.run_triage_evals --injection && uv run pytest tests/test_assistant_triage_eval_gate.py tests/test_assistant_triage_evals.py -q

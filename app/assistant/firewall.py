@@ -335,6 +335,11 @@ _ASSISTANT_INBOX: tuple[RoutePair, ...] = (
     ("GET", "/assistant/alerts"),
     ("GET", "/assistant/alerts/company"),
     ("PUT", "/assistant/alerts/company"),
+    # Phase 8 (docs/ASSISTANT_PHASE8_PLAN.md 8.1): the person's digest email
+    # switch and the admins' company triage switch.
+    ("PUT", "/assistant/alerts/me/digest-email"),
+    ("GET", "/assistant/alerts/company/triage"),
+    ("PUT", "/assistant/alerts/company/triage"),
     ("GET", "/assistant/alerts/defaults"),
     ("PUT", "/assistant/alerts/defaults/{role}/{event_type}"),
     ("POST", "/assistant/alerts/defaults/{role}/{event_type}/reset"),

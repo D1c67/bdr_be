@@ -215,6 +215,13 @@ def make(monkeypatch, at: datetime) -> World:
     return World(monkeypatch, at)
 
 
+def triage_on(w: World, enabled_at: datetime, *, enabled: bool = True, fuse_at: datetime | None = None) -> None:
+    """The phase 8 company triage columns of assistant_settings (0196 A2)."""
+    w.db.tables["assistant_settings"][0].update(
+        triage_enabled=enabled, triage_enabled_at=iso(enabled_at),
+        triage_fuse_tripped_at=iso(fuse_at) if fuse_at else None)
+
+
 def bid_setup(w: World, *, due: datetime, labor: bool = True, markups: bool = False,
               quotes: tuple[str, ...] = (CAT1,), pid: str = PROJECT) -> None:
     """A live bid due at `due` with quotes missing in `quotes`, labor in or
@@ -1421,6 +1428,16 @@ def _catalog_event(w: World, kind: str, at: datetime) -> None:
         w.add("audit_log", {"id": uid(), "action": "project.failed_to_bid", "entity": "project",
                             "entity_id": PROJECT, "payload": {"reason": "capacity"},
                             "created_at": iso(at - timedelta(seconds=5))})
+    elif kind == proactive.TRIAGE_ESCALATION:
+        # Phase 8: the triage finish emits one event (source emit) for the
+        # row's owner, with company triage on since before it was emitted.
+        triage_on(w, at - timedelta(hours=1))
+        w.project(PROJECT, internal_bid_at=iso(at + timedelta(days=2)))
+        inbox_id = uid()
+        w.event(event_type=kind, dedupe_key=f"p8:esc:{inbox_id}", subject_user_id=MAT, project_id=PROJECT,
+                source="emit", occurred_at=iso(at),
+                payload={"inbox_id": inbox_id, "triage_item_id": uid(), "run_id": uid(), "reason": "needs_decision",
+                         "severity_hint": "high", "source_kind": "bell.quote_received", "emitted_at": iso(at)})
     else:
         audience = sorted(str(r.value) for r in proactive.EVENT_TYPES[kind]["audience"])
         user = next(ROLE_USER[r] for r in audience if r in ROLE_USER)
@@ -1476,6 +1493,496 @@ def test_every_catalog_kind_through_the_router_never_calls_a_bdr_sender(monkeypa
         assert sum(c["delivered"] for c in [*fakes.graph.calls, *fakes.teams.calls]) == len(w.sends())
 
 
+# ── Phase 8: triage escalations (docs/ASSISTANT_PHASE8_PLAN.md 5.6, 9; WI-8b) ─
+
+ESC = proactive.TRIAGE_ESCALATION
+PROJECT3 = "99999999-9999-4999-8999-999999999999"
+WHY = "Your assistant flagged this. BDR already sent you the original notice."
+
+
+def escalate(w: World, user: str | None = MAT, *, at: datetime, severity: str = "high",
+             reason: str = "needs_decision", project_id: str | None = PROJECT, inbox_id: str | None = None,
+             emitted: datetime | None = None) -> dict:
+    """One event as the triage finish emits it (0196 A6.3): source emit, the
+    item's subject, project and inbox id, ids and enums only."""
+    inbox_id = inbox_id or uid()
+    return w.event(event_type=ESC, dedupe_key=f"p8:esc:{inbox_id}", subject_user_id=user, project_id=project_id,
+                   source="emit", occurred_at=iso(at),
+                   payload={"inbox_id": inbox_id, "triage_item_id": uid(), "run_id": uid(), "reason": reason,
+                            "severity_hint": severity, "source_kind": "bell.quote_received",
+                            "emitted_at": iso(emitted or at)})
+
+
+def esc_world(monkeypatch, at: datetime, *, enabled_at: datetime | None = None,
+              due: datetime | None = None) -> World:
+    w = make(monkeypatch, at)
+    triage_on(w, enabled_at or at - timedelta(hours=1))
+    # Due well past any digest window, so no bid line joins the test.
+    w.project(PROJECT, internal_bid_at=iso(due or at + timedelta(days=10)))
+    return w
+
+
+def record_row(w: World, user: str = MAT, *, at: datetime, project_id: str | None = PROJECT,
+               read: datetime | None = None, dismissed: datetime | None = None) -> tuple[dict, dict]:
+    """A BDR bell (older than the tail window) and the record row triage looked at."""
+    bell = w.bell(user, "quote.received", at, project_id=project_id, read_at=iso(read) if read else None,
+                  dismissed_at=iso(dismissed) if dismissed else None)
+    row = w.row(user_id=user, event_type="bell.quote_received", delivery="record", severity="low",
+                dedupe_key=f"p7:bell:{bell['id']}", source_notification_id=bell["id"], project_id=project_id,
+                created_at=iso(at), deliver_after=None, title="Vendor quotes", why="Recorded.")
+    return bell, row
+
+
+def esc_rows(w: World, user: str | None = None) -> list[dict]:
+    return w.inbox(user, event_type=ESC)
+
+
+def test_an_escalation_routes_to_its_subject_only_and_carries_the_project(monkeypatch):
+    at = pt(2026, 10, 30, 16, 0)
+    w = esc_world(monkeypatch, at)
+    event = escalate(w, at=at)
+    w.tick(at, tails=False)
+    rows = esc_rows(w)
+    assert [r["user_id"] for r in rows] == [MAT]
+    row = rows[0]
+    assert row["project_id"] == PROJECT and row["dedupe_key"] == f"p8:esc:{event['payload']['inbox_id']}"
+    assert row["severity"] == "high" and row["delivery"] == "immediate" and row["delivered_at"] == iso(at)
+    assert row["title"] == "Your assistant flagged a decision on bid 26.10.7301" and row["why"] == WHY
+    assert row["payload"]["severity_hint"] == "high" and row["payload"]["project_number"] == "26.10.7301"
+    bells = w.bells(type_="assistant.inbox")
+    assert [b["user_id"] for b in bells] == [MAT]
+    assert bells[0]["metadata"]["actor_kind"] == "system" and bells[0]["metadata"]["event_type"] == ESC
+    assert [s["user_id"] for s in w.sends(target_kind="inbox", channel="teams")] == [MAT]
+    assert w.events(event_type=ESC)[0]["routed"] == {"recipients": 1, "immediate": 1, "written": 1, "delivered": 1}
+
+
+def test_an_escalation_without_a_subject_reaches_nobody(monkeypatch):
+    """subject_only (owner question 7): never the kind's role audience."""
+    at = pt(2026, 10, 30, 16, 0)
+    w = esc_world(monkeypatch, at)
+    escalate(w, None, at=at)
+    w.tick(at, tails=False)
+    assert w.inbox() == [] and w.bells(type_="assistant.inbox") == [] and w.sends() == []
+    assert w.events(event_type=ESC)[0]["status"] == "processed"
+
+
+@pytest.mark.parametrize("hint,delivery", [("normal", "digest"), ("high", "immediate"), ("urgent", "immediate")])
+def test_the_hint_is_the_severity_and_no_admin_or_manual_row_caps_it(monkeypatch, hint, delivery):
+    """5.6 Severity (P8R-4): a role default, an admin role row or a manual
+    user severity row never lowers the model's choice."""
+    at = pt(2026, 10, 30, 16, 0)
+    w = esc_world(monkeypatch, at)
+    w.sub(role="estimating_engineer_materials", user_id=None, event_type=ESC, severity="low", source="admin")
+    w.sub(user_id=MAT, event_type=ESC, severity="low", enabled=True, source="user")
+    escalate(w, at=at, severity=hint)
+    w.tick(at, tails=False)
+    row = esc_rows(w, MAT)[0]
+    assert row["severity"] == hint and row["delivery"] == delivery
+
+
+def test_route_event_passes_the_hint_and_the_subscription_source_to_render(monkeypatch):
+    at = pt(2026, 10, 30, 16, 0)
+    w = esc_world(monkeypatch, at)
+    w.sub(user_id=MAT, event_type=ESC, severity="low", enabled=True, source="feedback_auto")
+    seen: list[dict] = []
+    real = proactive.render
+
+    def spy(event, role, facts):
+        seen.append(dict(facts))
+        return real(event, role, facts)
+
+    monkeypatch.setattr(proactive, "render", spy)
+    escalate(w, at=at, severity="urgent")
+    w.tick(at, tails=False)
+    facts = next(f for f in seen if f.get("subscription_source"))
+    assert facts["severity"] == "urgent" and facts["subscription_source"] == "feedback_auto"
+    assert facts["subscription_severity"] == "low"
+    row = esc_rows(w, MAT)[0]
+    assert row["severity"] == "low" and row["delivery"] == "record"
+    assert w.bells(MAT, "assistant.inbox") == [] and w.sends() == []
+
+
+def test_mute_then_reset_then_three_not_useful_marks_make_the_next_urgent_hint_inbox_only(monkeypatch):
+    at = pt(2026, 10, 30, 10, 0)
+    w = esc_world(monkeypatch, at)
+    # The person's mute (B3 accepts it for this kind) writes an own row, off.
+    w.sub(user_id=MAT, event_type=ESC, enabled=False, severity="normal", source="user")
+    escalate(w, at=at, severity="urgent")
+    w.tick(at, tails=False)
+    assert esc_rows(w, MAT) == [] and w.events(event_type=ESC)[0]["routed"]["muted"] == 1
+    # On again through the reset route: the own row is deleted (P8R-4).
+    assert repo.subscription_reset(MAT, ESC) is True
+    later = at + timedelta(minutes=5)
+    for _ in range(3):
+        escalate(w, at=later, severity="urgent")
+    w.tick(later, tails=False)
+    delivered = esc_rows(w, MAT)
+    assert len(delivered) == 3 and all(r["delivery"] == "immediate" and r["delivered_at"] for r in delivered)
+    results = [repo.inbox_feedback(MAT, r["id"], "not_useful", now=later) for r in delivered]
+    assert [r["auto_downgraded"] for r in results] == [False, False, True]
+    teams_before = len(w.sends(channel="teams"))
+    last = later + timedelta(minutes=5)
+    escalate(w, at=last, severity="urgent")
+    w.tick(last, tails=False)
+    newest = max(esc_rows(w, MAT), key=lambda r: r["created_at"])
+    assert newest["severity"] == "low" and newest["delivery"] == "record"
+    assert len(w.bells(MAT, "assistant.inbox")) == 3 and len(w.sends(channel="teams")) == teams_before
+
+
+def test_mute_project_and_the_closed_project_rule_apply_to_escalations(monkeypatch):
+    """R25 (project mute) and R24 (19.1 FQ1) cover the kind like every router kind."""
+    at = pt(2026, 10, 30, 16, 0)
+    w = esc_world(monkeypatch, at)
+    w.project(PROJECT2, number="26.10.7302", abandoned_at=iso(at - timedelta(days=1)))
+    w.add("assistant_project_mutes", {"user_id": MAT, "project_id": PROJECT, "created_at": iso(at)})
+    muted = escalate(w, at=at, project_id=PROJECT)
+    closed = escalate(w, at=at, project_id=PROJECT2, severity="urgent")
+    w.tick(at, tails=False)
+    assert esc_rows(w) == [] and w.bells(type_="assistant.inbox") == [] and w.sends() == []
+    by_id = {e["id"]: e for e in w.events(event_type=ESC)}
+    assert by_id[muted["id"]]["routed"]["project_muted"] == 1
+    assert by_id[closed["id"]]["routed"]["suppressed"] == 1
+
+
+@pytest.mark.parametrize("state", ["switch_off", "fuse", "emitted_before_switch_on"])
+def test_a_withdrawn_escalation_is_skipped_at_route_time(monkeypatch, state):
+    at = pt(2026, 10, 30, 16, 0)
+    w = esc_world(monkeypatch, at)
+    if state == "switch_off":
+        triage_on(w, at - timedelta(hours=1), enabled=False)
+    elif state == "fuse":
+        triage_on(w, at - timedelta(hours=1), fuse_at=at - timedelta(minutes=1))
+    escalate(w, at=at, severity="urgent",
+             emitted=at - timedelta(hours=2) if state == "emitted_before_switch_on" else at)
+    w.tick(at, tails=False)
+    event = w.events(event_type=ESC)[0]
+    assert event["status"] == "processed" and event["routed"] == {"triage_off": 1}
+    assert w.inbox() == [] and w.bells(type_="assistant.inbox") == [] and w.sends() == []
+
+
+def test_the_triage_switch_never_touches_phase7_kinds(monkeypatch):
+    at = pt(2026, 10, 30, 16, 0)
+    w = esc_world(monkeypatch, at)
+    triage_on(w, at, enabled=False, fuse_at=at)
+    w.card(MAT, created=at - timedelta(hours=3), expires=at + timedelta(minutes=30))
+    w.tick(at, tails=False)
+    assert len(w.inbox(MAT, event_type="assistant.approval_expiring")) == 1
+
+
+@pytest.mark.parametrize("change", ["flip", "fuse", "off"])
+def test_a_held_escalation_is_dismissed_at_six_after_a_flip_or_fuse_or_switch_off(monkeypatch, change):
+    """P8R-3: emitted 19:30, then before 06:00 the company switch flips off
+    and on (or the fuse latches, or the switch goes off): the 06:00 release
+    dismisses it superseded and delivers nothing."""
+    at = pt(2026, 10, 29, 19, 30)
+    w = esc_world(monkeypatch, at)
+    escalate(w, at=at, severity="high")
+    w.tick(at, tails=False)
+    row = esc_rows(w, MAT)[0]
+    assert proactive.is_held(row) and row["deliver_after"] == iso(pt(2026, 10, 30, 6))
+    night = pt(2026, 10, 29, 23, 0)
+    if change == "flip":
+        triage_on(w, night)
+    elif change == "fuse":
+        triage_on(w, at - timedelta(hours=1), fuse_at=night)
+    else:
+        triage_on(w, at - timedelta(hours=1), enabled=False)
+    w.tick(pt(2026, 10, 30, 6, 0), tails=False)
+    assert row["dismissed_at"] is not None and row["dismissed_reason"] == "superseded"
+    assert row["delivered_at"] is None and row["delivery"] == "immediate"
+    w.tick(pt(2026, 10, 30, 7, 0, 30), tails=False)
+    assert row["digest_id"] is None
+    assert w.bells(MAT, "assistant.inbox") == [] and w.sends() == [] and w.digests(MAT) == []
+
+
+def test_a_normal_escalation_waiting_for_the_digest_is_dismissed_after_a_flip(monkeypatch):
+    at = pt(2026, 10, 29, 16, 0)
+    w = esc_world(monkeypatch, at)
+    escalate(w, at=at, severity="normal")
+    w.tick(at, tails=False)
+    row = esc_rows(w, MAT)[0]
+    assert row["delivery"] == "digest" and row["deliver_after"] == iso(pt(2026, 10, 30, 7))
+    triage_on(w, pt(2026, 10, 29, 20, 0))
+    w.tick(pt(2026, 10, 30, 7, 0, 30), tails=False)
+    assert row["dismissed_reason"] == "superseded" and row["digest_id"] is None
+    assert w.digests(MAT) == [] and w.sends() == []
+
+
+@pytest.mark.parametrize("mode", ["tick", "digests_only"])
+def test_a_folded_escalation_is_withdrawn_from_the_am_digest_after_a_fuse_trip(monkeypatch, mode):
+    """19.1 FQ9: a high escalation held from 19:30 folds into the AM digest
+    at 06:00; the fuse latches at 06:30. At 07:00 it is dismissed
+    superseded and never joins the digest. `digests_only` stubs the release
+    step so the digest delivery's own recheck is the one that withdraws it."""
+    at = pt(2026, 10, 29, 19, 30)
+    w = esc_world(monkeypatch, at)
+    escalate(w, at=at, severity="high")
+    w.tick(at, tails=False)
+    row = esc_rows(w, MAT)[0]
+    w.tick(pt(2026, 10, 30, 6, 0), tails=False)
+    assert row["delivery"] == "digest" and row["precedence"] == "quiet_hours" and row["dismissed_at"] is None
+    triage_on(w, at - timedelta(hours=1), fuse_at=pt(2026, 10, 30, 6, 30))
+    if mode == "digests_only":
+        monkeypatch.setattr(svc, "release_held", lambda *a, **k: {})
+    out = w.tick(pt(2026, 10, 30, 7, 0, 30), tails=False)
+    assert out["release" if mode == "tick" else "digests"]["dismissed_superseded"] == 1
+    assert row["dismissed_reason"] == "superseded" and row["delivered_at"] is None and row["digest_id"] is None
+    assert w.bells(MAT, "assistant.inbox") == [] and w.bells(MAT, "assistant.digest") == []
+    assert w.digests(MAT) == [] and w.sends() == []
+
+
+def test_a_folded_escalation_is_not_unfolded_with_teams_after_a_flip(monkeypatch):
+    """19.1 FQ9, the un-fold branch: folded at 06:00, the AM digest never
+    goes out and the company switch flips; at 10:00 the un-fold pass
+    rechecks and dismisses it superseded instead of ringing it with Teams."""
+    at = pt(2026, 10, 29, 19, 30)
+    w = esc_world(monkeypatch, at)
+    escalate(w, at=at, severity="high")
+    w.tick(at, tails=False)
+    row = esc_rows(w, MAT)[0]
+    w.tick(pt(2026, 10, 30, 6, 0), tails=False)
+    assert row["delivery"] == "digest" and row["precedence"] == "quiet_hours"
+    triage_on(w, pt(2026, 10, 30, 6, 30))
+    out = w.tick(pt(2026, 10, 30, 10, 0), tails=False)  # no tick in between: no AM digest
+    assert out["release"]["dismissed_superseded"] == 1 and "unfolded" not in out["release"]
+    assert row["dismissed_reason"] == "superseded" and row["delivered_at"] is None
+    assert w.bells(MAT, "assistant.inbox") == [] and w.sends(channel="teams") == [] and w.sends() == []
+
+
+def test_a_held_unread_long_escalation_goes_out_neutral_once_the_bell_was_read(monkeypatch):
+    """Plan 5.6: "waited unread" holds only while the source bell is unread.
+    Routed Friday 19:30 with the bell unread, the bell is read at 21:00, so
+    the Saturday 06:00 release re-renders the title to the neutral wording,
+    and the row and its bell carry it."""
+    fri = pt(2026, 10, 30, 19, 30)
+    w = esc_world(monkeypatch, fri)
+    bell, record = record_row(w, at=pt(2026, 10, 30, 9, 12))
+    escalate(w, at=fri, inbox_id=record["id"], reason="unread_long", severity="high")
+    w.tick(fri, tails=False)
+    row = esc_rows(w, MAT)[0]
+    assert row["title"] == "An update on bid 26.10.7301 has waited unread since Fri Oct 30, 9:12 AM PT"
+    assert proactive.is_held(row)
+    bell["read_at"] = iso(pt(2026, 10, 30, 21, 0))
+    w.tick(pt(2026, 10, 31, 6, 0), tails=False)
+    neutral = "Your assistant flagged an update on bid 26.10.7301"
+    assert row["delivered_at"] == iso(pt(2026, 10, 31, 6)) and row["title"] == neutral
+    assert [b["message"] for b in w.bells(MAT, "assistant.inbox")] == [neutral]
+
+
+def test_a_folded_part_missing_escalation_is_re_rendered_at_the_fold_and_at_the_digest(monkeypatch):
+    """Plan 5.6: the part filled overnight drops "your part is still
+    missing" at the 06:00 fold, and a due time that passed before the 07:00
+    digest gives the overdue wording the digest and its email carry."""
+    at = pt(2026, 10, 29, 19, 30)
+    w = make(monkeypatch, at)
+    triage_on(w, at - timedelta(hours=1))
+    bid_setup(w, due=pt(2026, 10, 30, 6, 30), labor=False, markups=True)
+    escalate(w, LAB, at=at, reason="due_soon_part_missing", severity="high")
+    w.tick(at, tails=False)
+    row = esc_rows(w, LAB)[0]
+    assert row["title"] == "Bid 26.10.7301 is due Fri Oct 30, 6:30 AM PT and your part is still missing"
+    w.add("labor_reviews", {"project_id": PROJECT, "labor_amount": AMOUNTS[0]})
+    w.tick(pt(2026, 10, 30, 6, 0), tails=False)
+    assert row["delivery"] == "digest" and row["title"] == "Bid 26.10.7301 is due Fri Oct 30, 6:30 AM PT"
+    w.tick(pt(2026, 10, 30, 7, 0, 30), tails=False)
+    assert row["digest_id"] is not None and row["delivered_at"] is not None
+    assert row["title"] == "Bid 26.10.7301 was due Fri Oct 30, 6:30 AM PT"
+    assert w.sends(target_kind="inbox") == []
+    assert len(w.sends(target_kind="digest", channel="email", user_id=LAB)) == 1
+
+
+def test_escalations_are_delivered_as_chosen_on_a_read_or_dismissed_bell_or_beside_the_bid_line(monkeypatch):
+    """Owner questions 6 (c) and 28 (c): no R27, R28, R31, R32, no read-bell cap."""
+    at = pt(2026, 10, 30, 16, 0)
+    w = esc_world(monkeypatch, at)
+    _bell, read = record_row(w, at=at - timedelta(days=1), read=at - timedelta(hours=3))
+    _bell2, gone = record_row(w, at=at - timedelta(days=1), dismissed=at - timedelta(hours=2))
+    w.row(user_id=MAT, event_type="bid.due_not_ready", delivery="digest", severity="normal", project_id=PROJECT,
+          dedupe_key="p7:bid.due_not_ready:x", deliver_after=iso(pt(2026, 11, 2, 7)), payload={})
+    escalate(w, at=at, inbox_id=read["id"], reason="unread_long")
+    escalate(w, at=at, inbox_id=gone["id"], reason="due_soon_unread")
+    escalate(w, at=at, reason="due_soon_part_missing", severity="urgent")
+    w.tick(at, tails=False)
+    rows = esc_rows(w, MAT)
+    assert len(rows) == 3 and all(r["delivered_at"] == iso(at) for r in rows)
+    assert len(w.sends(target_kind="inbox", channel="teams")) == 3
+    assert w.inbox(MAT, event_type="bid.due_not_ready")[0]["dismissed_at"] is None
+
+
+def test_the_part_missing_clause_comes_from_the_routers_own_live_facts(monkeypatch):
+    """19.1 FQ5: the clause appears only when the router computes that a
+    part this person's role owns is missing; times are absolute Pacific."""
+    at = pt(2026, 10, 30, 10, 0)
+    w = make(monkeypatch, at)
+    triage_on(w, at - timedelta(hours=1))
+    bid_setup(w, due=pt(2026, 10, 30, 15, 0), labor=True, markups=True)  # quotes missing only
+    escalate(w, MAT, at=at, reason="due_soon_part_missing")
+    escalate(w, LAB, at=at, reason="due_soon_part_missing")
+    w.tick(at, tails=False)
+    mat, lab = esc_rows(w, MAT)[0], esc_rows(w, LAB)[0]
+    assert mat["title"] == "Bid 26.10.7301 is due Fri Oct 30, 3:00 PM PT and your part is still missing"
+    assert lab["title"] == "Bid 26.10.7301 is due Fri Oct 30, 3:00 PM PT"
+    blob = str(mat) + str(lab)
+    assert HOSTILE not in blob and not any(a in blob for a in AMOUNTS)
+
+
+def test_a_moved_due_date_shows_the_live_time_and_a_past_one_the_overdue_wording(monkeypatch):
+    at = pt(2026, 10, 30, 16, 0)
+    w = esc_world(monkeypatch, at, due=pt(2026, 10, 30, 15, 0))
+    escalate(w, at=at, reason="due_soon_unread")
+    w.tick(at, tails=False)
+    assert esc_rows(w, MAT)[0]["title"] == "Bid 26.10.7301 was due Fri Oct 30, 3:00 PM PT"
+
+
+def test_the_unread_clause_follows_the_source_bell_found_through_the_record_row(monkeypatch):
+    at = pt(2026, 10, 30, 16, 0)
+    w = esc_world(monkeypatch, at)
+    _b1, unread = record_row(w, at=pt(2026, 10, 29, 9, 12))
+    _b2, read = record_row(w, at=pt(2026, 10, 29, 9, 30), read=pt(2026, 10, 29, 10, 0))
+    _b3, other = record_row(w, LAB, at=pt(2026, 10, 29, 9, 40))
+    escalate(w, at=at, inbox_id=unread["id"], reason="unread_long")
+    escalate(w, at=at, inbox_id=read["id"], reason="unread_long")
+    escalate(w, at=at, inbox_id=other["id"], reason="unread_long")  # another person's row: never read
+    w.tick(at, tails=False)
+    titles = sorted(r["title"] for r in esc_rows(w, MAT))
+    assert titles == ["An update on bid 26.10.7301 has waited unread since Thu Oct 29, 9:12 AM PT",
+                      "Your assistant flagged an update on bid 26.10.7301",
+                      "Your assistant flagged an update on bid 26.10.7301"]
+
+
+def test_an_1815_high_escalation_held_to_six_folds_at_seven_with_absolute_times_though_the_bell_was_read(
+        monkeypatch):
+    at = pt(2026, 10, 29, 18, 15)
+    w = make(monkeypatch, at)
+    triage_on(w, at - timedelta(hours=1))
+    bid_setup(w, due=pt(2026, 10, 30, 15, 0), labor=True, markups=True)
+    bell, record = record_row(w, at=pt(2026, 10, 29, 17, 0))
+    escalate(w, at=at, inbox_id=record["id"], reason="due_soon_part_missing")
+    w.tick(at, tails=False)
+    row = esc_rows(w, MAT)[0]
+    title = "Bid 26.10.7301 is due Fri Oct 30, 3:00 PM PT and your part is still missing"
+    assert row["title"] == title and proactive.is_held(row)
+    assert row["deliver_after"] == iso(pt(2026, 10, 30, 6))
+    bell["read_at"] = iso(pt(2026, 10, 29, 21, 0))
+    w.tick(pt(2026, 10, 30, 6, 0), tails=False)
+    assert row["delivery"] == "digest" and row["precedence"] == "quiet_hours" and row["dismissed_at"] is None
+    w.tick(pt(2026, 10, 30, 7, 0, 30), tails=False)
+    assert row["digest_id"] is not None and row["delivered_at"] is not None and row["title"] == title
+    assert w.sends(target_kind="inbox") == []
+    assert len(w.sends(target_kind="digest", channel="email", user_id=MAT)) == 1
+
+
+def test_a_saturday_release_of_held_high_escalations_rings_in_app_only_and_urgent_rings_teams(monkeypatch):
+    """P27 in `_deliver` (P8R-5, F6): three projects' high escalations held
+    from Friday 19:30 are released Saturday 06:00 with three bells and no
+    Teams ledger row; an urgent one on Saturday night writes one Teams row
+    at once, and a high one at Saturday 10:00 (not held) does too."""
+    fri = pt(2026, 10, 30, 19, 30)
+    w = esc_world(monkeypatch, fri)
+    w.project(PROJECT2, number="26.10.7302")
+    w.project(PROJECT3, number="26.10.7303")
+    for pid in (PROJECT, PROJECT2, PROJECT3):
+        escalate(w, at=fri, project_id=pid, severity="high")
+    w.tick(fri, tails=False)
+    held = esc_rows(w, MAT)
+    assert len(held) == 3 and all(proactive.is_held(r) for r in held)
+    assert all(r["deliver_after"] == iso(pt(2026, 10, 31, 6)) for r in held)
+    w.tick(pt(2026, 10, 31, 6, 0), tails=False)
+    assert all(r["delivered_at"] == iso(pt(2026, 10, 31, 6)) and r["delivery"] == "immediate" for r in held)
+    assert len(w.bells(MAT, "assistant.inbox")) == 3
+    assert w.sends(channel="teams") == []
+    w.tick(pt(2026, 10, 31, 7, 0, 30), tails=False)
+    assert w.digests() == []
+    sat_night = pt(2026, 10, 31, 19, 30)
+    escalate(w, at=sat_night, severity="urgent")
+    w.tick(sat_night, tails=False)
+    urgent = [r for r in esc_rows(w, MAT) if r["severity"] == "urgent"][0]
+    assert urgent["delivered_at"] == iso(sat_night)
+    teams = w.sends(channel="teams")
+    assert len(teams) == 1 and teams[0]["target_id"] == urgent["id"] and teams[0]["not_before"] == iso(sat_night)
+    sun = pt(2026, 11, 1, 10, 0)
+    escalate(w, at=sun, severity="high")
+    w.tick(sun, tails=False)
+    assert len(w.sends(channel="teams")) == 2
+
+
+def test_a_held_high_escalation_released_on_a_holiday_rings_in_app_only(monkeypatch):
+    at = pt(2026, 11, 25, 19, 30)
+    w = esc_world(monkeypatch, at)
+    w.db.tables["assistant_settings"][0]["holidays"] = ["2026-11-26"]
+    escalate(w, at=at, severity="high")
+    w.tick(at, tails=False)
+    w.tick(pt(2026, 11, 26, 6, 0), tails=False)
+    row = esc_rows(w, MAT)[0]
+    assert row["delivered_at"] == iso(pt(2026, 11, 26, 6)) and w.sends(channel="teams") == []
+
+
+def test_the_non_workday_rule_is_only_for_escalations(monkeypatch):
+    """A held Phase 7 high row released on Saturday still gets its Teams row."""
+    w, row = _held_world(monkeypatch, pt(2026, 10, 31, 2, 0))
+    triage_on(w, pt(2026, 10, 30, 0, 0))
+    w.tick(pt(2026, 10, 31, 6, 0), tails=False)
+    assert row["delivered_at"] is not None and len(w.sends(target_kind="inbox", channel="teams")) == 1
+
+
+def test_digest_email_opt_out_writes_no_email_ledger_row(monkeypatch):
+    """Plan 9 step 2: the in-app digest and its bell stay; only the email row goes."""
+    at = pt(2026, 10, 30, 7, 0, 30)
+    w = make(monkeypatch, at)
+    w.add("assistant_profiles", {"user_id": MAT, "enabled": True, "digest_email_enabled": False})
+    w.todo(todo_id=uid(), user=MAT)
+    w.todo(todo_id=uid(), user=LAB)
+    w.tick(at)
+    assert len(w.digests(MAT)) == 1 and len(w.bells(MAT, "assistant.digest")) == 1
+    assert w.sends(user_id=MAT) == []
+    assert len(w.sends(user_id=LAB, target_kind="digest", channel="email")) == 1
+
+
+def test_person_eligible_is_the_routers_own_test(monkeypatch):
+    at = pt(2026, 10, 30, 16)
+    w = make(monkeypatch, at)
+    w.db.tables["profiles"][1]["is_active"] = False                       # MAT inactive
+    w.add("assistant_profiles", {"user_id": LAB, "enabled": False})       # LAB assistant off
+    ctx = svc._Context(at, settings=w.settings)
+    reads: list[str] = []
+    for person in w.db.tables["profiles"]:
+        expected = person["id"] in (EXE, EA, IT, ACC)
+        got = svc.person_eligible(person, settings=w.settings, settings_row=ctx.settings_row,
+                                  assistant_profile=lambda p=person: reads.append(p["id"]) or ctx.assistant_profile(
+                                      str(p["id"])))
+        assert got is expected, person["role"]
+        assert ctx.eligible(person, "bell.verify", {}) is expected
+    assert MAT not in reads and EST not in reads  # no profile read for an ineligible role or an inactive person
+    assert svc.person_eligible(None, settings=w.settings, settings_row=ctx.settings_row, assistant_profile=None) \
+        is False
+
+
+def test_missing_quote_categories_is_public_and_the_router_shares_it(monkeypatch):
+    at = pt(2026, 10, 30, 7, 0, 30)
+    w = make(monkeypatch, at)
+    bid_setup(w, due=pt(2026, 10, 30, 15, 0))
+    ctx = svc._Context(at, settings=w.settings)
+    assert svc.missing_quote_categories(w.db, [PROJECT]) == {PROJECT: [CAT1]}
+    assert svc._missing_quote_categories(ctx, [PROJECT]) == {PROJECT: [CAT1]}
+    assert svc.missing_quote_categories(w.db, []) == {}
+
+
+def test_the_digest_email_rows_were_rechecked_when_the_digest_was_built():
+    """5.6: _prepare_email needs no withdrawal test because every pending
+    digest row passes ctx.recheck before assistant_digest_deliver."""
+    src = (ROOT / "app/services/assistant_proactive.py").read_text(encoding="utf-8")
+    body = src[src.index("def deliver_digests("):src.index("def run_purge(")]
+    assert body.index("ctx.recheck(row, now)") < body.index("repo.digest_deliver(")
+    recheck = src[src.index("    def recheck("):src.index("def _tail_query(")]
+    assert "TRIAGE_ESCALATION" in recheck and "triage_withdrawn" in recheck
+
+
+def test_the_router_names_no_triage_module():
+    for rel in ("app/assistant/proactive.py", "app/services/assistant_proactive.py",
+                "app/services/assistant_delivery.py"):
+        assert "assistant_triage" not in (ROOT / rel).read_text(encoding="utf-8"), rel
+
+
 # ── Source scans (11.1) ──────────────────────────────────────────────────────
 
 SCANNED = (
@@ -1483,6 +1990,9 @@ SCANNED = (
     "app/services/assistant_proactive.py",
     "app/services/assistant_delivery.py",
     "app/routers/assistant_inbox.py",
+    # Phase 8 (plan hard rules): triage sends nothing itself.
+    "app/services/assistant_triage.py",
+    "app/services/assistant_triage_model.py",
 )
 REPO_MARKER = "# ── Phase 7: the proactive router"
 FORBIDDEN_NAMES = (

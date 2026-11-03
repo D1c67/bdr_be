@@ -8,8 +8,9 @@ deterministic and takes `now` (or the slot) as an argument. The router service
 uses the same templates for Teams and email text.
 
 What lives here:
-  EVENT_TYPES   the catalog (6.2 step 1): exactly three router-owned kinds
-                (`bid.due_not_ready`, `todo.due`, `assistant.approval_expiring`),
+  EVENT_TYPES   the catalog (6.2 step 1): exactly four router-owned kinds
+                (`bid.due_not_ready`, `todo.due`, `assistant.approval_expiring`,
+                `assistant.triage_escalation`),
                 the `bell.<routing_event>` record kinds (4.2 allowlist) and
                 `project.failed_to_bid`. Each has a sub-app, a payload
                 allowlist, title and why templates, role defaults and, for
@@ -34,6 +35,23 @@ optional; a missing key never matches a rule):
   call_in_overlap, nudged_today, bdr_external, bucket_key, delivery,
   bell_type, routine_recipe, due_digest_day, slot_times, quiet_start,
   quiet_end, catchup_hours.
+Facts read for `assistant.triage_escalation` (the router fills each from live
+state, never from the payload; a missing one means neutral wording):
+  internal_bid_at       the project's live internal bid datetime (ISO), so a
+                        moved due date is never shown stale; the escalation
+                        payload carries no due time.
+  role_owns_missing_part  strict True only when the router computed that a part
+                        this person's role owns is still missing; the "your
+                        part is still missing" clause appears only on `is True`.
+  source_bell_unread    strict True only while the source bell is still unread;
+                        the "still unread" and "waited unread" clauses need it.
+  source_bell_at        the source bell's created_at (ISO), the time shown in
+                        "waited unread since".
+  subscription_source   the source of the person's own subscription row; only
+                        `feedback_auto` ever lowers the model's severity.
+  subscription_severity the severity cap of that `feedback_auto` row (defaults
+                        to `low` when the source is `feedback_auto` and this is
+                        absent, because that row is inbox only).
 `reminder_1h_expected` is True only when `effective_prefs` gives this user the
 `internal_bid` reminder at offset 1h; R4 promises a 1-hour reminder only then.
 `slot_times` (`{"am": "07:00", "pm": "13:00"}`), `quiet_start`, `quiet_end`
@@ -77,7 +95,23 @@ BID_DUE = "bid.due_not_ready"
 TODO_DUE = "todo.due"
 APPROVAL_EXPIRING = "assistant.approval_expiring"
 FAILED_TO_BID = "project.failed_to_bid"
-ROUTER_KINDS = (BID_DUE, TODO_DUE, APPROVAL_EXPIRING)
+# Phase 8 (plan 5.6): the router-owned escalation the triage model can ask for.
+# Its severity is the model's hint (`payload.severity_hint`), not a role default.
+TRIAGE_ESCALATION = "assistant.triage_escalation"
+ROUTER_KINDS = (BID_DUE, TODO_DUE, APPROVAL_EXPIRING, TRIAGE_ESCALATION)
+
+# The reasons a triage escalation may carry (plan 5.5). A reason picks the
+# template and labels the Inbox row; it is never shown as a fact. A fact clause
+# in a title appears only when the router's own live facts make it true.
+ESCALATION_REASONS = (
+    "due_soon_part_missing",
+    "due_soon_unread",
+    "waiting_on_you",
+    "unread_long",
+    "needs_decision",
+    "changed_after_your_work",
+)
+ESCALATION_SEVERITIES = ("normal", "high", "urgent")
 
 SEVERITIES = ("low", "normal", "high", "urgent")
 DELIVERIES = ("direct", "immediate", "digest", "record")
@@ -191,6 +225,18 @@ _BELL_PAYLOAD = {
     "email_key": _HASH,
 }
 _FAILED_PAYLOAD = {"audit_id": _ID, "reason": ("enum", FAILED_TO_BID_REASONS)}
+# Ids, enums and the finish's real-clock time only (plan 5.5). No template slot
+# the router trusts rides in the payload: it computes times, part wording and
+# bell state itself.
+_ESCALATION_PAYLOAD = {
+    "inbox_id": _ID,
+    "triage_item_id": _ID,
+    "run_id": _ID,
+    "reason": _enum(*ESCALATION_REASONS),
+    "severity_hint": _enum(*ESCALATION_SEVERITIES),
+    "source_kind": _SLUG,
+    "emitted_at": _ISO,
+}
 
 # ── the bell mirror allowlist (4.2) ──────────────────────────────────────────
 # routing_event -> (label, group, audience). Labels, groups and audiences are
@@ -255,6 +301,11 @@ def _router_entry(
         "audience": frozenset(defaults),
         "templates": templates,
         "urgent_allowed": True,
+        # True means the kind has no audience fan-out: an event without a
+        # `subject_user_id` reaches nobody (plan 5.6, the subject only).
+        "subject_only": False,
+        # False hides the kind from the admin role grid and its routes.
+        "grid": True,
     }
 
 
@@ -310,6 +361,32 @@ _APPROVAL_TEMPLATES = {
     "why_plain": "An assistant card is waiting for your approval. It expires at {time} Pacific.",
 }
 
+# Every slot is filled from router-computed facts, never from the payload, and
+# times are absolute Pacific labels (a row held overnight never states a wrong
+# relative number). A "_np" key is the variant for an event without a project.
+_ESCALATION_TEMPLATES = {
+    "title": "Your assistant flagged an update",
+    "title_neutral": "Your assistant flagged an update on bid {number}",
+    "title_neutral_np": "Your assistant flagged an update",
+    "title_due": "Bid {number} is due {when}",
+    "title_due_np": "A bid is due {when}",
+    "title_due_overdue": "Bid {number} was due {when}",
+    "title_due_overdue_np": "A bid was due {when}",
+    "title_due_part": "Bid {number} is due {when} and your part is still missing",
+    "title_due_part_np": "A bid is due {when} and your part is still missing",
+    "title_due_unread": "Bid {number} is due {when} and an update is still unread",
+    "title_due_unread_np": "A bid is due {when} and an update is still unread",
+    "title_unread": "An update on bid {number} has waited unread since {when}",
+    "title_unread_np": "An update has waited unread since {when}",
+    "title_waiting": "Your assistant flagged bid {number} as waiting on you",
+    "title_waiting_np": "Your assistant flagged an item as waiting on you",
+    "title_decision": "Your assistant flagged a decision on bid {number}",
+    "title_decision_np": "Your assistant flagged a decision",
+    "title_changed": "Your assistant flagged a change on bid {number} after your work",
+    "title_changed_np": "Your assistant flagged a change after your work",
+    "why": "Your assistant flagged this. BDR already sent you the original notice.",
+}
+
 EVENT_TYPES: dict[str, dict[str, Any]] = {
     BID_DUE: _router_entry(
         "sweeper", "bidding", "Bid due and your part is missing", "Bidding",
@@ -331,6 +408,25 @@ EVENT_TYPES: dict[str, dict[str, Any]] = {
         _APPROVAL_PAYLOAD,
         _role_defaults(INTERNAL_ROLES, "high"),
         _APPROVAL_TEMPLATES,
+    ),
+    TRIAGE_ESCALATION: dict(
+        _router_entry(
+            "emit", "none", "Assistant flagged an update", "Assistant",
+            "Your assistant looked at a notification you already received and flagged it.",
+            _ESCALATION_PAYLOAD,
+            # The default severity is a placeholder: the row's severity is the
+            # model's hint (render), and no role or user severity row lowers it.
+            _role_defaults(INTERNAL_ROLES, "normal"),
+            _ESCALATION_TEMPLATES,
+        ),
+        # urgent comes only from the model's hint, never from an admin row;
+        # the admin Settings grid does not list the kind (plan 5.6, FQ2).
+        urgent_allowed=False,
+        grid=False,
+        # The audience above is only the role set the kind is defined for. An
+        # escalation belongs to one person's Inbox row: the router must never
+        # fall back to the audience when the event has no subject.
+        subject_only=True,
     ),
 }
 for _key, (_label, _group, _audience) in _BELL_EVENTS.items():
@@ -956,6 +1052,9 @@ def event_dedupe_key(event_type: str, payload: Mapping[str, Any], project_id: st
         return f"p7:{APPROVAL_EXPIRING}:" + need("approval_id", "expires_at")
     if event_type == FAILED_TO_BID:
         return f"p7:{FAILED_TO_BID}:" + need("audit_id")
+    if event_type == TRIAGE_ESCALATION:
+        # One escalation per record row (the inbox row the model looked at).
+        return "p8:esc:" + need("inbox_id")
     if event_type.startswith("bell."):
         return "p7:bell:" + need("notification_id")
     raise KeyError(event_type)
@@ -1250,12 +1349,50 @@ def _humanize(slug: Any) -> str | None:
     return text.replace("_", " ").replace(".", " ")
 
 
+def _escalation_titles(
+    payload: Mapping[str, Any], number: str | None, facts: Mapping[str, Any]
+) -> tuple[str, str]:
+    """Title and why of a triage escalation. The reason picks the template; a
+    factual clause ("your part is still missing", "unread") appears only when
+    the router's own live facts say so (`role_owns_missing_part`,
+    `source_bell_unread`), otherwise the wording is neutral. Times are the live
+    `internal_bid_at` and the source bell's `created_at`, absolute Pacific."""
+    tpl = EVENT_TYPES[TRIAGE_ESCALATION]["templates"]
+
+    def fill(key: str, **slots: str) -> str:
+        return tpl[key if number else key + "_np"].format(number=number, **slots)
+
+    reason = payload.get("reason")
+    due, now = _dt(facts.get("internal_bid_at")), _dt(facts.get("now"))
+    since = _dt(facts.get("source_bell_at"))
+    title = fill("title_neutral")
+    if reason in ("due_soon_part_missing", "due_soon_unread") and due is not None:
+        when = pt_label(due)
+        if now is not None and due <= now:
+            title = fill("title_due_overdue", when=when)
+        elif reason == "due_soon_part_missing":
+            title = fill("title_due_part" if facts.get("role_owns_missing_part") is True else "title_due", when=when)
+        else:
+            title = fill("title_due_unread" if facts.get("source_bell_unread") is True else "title_due", when=when)
+    elif reason == "unread_long" and facts.get("source_bell_unread") is True and since is not None:
+        title = fill("title_unread", when=pt_label(since))
+    elif reason == "waiting_on_you":
+        title = fill("title_waiting")
+    elif reason == "needs_decision":
+        title = fill("title_decision")
+    elif reason == "changed_after_your_work":
+        title = fill("title_changed")
+    return title, tpl["why"]
+
+
 def _titles(
     event_type: str, role: Role | str | None, payload: Mapping[str, Any], number: str | None,
     facts: Mapping[str, Any],
 ) -> tuple[str, str]:
     entry = EVENT_TYPES[event_type]
     tpl = entry["templates"]
+    if event_type == TRIAGE_ESCALATION:
+        return _escalation_titles(payload, number, facts)
     if event_type == BID_DUE:
         due = _dt(payload.get("internal_bid_at"))
         ref = _date(payload.get("slot_date")) or _date(facts.get("now"))
@@ -1284,6 +1421,25 @@ def _titles(
     return title, tpl["why"]
 
 
+def _escalation_severity(payload: Mapping[str, Any], facts: Mapping[str, Any]) -> str:
+    """The severity of a triage escalation: the model's hint (`normal`, `high`
+    or `urgent`), lowered only by the person's own `feedback_auto` mark (the
+    third "not useful" mark, inbox only). A role default, an admin row or a
+    manual severity row never caps it (plan 5.6 Severity). With no valid hint
+    the fact `severity` is used when it is a hint value, else `normal`. The
+    cap is `facts["subscription_severity"]`; a `feedback_auto` source without
+    one caps at `low`, because that row is always inbox only."""
+    hint = payload.get("severity_hint")
+    if hint not in ESCALATION_SEVERITIES:
+        hint = facts.get("severity") if facts.get("severity") in ESCALATION_SEVERITIES else "normal"
+    if facts.get("subscription_source") != "feedback_auto":
+        return hint
+    cap = facts.get("subscription_severity")
+    if cap not in SEVERITIES:
+        cap = "low"
+    return min(hint, cap, key=SEVERITIES.index)
+
+
 def render(event: dict[str, Any], recipient_role: str, facts: dict[str, Any]) -> dict[str, Any]:
     """Title, why, payload (ids plus server labels), severity, delivery
     (`record`, `digest` or `immediate`) and the precedence rule id for one
@@ -1308,6 +1464,8 @@ def render(event: dict[str, Any], recipient_role: str, facts: dict[str, Any]) ->
 
     if is_record:
         severity = "low"
+    elif event_type == TRIAGE_ESCALATION:
+        severity = _escalation_severity(payload, facts)
     else:
         severity = facts.get("severity") or default_severity(event_type, recipient_role) or "normal"
         if severity not in SEVERITIES:
@@ -1499,6 +1657,7 @@ def auto_downgrade_line(event_type: str) -> str:
         TODO_DUE: "To-do reminders",
         BID_DUE: "Bid due reminders",
         APPROVAL_EXPIRING: "Approval expiry reminders",
+        TRIAGE_ESCALATION: "Assistant escalations",
     }.get(event_type, "These items")
     return f"{what} now stay in your inbox only. Change this in Settings > My assistant."
 

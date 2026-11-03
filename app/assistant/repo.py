@@ -73,10 +73,13 @@ MESSAGE_COLUMNS = (
 )
 PROFILE_COLUMNS = (
     "user_id, display_name, enabled, timezone, daily_cost_cap_usd, quiet_hours, "
-    "calendar_mode, legal_hold, created_at, updated_at"
+    "calendar_mode, legal_hold, created_at, updated_at, digest_email_enabled"
 )
+# Phase 8 (0196 A2): the company triage switch, its last switch-on time (the
+# epoch) and the fuse latch.
 SETTINGS_COLUMNS = (
-    "id, enabled, model, global_daily_cap_usd, disabled_tools, holidays, proactive_enabled, updated_at"
+    "id, enabled, model, global_daily_cap_usd, disabled_tools, holidays, proactive_enabled, updated_at, "
+    "triage_enabled, triage_enabled_at, triage_fuse_tripped_at"
 )
 # Every 0170 column of assistant_approvals plus 0172's reverts_approval_id.
 APPROVAL_COLUMNS = (
@@ -118,6 +121,13 @@ RESERVATION_COLUMNS = (
 )
 # Tasks a splitter job may still wake (the hook, the continuation).
 OPEN_TASK_STATUSES = ("pending", "waiting_external", "running")
+# Phase 8 (0196 A2a; docs/ASSISTANT_PHASE8_PLAN.md 4.1): the company spend
+# identity, the value of assistant_company_spend_id(). Triage holds and calls
+# are attributed to it, so they count against the company cap and in no
+# person's budget. It is not a person: it has no profiles row (version nibble
+# 0, never a gen_random_uuid() value), and the per-person reads below refuse
+# it. app/assistant/spend.py re-exports it as spend.COMPANY_SPEND_ID.
+COMPANY_SPEND_ID = "00000000-0000-0000-0000-000000000001"
 
 
 def _sb():
@@ -194,6 +204,21 @@ def _dec(value: Any) -> Decimal:
         return Decimal("0")
 
 
+def is_company_spend_id(value: Any) -> bool:
+    """True when `value` is the company spend identity (any uuid spelling)."""
+    try:
+        return str(uuid.UUID(str(value))) == COMPANY_SPEND_ID
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
+def _refuse_company(user_id: Any, what: str) -> None:
+    """The per-person guard of phase 8 (4.1 A2a): the company spend id never
+    gets an assistant profile, a per-person cap or an Inbox."""
+    if is_company_spend_id(user_id):
+        raise ValueError(f"{what} is per person: the company spend id is not a person")
+
+
 # ── Settings, profiles, delegations ──────────────────────────────────────────
 
 
@@ -216,6 +241,7 @@ def human_profile(user_id: str) -> dict | None:
 
 
 def profile_row(user_id: str) -> dict | None:
+    _refuse_company(user_id, "the assistant profile")
     rows = _rows(
         _sb().table(PROFILES_TABLE).select(PROFILE_COLUMNS).eq("user_id", user_id).limit(1).execute()
     )
@@ -224,7 +250,9 @@ def profile_row(user_id: str) -> dict | None:
 
 def ensure_profile(user_id: str) -> dict:
     """The person's assistant_profiles row, created with the column defaults
-    on first use (every internal user gets one)."""
+    on first use (every internal user gets one). Never for the company
+    spend id (phase 8)."""
+    _refuse_company(user_id, "the assistant profile")
     row = profile_row(user_id)
     if row is not None:
         return row
@@ -528,7 +556,9 @@ def rpc_spend_state(user_id: str, user_cap_default: Any, global_cap_default: Any
     """RPC assistant_spend_state: {user_cap, user_spent, user_held,
     global_cap, global_spent, global_held} for today (Pacific), live holds
     counted as their unused part. The defaults apply when the person has no
-    assistant_profiles row or the company row is missing."""
+    assistant_profiles row or the company row is missing. Refuses the
+    company spend id (phase 8): it has no per-person cap."""
+    _refuse_company(user_id, "the spend state")
     data = _rpc_data(_sb().rpc(SPEND_STATE_RPC, {
         "p_user_id": user_id,
         "p_user_cap_default": _money(user_cap_default),
@@ -1941,7 +1971,9 @@ def delete_tool_results(user_id: str, result_ids: Sequence[str]) -> int:
 def owners_with_open_state(user_id: str | None, *, limit: int = 200) -> list[str]:
     """Users with a live delegation, a pending or approved card, an active
     schedule, an open task or an active hold (the orphan sweep, 3.5 item
-    5), sorted. None is the system sweep."""
+    5), sorted. None is the system sweep. The company spend id (phase 8,
+    MC-1) is never listed: its active triage holds are not a person's state,
+    and offboarding it would release live holds mid-call."""
     limit = max(1, min(1000, int(limit)))
     reads = (
         _scope(_sb().table(DELEGATIONS_TABLE).select("user_id"), user_id).is_("revoked_at", "null"),
@@ -1949,11 +1981,13 @@ def owners_with_open_state(user_id: str | None, *, limit: int = 200) -> list[str
         _scope(_sb().table(SCHEDULES_TABLE).select("user_id"), user_id).eq("status", "active"),
         _scope(_sb().table(TASKS_TABLE).select("user_id"), user_id)
         .in_("status", [*OPEN_TASK_STATUSES, "waiting_approval"]),
-        _scope(_sb().table(RESERVATIONS_TABLE).select("user_id"), user_id).eq("status", "active"),
+        _scope(_sb().table(RESERVATIONS_TABLE).select("user_id"), user_id).eq("status", "active")
+        .neq("user_id", COMPANY_SPEND_ID),
     )
     owners: set[str] = set()
     for query in reads:
-        owners.update(str(r["user_id"]) for r in _rows(query.limit(limit).execute()) if r.get("user_id"))
+        owners.update(str(r["user_id"]) for r in _rows(query.limit(limit).execute())
+                      if r.get("user_id") and not is_company_spend_id(r["user_id"]))
     return sorted(owners)[:limit]
 
 
@@ -1962,7 +1996,9 @@ def phase7_owners_with_open_state(user_id: str | None, *, limit: int = 200) -> l
     subscription override (role null), a project mute, an undelivered
     immediate or digest inbox row, or a pending external send. The orphan
     sweep reads it next to owners_with_open_state, which never sees these
-    tables. Sorted. None is the system sweep."""
+    tables. Phase 8 (docs/ASSISTANT_PHASE8_PLAN.md 11 item 4) adds a
+    pending or claimed triage item and a claimed triage run. Sorted. None
+    is the system sweep."""
     limit = max(1, min(1000, int(limit)))
     reads = (
         _scope(_sb().table(SUBSCRIPTIONS_TABLE).select("user_id"), user_id).is_("role", "null"),
@@ -1970,6 +2006,8 @@ def phase7_owners_with_open_state(user_id: str | None, *, limit: int = 200) -> l
         _scope(_sb().table(INBOX_TABLE).select("user_id"), user_id).in_("delivery", ["immediate", "digest"])
         .is_("delivered_at", "null").is_("dismissed_at", "null"),
         _scope(_sb().table(EXTERNAL_SENDS_TABLE).select("user_id"), user_id).eq("status", "pending"),
+        _scope(_sb().table(TRIAGE_ITEMS_TABLE).select("user_id"), user_id).in_("status", ["pending", "claimed"]),
+        _scope(_sb().table(TRIAGE_RUNS_TABLE).select("user_id"), user_id).eq("status", "claimed"),
     )
     owners: set[str] = set()
     for query in reads:
@@ -2299,6 +2337,483 @@ def unconsumed_staged_files(user_id: str) -> list[dict]:
         _live_unclaimed(_sb().table(FILES_TABLE).select(FILE_COLUMNS).eq("user_id", user_id))
         .order("created_at").limit(500).execute()
     )
+
+
+# ── Phase 8: model triage (docs/ASSISTANT_PHASE8_PLAN.md, 0196, WI-5) ────────
+#
+# The triage tables (assistant_triage_runs, assistant_triage_items) and their
+# RPCs. The work loop (app/services/assistant_triage.py) calls the system
+# sweeps with None: enqueue, claim, finish, skip-all, purge, the company hold
+# read and the fuse read; the admin route reads the counts and the company
+# triage spend; the model module reads the company triage spend. Every other
+# function here takes a real person's id and refuses the company spend id.
+# p_now (time travel) drives only the debounce, the window and the backoff:
+# leases and the epoch comparisons use the database's real clock (4).
+
+TRIAGE_ITEMS_TABLE = "assistant_triage_items"
+TRIAGE_RUNS_TABLE = "assistant_triage_runs"
+TRIAGE_ENQUEUE_RPC = "assistant_triage_enqueue"
+TRIAGE_CLAIM_RPC = "assistant_triage_claim"
+TRIAGE_FINISH_RPC = "assistant_triage_finish"
+TRIAGE_SKIP_USER_RPC = "assistant_triage_skip_user"
+TRIAGE_SKIP_ALL_RPC = "assistant_triage_skip_all"
+TRIAGE_COUNTS_RPC = "assistant_triage_counts"
+TRIAGE_COMPANY_SPEND_RPC = "assistant_triage_company_spend"
+TRIAGE_PURGE_RPC = "assistant_triage_purge"
+TRIAGE_SET_ENABLED_RPC = "assistant_triage_set_enabled"
+TRIAGE_ITEM_COLUMNS = (
+    "id, user_id, inbox_id, event_type, project_id, source_notification_id, status, skip_reason, run_id, "
+    "attempts, infra_retries, next_attempt_at, cap_deferred_at, decision, reason, action, severity_hint, "
+    "escalation_event_id, decided_at, created_at, enqueued_at, updated_at"
+)
+TRIAGE_RUN_COLUMNS = (
+    "id, user_id, status, claimed_by, claimed_at, lease_until, item_count, model, reservation_id, "
+    "input_tokens, cached_tokens, output_tokens, cost_usd, error_kind, finished_at, created_at"
+)
+TRIAGE_FINISH_STATUSES = ("decided", "skipped", "failed")
+# A3 error kinds (the run's error_kind, the finish's p_error_kind).
+TRIAGE_ERROR_KINDS = (
+    "cap_global", "cap_test", "spend_check", "ineligible", "model_error", "bad_answer", "truncated",
+    "unpriced", "busy", "timeout", "lease_expired", "switched_off", "fuse", "breaker",
+)
+TRIAGE_ITEM_SKIP_REASONS = ("dismissed", "stale", "cap")          # per-item finish entries (5.3 step 3)
+TRIAGE_SKIP_USER_REASONS = ("offboarded", "switched_off", "ineligible")
+TRIAGE_SKIP_ALL_REASONS = ("switched_off", "fuse")
+TRIAGE_DECISIONS = ("none", "suggest", "escalate")
+TRIAGE_SEVERITY_HINTS = ("normal", "high", "urgent")
+TRIAGE_COMPANY_HOLD_GRACE_SECONDS = 3600   # 5.1 step 6: expired more than an hour ago
+_TRIAGE_TOKEN_KEYS = ("input_tokens", "cached_tokens", "output_tokens")
+_BID_DUE_KIND = "bid.due_not_ready"
+
+
+def _p8_user_ids(user_ids: Sequence[Any] | None) -> list[str] | None:
+    """The rollout allowlist for p_user_ids: None means everyone; a list
+    (even an empty one, which claims nobody) is passed as uuids."""
+    return None if user_ids is None else _uuids(user_ids)
+
+
+def _p8_entry(entry: Any) -> dict:
+    """One p_items entry of the finish: {id, skip_reason} for a per-item
+    skip, else {id, decision, reason, action, severity_hint} as strings or
+    null. The enum gate is app/assistant/triage.validate; the RPC checks the
+    format again and takes ids only from its own item rows."""
+    if not isinstance(entry, Mapping):
+        raise ValueError("a triage finish entry is an object")
+    out: dict = {"id": str(uuid.UUID(str(entry.get("id"))))}
+    skip = entry.get("skip_reason")
+    if skip is not None:
+        if skip not in TRIAGE_ITEM_SKIP_REASONS:
+            raise ValueError(f"invalid triage item skip reason: {skip}")
+        out["skip_reason"] = skip
+        return out
+    for key in ("decision", "reason", "action", "severity_hint"):
+        value = entry.get(key)
+        out[key] = None if value is None else str(value)
+    return out
+
+
+def _p8_usage(usage: Mapping[str, Any] | None) -> dict:
+    """p_usage: the model, the hold and the token and cost numbers (JSON
+    numbers; the RPC ignores anything else)."""
+    out: dict = {}
+    if not usage:
+        return out
+    if usage.get("model"):
+        out["model"] = str(usage["model"])
+    if usage.get("reservation_id"):
+        try:
+            out["reservation_id"] = str(uuid.UUID(str(usage["reservation_id"])))
+        except (TypeError, ValueError):
+            pass
+    for key in _TRIAGE_TOKEN_KEYS:
+        if usage.get(key) is not None and not isinstance(usage[key], bool):
+            out[key] = max(0, int(usage[key]))
+    if usage.get("cost_usd") is not None:
+        out["cost_usd"] = float(_dec(usage["cost_usd"]))
+    return out
+
+
+# -- The company switch (8.1; Executive and IT Admin through the route) --------
+
+
+def set_triage_enabled(user_id: str, enabled: bool) -> dict:
+    """assistant_settings.triage_enabled for the company row; `user_id` is
+    the acting admin (updated_by). RPC assistant_triage_set_enabled (0196
+    B6, D-1): one guarded update that, on a flip from off to on, sets the
+    epoch triage_enabled_at from the database's clock_timestamp() and
+    clears the fuse latch in the same statement (A2, P10): the enqueue
+    window starts there, work from before it is fenced out, and only an off
+    and on flip clears a tripped fuse. Turning on while on, or off while
+    off, writes nothing. Returns {triage_enabled, triage_enabled_at,
+    triage_fuse_tripped_at, updated_at, changed}.
+
+    Until 0196 part B is applied the function is missing (PostgREST
+    PGRST202); the switch then falls back to the part A two-step update
+    (_set_triage_enabled_part_a) and logs a warning, so a flip still lands.
+    Release order: apply part B before this backend on staging and prod."""
+    _refuse_company(user_id, "the company triage switch")
+    try:
+        data = _rpc_data(_sb().rpc(TRIAGE_SET_ENABLED_RPC, {
+            "p_user_id": str(uuid.UUID(str(user_id))), "p_enabled": bool(enabled),
+        }).execute())
+    except Exception as exc:  # noqa: BLE001 - only a missing function falls back; the rest re-raise
+        if not _is_missing_function(exc):
+            raise
+        logger.warning("assistant triage switch: %s is missing (0196 part B not applied); "
+                       "using the part A two-step update", TRIAGE_SET_ENABLED_RPC)
+        return _set_triage_enabled_part_a(user_id, bool(enabled))
+    if "changed" not in data:
+        raise RuntimeError("assistant_triage_set_enabled returned no result")
+    return {
+        "triage_enabled": bool(data.get("triage_enabled")), "triage_enabled_at": data.get("triage_enabled_at"),
+        "triage_fuse_tripped_at": data.get("triage_fuse_tripped_at"), "updated_at": data.get("updated_at"),
+        "changed": bool(data.get("changed")),
+    }
+
+
+def _is_missing_function(exc: BaseException) -> bool:
+    """PostgREST's PGRST202: the function is not in the schema cache (a
+    database without 0196 part B). Nothing else counts."""
+    return str(getattr(exc, "code", "") or "") == "PGRST202" or "PGRST202" in str(exc)
+
+
+def _set_triage_enabled_part_a(user_id: str, enabled: bool) -> dict:
+    """The switch on a part A database (no B6): a guarded update that writes
+    only on a flip (triage_enabled = not enabled), clearing the latch on a
+    flip to on; then, on that flip, the epoch triage_enabled_at is the
+    updated_at the 0170 trigger stamped from the database's now(). Two
+    statements, so the B6 single statement replaces it once part B is in.
+    Same return shape as set_triage_enabled."""
+    uid = str(uuid.UUID(str(user_id)))
+    patch: dict[str, Any] = {"triage_enabled": enabled, "updated_by": uid}
+    if enabled:
+        patch["triage_fuse_tripped_at"] = None
+    rows = _rows(_sb().table(SETTINGS_TABLE).update(patch)
+                 .eq("id", 1).eq("triage_enabled", not enabled).execute())
+    changed = bool(rows)
+    if changed and enabled:
+        stamp = rows[0].get("updated_at")
+        if not stamp:
+            raise RuntimeError("assistant_settings returned no updated_at for the triage epoch")
+        rows = _rows(_sb().table(SETTINGS_TABLE).update({"triage_enabled_at": stamp}).eq("id", 1).execute())
+    if not rows:
+        rows = _rows(_sb().table(SETTINGS_TABLE).select(SETTINGS_COLUMNS).eq("id", 1).limit(1).execute())
+    if not rows:
+        raise RuntimeError("assistant_settings: the settings row is missing")
+    row = rows[0]
+    return {
+        "triage_enabled": bool(row.get("triage_enabled")), "triage_enabled_at": row.get("triage_enabled_at"),
+        "triage_fuse_tripped_at": row.get("triage_fuse_tripped_at"), "updated_at": row.get("updated_at"),
+        "changed": changed,
+    }
+
+
+# -- The work loop's system sweeps (5.1 to 5.5) ---------------------------------
+
+
+def triage_enqueue(
+    user_id: str | None, now: Any, window_hours: int, *, limit: int = 500,
+    user_ids: Sequence[Any] | None = None,
+) -> int:
+    """RPC assistant_triage_enqueue (A6.1): one pending item per undismissed
+    bell-sourced record row inside the window and after the last switch-on,
+    for any owner (or the allowlist); 0 while the switch is off or the fuse
+    is latched. Idempotent. Returns the items added. System sweep."""
+    _p7_system_only(user_id, "the triage enqueue")
+    return int(_scalar(_sb().rpc(TRIAGE_ENQUEUE_RPC, {
+        "p_now": _p7_iso(now), "p_window_hours": int(window_hours),
+        "p_limit": _p7_clamp(limit, 1, 1000, 500), "p_user_ids": _p8_user_ids(user_ids),
+    }).execute()) or 0)
+
+
+def triage_claim(
+    user_id: str | None, worker: str, now: Any, lease_seconds: int, debounce_seconds: int, batch_max: int,
+    fuse_ratio: Any, fuse_per_hour: int, *, user_ids: Sequence[Any] | None = None,
+) -> dict | None:
+    """RPC assistant_triage_claim (A6.2): one person's batch. The answer is
+    {"switched_off": True} (the company switch is off), {"fuse": True,
+    "tripped_now": bool} (the latch is set, or this claim tripped a wire and
+    set it), {"run_id", "user_id", "items": [{id, inbox_id, event_type,
+    project_id, source_notification_id, created_at, inbox_created_at,
+    cap_deferred_at}]} for a run, or None when nobody is due. The fuse
+    settings travel with every claim, so both workers stop at the same batch
+    boundary (P8R-2). System sweep."""
+    _p7_system_only(user_id, "the triage claim")
+    data = _scalar(_sb().rpc(TRIAGE_CLAIM_RPC, {
+        "p_worker": str(worker), "p_now": _p7_iso(now), "p_lease_seconds": int(lease_seconds),
+        "p_debounce_seconds": int(debounce_seconds), "p_batch_max": int(batch_max),
+        "p_fuse_ratio": float(_dec(fuse_ratio)), "p_fuse_per_hour": int(fuse_per_hour),
+        "p_user_ids": _p8_user_ids(user_ids),
+    }).execute())
+    if not isinstance(data, dict):
+        return None
+    if data.get("switched_off"):
+        return {"switched_off": True}
+    if data.get("fuse"):
+        return {"fuse": True, "tripped_now": bool(data.get("tripped_now"))}
+    if not data.get("run_id"):
+        return None
+    return {
+        "run_id": str(data["run_id"]), "user_id": str(data.get("user_id")),
+        "items": [dict(i) for i in data.get("items") or () if isinstance(i, dict)],
+    }
+
+
+def triage_finish(
+    user_id: str | None, run_id: str, worker: str, now: Any, status: str, error_kind: str | None,
+    items: Sequence[Mapping[str, Any]] | None, usage: Mapping[str, Any] | None,
+) -> dict:
+    """RPC assistant_triage_finish (A6.3), one fenced transaction: the
+    per-item skips first, then the switch and fuse fence, then the decisions
+    (an escalation inserts its router event in the same transaction) or the
+    error handling. Returns {fenced, emitted, status, error_kind}; a lost
+    fence is {fenced: False, emitted: 0} and wrote nothing. System sweep."""
+    _p7_system_only(user_id, "the triage finish")
+    if status not in TRIAGE_FINISH_STATUSES:
+        raise ValueError(f"invalid triage run status: {status}")
+    if status == "decided" and error_kind is not None:
+        raise ValueError("a decided triage run has no error kind")
+    if status != "decided" and error_kind not in TRIAGE_ERROR_KINDS:
+        raise ValueError(f"invalid triage error kind: {error_kind}")
+    data = _rpc_data(_sb().rpc(TRIAGE_FINISH_RPC, {
+        "p_run_id": str(uuid.UUID(str(run_id))), "p_worker": str(worker), "p_now": _p7_iso(now),
+        "p_status": status, "p_error_kind": error_kind,
+        "p_items": [_p8_entry(e) for e in items or ()], "p_usage": _p8_usage(usage),
+    }).execute())
+    if "fenced" not in data:
+        raise RuntimeError("assistant_triage_finish returned no result")
+    return {"fenced": bool(data.get("fenced")), "emitted": int(data.get("emitted") or 0),
+            "status": data.get("status"), "error_kind": data.get("error_kind")}
+
+
+def triage_skip_all(user_id: str | None, reason: str, now: Any = None, *, limit: int = 500) -> int:
+    """RPC assistant_triage_skip_all (A6.8): settle up to `limit` pending
+    items skipped with `reason` (switched_off or fuse). The function acts
+    only while a company switch is off or the latch is set, so it can never
+    skip items while triage is meant to run. Returns the count.
+    System sweep."""
+    _p7_system_only(user_id, "the triage skip-all")
+    if reason not in TRIAGE_SKIP_ALL_REASONS:
+        raise ValueError(f"invalid triage skip-all reason: {reason}")
+    return int(_scalar(_sb().rpc(TRIAGE_SKIP_ALL_RPC, {
+        "p_reason": reason, "p_now": _p7_iso(now), "p_limit": _p7_clamp(limit, 1, 1000, 500),
+    }).execute()) or 0)
+
+
+def triage_purge(user_id: str | None, now: Any = None, *, run_days: int = 90, limit: int = 500) -> dict:
+    """RPC assistant_triage_purge (0196 B4): runs older than `run_days`
+    whose items are gone or older, legal-hold people skipped, one worker at
+    a time. Returns {locked, assistant_triage_runs}. System sweep."""
+    _p7_system_only(user_id, "the triage purge")
+    return _rpc_data(_sb().rpc(TRIAGE_PURGE_RPC, {
+        "p_now": _p7_iso(now), "p_run_days": _p7_clamp(run_days, 7, 3650, 90),
+        "p_limit": _p7_clamp(limit, 1, 5000, 500),
+    }).execute())
+
+
+def triage_expired_company_holds(
+    user_id: str | None, *, grace_seconds: int = TRIAGE_COMPANY_HOLD_GRACE_SECONDS, limit: int = 50,
+) -> list[dict]:
+    """The company's own triage holds still status active that expired more
+    than `grace_seconds` ago (real clock), oldest first, bounded: the purge
+    step settles them through spend.settle so a crash between reserve and
+    settle never leaves an open company hold (5.1 step 6, MC-1).
+    System sweep."""
+    _p7_system_only(user_id, "the company triage hold read")
+    return _rows(
+        _sb().table(RESERVATIONS_TABLE).select(RESERVATION_COLUMNS)
+        .eq("user_id", COMPANY_SPEND_ID).eq("kind", "triage").eq("status", "active")
+        .lt("expires_at", _iso_ago(max(0, int(grace_seconds))))
+        .order("expires_at").limit(_p7_clamp(limit, 1, 500, 50)).execute()
+    )
+
+
+def triage_counts(user_id: str | None, since: Any, now: Any = None) -> dict:
+    """RPC assistant_triage_counts (A6.5): counts only (by status, decision,
+    reason, severity, skip reason and error kind), the cost sum, the
+    cap-deferred pending count, the fuse inputs, the latch and today's spend
+    breakdown, for the admin health block. No user id leaves it.
+    System sweep."""
+    _p7_system_only(user_id, "the triage counts")
+    return _rpc_data(_sb().rpc(TRIAGE_COUNTS_RPC, {"p_since": _p7_iso(since), "p_now": _p7_iso(now)}).execute())
+
+
+def triage_fuse_inputs(user_id: str | None, now: Any = None) -> dict:
+    """The fuse inputs and the latch from the counts RPC (since `now`, so no
+    per-window table scan is returned): {triage_enabled, triage_enabled_at,
+    fuse_tripped_at, sample, sample_escalations, hour_escalations}. Both
+    wires count only decisions whose run was claimed after the last
+    switch-on. System sweep."""
+    _p7_system_only(user_id, "the triage fuse read")
+    stamp = _p7_iso(now)
+    data = triage_counts(None, stamp, stamp)
+    fuse = data.get("fuse") if isinstance(data.get("fuse"), dict) else {}
+    return {
+        "triage_enabled": bool(data.get("triage_enabled")), "triage_enabled_at": data.get("triage_enabled_at"),
+        "fuse_tripped_at": data.get("fuse_tripped_at"), "sample": int(fuse.get("sample") or 0),
+        "sample_escalations": int(fuse.get("sample_escalations") or 0),
+        "hour_escalations": int(fuse.get("hour_escalations") or 0),
+    }
+
+
+def triage_company_spend(user_id: str | None) -> dict:
+    """RPC assistant_triage_company_spend (A6.7): today's company triage
+    spend, {spent, held, since} with Decimal amounts, for the Pacific day of
+    the real clock. No `now` argument on purpose (MC-4): the live-test cap
+    reads the real day even while the tick script runs days ahead.
+    System sweep."""
+    _p7_system_only(user_id, "the company triage spend")
+    data = _rpc_data(_sb().rpc(TRIAGE_COMPANY_SPEND_RPC, {}).execute())
+    if "spent" not in data or "held" not in data:
+        raise RuntimeError("assistant_triage_company_spend returned no result")
+    return {"spent": _dec(data["spent"]), "held": _dec(data["held"]), "since": data.get("since")}
+
+
+# -- One person's triage state (offboarding, the fact pack, the routes) ----------
+
+
+def triage_skip_user(user_id: str, reason: str, now: Any = None) -> int:
+    """RPC assistant_triage_skip_user (A6.4): this person's pending and
+    claimed items become skipped with `reason` (offboarded, switched_off or
+    ineligible; bounded 500), and their claimed runs fail first, so a late
+    finish emits nothing. Returns the items settled."""
+    _refuse_company(user_id, "the triage skip")
+    if reason not in TRIAGE_SKIP_USER_REASONS:
+        raise ValueError(f"invalid triage skip reason: {reason}")
+    return int(_scalar(_sb().rpc(TRIAGE_SKIP_USER_RPC, {
+        "p_user_id": str(uuid.UUID(str(user_id))), "p_reason": reason, "p_now": _p7_iso(now),
+    }).execute()) or 0)
+
+
+def triage_items_for_inbox(user_id: str, inbox_ids: Sequence[Any]) -> dict[str, dict]:
+    """This person's triage items by inbox row id (the Inbox routes join
+    them onto their items, 8.1)."""
+    _refuse_company(user_id, "the triage items")
+    out: dict[str, dict] = {}
+    for chunk in _p7_chunks(_uuids(inbox_ids)):
+        for row in _rows(_sb().table(TRIAGE_ITEMS_TABLE).select(TRIAGE_ITEM_COLUMNS)
+                         .eq("user_id", user_id).in_("inbox_id", chunk).execute()):
+            out[str(row["inbox_id"])] = row
+    return out
+
+
+def _triage_payload(payload: Any) -> dict:
+    """The allowlisted payload keys of a record row (plan 5.3 linked_bells
+    and bell_fields): slug enums, an integer round and the linked bell ids
+    (uuids only). Every other key, and any value of the wrong shape, is
+    dropped, so no tainted text leaves the repo."""
+    if not isinstance(payload, Mapping):
+        return {}
+    out: dict = {}
+    for key in ("stage", "routing_event"):
+        value = payload.get(key)
+        if isinstance(value, str) and _TRIAGE_SLUG_RE.fullmatch(value):
+            out[key] = value
+    value = payload.get("round")
+    if isinstance(value, int) and not isinstance(value, bool):
+        out["round"] = value
+    linked = payload.get("linked_notification_ids")
+    if isinstance(linked, (list, tuple)):
+        out["linked_notification_ids"] = [str(v) for v in linked
+                                          if isinstance(v, str) and _TRIAGE_UUID_RE.fullmatch(v)]
+    return out
+
+
+def triage_inbox_rows(user_id: str, inbox_ids: Sequence[Any]) -> dict[str, dict]:
+    """This person's inbox rows by id, dismissed ones included (the
+    per-item re-read of 5.3 step 3: a dismissed or missing row settles
+    skipped dismissed). Facts only (5.3, "never from raw tainted
+    columns"): TRIAGE_INBOX_COLUMNS leaves out title and why (bell text
+    built from attacker-controlled strings), and the payload comes back
+    narrowed to its allowlisted keys (_triage_payload)."""
+    _refuse_company(user_id, "the triage inbox read")
+    out: dict[str, dict] = {}
+    for chunk in _p7_chunks(_uuids(inbox_ids)):
+        for row in _rows(_sb().table(INBOX_TABLE).select(TRIAGE_INBOX_COLUMNS)
+                         .eq("user_id", user_id).in_("id", chunk).execute()):
+            fact = {col: row.get(col) for col in _TRIAGE_INBOX_FIELDS if col != "payload"}
+            fact["payload"] = _triage_payload(row.get("payload"))
+            out[str(row["id"])] = fact
+    return out
+
+
+def notification_delivery_facts(user_id: str, notification_ids: Sequence[Any]) -> dict[str, dict]:
+    """{bell id: {"teams_sent": bool, "email_sent": bool}} for this person's
+    bells: teams_sent_at (0175) set, and an email_log_id present. Presence
+    only, never the email row; a bell that is not theirs is not returned
+    (the fact pack's bdr_sent_teams and bdr_sent_email, 5.3)."""
+    _refuse_company(user_id, "the bell delivery facts")
+    out: dict[str, dict] = {}
+    for chunk in _p7_chunks(_uuids(notification_ids)):
+        for row in _rows(_sb().table(BELLS_TABLE).select("id, teams_sent_at, email_log_id")
+                         .eq("user_id", user_id).in_("id", chunk).execute()):
+            out[str(row["id"])] = {"teams_sent": row.get("teams_sent_at") is not None,
+                                   "email_sent": row.get("email_log_id") is not None}
+    return out
+
+
+def triage_bid_due_projects(user_id: str, project_ids: Sequence[Any], *, since: Any) -> set[str]:
+    """The projects among `project_ids` for which this person has an
+    undismissed bid.due_not_ready inbox row in the current or next slot:
+    deliver_after at or after `since` (the caller passes the current slot's
+    instant). Information for the model only (router_bid_due_row, P28)."""
+    _refuse_company(user_id, "the bid due read")
+    stamp = _p7_iso(since)
+    out: set[str] = set()
+    for chunk in _p7_chunks(_uuids(project_ids)):
+        for row in _rows(_sb().table(INBOX_TABLE).select("project_id").eq("user_id", user_id)
+                         .eq("event_type", _BID_DUE_KIND).is_("dismissed_at", "null")
+                         .in_("project_id", chunk).gte("deliver_after", stamp).execute()):
+            if row.get("project_id"):
+                out.add(str(row["project_id"]))
+    return out
+
+
+def triage_escalated_projects(user_id: str, project_ids: Sequence[Any], *, since: Any) -> set[str]:
+    """The projects among `project_ids` on which this person's triage
+    escalated an item decided at or after `since` (the pack's
+    escalated_project_last_2h; context for the model, no rule acts on it)."""
+    _refuse_company(user_id, "the triage escalation read")
+    stamp = _p7_iso(since)
+    out: set[str] = set()
+    for chunk in _p7_chunks(_uuids(project_ids)):
+        for row in _rows(_sb().table(TRIAGE_ITEMS_TABLE).select("project_id").eq("user_id", user_id)
+                         .eq("status", "decided").eq("decision", "escalate").in_("project_id", chunk)
+                         .gte("decided_at", stamp).execute()):
+            if row.get("project_id"):
+                out.add(str(row["project_id"]))
+    return out
+
+
+def triage_pending_cards_by_project(user_id: str, project_ids: Sequence[Any]) -> dict[str, int]:
+    """{project id: count} of this person's pending approval cards on each
+    project (the pack's pending_cards_on_project)."""
+    _refuse_company(user_id, "the pending card read")
+    out: dict[str, int] = {}
+    for chunk in _p7_chunks(_uuids(project_ids)):
+        for row in _rows(_sb().table(APPROVALS_TABLE).select("project_id").eq("user_id", user_id)
+                         .eq("status", "pending").in_("project_id", chunk).limit(_PAGE).execute()):
+            if row.get("project_id"):
+                key = str(row["project_id"])
+                out[key] = out.get(key, 0) + 1
+    return out
+
+
+def triage_person_summary(user_id: str, since: Any) -> dict:
+    """{last_run_at, decided, escalations} for this person: the last triage
+    run's finish (or claim) time, and the items decided and escalated at or
+    after `since` (the Alerts card's read-only triage line, 8.1). Counts
+    only."""
+    _refuse_company(user_id, "the triage summary")
+    runs = _rows(_sb().table(TRIAGE_RUNS_TABLE).select("finished_at, claimed_at, created_at")
+                 .eq("user_id", user_id).order("created_at", desc=True).limit(1).execute())
+    decided = _rows(_sb().table(TRIAGE_ITEMS_TABLE).select("decision").eq("user_id", user_id)
+                    .eq("status", "decided").gte("decided_at", _p7_iso(since)).limit(_PAGE).execute())
+    last = runs[0] if runs else {}
+    return {
+        "last_run_at": last.get("finished_at") or last.get("claimed_at"),
+        "decided": len(decided), "escalations": sum(1 for r in decided if r.get("decision") == "escalate"),
+    }
 
 
 # ── Phase 4 (0180): reasons, evidence log, report files, AE holds and tasks ──
@@ -3053,6 +3568,14 @@ INBOX_COLUMNS = (
     "read_at, feedback, feedback_at, created_at, event_type, delivery, precedence, deliver_after, "
     "digest_id, notification_id, source_notification_id, dismissed_at, dismissed_reason, snooze_count"
 )
+# The triage re-read (5.3 step 3): facts only, never title or why.
+_TRIAGE_INBOX_FIELDS = (
+    "id", "user_id", "event_type", "project_id", "source_notification_id", "created_at", "dismissed_at",
+    "payload",
+)
+TRIAGE_INBOX_COLUMNS = ", ".join(_TRIAGE_INBOX_FIELDS)
+_TRIAGE_SLUG_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:\-]{0,63}")  # proactive._SLUG_RE's shape
+_TRIAGE_UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 SUBSCRIPTION_COLUMNS = (
     "id, role, user_id, event_type, enabled, severity, created_at, updated_at, source, updated_by"
 )
@@ -3241,13 +3764,14 @@ def event_finish(
 def insert_inbox_row(user_id: str, row: Mapping[str, Any], *, now: Any = None) -> dict | None:
     """Insert one router-owned inbox row for `user_id`, ignoring a duplicate
     (user_id, dedupe_key; a full unique constraint). Returns the inserted
-    row, or None when it already existed. The key starts with `p7:` and the
+    row, or None when it already existed. The key starts with `p7:` (or
+    `p8:esc:`, the phase 8 triage escalation, plan 5.6) and the
     delivery is immediate, digest or record (direct rows belong to the 0184
     and 0187 functions); immediate and digest rows carry deliver_after.
     created_at defaults to `now`."""
     key = str(row.get("dedupe_key") or "")
-    if not key.startswith("p7:"):
-        raise ValueError("router inbox keys start with p7:")
+    if not key.startswith(("p7:", "p8:esc:")):
+        raise ValueError("router inbox keys start with p7: or p8:esc:")
     delivery = row.get("delivery")
     if delivery not in ROUTER_INBOX_DELIVERIES:
         raise ValueError(f"router inbox rows are {', '.join(ROUTER_INBOX_DELIVERIES)}")
@@ -3278,6 +3802,20 @@ def inbox_row_by_key(user_id: str, dedupe_key: str) -> dict | None:
     rows = _rows(_sb().table(INBOX_TABLE).select(INBOX_COLUMNS).eq("user_id", user_id)
                  .eq("dedupe_key", dedupe_key).limit(1).execute())
     return rows[0] if rows else None
+
+
+def inbox_rows_by_keys(user_id: str, dedupe_keys: Sequence[str]) -> dict[str, dict]:
+    """This person's Inbox rows by dedupe_key, one read per 100 keys (the
+    Inbox list links a page of escalated triage items to their escalation
+    rows, WI9-3). Keys with no row are absent; duplicates and empty keys
+    are dropped."""
+    keys = list(dict.fromkeys(_ids(dedupe_keys)))
+    out: dict[str, dict] = {}
+    for chunk in _p7_chunks(keys):
+        for row in _rows(_sb().table(INBOX_TABLE).select(INBOX_COLUMNS).eq("user_id", user_id)
+                         .in_("dedupe_key", chunk).execute()):
+            out.setdefault(str(row["dedupe_key"]), row)
+    return out
 
 
 def inbox_due_immediate(
@@ -3410,6 +3948,21 @@ def inbox_supersede_due_not_ready(
         .update({"dismissed_at": _p7_iso(now), "dismissed_reason": "superseded"})
         .eq("user_id", user_id).eq("event_type", "bid.due_not_ready").eq("project_id", project_id)
         .in_("delivery", ["immediate", "digest"]).neq("dedupe_key", keep_dedupe_key)
+        .is_("delivered_at", "null").is_("dismissed_at", "null").execute()
+    ))
+
+
+def inbox_retitle(user_id: str, inbox_id: str, title: str) -> bool:
+    """Phase 8 (plan 5.6): write the title of one of this person's
+    undelivered, undismissed rows, a triage escalation re-rendered from live
+    facts at release time. The bell, the digest, its email and the Teams
+    card all read the row's title, so they show the fresh wording. A
+    delivered row is never touched. True when a row changed."""
+    if not title:
+        raise ValueError("an inbox row needs a title")
+    return bool(_rows(
+        _sb().table(INBOX_TABLE).update({"title": title})
+        .eq("user_id", user_id).eq("id", str(inbox_id))
         .is_("delivered_at", "null").is_("dismissed_at", "null").execute()
     ))
 

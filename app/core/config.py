@@ -270,6 +270,37 @@ class Settings(BaseSettings):
     assistant_proactive_user_allowlist: str = ""
     assistant_proactive_test_email_to: str = ""
 
+    # Phase 8 notification triage (docs/ASSISTANT_PHASE8_PLAN.md 13). A facts
+    # only model pass over each person's recordable Inbox rows, paid by the
+    # company spend (no person's cap). The model must have an OpenAI price row.
+    # The user allowlist (profile ids or emails; empty means everyone who has
+    # the assistant) is a rollout lever only. test_spend_cap_usd is test only:
+    # set it on the tick script's and the eval runner's command lines, never
+    # in .env or on a server; dev project only, allowlist required.
+    assistant_triage_enabled: bool = False
+    assistant_triage_loop_enabled: bool = True
+    assistant_triage_user_allowlist: str = ""
+    assistant_triage_model: str = "gpt-6-luna"
+    assistant_triage_poll_seconds: int = 60
+    assistant_triage_debounce_seconds: int = 300
+    assistant_triage_batch_max: int = 10
+    assistant_triage_batches_per_tick: int = 5
+    assistant_triage_lease_seconds: int = 420
+    assistant_triage_timeout_seconds: int = 45
+    assistant_triage_max_output_tokens: int = 3200
+    # Sent as the Responses reasoning effort of every triage call (P8L-3).
+    # Empty (the default) sends none, so the model's own default applies: the
+    # 16.4 golden set passed there, while "low" gave 2 invalid answers in 44 at
+    # batch size 10 on two runs (2026-11-03), a gate miss. Reasoning tokens
+    # count against ASSISTANT_TRIAGE_MAX_OUTPUT_TOKENS either way.
+    assistant_triage_reasoning_effort: str = ""
+    assistant_triage_window_hours: int = 24
+    assistant_triage_fuse_ratio: float = 0.5
+    assistant_triage_fuse_per_hour: int = 30
+    assistant_triage_cap_pause_seconds: int = 900
+    assistant_triage_retention_days: int = 90
+    assistant_triage_test_spend_cap_usd: float | None = None
+
     # ── LLMs (routing lives in app/services/llm.py) ───────────────────────────
     # Master switch: when true EVERY AI feature routes to the self-hosted
     # OpenAI-compatible endpoint below and the SELF_HOSTED_* per-feature models.
@@ -1721,7 +1752,10 @@ class Settings(BaseSettings):
             raise ValueError(
                 "ASSISTANT_PROACTIVE_EXTERNAL_ENABLED=true needs ASSISTANT_PROACTIVE_ENABLED=true."
             )
+        if self.assistant_triage_enabled and not self.assistant_proactive_enabled:
+            raise ValueError("ASSISTANT_TRIAGE_ENABLED=true needs ASSISTANT_PROACTIVE_ENABLED=true.")
         self._check_proactive_test_email()
+        self._check_triage_test_cap()
         if not self.assistant_enabled:
             return self
         if len((self.assistant_token_secret or "").strip()) < 32:
@@ -1773,6 +1807,7 @@ class Settings(BaseSettings):
             if not low <= getattr(self, name) <= high:
                 raise ValueError(f"{name.upper()} must be between {low} and {high}.")
         self._check_proactive_times()
+        self._check_triage()
         from app.services import llm_pricing  # local: config must stay import-light
 
         if llm_pricing.price_for(self.assistant_model) is None:
@@ -1815,6 +1850,92 @@ class Settings(BaseSettings):
                     "ASSISTANT_PROACTIVE_DIGEST_TIMES: each slot plus the catch-up window must "
                     "stay outside quiet hours (ASSISTANT_PROACTIVE_QUIET_START to _END)."
                 )
+
+    def _check_triage(self) -> None:
+        """Phase 8 triage knobs (plan 13), checked while ASSISTANT_ENABLED is
+        on: ranges, the model price rule (an OpenAI row in llm_pricing.PRICES,
+        or every triage call would log a NULL cost), the lease that outlives
+        one worst-case model call (the RFP lease rule), and an output
+        allowance that fits a full batch. The self-hosted master switch needs
+        no extra check here: triage needs the proactive router, which needs
+        the assistant, and the assistant already refuses to boot under the
+        master switch without ASSISTANT_ALLOW_OPENAI_IN_SELF_HOSTED."""
+        for name, low, high in (
+            ("assistant_triage_poll_seconds", 15, 600),
+            ("assistant_triage_debounce_seconds", 0, 3600),
+            ("assistant_triage_batch_max", 1, 20),
+            ("assistant_triage_batches_per_tick", 1, 20),
+            ("assistant_triage_lease_seconds", 60, 1800),
+            ("assistant_triage_timeout_seconds", 10, 120),
+            ("assistant_triage_max_output_tokens", 1400, 6000),
+            ("assistant_triage_window_hours", 1, 72),
+            ("assistant_triage_fuse_ratio", 0, 1),
+            ("assistant_triage_fuse_per_hour", 0, 5000),
+            ("assistant_triage_cap_pause_seconds", 60, 3600),
+            ("assistant_triage_retention_days", 7, 3650),
+        ):
+            if not low <= getattr(self, name) <= high:
+                raise ValueError(f"{name.upper()} must be between {low} and {high}.")
+        from app.services import llm_pricing  # local: config must stay import-light
+
+        price = llm_pricing.price_for(self.assistant_triage_model)
+        if price is None or price.provider != "openai":
+            raise ValueError(
+                f"ASSISTANT_TRIAGE_MODEL={self.assistant_triage_model!r} must have an OpenAI row in "
+                "services/llm_pricing.PRICES; add the price first (spend accounting needs it)."
+            )
+        needed_lease = (
+            self.llm_background_wait_seconds
+            + self.assistant_triage_timeout_seconds * (self.third_party_llm_max_retries + 1)
+            + 60
+        )
+        if self.assistant_triage_lease_seconds < needed_lease:
+            too_short = (
+                "ASSISTANT_TRIAGE_LEASE_SECONDS must be at least LLM_BACKGROUND_WAIT_SECONDS plus "
+                "ASSISTANT_TRIAGE_TIMEOUT_SECONDS x (THIRD_PARTY_LLM_MAX_RETRIES + 1) plus 60 "
+                f"({needed_lease:g}) so the lease outlives one model call."
+            )
+            if "assistant_triage_lease_seconds" in self.model_fields_set:
+                raise ValueError(too_short)
+            # Not configured: stretch the default to cover one call instead of
+            # refusing to boot a deployment with a long LLM wait or retry count
+            # (the RFP lease pattern). If the stretch would pass the 1800 cap,
+            # only a deployment that actually runs triage is refused.
+            stretched = int(math.ceil(needed_lease))
+            if stretched <= 1800:
+                self.assistant_triage_lease_seconds = stretched
+            elif self.assistant_triage_enabled:
+                raise ValueError(too_short)
+        # 1200 + 200 x items: assistant_triage_model.OUTPUT_TOKENS_BASE and
+        # OUTPUT_TOKENS_PER_ITEM (P8L-3; pinned equal by the config tests).
+        needed_out = 1200 + 200 * self.assistant_triage_batch_max
+        if self.assistant_triage_max_output_tokens < needed_out:
+            raise ValueError(
+                "ASSISTANT_TRIAGE_MAX_OUTPUT_TOKENS must be at least 1200 + 200 x "
+                f"ASSISTANT_TRIAGE_BATCH_MAX ({needed_out})."
+            )
+        effort = (self.assistant_triage_reasoning_effort or "").strip().lower()
+        if effort not in ("", "low", "medium", "high"):
+            raise ValueError("ASSISTANT_TRIAGE_REASONING_EFFORT must be low, medium, high or empty.")
+        self.assistant_triage_reasoning_effort = effort
+
+    def _check_triage_test_cap(self) -> None:
+        """The live-test spend cap (plan 13, owner question 22): 0 to 5 USD,
+        only on the dev Supabase project and only with an allowlist, so it can
+        never exist on a prod-like server. Unset (None) is the normal state."""
+        cap = self.assistant_triage_test_spend_cap_usd
+        if cap is None:
+            return
+        if not 0 <= cap <= 5:
+            raise ValueError("ASSISTANT_TRIAGE_TEST_SPEND_CAP_USD must be between 0 and 5.")
+        if not (self.assistant_triage_user_allowlist or "").strip(" ,"):
+            raise ValueError(
+                "ASSISTANT_TRIAGE_TEST_SPEND_CAP_USD needs ASSISTANT_TRIAGE_USER_ALLOWLIST."
+            )
+        if _PHASE7_DEV_SUPABASE_REF not in (self.supabase_url or ""):
+            raise ValueError(
+                "ASSISTANT_TRIAGE_TEST_SPEND_CAP_USD is allowed only on the dev Supabase project."
+            )
 
     def _check_proactive_test_email(self) -> None:
         """The live-test recipient override (plan 12.1, owner question 38):

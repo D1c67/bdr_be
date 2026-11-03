@@ -96,6 +96,7 @@ FEATURE_LABELS: dict[str, str] = {
     "plans_chat": "AI Estimating: chat",
     "assistant": "BDR Assistant",
     "assistant_extract": "BDR Assistant: text extraction",
+    "assistant_triage": "BDR Assistant: notification triage",
 }
 
 _PROVIDER_LABELS = {

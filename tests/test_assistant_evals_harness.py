@@ -191,8 +191,9 @@ def test_action_card_ids_and_gate_status():
 
 def test_max_turns_default_covers_every_case():
     # Phase 3 brought the corpus to 45 turns (18 golden, 27 injection);
-    # phase 4 to 64 (30 golden, 34 injection).
-    assert ev.DEFAULT_MAX_TURNS == 70
+    # phase 4 to 64 (30 golden, 34 injection); Phase 8 (WI-10) to 72
+    # (30 golden, 42 injection).
+    assert ev.DEFAULT_MAX_TURNS == 72
     golden = ev.validate_golden(ev.load_json(ev.GOLDEN))
     cases = ev.validate_injection(ev.load_json(ev.INJECTION))
     assert len(golden) + sum(ev.turns_needed(c) for c in cases) <= ev.DEFAULT_MAX_TURNS

@@ -1107,7 +1107,7 @@ def test_channels_reads_teams_status_without_the_error_text(world):
     out = delivery.channels(USER)
     assert out == {"teams": {"available": True, "enabled": True, "connected": True,
                              "last_sent_at": "2026-10-30T15:00:00Z", "last_error_at": "2026-10-29T15:00:00Z"},
-                   "email": {"available": True}}
+                   "email": {"available": True, "enabled": True}}
     assert "@" not in repr(out)
 
 
@@ -1125,3 +1125,123 @@ def test_channels_follow_the_switches(world):
     out = delivery.channels(USER)
     assert out["teams"]["available"] is False and out["email"]["available"] is False
     assert delivery.channels(fk.P7_OTHER)["teams"]["enabled"] is True  # no row means on
+
+
+# ── Phase 8 (docs/ASSISTANT_PHASE8_PLAN.md 5.6, 9, 10; WI-8b) ────────────────
+
+
+def test_channels_carry_the_digest_email_switch(world):
+    assert delivery.channels(USER)["email"] == {"available": True, "enabled": True}
+    rows(world, "assistant_profiles").append({"user_id": USER, "enabled": True, "digest_email_enabled": False})
+    assert delivery.channels(USER)["email"] == {"available": True, "enabled": False}
+    rows(world, "assistant_profiles")[0]["digest_email_enabled"] = True
+    assert delivery.channels(USER)["email"]["enabled"] is True
+
+
+def test_digest_email_on_reads_only_an_explicit_false():
+    assert delivery.digest_email_on(None) is True
+    assert delivery.digest_email_on({"user_id": USER}) is True
+    assert delivery.digest_email_on({"digest_email_enabled": None}) is True
+    assert delivery.digest_email_on({"digest_email_enabled": True}) is True
+    assert delivery.digest_email_on({"digest_email_enabled": False}) is False
+
+
+def test_a_digest_email_opted_out_after_its_ledger_row_was_written_is_skipped_opted_out(world):
+    add_digest(world)
+    rows(world, "assistant_profiles").append({"user_id": USER, "enabled": True, "digest_email_enabled": False})
+    out = tick(world, FRI_8AM)
+    assert send(world)["status"] == "skipped" and send(world)["error_kind"] == "opted_out"
+    assert "opted_out" in repo.SEND_ERROR_KINDS and out["skipped_opted_out"] == 1
+    assert world.f.graph.calls == [] and world.f.branding.renders == []
+
+
+def test_the_router_digest_email_is_stamped_system(world):
+    add_digest(world)
+    tick(world, FRI_8AM)
+    mail = world.f.graph.calls[0]
+    assert mail["actor_kind"] == "system" and mail["sent_by"] is None
+    assert send(world)["status"] == "sent"
+
+
+def test_the_email_step_passes_actor_kind_system_by_keyword():
+    tree = ast.parse(DELIVERY_SOURCE)
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+             and n.func.attr == "send_mail"]
+    assert len(calls) == 1
+    kw = {k.arg: k.value for k in calls[0].keywords}
+    assert isinstance(kw.get("actor_kind"), ast.Constant) and kw["actor_kind"].value == "system"
+    assert "sent_by" not in kw
+
+
+def _escalation_settings(world, *, enabled: bool = True, enabled_at: datetime | None = None,
+                         fuse_at: datetime | None = None) -> None:
+    rows(world, "assistant_settings")[0].update(
+        triage_enabled=enabled, triage_enabled_at=iso(enabled_at or FRI_8AM - timedelta(hours=2)),
+        triage_fuse_tripped_at=iso(fuse_at) if fuse_at else None)
+
+
+def _add_escalation(world, *, severity: str = "high", emitted: datetime | None = FRI_8AM - timedelta(minutes=5),
+                    **over) -> dict:
+    payload = {"inbox_id": str(uuid.uuid4()), "triage_item_id": str(uuid.uuid4()), "run_id": str(uuid.uuid4()),
+               "reason": "needs_decision", "severity_hint": severity, "source_kind": "bell.quote_received",
+               "project_number": "26.10.7301"}
+    if emitted is not None:
+        payload["emitted_at"] = iso(emitted)
+    return add_teams(world, event_type=proactive.TRIAGE_ESCALATION, severity=severity, payload=payload,
+                     title="Your assistant flagged a decision on bid 26.10.7301",
+                     why="Your assistant flagged this. BDR already sent you the original notice.", **over)
+
+
+def test_an_escalation_teams_row_sends_while_company_triage_is_on(world):
+    _escalation_settings(world)
+    _add_escalation(world)
+    tick(world, FRI_8AM)
+    assert send(world)["status"] == "sent" and len(teams_sent(world)) == 1
+
+
+@pytest.mark.parametrize("state", ["switch_off", "fuse", "flipped_after_emit", "no_emitted_at", "no_epoch",
+                                   "no_columns"])
+def test_a_withdrawn_escalation_teams_row_is_skipped_stale(world, state):
+    """P8R-3, 19.1 FQ9: a Teams ledger row written just before a fuse trip,
+    a switch-off or an off and on flip is not sent; a missing stamp fails
+    closed."""
+    _escalation_settings(world)
+    emitted = FRI_8AM - timedelta(minutes=5)
+    if state == "switch_off":
+        _escalation_settings(world, enabled=False)
+    elif state == "fuse":
+        _escalation_settings(world, fuse_at=FRI_8AM - timedelta(minutes=1))
+    elif state == "flipped_after_emit":
+        _escalation_settings(world, enabled_at=FRI_8AM - timedelta(minutes=1))
+    elif state == "no_emitted_at":
+        emitted = None
+    elif state == "no_epoch":
+        rows(world, "assistant_settings")[0]["triage_enabled_at"] = None
+    else:
+        for key in ("triage_enabled", "triage_enabled_at", "triage_fuse_tripped_at"):
+            rows(world, "assistant_settings")[0].pop(key, None)
+    _add_escalation(world, severity="urgent" if state == "fuse" else "high", emitted=emitted)
+    tick(world, FRI_8AM)
+    assert send(world)["status"] == "skipped" and send(world)["error_kind"] == "stale"
+    assert world.f.teams.calls == [] and world.f.teams.cards == []
+
+
+def test_the_withdrawal_test_touches_only_the_escalation_kind(world):
+    """A Phase 7 router row ignores the triage columns entirely."""
+    _escalation_settings(world, enabled=False, fuse_at=FRI_8AM)
+    add_teams(world)
+    tick(world, FRI_8AM)
+    assert send(world)["status"] == "sent"
+
+
+def test_escalation_withdrawn_is_pure_over_the_company_row():
+    at = FRI_8AM.astimezone(timezone.utc)
+    on = {"triage_enabled": True, "triage_enabled_at": iso(at), "triage_fuse_tripped_at": None}
+    assert delivery.escalation_withdrawn(on, {"emitted_at": iso(at)}) is False
+    assert delivery.escalation_withdrawn(on, {"emitted_at": iso(at + timedelta(seconds=1))}) is False
+    assert delivery.escalation_withdrawn(on, {"emitted_at": iso(at - timedelta(seconds=1))}) is True
+    assert delivery.escalation_withdrawn({**on, "triage_enabled": False}, {"emitted_at": iso(at)}) is True
+    assert delivery.escalation_withdrawn({**on, "triage_fuse_tripped_at": iso(at)}, {"emitted_at": iso(at)}) is True
+    assert delivery.escalation_withdrawn(None, {"emitted_at": iso(at)}) is True
+    assert delivery.escalation_withdrawn(on, None) is True
+    assert delivery.escalation_withdrawn(on, {"emitted_at": "not a time"}) is True

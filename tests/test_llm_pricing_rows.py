@@ -1,7 +1,9 @@
 """Verified price rows and cache-write billing (services/llm_pricing).
 
-Pinned here (prices checked 2026-10-21 on the provider pricing pages):
-  OpenAI      gpt-6-astra 10 / 1 / 50 (2x, 1.5x above 272k); gpt-5.4
+Pinned here (prices checked 2026-10-21 on the provider pricing pages;
+gpt-6-luna checked 2026-11-02 on developers.openai.com/api/docs/pricing):
+  OpenAI      gpt-6-astra 10 / 1 / 50 (2x, 1.5x above 272k); gpt-6-luna
+              0.1 / 0.01 / 0.5 with the same long-context tier; gpt-5.4
               2.5 / 0.25 / 15 with the same long-context tier;
               gpt-5.4-mini 0.75 / 0.075 / 4.5; gpt-5.4-nano 0.2 / 0.02 /
               1.25 (no long-context tier).
@@ -35,6 +37,7 @@ D = Decimal
     "model,prices,threshold,provider",
     [
         ("gpt-6-astra", ("10", "1", "50"), 272_000, "openai"),
+        ("gpt-6-luna", ("0.1", "0.01", "0.5"), 272_000, "openai"),
         ("gpt-5.4", ("2.5", "0.25", "15"), 272_000, "openai"),
         ("gpt-5.4-mini", ("0.75", "0.075", "4.5"), None, "openai"),
         ("gpt-5.4-nano", ("0.2", "0.02", "1.25"), None, "openai"),
@@ -62,6 +65,7 @@ def test_every_model_the_app_configures_on_openai_has_a_row():
     for model in (
         s.openai_plans_model, s.openai_bid_split_model, s.openai_email_model, s.openai_quote_model,
         s.openai_alias_model, s.openai_rfp_classify_model, s.openai_proposal_model, s.openai_email_match_model,
+        s.assistant_triage_model,
     ):
         assert llm_pricing.price_for(model) is not None, model
     assert llm_pricing.price_for(s.claude_bid_split_model) is not None  # the splitter model
@@ -73,6 +77,8 @@ def test_every_model_the_app_configures_on_openai_has_a_row():
         ("claude-opus-5-5-20260401", "claude-opus-5-5"),
         ("claude-opus-5-20260101", "claude-opus-5"),
         ("gpt-5.4-2026-03-05", "gpt-5.4"),
+        ("gpt-6-luna-2026-10-01", "gpt-6-luna"),
+        ("gpt-6-luna-mini", None),
         ("GPT-5.4-Mini", "gpt-5.4-mini"),
         ("claude-opus-5-6", None),
         ("claude-opus-5-5-mini", None),
@@ -117,6 +123,16 @@ def test_output_price_per_token_applies_the_long_context_multiplier():
     assert llm_pricing.output_price_per_token("gpt-6-astra") == D(50) / D(1_000_000)
     assert llm_pricing.output_price_per_token("gpt-6-astra", input_tokens=300_000) == D(75) / D(1_000_000)
     assert llm_pricing.output_price_per_token("gpt-5.3-mini") is None
+
+
+def test_gpt_6_luna_long_context_bills_the_whole_request_at_the_tier():
+    # Under the threshold: 0.1 in, 0.01 cached, 0.5 out per 1M.
+    assert llm_pricing.output_price_per_token("gpt-6-luna", input_tokens=272_000) == D("0.5") / D(1_000_000)
+    # 300,000 input tokens: 0.2 per 1M input and 0.75 per 1M output.
+    assert llm_pricing.output_price_per_token("gpt-6-luna", input_tokens=300_000) == D("0.75") / D(1_000_000)
+    assert llm_pricing.estimate_cost("gpt-6-luna", input_tokens=300_000, output_tokens=0) == D("0.060000")
+    assert llm_pricing.estimate_cost("gpt-6-luna", input_tokens=300_000, cached_tokens=100_000, output_tokens=1_000) == D("0.042750")
+    assert llm_pricing.estimate_cost("gpt-6-luna", input_tokens=4_300, output_tokens=1_500) == D("0.001180")
 
 
 def test_conservative_fallback_prices_at_the_most_expensive_row():

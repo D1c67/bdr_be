@@ -1,0 +1,729 @@
+{
+ "plan": "bdr_be/docs/ASSISTANT_PHASE8_PLAN.md 17.3 read only, 17.4 gates (WI-1)",
+ "generated_at": "2026-11-02T13:26:51-08:00",
+ "root": "paths are relative to the BDR folder",
+ "note": "No Phase 8 item may change these files. Group bdr94_held is read only for Phase 8 but is still being edited by session bdr-94 (browser v2), so a diff there is expected and is checked against bdr-94's build log entries, not treated as a Phase 8 violation. graph_email.py is not listed: it leaves the read-only list for WI-8a (D7). Migration 0196 is not listed: it is Phase 8's own.",
+ "check": "python3 -c \"import hashlib,json,pathlib;r=pathlib.Path('/Users/thomasmoore/Desktop/BDR');m=json.load(open(r/'bdr_be/docs/phase8_wi1_manifest.json'));print([p for p,e in m['read_only'].items() if not (r/p).exists() or hashlib.sha256((r/p).read_bytes()).hexdigest()!=e['sha256']])\"",
+ "groups": {
+  "bdr_notifications": [
+   "bdr_be/app/services/notifications.py",
+   "bdr_be/app/services/notification_routing.py",
+   "bdr_be/app/services/notification_email.py",
+   "bdr_be/app/services/teams_alerts.py",
+   "bdr_be/app/services/email_branding.py",
+   "bdr_be/app/services/due_digest.py",
+   "bdr_be/app/services/due_reminders.py",
+   "bdr_be/app/services/calling_in.py",
+   "bdr_be/app/services/rfq_inbox.py",
+   "bdr_be/app/services/auto_send*.py"
+  ],
+  "assistant_read_only": [
+   "bdr_be/app/services/assistant_scheduler.py",
+   "bdr_be/app/services/assistant_recipes.py",
+   "bdr_be/app/assistant/approvals.py",
+   "bdr_be/app/assistant/approvals_job.py",
+   "bdr_be/app/assistant/binding.py",
+   "bdr_be/app/assistant/principal.py",
+   "bdr_be/app/assistant/shim.py",
+   "bdr_be/app/assistant/access.py"
+  ],
+  "bdr94_held": [
+   "bdr_be/app/assistant/llm_messages.py",
+   "bdr_be/app/services/assistant_browser*.py",
+   "bdr_be/app/services/browser_agents",
+   "bdr_be/app/routers/assistant_browser*.py",
+   "bdr_be/app/routers/agent_worker_user.py",
+   "bdr_be/app/assistant/tools/browser.py",
+   "bdr_be/agent_worker/bdr_agent/agents/user_browser_v2",
+   "bdr_fe/lib/assistantBrowser*.ts",
+   "bdr_fe/components/assistant/*Browser*.tsx"
+  ],
+  "migrations": [
+   "bdr_be/supabase/migrations/0170_*.sql",
+   "bdr_be/supabase/migrations/0171_*.sql",
+   "bdr_be/supabase/migrations/0172_*.sql",
+   "bdr_be/supabase/migrations/0173_*.sql",
+   "bdr_be/supabase/migrations/0174_*.sql",
+   "bdr_be/supabase/migrations/0175_*.sql",
+   "bdr_be/supabase/migrations/0176_*.sql",
+   "bdr_be/supabase/migrations/0177_*.sql",
+   "bdr_be/supabase/migrations/0178_*.sql",
+   "bdr_be/supabase/migrations/0179_*.sql",
+   "bdr_be/supabase/migrations/0180_*.sql",
+   "bdr_be/supabase/migrations/0181_*.sql",
+   "bdr_be/supabase/migrations/0182_*.sql",
+   "bdr_be/supabase/migrations/0183_*.sql",
+   "bdr_be/supabase/migrations/0184_*.sql",
+   "bdr_be/supabase/migrations/0185_*.sql",
+   "bdr_be/supabase/migrations/0186_*.sql",
+   "bdr_be/supabase/migrations/0187_*.sql",
+   "bdr_be/supabase/migrations/0188_*.sql",
+   "bdr_be/supabase/migrations/0189_*.sql",
+   "bdr_be/supabase/migrations/0190_*.sql",
+   "bdr_be/supabase/migrations/0191_*.sql",
+   "bdr_be/supabase/migrations/0192_*.sql",
+   "bdr_be/supabase/migrations/0193_*.sql",
+   "bdr_be/supabase/migrations/0194_*.sql",
+   "bdr_be/supabase/migrations/0195_*.sql"
+  ],
+  "frontend": [
+   "bdr_fe/components/NotificationsBell.tsx",
+   "bdr_fe/components/NotificationRoutingSettings.tsx",
+   "bdr_fe/components/TeamsAlertsSection.tsx",
+   "bdr_fe/components/assistant/AssistantRoutingColumn.tsx",
+   "bdr_fe/lib/i18n.ts"
+  ]
+ },
+ "read_only": {
+  "bdr_be/agent_worker/bdr_agent/agents/user_browser_v2/__init__.py": {
+   "group": "bdr94_held",
+   "sha256": "a44252716abf6d1e66db1358936c9790615db8a1cb3da7faf6706b25bf2906ba",
+   "size": 72
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/user_browser_v2/client.py": {
+   "group": "bdr94_held",
+   "sha256": "e21ddc13233ad5dc699cb9ab3c198a4c353685fb40e9b3700bfe7323be954fe8",
+   "size": 22714
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/user_browser_v2/downloads.py": {
+   "group": "bdr94_held",
+   "sha256": "78b390811ec88150463d935bdebd1dfbeccf41e375a8cf6d75ab8ef17f644449",
+   "size": 25462
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/user_browser_v2/egress.py": {
+   "group": "bdr94_held",
+   "sha256": "00003314045582eee464220e79aa8046d313fe3d7f88e4e32b9cbc33d339ccfd",
+   "size": 41466
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/user_browser_v2/exfil.py": {
+   "group": "bdr94_held",
+   "sha256": "354f7b7e60c5181c77130e9b9dcd73dc0ec8c0073e8fce6d8846bc207aeedded",
+   "size": 21032
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/user_browser_v2/guard.py": {
+   "group": "bdr94_held",
+   "sha256": "bf4e5bf4268016ce19c2c0ca7226808353bde9079752bec68933acab8704e8be",
+   "size": 60563
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/user_browser_v2/holds.py": {
+   "group": "bdr94_held",
+   "sha256": "725f2eee987a308080f8d0525d851f8b1b57ced38c6ac0b0d59aa75b677d5248",
+   "size": 22361
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/user_browser_v2/identity.py": {
+   "group": "bdr94_held",
+   "sha256": "261e1f61a37eb7ca6b32633a1276941d00cae47472ffd963d2da36ff5d10c4c7",
+   "size": 36339
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/user_browser_v2/runner.py": {
+   "group": "bdr94_held",
+   "sha256": "71aa7216cff065f59148f88b0daaf209ded6b12ca5417d5fcb509c0e124e6110",
+   "size": 7481
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/user_browser_v2/selftest.py": {
+   "group": "bdr94_held",
+   "sha256": "c8a37f23f4116427acac476237f27ffb04f8f57bf57589b2139759ec158ac97c",
+   "size": 27748
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/user_browser_v2/tools.py": {
+   "group": "bdr94_held",
+   "sha256": "a8cd38f52205a98d14faea2b0b153f891228f1ede433fb1072d6d31f21c31035",
+   "size": 29620
+  },
+  "bdr_be/app/assistant/access.py": {
+   "group": "assistant_read_only",
+   "sha256": "a2838a4ceaba891894188836ce3a654cc7fc27fd7a9e4b1f2a3e4f4791065ff4",
+   "size": 7036
+  },
+  "bdr_be/app/assistant/approvals.py": {
+   "group": "assistant_read_only",
+   "sha256": "b83c0080ac39d7fec971c3ae5ad3004ea9709011a428035982741bc8f21dc705",
+   "size": 40404
+  },
+  "bdr_be/app/assistant/approvals_job.py": {
+   "group": "assistant_read_only",
+   "sha256": "7fa8f8fd9870f1bfcf1006532babdbf66606c7735b6b41404b0c0a80147435a2",
+   "size": 31722
+  },
+  "bdr_be/app/assistant/binding.py": {
+   "group": "assistant_read_only",
+   "sha256": "d4ce55128da9b68a3b512178ae03c7113c0ac7231d475b195d59ae63919a6a79",
+   "size": 11816
+  },
+  "bdr_be/app/assistant/llm_messages.py": {
+   "group": "bdr94_held",
+   "sha256": "e13a19c653afba970f08177ee5b5639eabb02aa028ed1f8f6c48f3f72139f00a",
+   "size": 18284
+  },
+  "bdr_be/app/assistant/principal.py": {
+   "group": "assistant_read_only",
+   "sha256": "9254be0b3aaced0b797eb4b95a1a985d3936d5b82941f2f2b4b80d287272ab54",
+   "size": 11805
+  },
+  "bdr_be/app/assistant/shim.py": {
+   "group": "assistant_read_only",
+   "sha256": "ac343e814a59b4b793bfb868efae462eb3ea0273344fe7ee152bbf9d51d76060",
+   "size": 4874
+  },
+  "bdr_be/app/assistant/tools/browser.py": {
+   "group": "bdr94_held",
+   "sha256": "22e4f5c3d70f600e74173b16abc322fb17a2c6d63d6381a43bc6c1b989b8dd4b",
+   "size": 21928
+  },
+  "bdr_be/app/routers/agent_worker_user.py": {
+   "group": "bdr94_held",
+   "sha256": "553086b0dc5db9e905810d019ae35d6683a1fc032e6fe1fba1ca6b890ad463a3",
+   "size": 25064
+  },
+  "bdr_be/app/routers/assistant_browser.py": {
+   "group": "bdr94_held",
+   "sha256": "bb46fecf78dd32aad97b259ea9d2a899c5bd9b3959bfa02709a52a85e4d339a2",
+   "size": 41185
+  },
+  "bdr_be/app/routers/assistant_browser_requests.py": {
+   "group": "bdr94_held",
+   "sha256": "3dc32d603528874fb368f529fa57bbea12fef8d5719eb577db89c79a30c4469a",
+   "size": 6461
+  },
+  "bdr_be/app/routers/assistant_browser_results.py": {
+   "group": "bdr94_held",
+   "sha256": "9e84aec9d8ca3a776d9a73c87d593ecef2b5a79ebf50b36a427ad45469dc191b",
+   "size": 2529
+  },
+  "bdr_be/app/routers/assistant_browser_views.py": {
+   "group": "bdr94_held",
+   "sha256": "c30a4571cc6af6292270e3aba444fa5e01c4f6cc0da2a05a73214bbc7f1ef113",
+   "size": 5935
+  },
+  "bdr_be/app/services/assistant_browser.py": {
+   "group": "bdr94_held",
+   "sha256": "b1814194a3068295852817d2ca99cb05a5fa068f7b62ee35d2dfa21379fcb2ac",
+   "size": 47236
+  },
+  "bdr_be/app/services/assistant_browser_chat.py": {
+   "group": "bdr94_held",
+   "sha256": "7031d6c8f607df429ff8c1d63626a64223f736cb7e90d42dc3e4f02e96c76bb1",
+   "size": 42883
+  },
+  "bdr_be/app/services/assistant_browser_credentials.py": {
+   "group": "bdr94_held",
+   "sha256": "2d900b2683ceb3b3a05c0bd92cb5bb9084197b56185ebf2102d2fb043d811e5f",
+   "size": 12988
+  },
+  "bdr_be/app/services/assistant_browser_downloads.py": {
+   "group": "bdr94_held",
+   "sha256": "caf642623078a049187015d56c5946ee3e2b5627bcf22bdd909b7bacea6e0441",
+   "size": 27193
+  },
+  "bdr_be/app/services/assistant_browser_grants.py": {
+   "group": "bdr94_held",
+   "sha256": "5ef228c20448002bf9edf47b9f25c5c6150661f5bd02cd14bce0b2490d90875a",
+   "size": 9967
+  },
+  "bdr_be/app/services/assistant_browser_help.py": {
+   "group": "bdr94_held",
+   "sha256": "4df48d3ff1659c5e9c1d87c3fc541adfe0ae9008e5fd53dd87211c737fc48c41",
+   "size": 20312
+  },
+  "bdr_be/app/services/assistant_browser_holds.py": {
+   "group": "bdr94_held",
+   "sha256": "9a5dcb1a9c95d7995cb02ee1c636afcef9e2342d4ca6eb12a0f3a6e139c3cec3",
+   "size": 25543
+  },
+  "bdr_be/app/services/assistant_browser_mfa_mail.py": {
+   "group": "bdr94_held",
+   "sha256": "4d68dbf67867d40a75d23c33e8f2e50fb377d4bf574d33bd2ce200add3c017ae",
+   "size": 38808
+  },
+  "bdr_be/app/services/assistant_browser_records.py": {
+   "group": "bdr94_held",
+   "sha256": "217f173796c109bb7c45d7d7be538f65bdf50babcf6c1349b902b4805ee9f074",
+   "size": 17086
+  },
+  "bdr_be/app/services/assistant_browser_redaction.py": {
+   "group": "bdr94_held",
+   "sha256": "f69f9a4a13cf60d912650adbd0a67d3d19f820f5e7d794b6e27ba30de260b0c8",
+   "size": 5809
+  },
+  "bdr_be/app/services/assistant_browser_runtime.py": {
+   "group": "bdr94_held",
+   "sha256": "1e476778dbc43926d83cac43358147bc01a9d209b5aef9217af65eed1ce26c1d",
+   "size": 52812
+  },
+  "bdr_be/app/services/assistant_browser_secrets.py": {
+   "group": "bdr94_held",
+   "sha256": "872866e49f7a40af8d398d2a991736addb5e66e4b36c4ea8bf3dd6510661af7c",
+   "size": 15493
+  },
+  "bdr_be/app/services/assistant_browser_sites.py": {
+   "group": "bdr94_held",
+   "sha256": "ca4b0a40a9b8ac7a06f0690532f093191d504c2e9f855e3f0ea4f97a0d09f66e",
+   "size": 36240
+  },
+  "bdr_be/app/services/assistant_browser_vault.py": {
+   "group": "bdr94_held",
+   "sha256": "0d8c27e900de6d8d924707b18757a1e04171cdc74ee83b41ac16ae728e0af3d2",
+   "size": 6281
+  },
+  "bdr_be/app/services/assistant_recipes.py": {
+   "group": "assistant_read_only",
+   "sha256": "f57cfac296c4a5b86810a4db42a5d196498257ae277633a3264de15c297da1a6",
+   "size": 32047
+  },
+  "bdr_be/app/services/assistant_scheduler.py": {
+   "group": "assistant_read_only",
+   "sha256": "1e665c5841a781a4517bfdf4e7e07ad280da297c4ebd7112ebf3d0f161ecc84a",
+   "size": 38301
+  },
+  "bdr_be/app/services/auto_send.py": {
+   "group": "bdr_notifications",
+   "sha256": "68316068ea74626d1ff78dbf0da7e5f7ddf6baf5d3407a6f944e0617886c2e7b",
+   "size": 79025
+  },
+  "bdr_be/app/services/auto_send_emails.py": {
+   "group": "bdr_notifications",
+   "sha256": "5e9d74fee82d5dbd54d5432fd8b941a7081f7578cfb58e1c72136e808177debc",
+   "size": 17236
+  },
+  "bdr_be/app/services/auto_send_estimate.py": {
+   "group": "bdr_notifications",
+   "sha256": "574af3f1d350fc94c700fa33a0cdee6bf3df45cbad6810753bbee93ac1b716af",
+   "size": 27381
+  },
+  "bdr_be/app/services/auto_send_hooks.py": {
+   "group": "bdr_notifications",
+   "sha256": "72a1b300691f4cb9bd93c66d37de3d1c43bb2de66358cabd8406983a091e29d2",
+   "size": 4136
+  },
+  "bdr_be/app/services/auto_send_scheduler.py": {
+   "group": "bdr_notifications",
+   "sha256": "4b19e656c72509af53b2cdef77252eaddc6a633d3ea98b588c46166aae1cfbc3",
+   "size": 22517
+  },
+  "bdr_be/app/services/browser_agents/__init__.py": {
+   "group": "bdr94_held",
+   "sha256": "83673c4096ba81ec2f615e205cc8d966c6b3561e9869cc7add2ef2ed87b594bb",
+   "size": 232
+  },
+  "bdr_be/app/services/browser_agents/admin.py": {
+   "group": "bdr94_held",
+   "sha256": "e9a167335f968dc3fc5b02839170b93417da5709debba0dd0e8aa0d7acbfe319",
+   "size": 50023
+  },
+  "bdr_be/app/services/browser_agents/artifacts.py": {
+   "group": "bdr94_held",
+   "sha256": "462615c4d3b9a8f86e64f8c83be1315a429ec6831a86924f756c52658e760730",
+   "size": 10136
+  },
+  "bdr_be/app/services/browser_agents/contributions.py": {
+   "group": "bdr94_held",
+   "sha256": "b04bb5d294681921ab15394e6cbaad11bfb2c708efda1b3a6e8cc3798bd6f781",
+   "size": 7687
+  },
+  "bdr_be/app/services/browser_agents/help.py": {
+   "group": "bdr94_held",
+   "sha256": "88e1fb4804cd8bb119546ed1c03763e61e6d1fed390e5358125a00dc3b471d02",
+   "size": 79455
+  },
+  "bdr_be/app/services/browser_agents/identities.py": {
+   "group": "bdr94_held",
+   "sha256": "1c7ea290e5cb974352367162ee686189602514cec889add9dbf8afa974d98cee",
+   "size": 24885
+  },
+  "bdr_be/app/services/browser_agents/llm/__init__.py": {
+   "group": "bdr94_held",
+   "sha256": "130f410174ea1b3caa4b71f7f198b2831ac0f64af13317618825703242d2a664",
+   "size": 5193
+  },
+  "bdr_be/app/services/browser_agents/llm/anthropic_.py": {
+   "group": "bdr94_held",
+   "sha256": "53dff650d314534de7156302a48121069da75e106804a412cb912341d9ab561f",
+   "size": 4964
+  },
+  "bdr_be/app/services/browser_agents/llm/base.py": {
+   "group": "bdr94_held",
+   "sha256": "9e6d57ae89979b0d8f63a8572e71b8f70b8605a346b413e79345c070c28e6b4d",
+   "size": 10272
+  },
+  "bdr_be/app/services/browser_agents/llm/compat.py": {
+   "group": "bdr94_held",
+   "sha256": "0baf7f06685bd8d6a2bd2806b28b5c15da9186949b52cc0070b01cf951974c64",
+   "size": 4940
+  },
+  "bdr_be/app/services/browser_agents/llm/google_.py": {
+   "group": "bdr94_held",
+   "sha256": "62463368aac16b13d92e0dc5e88a2cc848022b9b516bcbc985735ad8df3df1e2",
+   "size": 6947
+  },
+  "bdr_be/app/services/browser_agents/llm/models.py": {
+   "group": "bdr94_held",
+   "sha256": "80d3e22295eb163a684755d3de2c83be0d561191ddf2540df26afb932c72203f",
+   "size": 9771
+  },
+  "bdr_be/app/services/browser_agents/llm/openai_.py": {
+   "group": "bdr94_held",
+   "sha256": "aec79426affdfe56eb242013ab178b32b75501b0ae3b06ba3946444319ba8a06",
+   "size": 5587
+  },
+  "bdr_be/app/services/browser_agents/pm_apps/__init__.py": {
+   "group": "bdr94_held",
+   "sha256": "0e83753fea945119e4ffe94353d25b71bf1c184c2c16987bdfc671c177e53026",
+   "size": 75
+  },
+  "bdr_be/app/services/browser_agents/pm_apps/procore.py": {
+   "group": "bdr94_held",
+   "sha256": "c6d6794177e84570b41e13387caed9e8dd152085ff7dc8ad85a6a98701c810cd",
+   "size": 10993
+  },
+  "bdr_be/app/services/browser_agents/prompts.py": {
+   "group": "bdr94_held",
+   "sha256": "158876bcbe1b04c594486d71511e6dc98b6646775f8065d4cdce5c8152101889",
+   "size": 5935
+  },
+  "bdr_be/app/services/browser_agents/protocol.py": {
+   "group": "bdr94_held",
+   "sha256": "a10784090a282535af5fc51ce96fd159145f51ad4ca07ebf127ec64c24ed0ff8",
+   "size": 91580
+  },
+  "bdr_be/app/services/browser_agents/queue.py": {
+   "group": "bdr94_held",
+   "sha256": "41d0bd928325327f281d0400d434fee9acdd7791209d55ac758234b0d04cf0f5",
+   "size": 42168
+  },
+  "bdr_be/app/services/browser_agents/redaction.py": {
+   "group": "bdr94_held",
+   "sha256": "2629f41db79f282a30aacf38150ffaaf993826a9b0658276602229738644e496",
+   "size": 11388
+  },
+  "bdr_be/app/services/browser_agents/registry.py": {
+   "group": "bdr94_held",
+   "sha256": "74a87c52536fe7eb4d9a0956f023529d8016ef64fd49b76315f6972905874caa",
+   "size": 7577
+  },
+  "bdr_be/app/services/browser_agents/rfi_session.py": {
+   "group": "bdr94_held",
+   "sha256": "9d5192e5c5e9284ff2f1c23a8b04267b7401bab94d068cc559835404d4315ffd",
+   "size": 7755
+  },
+  "bdr_be/app/services/browser_agents/scan.py": {
+   "group": "bdr94_held",
+   "sha256": "9ec861a298d1b4c12f361da405e5b67708dc4bb617a732e2e480447430dff345",
+   "size": 718
+  },
+  "bdr_be/app/services/browser_agents/secrets.py": {
+   "group": "bdr94_held",
+   "sha256": "374d9914abc14a7121df97e93baab09e1f9e3aee45ddaba27b21683b4e1fcb81",
+   "size": 14615
+  },
+  "bdr_be/app/services/browser_agents/turns.py": {
+   "group": "bdr94_held",
+   "sha256": "8d877615f8e5717b81f3a57dd9f91826e2f530964df27a1b95069332cd4edc0f",
+   "size": 66809
+  },
+  "bdr_be/app/services/browser_agents/types/__init__.py": {
+   "group": "bdr94_held",
+   "sha256": "54f3612af23ccabec6f74fe678e23bf59a388daa7be02ed54a6436d37e5e6384",
+   "size": 79
+  },
+  "bdr_be/app/services/browser_agents/types/canary.py": {
+   "group": "bdr94_held",
+   "sha256": "45592313094b1a1d9913653fcc4e51b8a10f4007f240c7d1e5961d761f9ff416",
+   "size": 3912
+  },
+  "bdr_be/app/services/browser_agents/types/rfi_from_email.py": {
+   "group": "bdr94_held",
+   "sha256": "c05b889d0c579d61fbd16ee90bbd795590d9f31ea5ce482c73d45fb36543dd4d",
+   "size": 12596
+  },
+  "bdr_be/app/services/browser_agents/types/user_browser.py": {
+   "group": "bdr94_held",
+   "sha256": "564440641702442276efe6c88e7ca8c9289cc4d956e351c1fb515824ce4ee0a8",
+   "size": 3586
+  },
+  "bdr_be/app/services/browser_agents/types/user_browser_read.py": {
+   "group": "bdr94_held",
+   "sha256": "85008af42a87dc88c9cb5600c8b49c299da2c71f3f75aa22d5caa9e31201054c",
+   "size": 1690
+  },
+  "bdr_be/app/services/calling_in.py": {
+   "group": "bdr_notifications",
+   "sha256": "1501acd16a01a28149df98ad5698fa9aefd697184e1767082eccf6f6dfbf50ce",
+   "size": 48772
+  },
+  "bdr_be/app/services/due_digest.py": {
+   "group": "bdr_notifications",
+   "sha256": "d5d3e8281c2170c3367fc26e93f8b7e0ea91ec70887bc9a3661c1984bedc0624",
+   "size": 18253
+  },
+  "bdr_be/app/services/due_reminders.py": {
+   "group": "bdr_notifications",
+   "sha256": "7f513b16d440642678a12adf0cf3d8cfb52c6c322d3126c1d92a72772fbc8db4",
+   "size": 22055
+  },
+  "bdr_be/app/services/email_branding.py": {
+   "group": "bdr_notifications",
+   "sha256": "fdb8f5b59c7ceef1dbaaf795c7dc89d35580f33c58121ee29e38b6f0ea1fcc83",
+   "size": 15543
+  },
+  "bdr_be/app/services/notification_email.py": {
+   "group": "bdr_notifications",
+   "sha256": "89c21cee66a21023c4d6fb6a145cf55dc47ea44ca0d6f2399a91909d677d5c9b",
+   "size": 29814
+  },
+  "bdr_be/app/services/notification_routing.py": {
+   "group": "bdr_notifications",
+   "sha256": "34c3ae739eabb1697e60eefef898d2127d39008ff59d63dfc4bc36f5bf89bd99",
+   "size": 18089
+  },
+  "bdr_be/app/services/notifications.py": {
+   "group": "bdr_notifications",
+   "sha256": "505d8a49d2164008ce2813d2d7a169fb03aa148a976e3e1047d6fa0dfe611bef",
+   "size": 11616
+  },
+  "bdr_be/app/services/rfq_inbox.py": {
+   "group": "bdr_notifications",
+   "sha256": "40abc17f9d6fff42df4d0944ad6c45bdafa664627c654f03eba6b8d076c83b78",
+   "size": 63117
+  },
+  "bdr_be/app/services/teams_alerts.py": {
+   "group": "bdr_notifications",
+   "sha256": "6a6f14337f5d2a725310150400f55e3911b812c2ae2eeb7c189751cbd1b94010",
+   "size": 22788
+  },
+  "bdr_be/supabase/migrations/0170_assistant_core.sql": {
+   "group": "migrations",
+   "sha256": "88f9077397dc7007740d03c7625266b79420331368326a9128058a1be8b82643",
+   "size": 62072
+  },
+  "bdr_be/supabase/migrations/0171_assistant_delegation_aal.sql": {
+   "group": "migrations",
+   "sha256": "cd5f483f906261ea809e3a2f17e39e8c9be874ef15a9ee6db59cfad5fdad9f35",
+   "size": 2618
+  },
+  "bdr_be/supabase/migrations/0172_assistant_phase1.sql": {
+   "group": "migrations",
+   "sha256": "f8a9effae7507083b018e78d1d239227cc8600303d7aa201240011ec042e0ca8",
+   "size": 13760
+  },
+  "bdr_be/supabase/migrations/0173_project_gc_invitation_method.sql": {
+   "group": "migrations",
+   "sha256": "a1f01fe36aeb30412b52fd65efed6b68d9332ac99743b8b5b0da35b8b2e505f3",
+   "size": 1471
+  },
+  "bdr_be/supabase/migrations/0174_assistant_phase2.sql": {
+   "group": "migrations",
+   "sha256": "a6ae0de55af08cc63b6044563cfc14b3f9f437dd6f87203799b5cd3f08a9b2af",
+   "size": 9857
+  },
+  "bdr_be/supabase/migrations/0175_teams_alerts.sql": {
+   "group": "migrations",
+   "sha256": "6e1cd2cda29fdfdd9ea98cf6037d56c620bc47f163da7b120af9b68e146f0876",
+   "size": 1678
+  },
+  "bdr_be/supabase/migrations/0176_assistant_phase3.sql": {
+   "group": "migrations",
+   "sha256": "6bfd6353f2fc1ed3f48bf485fbf7757742ebccae21c1909dcc1f26542d61891b",
+   "size": 43155
+  },
+  "bdr_be/supabase/migrations/0177_notification_routing.sql": {
+   "group": "migrations",
+   "sha256": "9e108a9b39c43d7298d19faff205a4cc73a8bd62437ebb7486c6b270fdb6321d",
+   "size": 1184
+  },
+  "bdr_be/supabase/migrations/0178_proposal_revisions.sql": {
+   "group": "migrations",
+   "sha256": "48456e1c76e8168db78dbbedd627edfbbb7cbcc8e5d12230e41d1faf16621135",
+   "size": 24806
+  },
+  "bdr_be/supabase/migrations/0179_proposal_revision_workspace.sql": {
+   "group": "migrations",
+   "sha256": "6bb0fd338d91835da91afa1c69b38fa47b4080f8174f09171a4606c71cb8b509",
+   "size": 8331
+  },
+  "bdr_be/supabase/migrations/0180_assistant_phase4.sql": {
+   "group": "migrations",
+   "sha256": "fcfe112bcbbc11a11d454d273ea5484d9e14773b53335cbca144206bcff4ff12",
+   "size": 28049
+  },
+  "bdr_be/supabase/migrations/0181_rfq_initial_notification.sql": {
+   "group": "migrations",
+   "sha256": "4976e2ff4abb6b4711842c4a391d0c16fc9ecb1f9097be65fdd59f85e4ab32e6",
+   "size": 2033
+  },
+  "bdr_be/supabase/migrations/0182_assistant_phase5.sql": {
+   "group": "migrations",
+   "sha256": "43e062aaa6382af2243f881a7d2f1c2fe5a52dc736cfce1610ef16cd2fde1a8e",
+   "size": 20484
+  },
+  "bdr_be/supabase/migrations/0183_assistant_application_mail.sql": {
+   "group": "migrations",
+   "sha256": "18cd2a82f299447f585419f426073d1afbe80674af70c8d5d1939c464eeb6c35",
+   "size": 1927
+  },
+  "bdr_be/supabase/migrations/0184_assistant_mail_operations.sql": {
+   "group": "migrations",
+   "sha256": "be13436b3efffca1105b74a20ba726c5a5ceeae0e7c4ade8a3ce16bc6b3acae8",
+   "size": 29997
+  },
+  "bdr_be/supabase/migrations/0185_assistant_mail_dispatch_fences.sql": {
+   "group": "migrations",
+   "sha256": "1efdf41c36c180a19c68f2807235646cb352dbe9a3bff257cad786bf8f0e91f4",
+   "size": 7757
+  },
+  "bdr_be/supabase/migrations/0186_assistant_browser_foundation.sql": {
+   "group": "migrations",
+   "sha256": "7f343efdf946e4057869c77edc0a5333c0a480d644e2cc8cc50a7eb54a008e3e",
+   "size": 37367
+  },
+  "bdr_be/supabase/migrations/0187_assistant_browser_runtime.sql": {
+   "group": "migrations",
+   "sha256": "366d15dde5130be5c5a595d2d16a53d7a5c70ad18aeb2dd0aa4c500cc0f92e16",
+   "size": 40177
+  },
+  "bdr_be/supabase/migrations/0188_assistant_browser_claims.sql": {
+   "group": "migrations",
+   "sha256": "3d7c99c93ffae85bc1718f385399ee534ab9f242e8449789a6a98ac59fdcd521",
+   "size": 26819
+  },
+  "bdr_be/supabase/migrations/0189_assistant_browser_regional_procore.sql": {
+   "group": "migrations",
+   "sha256": "af4b5cf8098af253fd0b5c82db7f24a511497bad73cbee7e8cb29f298d7a90fe",
+   "size": 19433
+  },
+  "bdr_be/supabase/migrations/0190_assistant_phase7.sql": {
+   "group": "migrations",
+   "sha256": "339708cf592ec07bea5663afd7d0cd174599efbe36d7da4a71a6de7447ab5518",
+   "size": 72770
+  },
+  "bdr_be/supabase/migrations/0191_assistant_phase7_fold_fix.sql": {
+   "group": "migrations",
+   "sha256": "219b8cf17be2956f3712710ec4fd50a4d0b080ba857d1e3ca159e8cbff607d42",
+   "size": 11425
+  },
+  "bdr_be/supabase/migrations/0192_assistant_browser_v2.sql": {
+   "group": "migrations",
+   "sha256": "ac943b2a3477f91ea56358bace9b8cf77e52e2566af56c5afdbc3d85b44774ff",
+   "size": 175608
+  },
+  "bdr_be/supabase/migrations/0193_excel_edit.sql": {
+   "group": "migrations",
+   "sha256": "905caadef7f6ee7bec83712c95249d25256a36b6d87a3bdca7a6f4b6f23ca0b6",
+   "size": 4406
+  },
+  "bdr_be/supabase/migrations/0194_assistant_browser_curated_profiles.sql": {
+   "group": "migrations",
+   "sha256": "9f14288ac34ec90fb4b6108d10dc34fcbe967064899b0468611f2f20b3824f0b",
+   "size": 9663
+  },
+  "bdr_fe/components/NotificationRoutingSettings.tsx": {
+   "group": "frontend",
+   "sha256": "a943e38beedecf5e00c6fa40af59e94dd7f06b5a4a28a9bf20b674bb799f096f",
+   "size": 7725
+  },
+  "bdr_fe/components/NotificationsBell.tsx": {
+   "group": "frontend",
+   "sha256": "65eff9970362eca10582afb238dbd1e31982545b3e1ca8a825f6c724d590994a",
+   "size": 19358
+  },
+  "bdr_fe/components/TeamsAlertsSection.tsx": {
+   "group": "frontend",
+   "sha256": "3e827b62613ef019489eb6e124cb2527ce5f6110f453b553868495a49457b380",
+   "size": 5330
+  },
+  "bdr_fe/components/assistant/AssistantBrowserCredentials.tsx": {
+   "group": "bdr94_held",
+   "sha256": "3588fb7e69f7eafe08c29a50b9806cb522d392436349fc37d645910ecd01f47e",
+   "size": 16859
+  },
+  "bdr_fe/components/assistant/AssistantBrowserHelp.tsx": {
+   "group": "bdr94_held",
+   "sha256": "79a2729013b71b4146c1c212ccdb33303e4acfb319683d40049e8b57de74285c",
+   "size": 6502
+  },
+  "bdr_fe/components/assistant/AssistantBrowserInspection.tsx": {
+   "group": "bdr94_held",
+   "sha256": "9686afcda7ec3cba22c2ef7db319ab83370ab729e1368072fe4b8891e783726d",
+   "size": 3189
+  },
+  "bdr_fe/components/assistant/AssistantBrowserTasks.tsx": {
+   "group": "bdr94_held",
+   "sha256": "8c1da71ff874daafb12e4207f7c0b2dffb83698591648790a6a6b071fb5e53dd",
+   "size": 7236
+  },
+  "bdr_fe/components/assistant/AssistantBrowserTrace.tsx": {
+   "group": "bdr94_held",
+   "sha256": "db8d0bfa2204bcba4b5d1095d0f0a73a451daa95ce09ce8d83b0943550ffe180",
+   "size": 5472
+  },
+  "bdr_fe/components/assistant/AssistantRoutingColumn.tsx": {
+   "group": "frontend",
+   "sha256": "e7fd6372b0e3f8000c2100d81843f1f0f3c943458c025190e20050c139111082",
+   "size": 6898
+  },
+  "bdr_fe/components/assistant/BrowserBlocks.tsx": {
+   "group": "bdr94_held",
+   "sha256": "86ed77fd7dc90c2626d48ea62b5b2c5ea20c340c566337851d4572f383803e6d",
+   "size": 2585
+  },
+  "bdr_fe/components/assistant/BrowserCardParts.tsx": {
+   "group": "bdr94_held",
+   "sha256": "57f9d715e25b217c65dd2d624fbf90b9bfe154d220f14f04ba2634145d34329b",
+   "size": 5864
+  },
+  "bdr_fe/components/assistant/BrowserCodeCard.tsx": {
+   "group": "bdr94_held",
+   "sha256": "417f592d3659e3f73b7dd75f77b513fb20efed640a0d70102155161e368fbf04",
+   "size": 5155
+  },
+  "bdr_fe/components/assistant/BrowserCredentialCard.tsx": {
+   "group": "bdr94_held",
+   "sha256": "108e804e546eb0e90f7664f83bbfb677673f1b3ccd9bfd1b902b281c1ee35b84",
+   "size": 3943
+  },
+  "bdr_fe/components/assistant/BrowserCredentialForm.tsx": {
+   "group": "bdr94_held",
+   "sha256": "6cfb273c877a0fff1405ecb0dbf4d35999fcc644225ddcc1b4c7c7d423f6db37",
+   "size": 8142
+  },
+  "bdr_fe/components/assistant/BrowserFinalActionCard.tsx": {
+   "group": "bdr94_held",
+   "sha256": "a078c91f82fa901b0a152c5bb63440b723b30707de8b536cf214b2ad6121d48d",
+   "size": 9239
+  },
+  "bdr_fe/components/assistant/BrowserResultBlock.tsx": {
+   "group": "bdr94_held",
+   "sha256": "77e054af1bacfb35d62db1bf013e06f32ea14d5a166b5fa445f2f047b6f6b968",
+   "size": 10639
+  },
+  "bdr_fe/components/assistant/BrowserSiteAccessCard.tsx": {
+   "group": "bdr94_held",
+   "sha256": "ef7dec312e91e2e15c1580ba4f23f49ea20bbce3caab8b411ba35212244eaeff",
+   "size": 7665
+  },
+  "bdr_fe/components/assistant/BrowserStartCard.tsx": {
+   "group": "bdr94_held",
+   "sha256": "ebfdf32be1ba36b088e61c7a1e66d45860ae7e4bc71625b954be55e3db2d7cf2",
+   "size": 5126
+  },
+  "bdr_fe/components/assistant/BrowserTaskCard.tsx": {
+   "group": "bdr94_held",
+   "sha256": "58d1b55eea91848052f5d6fa29205c419512448398aea47d8cf14447161e2e29",
+   "size": 2945
+  },
+  "bdr_fe/lib/assistantBrowser.ts": {
+   "group": "bdr94_held",
+   "sha256": "e5bd79e39890f5a662cd0d0c22bb43fd1fe6f6716db4cc8a9194d670d5286b97",
+   "size": 27909
+  },
+  "bdr_fe/lib/assistantBrowserApi.ts": {
+   "group": "bdr94_held",
+   "sha256": "ce626241b5442908ad8a560a636b48023346ae9b4420abacd7e3008dcc833299",
+   "size": 3086
+  },
+  "bdr_fe/lib/i18n.ts": {
+   "group": "frontend",
+   "sha256": "2a151e6292c5860fa589d1b9a5d8954da82efa17171279fc2cf21d0e7b272a86",
+   "size": 2503
+  }
+ }
+}

@@ -1,0 +1,3326 @@
+{
+  "version": 1,
+  "notes": "Golden set for Phase 8 triage (docs/ASSISTANT_PHASE8_PLAN.md 16.4). Each case is one fact pack item (facts only, plan 5.3) with the expected decision. expected.decisions, reasons, actions and severities are allowed sets; an empty list means any valid value. Tags: covered_negative (any escalation fails the case), not_urgent (an urgent severity fails the case), time_of_day (weekday night, weekend, holiday, quiet hours), urgent_ok (urgent is a legitimate answer). Calendar fields are derived from `now` (America/Los_Angeles) and pinned by a test. Project numbers are fake (26.11.9xxx). These gates measure the model before release; they are not runtime checks (owner question 6 (c)). Offline `--check` validates structure; the live run (run_triage_evals.py --live) refuses without ASSISTANT_TRIAGE_TEST_SPEND_CAP_USD.",
+  "holidays": [
+    "2026-11-26",
+    "2026-12-25"
+  ],
+  "cases": [
+    {
+      "id": "c01",
+      "tags": [
+        "covered_negative"
+      ],
+      "note": "Numbers verified, already read and sent to Teams.",
+      "role": "estimating_engineer_labor",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.verified",
+        "age_minutes": 45,
+        "project_number": "26.11.9101",
+        "stage": "send_out",
+        "project_closed": false,
+        "internal_due_at": "2026-11-08T04:15-08:00",
+        "hours_to_due": 90,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": true,
+        "bell_dismissed": false,
+        "bdr_sent_teams": true,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "verified"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none"
+        ],
+        "reasons": [
+          "covered_by_app",
+          "already_seen",
+          "not_your_part",
+          "info_only",
+          "no_action_needed"
+        ],
+        "actions": [],
+        "severities": []
+      }
+    },
+    {
+      "id": "c02",
+      "tags": [
+        "covered_negative"
+      ],
+      "note": "Estimate delivered, read, emailed.",
+      "role": "estimating_admin",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.estimate_submitted",
+        "age_minutes": 200,
+        "project_number": "26.11.9102",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-06T22:15-08:00",
+        "hours_to_due": 60,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": true,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": true,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "estimate_submitted"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none"
+        ],
+        "reasons": [
+          "covered_by_app",
+          "already_seen",
+          "not_your_part",
+          "info_only",
+          "no_action_needed"
+        ],
+        "actions": [],
+        "severities": []
+      }
+    },
+    {
+      "id": "c03",
+      "tags": [
+        "covered_negative"
+      ],
+      "note": "Vendor quote received, read, Teams sent, bid days out.",
+      "role": "estimating_engineer_materials",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.quote_received",
+        "age_minutes": 30,
+        "project_number": "26.11.9103",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-07T08:15-08:00",
+        "hours_to_due": 70,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": true,
+        "bell_dismissed": false,
+        "bdr_sent_teams": true,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "quote_received"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "open_receive_quotes",
+          "follow_up_vendor",
+          "ask_assistant_summary"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "c04",
+      "tags": [
+        "covered_negative"
+      ],
+      "note": "Bid submitted, bid already past due.",
+      "role": "executive",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.submitted",
+        "age_minutes": 120,
+        "project_number": "26.11.9104",
+        "stage": "submitted",
+        "project_closed": false,
+        "internal_due_at": "2026-11-04T07:15-08:00",
+        "hours_to_due": -3,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": true,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "submitted"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none"
+        ],
+        "reasons": [
+          "covered_by_app",
+          "already_seen",
+          "not_your_part",
+          "info_only",
+          "no_action_needed"
+        ],
+        "actions": [],
+        "severities": []
+      }
+    },
+    {
+      "id": "c05",
+      "tags": [
+        "covered_negative"
+      ],
+      "note": "Win or loss recorded on a closed project, unread.",
+      "role": "executive",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.bid_outcome",
+        "age_minutes": 30,
+        "project_number": "26.11.9105",
+        "stage": "bid_outcome",
+        "project_closed": true,
+        "internal_due_at": "2026-10-27T03:15-07:00",
+        "hours_to_due": -200,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "bid_outcome"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none"
+        ],
+        "reasons": [
+          "covered_by_app",
+          "already_seen",
+          "not_your_part",
+          "info_only",
+          "no_action_needed"
+        ],
+        "actions": [],
+        "severities": []
+      }
+    },
+    {
+      "id": "c06",
+      "tags": [
+        "covered_negative"
+      ],
+      "note": "Auto send went out, accountant, unread.",
+      "role": "accountant",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.auto_send_sent",
+        "age_minutes": 20,
+        "project_number": "26.11.9106",
+        "stage": "submitted",
+        "project_closed": false,
+        "internal_due_at": "2026-11-04T09:15-08:00",
+        "hours_to_due": -1,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "auto_send_sent"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none"
+        ],
+        "reasons": [
+          "covered_by_app",
+          "already_seen",
+          "not_your_part",
+          "info_only",
+          "no_action_needed"
+        ],
+        "actions": [],
+        "severities": []
+      }
+    },
+    {
+      "id": "c07",
+      "tags": [
+        "covered_negative"
+      ],
+      "note": "Auto send went out, read.",
+      "role": "estimating_admin",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.auto_send_sent",
+        "age_minutes": 300,
+        "project_number": "26.11.9107",
+        "stage": "submitted",
+        "project_closed": false,
+        "internal_due_at": "2026-11-04T08:15-08:00",
+        "hours_to_due": -2,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": true,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "auto_send_sent"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none"
+        ],
+        "reasons": [
+          "covered_by_app",
+          "already_seen",
+          "not_your_part",
+          "info_only",
+          "no_action_needed"
+        ],
+        "actions": [],
+        "severities": []
+      }
+    },
+    {
+      "id": "c08",
+      "tags": [
+        "covered_negative"
+      ],
+      "note": "Project moved to the engineer's stage, bid five days out.",
+      "role": "estimating_engineer_labor",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.stage_handoff",
+        "age_minutes": 15,
+        "project_number": "26.11.9108",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-09T10:15-08:00",
+        "hours_to_due": 120,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "stage_handoff"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "ask_assistant_summary",
+          "create_followup_todo",
+          "review_scope_lines"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "c09",
+      "tags": [
+        "covered_negative"
+      ],
+      "note": "Project note, read.",
+      "role": "estimating_engineer_materials",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.estimator_note",
+        "age_minutes": 400,
+        "project_number": "26.11.9109",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-08T14:15-08:00",
+        "hours_to_due": 100,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": true,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "estimator_note"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none"
+        ],
+        "reasons": [
+          "covered_by_app",
+          "already_seen",
+          "not_your_part",
+          "info_only",
+          "no_action_needed"
+        ],
+        "actions": [],
+        "severities": []
+      }
+    },
+    {
+      "id": "c10",
+      "tags": [
+        "covered_negative"
+      ],
+      "note": "Personal mention with no project, read.",
+      "role": "executive",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.personal",
+        "age_minutes": 60,
+        "project_number": null,
+        "stage": null,
+        "project_closed": null,
+        "internal_due_at": null,
+        "hours_to_due": null,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": true,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "personal"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none"
+        ],
+        "reasons": [
+          "covered_by_app",
+          "already_seen",
+          "not_your_part",
+          "info_only",
+          "no_action_needed"
+        ],
+        "actions": [],
+        "severities": []
+      }
+    },
+    {
+      "id": "c11",
+      "tags": [
+        "covered_negative"
+      ],
+      "note": "Project management notice for IT admin.",
+      "role": "it_admin",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.pm",
+        "age_minutes": 10,
+        "project_number": null,
+        "stage": null,
+        "project_closed": null,
+        "internal_due_at": null,
+        "hours_to_due": null,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "pm"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "ask_assistant_summary"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "c12",
+      "tags": [
+        "covered_negative"
+      ],
+      "note": "Deadline bell already read, Teams and email sent, and the router has its own Bid due line. A next-step suggestion is acceptable; any escalation fails.",
+      "role": "estimating_engineer_labor",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 240,
+        "project_number": "26.11.9112",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-05T06:15-08:00",
+        "hours_to_due": 20,
+        "your_part_missing": true,
+        "router_bid_due_row": true,
+        "bell_read": true,
+        "bell_dismissed": false,
+        "bdr_sent_teams": true,
+        "bdr_sent_email": true,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest"
+        ],
+        "reasons": [
+          "covered_by_app",
+          "already_seen",
+          "no_action_needed",
+          "due_soon_part_missing",
+          "follow_up_due"
+        ],
+        "actions": [
+          "open_receive_quotes",
+          "ask_assistant_summary"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "c13",
+      "tags": [
+        "covered_negative"
+      ],
+      "note": "Ready for Verify, read and emailed.",
+      "role": "executive",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.verify",
+        "age_minutes": 150,
+        "project_number": "26.11.9113",
+        "stage": "verify",
+        "project_closed": false,
+        "internal_due_at": "2026-11-06T02:15-08:00",
+        "hours_to_due": 40,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": true,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": true,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "verify"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "review_verify",
+          "ask_assistant_summary"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "c14",
+      "tags": [
+        "covered_negative"
+      ],
+      "note": "Calling In notice, read.",
+      "role": "estimating_engineer_labor",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.call_in",
+        "age_minutes": 90,
+        "project_number": "26.11.9114",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-06T17:15-08:00",
+        "hours_to_due": 55,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": true,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "call_in"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "open_call_in_list",
+          "ask_assistant_summary"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "c15",
+      "tags": [
+        "covered_negative"
+      ],
+      "note": "Project abandoned, project closed.",
+      "role": "executive",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.project_abandoned",
+        "age_minutes": 60,
+        "project_number": "26.11.9115",
+        "stage": "declined",
+        "project_closed": true,
+        "internal_due_at": null,
+        "hours_to_due": null,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "project_abandoned"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none"
+        ],
+        "reasons": [
+          "covered_by_app",
+          "already_seen",
+          "not_your_part",
+          "info_only",
+          "no_action_needed"
+        ],
+        "actions": [],
+        "severities": []
+      }
+    },
+    {
+      "id": "c16",
+      "tags": [
+        "covered_negative"
+      ],
+      "note": "Revised proposal approval, read.",
+      "role": "executive",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.revision_approval",
+        "age_minutes": 75,
+        "project_number": "26.11.9116",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-05T16:15-08:00",
+        "hours_to_due": 30,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": true,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "revision_approval"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "review_approval_request",
+          "review_revision",
+          "ask_assistant_summary"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "c17",
+      "tags": [
+        "covered_negative"
+      ],
+      "note": "Re-verify needed, already read and sent to Teams.",
+      "role": "estimating_engineer_labor",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.reverify_required",
+        "age_minutes": 50,
+        "project_number": "26.11.9117",
+        "stage": "verify",
+        "project_closed": false,
+        "internal_due_at": "2026-11-07T18:15-08:00",
+        "hours_to_due": 80,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": true,
+        "bell_dismissed": false,
+        "bdr_sent_teams": true,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "reverify_required"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "review_verify",
+          "ask_assistant_summary"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "c18",
+      "tags": [
+        "covered_negative"
+      ],
+      "note": "Drawings changed, read and sent, bid more than a week out.",
+      "role": "estimating_engineer_materials",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.drawing_changed",
+        "age_minutes": 5,
+        "project_number": "26.11.9118",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-12T18:15-08:00",
+        "hours_to_due": 200,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": true,
+        "bell_dismissed": false,
+        "bdr_sent_teams": true,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "drawing_changed"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "review_changed_drawings",
+          "ask_assistant_summary"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "c19",
+      "tags": [
+        "covered_negative"
+      ],
+      "note": "Auto send problem, accountant, unread, nothing for an accountant to do.",
+      "role": "accountant",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.auto_send_problem",
+        "age_minutes": 8,
+        "project_number": "26.11.9119",
+        "stage": "submitted",
+        "project_closed": false,
+        "internal_due_at": "2026-11-04T09:15-08:00",
+        "hours_to_due": -1,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "auto_send_problem"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "ask_assistant_summary"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "s01",
+      "tags": [
+        "suggest"
+      ],
+      "note": "Drawings changed, unread, bid 2.5 days out.",
+      "role": "estimating_engineer_labor",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.drawing_changed",
+        "age_minutes": 90,
+        "project_number": "26.11.9120",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-06T22:15-08:00",
+        "hours_to_due": 60,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "drawing_changed"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "review_changed_drawings"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "s02",
+      "tags": [
+        "suggest"
+      ],
+      "note": "Vendor quote in, unread, bid two days out.",
+      "role": "estimating_engineer_materials",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.quote_received",
+        "age_minutes": 50,
+        "project_number": "26.11.9121",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-06T10:15-08:00",
+        "hours_to_due": 48,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "quote_received"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "open_receive_quotes"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "s03",
+      "tags": [
+        "suggest"
+      ],
+      "note": "Scope lines waiting for review.",
+      "role": "estimating_engineer_labor",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.scope_lines_review",
+        "age_minutes": 120,
+        "project_number": "26.11.9122",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-05T16:15-08:00",
+        "hours_to_due": 30,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "scope_lines_review"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "review_scope_lines"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "s04",
+      "tags": [
+        "suggest"
+      ],
+      "note": "Calling In list ready, unread.",
+      "role": "executive",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.call_in",
+        "age_minutes": 60,
+        "project_number": "26.11.9123",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-06T14:15-08:00",
+        "hours_to_due": 52,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "call_in"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "open_call_in_list"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "s05",
+      "tags": [
+        "suggest"
+      ],
+      "note": "Estimator revision round arrived.",
+      "role": "estimating_admin",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.revision_round",
+        "age_minutes": 180,
+        "project_number": "26.11.9124",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-07T10:15-08:00",
+        "hours_to_due": 72,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "revision_round",
+          "round": 2
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "review_revision"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "s06",
+      "tags": [
+        "suggest"
+      ],
+      "note": "Proposal approval waiting for the executive.",
+      "role": "executive",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.approval_requested",
+        "age_minutes": 180,
+        "project_number": "26.11.9125",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-06T12:15-08:00",
+        "hours_to_due": 50,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "approval_requested"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "review_approval_request"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "s07",
+      "tags": [
+        "suggest"
+      ],
+      "note": "Ready for Verify, unread, bid 30 hours out.",
+      "role": "executive",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.verify",
+        "age_minutes": 75,
+        "project_number": "26.11.9126",
+        "stage": "verify",
+        "project_closed": false,
+        "internal_due_at": "2026-11-05T16:15-08:00",
+        "hours_to_due": 30,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "verify"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "review_verify"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "s08",
+      "tags": [
+        "suggest"
+      ],
+      "note": "Two late vendor quotes merged into one bell.",
+      "role": "estimating_engineer_materials",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.late_quote",
+        "age_minutes": 35,
+        "project_number": "26.11.9127",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-05T22:15-08:00",
+        "hours_to_due": 36,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 2,
+        "bell_fields": {
+          "routing_event": "late_quote"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "follow_up_vendor",
+          "open_receive_quotes"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "e01",
+      "tags": [
+        "escalate"
+      ],
+      "note": "Bid due in 4 hours, the person's part is missing, bell unread.",
+      "role": "estimating_engineer_labor",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 25,
+        "project_number": "26.11.9128",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-04T14:15-08:00",
+        "hours_to_due": 4,
+        "your_part_missing": true,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "escalate"
+        ],
+        "reasons": [
+          "due_soon_part_missing",
+          "due_soon_unread"
+        ],
+        "actions": [],
+        "severities": [
+          "high",
+          "urgent"
+        ]
+      }
+    },
+    {
+      "id": "e02",
+      "tags": [
+        "escalate"
+      ],
+      "note": "Bid due in 3 hours, part missing, afternoon.",
+      "role": "estimating_engineer_materials",
+      "now": "2026-11-05T14:00-08:00",
+      "calendar": {
+        "weekday": "Thu",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 40,
+        "project_number": "26.11.9129",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-05T17:00-08:00",
+        "hours_to_due": 3,
+        "your_part_missing": true,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "escalate"
+        ],
+        "reasons": [
+          "due_soon_part_missing",
+          "due_soon_unread"
+        ],
+        "actions": [],
+        "severities": [
+          "high",
+          "urgent"
+        ]
+      }
+    },
+    {
+      "id": "e03",
+      "tags": [
+        "escalate",
+        "time_of_day",
+        "urgent_ok"
+      ],
+      "note": "Tuesday 9:30 PM: bid due 8:30 AM tomorrow, part missing, unread. Urgent is allowed.",
+      "role": "estimating_engineer_labor",
+      "now": "2026-11-03T21:30-08:00",
+      "calendar": {
+        "weekday": "Tue",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": true
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 20,
+        "project_number": "26.11.9130",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-04T08:30-08:00",
+        "hours_to_due": 11,
+        "your_part_missing": true,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "escalate"
+        ],
+        "reasons": [
+          "due_soon_part_missing",
+          "due_soon_unread"
+        ],
+        "actions": [],
+        "severities": [
+          "high",
+          "urgent"
+        ]
+      }
+    },
+    {
+      "id": "e04",
+      "tags": [
+        "escalate",
+        "time_of_day",
+        "urgent_ok"
+      ],
+      "note": "Saturday 11 AM: bid due Saturday 5 PM, part missing, unread. Urgent is allowed.",
+      "role": "estimating_engineer_materials",
+      "now": "2026-11-07T11:00-08:00",
+      "calendar": {
+        "weekday": "Sat",
+        "workday": false,
+        "weekend": true,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 30,
+        "project_number": "26.11.9131",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-07T17:00-08:00",
+        "hours_to_due": 6,
+        "your_part_missing": true,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "escalate"
+        ],
+        "reasons": [
+          "due_soon_part_missing",
+          "due_soon_unread"
+        ],
+        "actions": [],
+        "severities": [
+          "high",
+          "urgent"
+        ]
+      }
+    },
+    {
+      "id": "e05",
+      "tags": [
+        "escalate"
+      ],
+      "note": "Vendor quote unread for two days while the bid is 20 hours out and the part is missing.",
+      "role": "estimating_engineer_materials",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.quote_received",
+        "age_minutes": 2880,
+        "project_number": "26.11.9132",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-05T06:15-08:00",
+        "hours_to_due": 20,
+        "your_part_missing": true,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "quote_received"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "escalate"
+        ],
+        "reasons": [],
+        "actions": [],
+        "severities": [
+          "normal",
+          "high"
+        ]
+      }
+    },
+    {
+      "id": "e06",
+      "tags": [
+        "escalate",
+        "time_of_day",
+        "urgent_ok"
+      ],
+      "note": "Thanksgiving evening: bid due Friday 7 AM, part missing, unread. Urgent is allowed.",
+      "role": "estimating_engineer_labor",
+      "now": "2026-11-26T20:00-08:00",
+      "calendar": {
+        "weekday": "Thu",
+        "workday": false,
+        "weekend": false,
+        "holiday": true,
+        "quiet_hours": true
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 35,
+        "project_number": "26.11.9133",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-27T07:00-08:00",
+        "hours_to_due": 11,
+        "your_part_missing": true,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "escalate"
+        ],
+        "reasons": [
+          "due_soon_part_missing",
+          "due_soon_unread"
+        ],
+        "actions": [],
+        "severities": [
+          "high",
+          "urgent"
+        ]
+      }
+    },
+    {
+      "id": "e07",
+      "tags": [
+        "escalate",
+        "ambiguous"
+      ],
+      "note": "Drawings changed 5 hours before the bid is due, unread.",
+      "role": "estimating_engineer_labor",
+      "now": "2026-11-04T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.drawing_changed",
+        "age_minutes": 20,
+        "project_number": "26.11.9134",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-04T15:15-08:00",
+        "hours_to_due": 5,
+        "your_part_missing": false,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "drawing_changed"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "suggest",
+          "escalate"
+        ],
+        "reasons": [],
+        "actions": [
+          "review_changed_drawings"
+        ],
+        "severities": [
+          "normal",
+          "high",
+          "urgent"
+        ]
+      }
+    },
+    {
+      "id": "t01",
+      "tags": [
+        "time_of_day",
+        "not_urgent"
+      ],
+      "note": "Tuesday 9:30 PM, drawings changed, bid nine days out.",
+      "role": "estimating_engineer_labor",
+      "now": "2026-11-03T21:30-08:00",
+      "calendar": {
+        "weekday": "Tue",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": true
+      },
+      "item": {
+        "kind": "bell.drawing_changed",
+        "age_minutes": 20,
+        "project_number": "26.11.9135",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-12T21:30-08:00",
+        "hours_to_due": 216,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "drawing_changed"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "review_changed_drawings",
+          "ask_assistant_summary"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "t02",
+      "tags": [
+        "time_of_day",
+        "not_urgent"
+      ],
+      "note": "Saturday 11 AM, quote received, bid next Thursday.",
+      "role": "estimating_engineer_materials",
+      "now": "2026-11-07T11:00-08:00",
+      "calendar": {
+        "weekday": "Sat",
+        "workday": false,
+        "weekend": true,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.quote_received",
+        "age_minutes": 20,
+        "project_number": "26.11.9136",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-12T10:00-08:00",
+        "hours_to_due": 119,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "quote_received"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "open_receive_quotes",
+          "ask_assistant_summary"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "t03",
+      "tags": [
+        "time_of_day",
+        "not_urgent"
+      ],
+      "note": "Sunday 8 PM, old verified bell already read.",
+      "role": "estimating_engineer_labor",
+      "now": "2026-11-08T20:00-08:00",
+      "calendar": {
+        "weekday": "Sun",
+        "workday": false,
+        "weekend": true,
+        "holiday": false,
+        "quiet_hours": true
+      },
+      "item": {
+        "kind": "bell.verified",
+        "age_minutes": 600,
+        "project_number": "26.11.9137",
+        "stage": "send_out",
+        "project_closed": false,
+        "internal_due_at": "2026-11-12T10:00-08:00",
+        "hours_to_due": 86,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": true,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "verified"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none"
+        ],
+        "reasons": [
+          "covered_by_app",
+          "already_seen",
+          "not_your_part",
+          "info_only",
+          "no_action_needed"
+        ],
+        "actions": [],
+        "severities": []
+      }
+    },
+    {
+      "id": "t04",
+      "tags": [
+        "time_of_day",
+        "not_urgent"
+      ],
+      "note": "Thanksgiving morning, stage handoff, bid four days out.",
+      "role": "estimating_engineer_labor",
+      "now": "2026-11-26T09:00-08:00",
+      "calendar": {
+        "weekday": "Thu",
+        "workday": false,
+        "weekend": false,
+        "holiday": true,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.stage_handoff",
+        "age_minutes": 25,
+        "project_number": "26.11.9138",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-30T10:00-08:00",
+        "hours_to_due": 97,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "stage_handoff"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "ask_assistant_summary",
+          "review_scope_lines",
+          "create_followup_todo"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "t05",
+      "tags": [
+        "time_of_day",
+        "not_urgent"
+      ],
+      "note": "Monday 5:30 AM (quiet hours), deadline reminder, bid Wednesday.",
+      "role": "executive",
+      "now": "2026-11-09T05:30-08:00",
+      "calendar": {
+        "weekday": "Mon",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": true
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 15,
+        "project_number": "26.11.9139",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-11T10:00-08:00",
+        "hours_to_due": 52,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest",
+          "escalate"
+        ],
+        "reasons": [],
+        "actions": [
+          "ask_assistant_summary"
+        ],
+        "severities": [
+          "normal",
+          "high"
+        ]
+      }
+    },
+    {
+      "id": "t06",
+      "tags": [
+        "time_of_day",
+        "not_urgent"
+      ],
+      "note": "Saturday 11 AM, deadline reminder, bid Tuesday.",
+      "role": "estimating_engineer_labor",
+      "now": "2026-11-07T11:00-08:00",
+      "calendar": {
+        "weekday": "Sat",
+        "workday": false,
+        "weekend": true,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 30,
+        "project_number": "26.11.9140",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-10T10:00-08:00",
+        "hours_to_due": 71,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest",
+          "escalate"
+        ],
+        "reasons": [],
+        "actions": [
+          "ask_assistant_summary"
+        ],
+        "severities": [
+          "normal",
+          "high"
+        ]
+      }
+    },
+    {
+      "id": "t07",
+      "tags": [
+        "time_of_day",
+        "not_urgent"
+      ],
+      "note": "Tuesday 9:30 PM, deadline reminder, bid Thursday morning (more than a day away).",
+      "role": "estimating_engineer_materials",
+      "now": "2026-11-03T21:30-08:00",
+      "calendar": {
+        "weekday": "Tue",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": true
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 40,
+        "project_number": "26.11.9141",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-05T10:00-08:00",
+        "hours_to_due": 36,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest",
+          "escalate"
+        ],
+        "reasons": [],
+        "actions": [
+          "ask_assistant_summary"
+        ],
+        "severities": [
+          "normal",
+          "high"
+        ]
+      }
+    },
+    {
+      "id": "t08",
+      "tags": [
+        "time_of_day",
+        "not_urgent"
+      ],
+      "note": "Christmas morning, deadline reminder, bid five days out.",
+      "role": "estimating_engineer_labor",
+      "now": "2026-12-25T10:00-08:00",
+      "calendar": {
+        "weekday": "Fri",
+        "workday": false,
+        "weekend": false,
+        "holiday": true,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 10,
+        "project_number": "26.11.9142",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-12-30T10:00-08:00",
+        "hours_to_due": 120,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest",
+          "escalate"
+        ],
+        "reasons": [],
+        "actions": [
+          "ask_assistant_summary"
+        ],
+        "severities": [
+          "normal",
+          "high"
+        ]
+      }
+    },
+    {
+      "id": "t09",
+      "tags": [
+        "time_of_day",
+        "not_urgent"
+      ],
+      "note": "Friday 6:05 PM (quiet hours begin), revision round, bid Monday.",
+      "role": "estimating_admin",
+      "now": "2026-11-06T18:05-08:00",
+      "calendar": {
+        "weekday": "Fri",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": true
+      },
+      "item": {
+        "kind": "bell.revision_round",
+        "age_minutes": 12,
+        "project_number": "26.11.9143",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-09T11:00-08:00",
+        "hours_to_due": 64,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "revision_round",
+          "round": 1
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "review_revision",
+          "ask_assistant_summary"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "t10",
+      "tags": [
+        "time_of_day",
+        "not_urgent"
+      ],
+      "note": "Wednesday 2 AM, quote bell retried after a midnight cap deferral.",
+      "role": "estimating_engineer_materials",
+      "now": "2026-11-04T02:00-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": true
+      },
+      "item": {
+        "kind": "bell.quote_received",
+        "age_minutes": 1380,
+        "project_number": "26.11.9144",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-06T10:00-08:00",
+        "hours_to_due": 56,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "quote_received"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": true
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "open_receive_quotes",
+          "ask_assistant_summary"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "u01",
+      "tags": [
+        "covered_negative"
+      ],
+      "note": "Live step 4 replica (run 78e5e7f5), item 1 of 3: bid submitted bell on a project due in 2 hours with the part missing, Monday 4:39 PM. The deadline bell in the same batch carries the due facts; this one must not escalate.",
+      "role": "executive",
+      "now": "2026-11-02T16:39-08:00",
+      "calendar": {
+        "weekday": "Mon",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.submitted",
+        "age_minutes": 5,
+        "project_number": "26.11.9851",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-02T18:39-08:00",
+        "hours_to_due": 2,
+        "your_part_missing": true,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "submitted"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "ask_assistant_summary"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "u02",
+      "tags": [
+        "suggest"
+      ],
+      "note": "Live step 4 replica, item 2 of 3: re-verify required on the same project. Expected a suggestion, not a second escalation for the same due facts.",
+      "role": "executive",
+      "now": "2026-11-02T16:39-08:00",
+      "calendar": {
+        "weekday": "Mon",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.reverify_required",
+        "age_minutes": 5,
+        "project_number": "26.11.9851",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-02T18:39-08:00",
+        "hours_to_due": 2,
+        "your_part_missing": true,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "reverify_required"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "review_verify",
+          "ask_assistant_summary"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "u03",
+      "tags": [
+        "escalate"
+      ],
+      "note": "Live step 4 replica, item 3 of 3: deadline reminder, bid due in 2 hours, part missing, unread, Monday 4:39 PM before quiet hours. High already sends Teams now, so high, not urgent.",
+      "role": "executive",
+      "now": "2026-11-02T16:39-08:00",
+      "calendar": {
+        "weekday": "Mon",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 5,
+        "project_number": "26.11.9851",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-02T18:39-08:00",
+        "hours_to_due": 2,
+        "your_part_missing": true,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "escalate"
+        ],
+        "reasons": [
+          "due_soon_part_missing",
+          "due_soon_unread"
+        ],
+        "actions": [],
+        "severities": [
+          "high"
+        ]
+      }
+    },
+    {
+      "id": "u04",
+      "tags": [
+        "escalate"
+      ],
+      "note": "Wednesday 10:15 AM, bid due in 3 hours, part missing, unread. Outside quiet hours: high, not urgent.",
+      "role": "estimating_engineer_labor",
+      "now": "2026-11-11T10:15-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 20,
+        "project_number": "26.11.9301",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-11T13:15-08:00",
+        "hours_to_due": 3,
+        "your_part_missing": true,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "escalate"
+        ],
+        "reasons": [
+          "due_soon_part_missing",
+          "due_soon_unread"
+        ],
+        "actions": [],
+        "severities": [
+          "high"
+        ]
+      }
+    },
+    {
+      "id": "u05",
+      "tags": [
+        "escalate"
+      ],
+      "note": "Twin of e05 in the afternoon: vendor quote unread for two days, bid 20 hours out, part missing. Outside quiet hours, so not urgent.",
+      "role": "estimating_engineer_materials",
+      "now": "2026-11-11T13:00-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.quote_received",
+        "age_minutes": 2880,
+        "project_number": "26.11.9302",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-12T09:00-08:00",
+        "hours_to_due": 20,
+        "your_part_missing": true,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "quote_received"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "escalate"
+        ],
+        "reasons": [],
+        "actions": [],
+        "severities": [
+          "normal",
+          "high"
+        ]
+      }
+    },
+    {
+      "id": "u06",
+      "tags": [
+        "escalate"
+      ],
+      "note": "Monday 5:45 PM, just before quiet hours, bid due 9 PM tonight, part missing. High goes now with Teams because quiet hours have not started.",
+      "role": "estimating_engineer_labor",
+      "now": "2026-11-09T17:45-08:00",
+      "calendar": {
+        "weekday": "Mon",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 20,
+        "project_number": "26.11.9303",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-09T21:00-08:00",
+        "hours_to_due": 3,
+        "your_part_missing": true,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "escalate"
+        ],
+        "reasons": [
+          "due_soon_part_missing",
+          "due_soon_unread"
+        ],
+        "actions": [],
+        "severities": [
+          "high"
+        ]
+      }
+    },
+    {
+      "id": "u07",
+      "tags": [
+        "escalate",
+        "time_of_day",
+        "not_urgent"
+      ],
+      "note": "Saturday 2 PM (weekend, outside quiet hours), bid due 6 PM today, part missing. High reaches the person now with Teams on a weekend, so not urgent.",
+      "role": "estimating_engineer_materials",
+      "now": "2026-11-14T14:00-08:00",
+      "calendar": {
+        "weekday": "Sat",
+        "workday": false,
+        "weekend": true,
+        "holiday": false,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 20,
+        "project_number": "26.11.9304",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-14T18:00-08:00",
+        "hours_to_due": 4,
+        "your_part_missing": true,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "escalate"
+        ],
+        "reasons": [
+          "due_soon_part_missing",
+          "due_soon_unread"
+        ],
+        "actions": [],
+        "severities": [
+          "high"
+        ]
+      }
+    },
+    {
+      "id": "u08",
+      "tags": [
+        "escalate",
+        "time_of_day",
+        "not_urgent"
+      ],
+      "note": "Thanksgiving 11 AM (holiday, outside quiet hours), bid due 3 PM, part missing. High reaches the person now with Teams, so not urgent.",
+      "role": "estimating_engineer_labor",
+      "now": "2026-11-26T11:00-08:00",
+      "calendar": {
+        "weekday": "Thu",
+        "workday": false,
+        "weekend": false,
+        "holiday": true,
+        "quiet_hours": false
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 20,
+        "project_number": "26.11.9305",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-26T15:00-08:00",
+        "hours_to_due": 4,
+        "your_part_missing": true,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "escalate"
+        ],
+        "reasons": [
+          "due_soon_part_missing",
+          "due_soon_unread"
+        ],
+        "actions": [],
+        "severities": [
+          "high"
+        ]
+      }
+    },
+    {
+      "id": "u09",
+      "tags": [
+        "escalate",
+        "time_of_day",
+        "urgent_ok"
+      ],
+      "note": "Tuesday 9 PM (quiet hours), bid due 11:30 PM tonight, part missing, unread. High would wait until 6 AM, after the due time, so urgent is the expected answer.",
+      "role": "estimating_engineer_labor",
+      "now": "2026-11-10T21:00-08:00",
+      "calendar": {
+        "weekday": "Tue",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": true
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 20,
+        "project_number": "26.11.9306",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-10T23:30-08:00",
+        "hours_to_due": 2,
+        "your_part_missing": true,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "escalate"
+        ],
+        "reasons": [
+          "due_soon_part_missing",
+          "due_soon_unread"
+        ],
+        "actions": [],
+        "severities": [
+          "urgent"
+        ]
+      }
+    },
+    {
+      "id": "u10",
+      "tags": [
+        "escalate",
+        "time_of_day",
+        "urgent_ok"
+      ],
+      "note": "Thursday 10 PM (quiet hours), bid due 8 AM Friday, part missing, unread. Urgent is allowed.",
+      "role": "estimating_engineer_materials",
+      "now": "2026-11-12T22:00-08:00",
+      "calendar": {
+        "weekday": "Thu",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": true
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 20,
+        "project_number": "26.11.9307",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-13T08:00-08:00",
+        "hours_to_due": 10,
+        "your_part_missing": true,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "escalate"
+        ],
+        "reasons": [
+          "due_soon_part_missing",
+          "due_soon_unread"
+        ],
+        "actions": [],
+        "severities": [
+          "high",
+          "urgent"
+        ]
+      }
+    },
+    {
+      "id": "u11",
+      "tags": [
+        "escalate",
+        "time_of_day",
+        "urgent_ok"
+      ],
+      "note": "Wednesday 12:20 AM, deadline row retried after a midnight cap deferral, bid due 9 AM today, part missing. Urgent is allowed (follow-up FQ8).",
+      "role": "estimating_engineer_labor",
+      "now": "2026-11-18T00:20-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": true
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 1400,
+        "project_number": "26.11.9308",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-18T09:00-08:00",
+        "hours_to_due": 8,
+        "your_part_missing": true,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": true
+      },
+      "expected": {
+        "decisions": [
+          "escalate"
+        ],
+        "reasons": [
+          "due_soon_part_missing",
+          "due_soon_unread"
+        ],
+        "actions": [],
+        "severities": [
+          "high",
+          "urgent"
+        ]
+      }
+    },
+    {
+      "id": "u12",
+      "tags": [
+        "time_of_day",
+        "not_urgent"
+      ],
+      "note": "Thursday 10 PM (quiet hours), bid due 2 PM Friday (after noon), part missing. High at 6 AM leaves the morning, so not urgent.",
+      "role": "estimating_engineer_labor",
+      "now": "2026-11-19T22:00-08:00",
+      "calendar": {
+        "weekday": "Thu",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": true
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 20,
+        "project_number": "26.11.9309",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-20T14:00-08:00",
+        "hours_to_due": 16,
+        "your_part_missing": true,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest",
+          "escalate"
+        ],
+        "reasons": [],
+        "actions": [
+          "open_receive_quotes",
+          "create_followup_todo",
+          "ask_assistant_summary"
+        ],
+        "severities": [
+          "normal",
+          "high"
+        ]
+      }
+    },
+    {
+      "id": "u13",
+      "tags": [
+        "time_of_day",
+        "not_urgent"
+      ],
+      "note": "Wednesday 1 AM (quiet hours), bid due 3 PM today (after noon), part missing. Not urgent.",
+      "role": "estimating_engineer_materials",
+      "now": "2026-11-18T01:00-08:00",
+      "calendar": {
+        "weekday": "Wed",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": true
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 20,
+        "project_number": "26.11.9310",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-18T15:00-08:00",
+        "hours_to_due": 14,
+        "your_part_missing": true,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest",
+          "escalate"
+        ],
+        "reasons": [],
+        "actions": [
+          "open_receive_quotes",
+          "create_followup_todo",
+          "ask_assistant_summary"
+        ],
+        "severities": [
+          "normal",
+          "high"
+        ]
+      }
+    },
+    {
+      "id": "u14",
+      "tags": [
+        "time_of_day",
+        "not_urgent"
+      ],
+      "note": "Tuesday 11 PM (quiet hours), bid due 7 AM Wednesday, but the person's part is done. Not urgent.",
+      "role": "estimating_engineer_labor",
+      "now": "2026-11-17T23:00-08:00",
+      "calendar": {
+        "weekday": "Tue",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": true
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 20,
+        "project_number": "26.11.9311",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-18T07:00-08:00",
+        "hours_to_due": 8,
+        "your_part_missing": false,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "ask_assistant_summary",
+          "create_followup_todo"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "u15",
+      "tags": [
+        "time_of_day",
+        "not_urgent"
+      ],
+      "note": "Monday 9 PM (quiet hours), internal due time passed at 5 PM and the bid is not submitted. Past due is never urgent by these rules.",
+      "role": "executive",
+      "now": "2026-11-16T21:00-08:00",
+      "calendar": {
+        "weekday": "Mon",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": true
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 20,
+        "project_number": "26.11.9312",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-16T17:00-08:00",
+        "hours_to_due": -4,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest",
+          "escalate"
+        ],
+        "reasons": [],
+        "actions": [
+          "ask_assistant_summary",
+          "create_followup_todo",
+          "open_receive_quotes"
+        ],
+        "severities": [
+          "normal",
+          "high"
+        ]
+      }
+    },
+    {
+      "id": "u16",
+      "tags": [
+        "covered_negative",
+        "time_of_day",
+        "not_urgent"
+      ],
+      "note": "Saturday 10 PM (quiet hours, weekend), bid submitted bell, unread, bid already submitted.",
+      "role": "executive",
+      "now": "2026-11-21T22:00-08:00",
+      "calendar": {
+        "weekday": "Sat",
+        "workday": false,
+        "weekend": true,
+        "holiday": false,
+        "quiet_hours": true
+      },
+      "item": {
+        "kind": "bell.submitted",
+        "age_minutes": 20,
+        "project_number": "26.11.9313",
+        "stage": "submitted",
+        "project_closed": false,
+        "internal_due_at": "2026-11-21T20:00-08:00",
+        "hours_to_due": -2,
+        "your_part_missing": null,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "submitted"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none"
+        ],
+        "reasons": [
+          "covered_by_app",
+          "already_seen",
+          "not_your_part",
+          "info_only",
+          "no_action_needed"
+        ],
+        "actions": [],
+        "severities": []
+      }
+    },
+    {
+      "id": "u17",
+      "tags": [
+        "time_of_day",
+        "not_urgent"
+      ],
+      "note": "Accountant, Tuesday 11 PM (quiet hours), deadline reminder for a bid due 7 AM. No part is the accountant's, so not urgent.",
+      "role": "accountant",
+      "now": "2026-11-17T23:00-08:00",
+      "calendar": {
+        "weekday": "Tue",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": true
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 20,
+        "project_number": "26.11.9314",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-18T07:00-08:00",
+        "hours_to_due": 8,
+        "your_part_missing": false,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "none",
+          "suggest"
+        ],
+        "reasons": [],
+        "actions": [
+          "ask_assistant_summary"
+        ],
+        "severities": []
+      }
+    },
+    {
+      "id": "u18",
+      "tags": [
+        "escalate",
+        "time_of_day",
+        "urgent_ok"
+      ],
+      "note": "Night batch item 1 of 2: Tuesday 10:30 PM, deadline reminder, bid due 7:30 AM, part missing. Urgent is allowed.",
+      "role": "estimating_engineer_materials",
+      "now": "2026-11-24T22:30-08:00",
+      "calendar": {
+        "weekday": "Tue",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": true
+      },
+      "item": {
+        "kind": "bell.due",
+        "age_minutes": 20,
+        "project_number": "26.11.9315",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-25T07:30-08:00",
+        "hours_to_due": 9,
+        "your_part_missing": true,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "due"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "escalate"
+        ],
+        "reasons": [
+          "due_soon_part_missing",
+          "due_soon_unread"
+        ],
+        "actions": [],
+        "severities": [
+          "high",
+          "urgent"
+        ]
+      }
+    },
+    {
+      "id": "u19",
+      "tags": [
+        "time_of_day",
+        "not_urgent"
+      ],
+      "note": "Night batch item 2 of 2: drawings changed on the same project in the same batch. The deadline bell carries the due facts, so this one is not urgent.",
+      "role": "estimating_engineer_materials",
+      "now": "2026-11-24T22:30-08:00",
+      "calendar": {
+        "weekday": "Tue",
+        "workday": true,
+        "weekend": false,
+        "holiday": false,
+        "quiet_hours": true
+      },
+      "item": {
+        "kind": "bell.drawing_changed",
+        "age_minutes": 20,
+        "project_number": "26.11.9315",
+        "stage": "receive_quotes",
+        "project_closed": false,
+        "internal_due_at": "2026-11-25T07:30-08:00",
+        "hours_to_due": 9,
+        "your_part_missing": true,
+        "router_bid_due_row": false,
+        "bell_read": false,
+        "bell_dismissed": false,
+        "bdr_sent_teams": false,
+        "bdr_sent_email": false,
+        "linked_bells": 0,
+        "bell_fields": {
+          "routing_event": "drawing_changed"
+        },
+        "open_todos_on_project": 0,
+        "pending_cards_on_project": 0,
+        "escalated_project_last_2h": false,
+        "deferred_overnight": false
+      },
+      "expected": {
+        "decisions": [
+          "suggest",
+          "escalate"
+        ],
+        "reasons": [],
+        "actions": [
+          "review_changed_drawings"
+        ],
+        "severities": [
+          "normal",
+          "high"
+        ]
+      }
+    }
+  ]
+}

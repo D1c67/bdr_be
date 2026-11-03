@@ -59,10 +59,13 @@ AREA_PAYROLL = "certified payroll"
 AREA_LANE = "moving a lane"
 AREA_MAIL = "email and mailbox review"
 AREA_WEB = "public web search and reading"
-AREA_ORDER: tuple[str, ...] = (AREA_MAIL, AREA_WEB, AREA_PLANS, AREA_REPORTS, AREA_EVIDENCE, AREA_PM, AREA_PAYROLL, AREA_LANE)
+# Phase 8 (docs/ASSISTANT_PHASE8_PLAN.md 6.1): the inbox_list read tool.
+AREA_INBOX = "your assistant Inbox (alerts, flags and digests)"
+AREA_ORDER: tuple[str, ...] = (AREA_MAIL, AREA_WEB, AREA_INBOX, AREA_PLANS, AREA_REPORTS, AREA_EVIDENCE, AREA_PM, AREA_PAYROLL, AREA_LANE)
 _NAMESPACE_AREAS = {
     "mail": AREA_MAIL,
     "web": AREA_WEB,
+    "inbox": AREA_INBOX,
     "plans": AREA_PLANS,
     "report": AREA_REPORTS,
     "evidence": AREA_EVIDENCE,

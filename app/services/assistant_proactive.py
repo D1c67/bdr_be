@@ -33,6 +33,17 @@ reads neither the quotes table nor the 6:03 digest's ledger (owner questions 8
 and 17). Titles, whys and payloads come from proactive.render (ids, enums,
 counts, Pacific times, project numbers); no free text and no amount leaves a
 function here.
+
+Phase 8 (docs/ASSISTANT_PHASE8_PLAN.md 5.6, 9): the router-owned kind
+`assistant.triage_escalation` reaches only its subject; its severity is the
+model's hint, lowered only by the person's own `feedback_auto` row; its
+template facts are computed here from live state; it is withdrawn at route
+time (`triage_off`), at delivery (`superseded`) and at Teams send time when the
+company triage switch is off, the fuse latch is set or it was emitted before
+the last switch-on; a held, non-urgent one released on a non-workday rings
+in-app only. The router digest email honours the person's digest email
+switch. `person_eligible` and `missing_quote_categories` are shared with the
+triage service, which imports them; this module imports no triage module.
 """
 
 from __future__ import annotations
@@ -220,6 +231,32 @@ def _env_on(settings: Any) -> bool:
                 and getattr(settings, "assistant_proactive_enabled", False))
 
 
+def person_eligible(person: Mapping[str, Any] | None, *, settings: Any, settings_row: Mapping[str, Any] | None,
+                    assistant_profile: Any) -> bool:
+    """The router's person test (6.2 step 4), shared with the phase 8 triage
+    service (plan 5.3 step 1) so it is not copied: an active profile with an
+    internal role and a working assistant (`access.assistant_enabled_for`
+    over the company row and the person's assistant_profiles row, a missing
+    row counting as on). No delegation test (D7; phase 8 P15) and no per-kind
+    sub-app step (the caller adds that when it has a kind). Pure over its
+    arguments; the caller reads the rows. `assistant_profile` is the row (or
+    None), or a no-argument callable that returns it, called only after the
+    role and active checks pass so an ineligible person costs no read."""
+    if not person:
+        return False
+    try:
+        role = Role(person.get("role"))
+    except ValueError:
+        return False
+    if role not in INTERNAL_ROLES or not person.get("is_active"):
+        return False
+    if callable(assistant_profile):
+        assistant_profile = assistant_profile()
+    user = SimpleNamespace(is_active=True, role=role)
+    env = bool(getattr(settings, "assistant_enabled", False))
+    return bool(access.assistant_enabled_for(user, settings_row, assistant_profile, env=env))
+
+
 def _card_sub_app(action_kind: str | None) -> str | None:
     """The sub-app of the tool an approval card names (the registry spec, as
     approvals_job checks it), or None when the tool has none or is gone."""
@@ -269,6 +306,7 @@ class _Context:
         self._auto_send: dict[str, Any] = {}
         self._auto_send_row: dict | None | bool = False
         self._call_in: dict[str, bool] = {}
+        self._parts: dict[str, dict] = {}
 
     @property
     def switch_on(self) -> bool:
@@ -326,18 +364,12 @@ class _Context:
     def eligible(self, person: Mapping[str, Any], event_type: str, payload: Mapping[str, Any]) -> bool:
         """6.2 step 4: an active internal person with a working assistant (a
         missing assistant_profiles row counts as on) and the kind's sub-app on
-        for the role. No delegation test (D7)."""
-        try:
-            role = Role(person.get("role"))
-        except ValueError:
+        for the role. No delegation test (D7). The person test is
+        `person_eligible`, shared with the phase 8 triage service."""
+        if not person_eligible(person, settings=self.settings, settings_row=self.settings_row,
+                               assistant_profile=lambda: self.assistant_profile(str(person["id"]))):
             return False
-        if role not in INTERNAL_ROLES or not person.get("is_active"):
-            return False
-        user = SimpleNamespace(is_active=True, role=role)
-        env = bool(getattr(self.settings, "assistant_enabled", False))
-        if not access.assistant_enabled_for(user, self.settings_row, self.assistant_profile(str(person["id"])),
-                                            env=env):
-            return False
+        role = Role(person.get("role"))
         sub_app = proactive.EVENT_TYPES[event_type]["sub_app"]
         if sub_app == "card":
             sub_app = self.sub_app(payload.get("action_kind"))
@@ -383,6 +415,19 @@ class _Context:
                          .order("user_id").range(lo, hi))
             self._teams = {str(r["user_id"]): r.get("enabled") for r in rows if r.get("user_id")}
         return self._teams.get(str(user_id)) is not False
+
+    def digest_email_on(self, user_id: str) -> bool:
+        """The person's assistant digest email switch (phase 8, plan 9 step
+        2): `assistant_profiles.digest_email_enabled`, read from the cached
+        assistant profile; a missing row means on."""
+        return assistant_delivery.digest_email_on(self.assistant_profile(str(user_id)))
+
+    def triage_withdrawn(self, payload: Mapping[str, Any] | None) -> bool:
+        """Phase 8 (plan 5.6, P8R-3): a triage escalation is withdrawn while
+        the company triage switch is off or the fuse latch is set, or when it
+        was emitted before the last switch-on. Read from this tick's company
+        row; the Teams send applies the same test at send time."""
+        return assistant_delivery.escalation_withdrawn(self.settings_row, dict(payload or {}))
 
     # domain rows
 
@@ -480,6 +525,27 @@ class _Context:
                 self._auto_send[project_id] = None
         return self._auto_send[project_id]
 
+    def parts_payload(self, project: Mapping[str, Any]) -> dict[str, Any]:
+        """A `bid.due_not_ready`-shaped parts payload for one project, read
+        live (due_digest.readiness_rows plus missing_quote_categories), for
+        the phase 8 escalation clause "your part is still missing" (plan 5.6,
+        19.1 FQ5). Amounts are read only to compute booleans; an unreadable
+        project gives an empty payload, so no part is claimed missing."""
+        pid = str(project["id"])
+        if pid not in self._parts:
+            checks = due_digest.readiness_rows(self.sb, [dict(project)])
+            if not checks:
+                self._parts[pid] = {}
+            else:
+                flags = checks[0].get("checks") or {}
+                missing = {} if flags.get("has_quotes") else missing_quote_categories(self.sb, [pid])
+                self._parts[pid] = {
+                    "missing_quote_category_ids": list(missing.get(pid, [])),
+                    "labor_missing": not flags.get("has_labor"),
+                    "markups_missing": not flags.get("has_markups"),
+                }
+        return self._parts[pid]
+
     def call_in_open(self, project_id: str) -> bool:
         """R9: the project sits on the open pre-bid call list."""
         if project_id not in self._call_in:
@@ -520,12 +586,18 @@ class _Context:
         """The delivery-time recheck (6.4) of one undelivered row: the
         dismiss reason, or None when it may go. Eligibility and subscription
         for the person's current role (superseded), a project mute (muted), a
-        closed project (project_closed), a stale fact (superseded)."""
+        closed project (project_closed), a stale fact (superseded). A phase 8
+        triage escalation is also superseded when withdrawn (plan 5.6); its
+        bell being read or the bid moving meanwhile does not drop it."""
         user_id = str(row["user_id"])
         event_type = str(row.get("event_type") or "")
         payload = row.get("payload") or {}
         if event_type not in proactive.EVENT_TYPES:
             return None
+        # Phase 8: a held or digest-bound escalation is not released after a
+        # fuse trip or a switch-off or flip of company triage (19.1 FQ9).
+        if event_type == proactive.TRIAGE_ESCALATION and self.triage_withdrawn(payload):
+            return "superseded"
         person = self.person(user_id)
         if person is None or not self.allowed(person) or not self.eligible(person, event_type, payload):
             return "superseded"
@@ -747,14 +819,21 @@ def scan_approvals(now: datetime, *, ctx: _Context | None = None) -> int:
 
 
 def _missing_quote_categories(ctx: _Context, project_ids: list[str]) -> dict[str, list[str]]:
+    """The router's call site: `missing_quote_categories` over the tick's
+    client."""
+    return missing_quote_categories(ctx.sb, project_ids)
+
+
+def missing_quote_categories(sb: Any, project_ids: list[str]) -> dict[str, list[str]]:
     """Per project, the material category ids of RFQs with no vendor quote
     yet (ids only, no names). The embedded quote ids only test presence, as
     due_digest.readiness_rows does, and are dropped row by row: nothing from
     quotes leaves this function. A project with no RFQs is absent, so it has
-    no quote part (5.3)."""
+    no quote part (5.3). Shared with the phase 8 triage service (plan 5.3,
+    `your_part_missing`), so there is one copy."""
     out: dict[str, set[str]] = {}
-    for chunk in _chunks(project_ids):
-        rows = _page(lambda lo, hi, c=chunk: ctx.sb.table("rfqs").select(RFQ_READINESS_COLUMNS)
+    for chunk in _chunks([str(p) for p in project_ids]):
+        rows = _page(lambda lo, hi, c=chunk: sb.table("rfqs").select(RFQ_READINESS_COLUMNS)
                      .in_("project_id", c).order("id").range(lo, hi))
         for r in rows:
             quoted = bool(r.get("quotes"))
@@ -942,11 +1021,15 @@ def _open_slots(now: datetime, ctx: _Context) -> list[tuple[str, date, datetime]
 def _recipients(event: Mapping[str, Any], ctx: _Context) -> list[dict]:
     """6.2 step 2: the subject for one-person kinds and bells, else every
     active profile in the kind's audience. A subject who is gone yields
-    nobody."""
+    nobody. A `subject_only` kind (the phase 8 triage escalation, owner
+    question 7) never falls back to the audience: without a subject it
+    reaches nobody."""
     subject = event.get("subject_user_id")
     if subject:
         person = ctx.person(subject)
         return [person] if person is not None else []
+    if (proactive.EVENT_TYPES.get(str(event["event_type"])) or {}).get("subject_only"):
+        return []
     return ctx.audience(str(event["event_type"]))
 
 
@@ -1036,6 +1119,79 @@ def _later_slot_passed(payload: Mapping[str, Any], now: datetime, ctx: _Context)
         return False
 
 
+def _escalation_facts(uid: str, role: str, payload: Mapping[str, Any], project: Mapping[str, Any] | None,
+                      now: datetime, ctx: _Context) -> dict[str, Any]:
+    """The template inputs of a phase 8 triage escalation for one person
+    (plan 5.6, 19.1 FQ5; the facts listed in proactive's docstring), each
+    computed here from live state and never taken from the payload: the
+    project's live `internal_bid_at`; `role_owns_missing_part` over a freshly
+    read parts payload, only for a `due_soon_part_missing` reason on a bid
+    still ahead; and, for the unread reasons, the source bell's read state,
+    found through the person's own record row named by `payload.inbox_id`
+    (the payload carries no bell id). A fact that cannot be computed is left
+    out, which gives the neutral wording; the escalation is delivered either
+    way."""
+    facts: dict[str, Any] = {}
+    reason = payload.get("reason")
+    due = _utc((project or {}).get("internal_bid_at"))
+    if due is not None:
+        facts["internal_bid_at"] = _iso(due)
+    if reason == "due_soon_part_missing" and project and project.get("id") and due is not None and due > now:
+        facts["role_owns_missing_part"] = proactive.role_owns_missing_part(role, ctx.parts_payload(project))
+    if reason in ("unread_long", "due_soon_unread") and payload.get("inbox_id"):
+        record = repo.inbox_row(uid, str(payload["inbox_id"]))
+        nid = (record or {}).get("source_notification_id")
+        state = repo.notification_states(uid, [nid]).get(str(nid)) if nid else None
+        if state is not None:
+            facts["source_bell_unread"] = state.get("read_at") is None and state.get("dismissed_at") is None
+            bell = ctx.bell(nid)
+            mine = bell is not None and str(bell.get("user_id") or "") == uid
+            at = _utc((bell or {}).get("created_at")) if mine else _utc((record or {}).get("created_at"))
+            if at is not None:
+                facts["source_bell_at"] = _iso(at)
+    return facts
+
+
+def _refresh_escalation(row: Mapping[str, Any], now: datetime, ctx: _Context) -> Mapping[str, Any]:
+    """The release-time re-render of a phase 8 triage escalation's title
+    (plan 5.6: a factual clause appears only while the router's live facts
+    make it true). A row held by quiet hours, folded into the AM digest or
+    waiting for a digest goes out later than it was routed, so "waited
+    unread", "your part is still missing" and "is due" are recomputed here
+    from live state exactly as at route time; a clause that no longer holds
+    falls back to the neutral wording, and a due time that passed meanwhile
+    to the overdue one. A changed title is written back to the undelivered
+    row, which the bell, the digest, its email and the Teams card all read.
+    Any other kind is returned unchanged. A fact that cannot be read is left
+    out (neutral wording); the escalation is delivered either way."""
+    if row.get("event_type") != proactive.TRIAGE_ESCALATION:
+        return row
+    uid = str(row["user_id"])
+    stored = row.get("payload") or {}
+    payload = proactive.clean_payload(proactive.TRIAGE_ESCALATION, stored)
+    project_id = str(row["project_id"]) if row.get("project_id") else None
+    project = ctx.project(project_id)
+    role = str((ctx.person(uid) or {}).get("role") or "")
+    facts: dict[str, Any] = {
+        "now": now, "holidays": ctx.holidays, "severity": row.get("severity"),
+        "project_number": (project or {}).get("number") or stored.get("project_number"),
+        "slot_times": ctx.slot_times, "quiet_start": ctx.quiet_start, "quiet_end": ctx.quiet_end,
+    }
+    try:
+        facts.update(_escalation_facts(uid, role, payload, project, now, ctx))
+    except Exception as exc:  # noqa: BLE001 - an unreadable fact means neutral wording
+        logger.warning("assistant proactive: escalation facts unreadable (%s)", exc.__class__.__name__)
+    try:
+        title = proactive.render({"event_type": proactive.TRIAGE_ESCALATION, "payload": payload,
+                                  "project_id": project_id}, role, facts)["title"]
+    except (ValueError, KeyError):
+        return row
+    if not title or title == row.get("title"):
+        return row
+    repo.inbox_retitle(uid, str(row["id"]), title)
+    return {**row, "title": title}
+
+
 def route_event(event: dict[str, Any], now: datetime, *, ctx: _Context | None = None) -> dict[str, int]:
     """Route one claimed event (6.2): catalog, recipients, allowlist,
     eligibility, subscriptions, precedence, render, inbox upsert and delivery.
@@ -1048,6 +1204,10 @@ def route_event(event: dict[str, Any], now: datetime, *, ctx: _Context | None = 
     if entry is None:
         raise _Unroutable("unknown_type")
     payload = proactive.clean_payload(event_type, event.get("payload"))
+    if event_type == proactive.TRIAGE_ESCALATION and ctx.triage_withdrawn(payload):
+        # Phase 8 kill switch (plan 5.6, P8R-3): company triage off, the fuse
+        # latched, or emitted before the last switch-on. Nobody is reached.
+        return {"triage_off": 1}
     project_id = str(event["project_id"]) if event.get("project_id") else None
     project = ctx.project(project_id)
     is_bell = event_type.startswith("bell.")
@@ -1089,7 +1249,15 @@ def route_event(event: dict[str, Any], now: datetime, *, ctx: _Context | None = 
             "project_closed": ctx.project_closed(project, event_type) if project_id else False,
             "slot_times": ctx.slot_times, "quiet_start": ctx.quiet_start, "quiet_end": ctx.quiet_end,
         }
-        if event_type == proactive.APPROVAL_EXPIRING:
+        if event_type == proactive.TRIAGE_ESCALATION:
+            # The model's hint is the severity; only the person's own
+            # `feedback_auto` row lowers it, inside render (P8R-4, F6). A
+            # role default, an admin row or a manual user severity never caps it.
+            facts["severity"] = payload.get("severity_hint")
+            facts["subscription_source"] = sub["source"]
+            facts["subscription_severity"] = sub["severity"]
+            facts.update(_escalation_facts(uid, role, payload, project, now, ctx))
+        elif event_type == proactive.APPROVAL_EXPIRING:
             card = ctx.card(uid, payload.get("approval_id"))
             expires = _utc((card or {}).get("expires_at"))
             facts["card_pending"] = bool(card and card.get("status") == "pending" and expires and expires > now)
@@ -1228,11 +1396,18 @@ def _deliver(row: Mapping[str, Any], now: datetime, ctx: _Context) -> str:
     not off, one Teams ledger row. A merged row (NO_TEAMS_RULES) gets none,
     as render decided. A non-urgent approval warning inside quiet hours gets
     its Teams row with not_before the next 06:00 PT (P31); an urgent one goes
-    at once (P39)."""
+    at once (P39). A phase 8 triage escalation held by quiet hours and
+    released on a weekend or holiday (no digest to fold into) rings in-app
+    only, with no Teams row (P27; P8R-5, F6); an urgent one is never held."""
     uid = str(row["user_id"])
     severity = row.get("severity")
     teams = (severity in ("high", "urgent") and row.get("precedence") not in NO_TEAMS_RULES
              and ctx.external and ctx.teams_on(uid))
+    if (teams and row.get("event_type") == proactive.TRIAGE_ESCALATION and severity != "urgent"
+            and proactive.is_held(row)
+            and proactive.fold_params(now, ctx.holidays, catchup_hours=ctx.catchup,
+                                      slot_times=ctx.slot_times) is None):
+        teams = False
     not_before = None
     if (teams and row.get("event_type") == proactive.APPROVAL_EXPIRING and severity != "urgent"
             and proactive.in_quiet_hours(now, start=ctx.quiet_start, end=ctx.quiet_end)):
@@ -1256,8 +1431,9 @@ def _fold_args(now: datetime, ctx: _Context) -> dict[str, Any]:
 
 
 def _release_row(row: Mapping[str, Any], now: datetime, ctx: _Context) -> str:
-    """One due immediate row: the delivery-time recheck (6.4), then a held
-    row (proactive.is_held) goes through assistant_inbox_fold, which folds it
+    """One due immediate row: the delivery-time recheck (6.4), a phase 8
+    escalation's title re-rendered from live facts (_refresh_escalation),
+    then a held row (proactive.is_held) goes through assistant_inbox_fold, which folds it
     into the 7:00 AM digest on a workday before the catch-up window closes
     while the AM digest has not gone out; every other row, and a held row the
     fold answers `deliver` for, is delivered at once with its Teams row."""
@@ -1266,6 +1442,7 @@ def _release_row(row: Mapping[str, Any], now: datetime, ctx: _Context) -> str:
     if reason is not None:
         repo.inbox_dismiss(uid, [row["id"]], reason, now=now)
         return f"dismissed_{reason}"
+    row = _refresh_escalation(row, now, ctx)
     if proactive.is_held(row):
         answer = repo.inbox_fold(uid, str(row["id"]), now=now, **_fold_args(now, ctx))
         if answer == "folded":
@@ -1308,7 +1485,7 @@ def release_held(now: datetime, *, worker: str | None = None, ctx: _Context | No
             counts["unfolded"] += 1
             fresh = repo.inbox_row(uid, str(row["id"]))
             if fresh is not None:
-                counts[_deliver(fresh, now, ctx)] += 1
+                counts[_deliver(_refresh_escalation(fresh, now, ctx), now, ctx)] += 1
         except Exception as exc:  # noqa: BLE001
             logger.warning("assistant proactive: un-fold %s failed (%s)", row.get("id"), exc.__class__.__name__)
             counts["errors"] += 1
@@ -1340,8 +1517,13 @@ def deliver_digests(now: datetime, *, worker: str, ctx: _Context | None = None) 
                     if reason is not None:
                         repo.inbox_dismiss(uid, [row["id"]], reason, now=now)
                         counts[f"dismissed_{reason}"] += 1
+                    else:
+                        # Phase 8: an escalation's clauses are true when it goes out.
+                        _refresh_escalation(row, now, ctx)
+                # Phase 8 (plan 9 step 2): a person who turned the assistant
+                # digest email off gets the in-app digest and bell, no email row.
                 result = repo.digest_deliver(uid, digest_date=day, slot=slot, slot_at=slot_at, worker=worker,
-                                             email=ctx.external, now=now)
+                                             email=ctx.external and ctx.digest_email_on(uid), now=now)
                 counts["digests" if result.get("claimed") else "not_claimed"] += 1
             except Exception as exc:  # noqa: BLE001 - one person never stops the slot
                 logger.warning("assistant proactive: digest for one person failed (%s)", exc.__class__.__name__)

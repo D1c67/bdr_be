@@ -22,7 +22,9 @@ One tick (`send_due`), in order (8.5 steps 1 to 7):
   3. Per row, each in its own try: the channel gate (company switch,
      NOTIFICATION_EMAILS_ENABLED with MS_CLIENT_ID, TEAMS_ALERTS_ENABLED
      through teams_alerts.is_configured) settles `skipped channel_off`; the
-     recheck settles `skipped offboarded`, `stale` or `opted_out`; the
+     recheck settles `skipped offboarded`, `stale` or `opted_out` (the Teams
+     switch, or the phase 8 digest email switch; a withdrawn triage
+     escalation, phase 8 plan 5.6, is `stale`); the
      send-time gates settle `stale` or defer a non-urgent Teams row to the
      next 06:00 PT; the live-test guard settles `permanent` before any helper
      is called; then the helper call, classified and settled under the fence.
@@ -195,6 +197,30 @@ def _person_ok(user_id: str, settings: Any, settings_row: dict | None) -> dict |
     return person
 
 
+def digest_email_on(profile_row: dict | None) -> bool:
+    """The person's assistant digest email switch (phase 8, owner question 17,
+    plan 9): `assistant_profiles.digest_email_enabled`; a missing row or a
+    missing column means on. Only an explicit false turns the email off."""
+    return not (isinstance(profile_row, dict) and profile_row.get("digest_email_enabled") is False)
+
+
+def escalation_withdrawn(settings_row: dict | None, payload: dict | None) -> bool:
+    """Phase 8 (plan 5.6, P8R-3, 19.1 FQ9): a triage escalation is withdrawn
+    when the company triage switch is off, the fault fuse latch is set, or its
+    payload `emitted_at` (the finish's real clock) is before
+    `triage_enabled_at` (a run from before the last switch-on, so a quick off
+    and on flip cannot let it through). A missing stamp on either side fails
+    closed. The router applies it at route and delivery time and the Teams
+    send applies it here; it is a kill switch, not a rule on the model's
+    choice. Pure: reads the company row the caller already loaded."""
+    row = settings_row or {}
+    if not row.get("triage_enabled") or row.get("triage_fuse_tripped_at"):
+        return True
+    epoch = _utc(row.get("triage_enabled_at"))
+    emitted = _utc((payload or {}).get("emitted_at"))
+    return epoch is None or emitted is None or emitted < epoch
+
+
 # ── Error classification (8.5 step 6) ───────────────────────────────────────
 
 
@@ -300,6 +326,11 @@ def _prepare_teams(row: dict, clock: datetime, ctx: dict) -> Callable[[], str | 
     inbox = repo.inbox_row(user_id, str(row["target_id"]))
     if not inbox or inbox.get("delivered_at") is None or inbox.get("dismissed_at") is not None:
         raise _Outcome("skipped", "stale")
+    # Phase 8: a Teams row written just before a fuse trip or a switch-off
+    # (or flip) of company triage is not sent (plan 5.6, P8R-3).
+    if (inbox.get("event_type") == proactive.TRIAGE_ESCALATION
+            and escalation_withdrawn(ctx["settings_row"], inbox.get("payload"))):
+        raise _Outcome("skipped", "stale")
     state = teams_alerts.get_state(user_id) or {}
     if state.get("enabled") is False:  # a missing row means on (owner question 35)
         raise _Outcome("skipped", "opted_out")
@@ -362,6 +393,10 @@ def _prepare_email(row: dict, clock: datetime, ctx: dict) -> Callable[[], str | 
     person = _person_ok(user_id, settings, ctx["settings_row"])
     if person is None:
         raise _Outcome("skipped", "offboarded")
+    # Phase 8 (plan 9 step 3): the person turned the assistant digest email
+    # off after the ledger row was written. The in-app digest stays.
+    if not digest_email_on(repo.profile_row(user_id)):
+        raise _Outcome("skipped", "opted_out")
     digest = repo.digest(user_id, str(row["target_id"]))
     if not digest or digest.get("notification_id") is None:
         raise _Outcome("skipped", "stale")
@@ -415,7 +450,9 @@ def _prepare_email(row: dict, clock: datetime, ctx: dict) -> Callable[[], str | 
     logo = (LOGO_CONTENT_ID, LOGO_FILENAME, email_branding.logo_bytes(), "image/jpeg")
 
     def send() -> str | None:
-        log = graph_email.send_mail(to=[to], subject=subject, body_html=body_html, inline_images=[logo])
+        # Router digest email logs as `system` (plan 10; owner question 18).
+        log = graph_email.send_mail(to=[to], subject=subject, body_html=body_html, inline_images=[logo],
+                                    actor_kind="system")
         return str(log["id"]) if isinstance(log, dict) and log.get("id") else None
 
     return send
@@ -529,12 +566,14 @@ def send_due(now: datetime, worker: str) -> dict[str, Any]:
 def channels(user_id: str) -> dict[str, Any]:
     """The read-only channel state for GET /assistant/alerts (10.1):
     `{teams: {available, enabled, connected, last_sent_at, last_error_at},
-    email: {available}}`, read from `teams_alerts.status` without the error
-    text, so the route never names `teams_alerts`. `available` also needs
-    ASSISTANT_PROACTIVE_EXTERNAL_ENABLED (the router sends nothing without it)."""
+    email: {available, enabled}}`, read from `teams_alerts.status` without the
+    error text, so the route never names `teams_alerts`. `available` also needs
+    ASSISTANT_PROACTIVE_EXTERNAL_ENABLED (the router sends nothing without it).
+    `email.enabled` is the person's digest email switch (phase 8, plan 9)."""
     settings = get_settings()
     external = bool(getattr(settings, "assistant_proactive_external_enabled", False))
     status = teams_alerts.status(user_id) or {}
+    email_enabled = digest_email_on(repo.profile_row(user_id))
     return {
         "teams": {
             "available": external and bool(status.get("available")),
@@ -543,5 +582,5 @@ def channels(user_id: str) -> dict[str, Any]:
             "last_sent_at": status.get("last_sent_at"),
             "last_error_at": status.get("last_error_at"),
         },
-        "email": {"available": external and _email_on(settings)},
+        "email": {"available": external and _email_on(settings), "enabled": email_enabled},
     }

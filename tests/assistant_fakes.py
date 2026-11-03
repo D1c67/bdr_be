@@ -72,7 +72,14 @@ FakeTeamsAlerts and FakeEmailBranding (record calls, raise scripted errors;
 `install_delivery_fakes` patches the real helper modules). The link-bell
 and fold twins follow 0191 (severity from the payload; the fold keeps the
 prior precedence in payload folded_from_precedence and the un-fold restores
-it)."""
+Phase 8 (docs/ASSISTANT_PHASE8_PLAN.md, WI-5) adds, per 0196: the company
+spend identity COMPANY_SPEND_ID; the reserve twin mirrors B2 (kind triage
+only under the company id, with no per-person cap check, and the company id
+refused for every other kind); Python twins of the triage RPCs (enqueue,
+claim, finish with the escalation emit, skip-user, skip-all, counts, company
+spend, purge, and the retry helper they share; see the _Phase8Mixin comment);
+and the row builders triage_item_row and triage_run_row. `FakeDB.now` is the
+real clock (clock_timestamp) of those twins; p_now is the travelled one."""
 
 from __future__ import annotations
 
@@ -143,6 +150,9 @@ SUPERSEDE_COLUMNS = (
 # Phase 4 (0180).
 AE_HOLD_KINDS = ("plans_pages", "ai_estimate")
 RESERVATION_KINDS = ("turn_call", "split_task", "plans_pages", "ai_estimate")
+# Phase 8 (0196 A2a, B1): kind triage, held only by the company spend id.
+RESERVATION_KINDS += ("triage",)
+COMPANY_SPEND_ID = "00000000-0000-0000-0000-000000000001"
 REPORT_SPECS = ("bid_invitations", "quote_readiness", "estimator_vs_bid", "project_timeline",
                 "project_file_access", "change_history", "ai_usage", "person_evidence")
 EVIDENCE_VIEWS = ("activity", "file_access", "notifications", "ai_usage", "estimator_timeline")
@@ -1261,7 +1271,564 @@ class _Phase7Mixin:
         return {"since": p["p_since"], "floor": floor, "kinds": kinds, "health": health}
 
 
-class FakeDB(_Phase7Mixin):
+# ── Phase 8 (0196): model triage ─────────────────────────────────────────────
+#
+# Python twins of the triage RPCs of docs/ASSISTANT_PHASE8_PLAN.md 4.1 A6 and
+# 4.2 B4 over the tables assistant_triage_runs and assistant_triage_items (with
+# their checks): enqueue (switch, epoch, latch, window, the allowlist, one
+# item per record row), claim (switch and latch, the epoch sweep, both fuse
+# wires and the latch, the lease retirement, the candidate pick with the
+# debounce and the batch size, the re-check, an item that failed an answer
+# check taken alone), finish (the fence, the per-item skips first, the epoch
+# and latch fence, decisions with the escalation event in the same statement,
+# the error handling), skip-user, skip-all, counts, company spend and purge,
+# plus the retry helper they share. `FakeDB.now` stands in for the real clock
+# (clock_timestamp: leases, enqueued_at, claimed_at, the latch time); p_now is
+# the travelled clock. The phase 7 lock serializes the bodies, so two
+# simulated workers can share one FakeDB.
+
+P8_RPCS = {
+    "assistant_triage_enqueue": "_p8_enqueue",
+    "assistant_triage_claim": "_p8_claim",
+    "assistant_triage_finish": "_p8_finish",
+    "assistant_triage_skip_user": "_p8_skip_user",
+    "assistant_triage_skip_all": "_p8_skip_all",
+    "assistant_triage_counts": "_p8_counts",
+    "assistant_triage_company_spend": "_p8_company_spend",
+    "assistant_triage_purge": "_p8_purge",
+    "assistant_triage_set_enabled": "_p8_set_enabled",
+}
+P8_ERROR_KINDS = ("cap_global", "cap_test", "spend_check", "ineligible", "model_error", "bad_answer",
+                  "truncated", "unpriced", "busy", "timeout", "lease_expired", "switched_off", "fuse", "breaker")
+P8_INFRA_KINDS = ("model_error", "timeout", "busy", "spend_check", "unpriced", "lease_expired", "breaker")
+P8_SKIP_REASONS = ("cap", "ineligible", "offboarded", "stale", "dismissed", "switched_off", "fuse", "bad_answer")
+P8_WORD = re.compile(r"^[a-z][a-z0-9_]{2,40}$")
+P8_MODEL = re.compile(r"^[A-Za-z0-9._:/-]{1,120}$")
+P8_UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+PT_ZONE = ZoneInfo("America/Los_Angeles")
+
+
+def p8_cap_offset_seconds(item_id) -> int:
+    """The fake's stable per-item midnight offset in [0, 7200) (the real
+    helper uses hashtext; only the range and the stability matter)."""
+    import zlib
+
+    return zlib.crc32(str(item_id).encode()) % 7200
+
+
+def p8_next_midnight(now) -> datetime:
+    """The next Pacific midnight strictly after `now` (the retry helper's
+    cap branch, before the offset)."""
+    local = _ts(now).astimezone(PT_ZONE)
+    day = (local + timedelta(days=1)).date()
+    return datetime(day.year, day.month, day.day, tzinfo=PT_ZONE).astimezone(timezone.utc)
+
+
+class _Phase8Mixin:
+    def _p8_settings(self) -> dict:
+        return next((r for r in self.tables.get("assistant_settings", []) if str(r.get("id")) == "1"), {})
+
+    def _p8_update_settings(self, row: dict, patch: dict) -> dict:
+        """The 0170 set_updated_at trigger on assistant_settings: updated_at
+        is the database's now() whatever the SET sends. It mirrors the
+        trigger only; the B6 switch stamps its epoch from clock_timestamp()
+        (D-1), and only the part A fallback of repo.set_triage_enabled reads
+        updated_at back as the epoch."""
+        row.update(patch)
+        row["updated_at"] = self.now_iso()
+        return row
+
+    def _p8_items(self) -> list[dict]:
+        return self.tables.setdefault("assistant_triage_items", [])
+
+    def _p8_runs(self) -> list[dict]:
+        return self.tables.setdefault("assistant_triage_runs", [])
+
+    def _p8_run(self, run_id) -> dict | None:
+        return next((r for r in self._p8_runs() if str(r.get("id")) == str(run_id)), None)
+
+    def _p8_checks(self, item: dict) -> None:
+        if (item.get("status") not in ("pending", "claimed", "decided", "skipped", "failed")
+                or item.get("skip_reason") not in (None, *P8_SKIP_REASONS)
+                or not 0 <= int(item.get("attempts") or 0) <= 3
+                or item.get("decision") not in (None, "none", "suggest", "escalate")
+                or item.get("severity_hint") not in (None, "normal", "high", "urgent")
+                or (item.get("status") == "decided") != (item.get("decision") is not None)
+                or (item.get("decision") == "escalate" and item.get("severity_hint") is None)
+                or (item.get("status") == "skipped") != (item.get("skip_reason") is not None)):
+            raise CheckViolation("assistant_triage_items check (check_violation)")
+
+    def _p8_set(self, item: dict, **fields) -> None:
+        candidate = {**item, **fields}
+        self._p8_checks(candidate)
+        item.update(fields)
+
+    @staticmethod
+    def _p8_bad(name: str) -> None:
+        raise CheckViolation(f"{name}: bad arguments (check_violation)")
+
+    # ── the retry helper (A4) ──
+
+    def _p8_retry(self, item: dict, kind: str, p_now) -> str | None:
+        if item.get("status") != "claimed":
+            return None
+        stamp = _p7_s(p_now)
+        if kind in ("bad_answer", "truncated"):
+            attempts = min(int(item.get("attempts") or 0) + 1, 3)
+            if attempts >= 3:
+                status = "failed" if kind == "truncated" else "skipped"
+                self._p8_set(item, attempts=attempts, status=status,
+                             skip_reason=None if kind == "truncated" else "bad_answer",
+                             next_attempt_at=None, updated_at=stamp)
+                return status
+            wait = timedelta(seconds=60) if attempts == 1 else timedelta(minutes=5)
+            self._p8_set(item, attempts=attempts, status="pending", next_attempt_at=_p7_s(_ts(p_now) + wait),
+                         updated_at=stamp)
+            return "pending"
+        if kind in P8_INFRA_KINDS:
+            retries = int(item.get("infra_retries") or 0)
+            wait = min(60 * 2 ** min(retries, 10), 900)
+            self._p8_set(item, infra_retries=min(retries + 1, 1000), status="pending",
+                         next_attempt_at=_p7_s(_ts(p_now) + timedelta(seconds=wait)), updated_at=stamp)
+            return "pending"
+        if kind == "cap":
+            at = p8_next_midnight(p_now) + timedelta(seconds=p8_cap_offset_seconds(item["id"]))
+            self._p8_set(item, cap_deferred_at=item.get("cap_deferred_at") or stamp, status="pending",
+                         next_attempt_at=_p7_s(at), updated_at=stamp)
+            return "pending"
+        raise CheckViolation("assistant_triage_item_retry: unknown kind (check_violation)")
+
+    # ── A6.1 enqueue ──
+
+    def _p8_enqueue(self, p: dict) -> int:
+        now, window, limit = p.get("p_now"), p.get("p_window_hours"), p.get("p_limit")
+        if now is None or window is None or not 1 <= int(window) <= 72 or limit is None or not 1 <= int(limit) <= 1000:
+            self._p8_bad("assistant_triage_enqueue")
+        with self._p7_lock:
+            sett = self._p8_settings()
+            if (sett.get("triage_enabled") is not True or sett.get("triage_enabled_at") is None
+                    or sett.get("triage_fuse_tripped_at") is not None):
+                return 0
+            p_now = _ts(now)
+            floor = max(p_now - timedelta(hours=int(window)), _ts(sett["triage_enabled_at"]))
+            allow = None if p.get("p_user_ids") is None else {str(u) for u in p["p_user_ids"]}
+            have = {(str(t["user_id"]), str(t["inbox_id"])) for t in self._p8_items()}
+            rows = [r for r in self.tables.get("assistant_inbox", [])
+                    if r.get("delivery") == "record" and r.get("dismissed_at") is None
+                    and str(r.get("event_type") or "").startswith("bell.")
+                    and floor <= _ts(r["created_at"]) <= p_now
+                    and (allow is None or str(r.get("user_id")) in allow)
+                    and (str(r.get("user_id")), str(r.get("id"))) not in have]
+            rows.sort(key=lambda r: (_ts(r["created_at"]), str(r["id"])))
+            for r in rows[: int(limit)]:
+                self._p8_items().append(triage_item_row(
+                    id=str(uuid.uuid4()), user_id=str(r["user_id"]), inbox_id=str(r["id"]),
+                    event_type=r["event_type"], project_id=r.get("project_id"),
+                    source_notification_id=r.get("source_notification_id"), created_at=_p7_s(p_now),
+                    updated_at=_p7_s(p_now), enqueued_at=self.now_iso()))
+            return len(rows[: int(limit)])
+
+    # ── A6.2 claim ──
+
+    def _p8_fuse_sample(self, sett: dict, p_now) -> tuple[int, int, int]:
+        epoch = _ts(sett["triage_enabled_at"])
+        runs = {str(r["id"]): r for r in self._p8_runs()}
+
+        def after(t: dict) -> bool:
+            run = runs.get(str(t.get("run_id")))
+            return run is not None and _ts(run["claimed_at"]) >= epoch
+
+        decided = [t for t in self._p8_items() if t.get("status") == "decided" and after(t)]
+        decided.sort(key=lambda t: (_ts(t["decided_at"]), str(t["id"])), reverse=True)
+        sample = decided[:50]
+        hour = [t for t in decided if t.get("decision") == "escalate"
+                and _ts(t["decided_at"]) > _ts(p_now) - timedelta(hours=1)]
+        return len(sample), sum(1 for t in sample if t.get("decision") == "escalate"), len(hour)
+
+    def _p8_live_run(self, user_id) -> bool:
+        return any(str(r.get("user_id")) == str(user_id) and r.get("status") == "claimed"
+                   and _ts(r["lease_until"]) > self.now for r in self._p8_runs())
+
+    def _p8_claim(self, p: dict):
+        worker, now = p.get("p_worker"), p.get("p_now")
+        lease, debounce, batch = p.get("p_lease_seconds"), p.get("p_debounce_seconds"), p.get("p_batch_max")
+        ratio, per_hour = p.get("p_fuse_ratio"), p.get("p_fuse_per_hour")
+        if (worker is None or not 1 <= len(str(worker)) <= 200 or now is None
+                or lease is None or not 60 <= int(lease) <= 1800 or debounce is None or not 0 <= int(debounce) <= 3600
+                or batch is None or not 1 <= int(batch) <= 20 or ratio is None or not 0 <= float(ratio) <= 1
+                or per_hour is None or not 0 <= int(per_hour) <= 5000):
+            self._p8_bad("assistant_triage_claim")
+        with self._p7_lock:
+            sett = self._p8_settings()
+            p_now = _ts(now)
+            stamp = _p7_s(p_now)
+            # 1. Switch and latch.
+            if sett.get("triage_enabled") is not True or sett.get("triage_enabled_at") is None:
+                return {"switched_off": True}
+            if sett.get("triage_fuse_tripped_at") is not None:
+                return {"fuse": True, "tripped_now": False}
+            epoch = _ts(sett["triage_enabled_at"])
+            # 2. Epoch sweep (real clock against real clock).
+            old = [t for t in self._p8_items() if t.get("status") == "pending" and _ts(t["enqueued_at"]) < epoch]
+            old.sort(key=lambda t: _ts(t["enqueued_at"]))
+            for t in old[:500]:
+                self._p8_set(t, status="skipped", skip_reason="switched_off", next_attempt_at=None, updated_at=stamp)
+            # 3. Fuse.
+            sample, sample_esc, hour_esc = self._p8_fuse_sample(sett, p_now)
+            if ((float(ratio) > 0 and sample >= 20 and sample_esc / max(sample, 1) > float(ratio))
+                    or (int(per_hour) > 0 and hour_esc > int(per_hour))):
+                tripped = sett.get("triage_fuse_tripped_at") is None
+                if tripped:
+                    sett["triage_fuse_tripped_at"] = self.now_iso()
+                return {"fuse": True, "tripped_now": tripped}
+            # 4. Retire expired claims.
+            for run in sorted((r for r in self._p8_runs() if r.get("status") == "claimed"
+                               and _ts(r["lease_until"]) < self.now), key=lambda r: _ts(r["lease_until"]))[:50]:
+                run.update(status="failed", error_kind="lease_expired", finished_at=stamp)
+                for t in sorted((t for t in self._p8_items() if str(t.get("run_id")) == str(run["id"])
+                                 and t.get("status") == "claimed"), key=lambda t: str(t["id"])):
+                    self._p8_retry(t, "lease_expired", p_now)
+            # 5. Candidates.
+            allow = None if p.get("p_user_ids") is None else {str(u) for u in p["p_user_ids"]}
+
+            def eligible(t: dict) -> bool:
+                return (t.get("status") == "pending"
+                        and (t.get("next_attempt_at") is None or _ts(t["next_attempt_at"]) <= p_now)
+                        and _ts(t["enqueued_at"]) >= epoch)
+
+            groups: dict[str, list[dict]] = {}
+            for t in self._p8_items():
+                if eligible(t) and (allow is None or str(t["user_id"]) in allow) \
+                        and not self._p8_live_run(t["user_id"]):
+                    groups.setdefault(str(t["user_id"]), []).append(t)
+            cands = [(min(_ts(t["created_at"]) for t in ts), uid) for uid, ts in groups.items()
+                     if min(_ts(t["created_at"]) for t in ts) <= p_now - timedelta(seconds=int(debounce))
+                     or len(ts) >= int(batch)]
+            for _first_at, uid in sorted(cands)[:5]:
+                # 6. Re-check under the per-person lock.
+                self.advisory_locks.append(f"assistant_triage:{uid}")
+                if self._p8_live_run(uid):
+                    continue
+                mine = sorted((t for t in self._p8_items() if str(t["user_id"]) == uid and eligible(t)),
+                              key=lambda t: (_ts(t["created_at"]), str(t["id"])))
+                if not mine:
+                    continue
+                # 7. The batch (an item that failed an answer check goes alone), then the run.
+                if int(mine[0].get("attempts") or 0) > 0:
+                    batch_items = [mine[0]]
+                else:
+                    batch_items = [t for t in mine if int(t.get("attempts") or 0) == 0][: int(batch)]
+                if not batch_items:
+                    continue
+                run = triage_run_row(
+                    id=str(uuid.uuid4()), user_id=uid, claimed_by=str(worker), claimed_at=self.now_iso(),
+                    lease_until=(self.now + timedelta(seconds=int(lease))).isoformat(),
+                    item_count=len(batch_items), created_at=stamp)
+                self._p8_runs().append(run)
+                for t in batch_items:
+                    self._p8_set(t, status="claimed", run_id=run["id"], updated_at=stamp)
+                inbox = {str(r["id"]): r for r in self.tables.get("assistant_inbox", [])}
+                return {"run_id": run["id"], "user_id": uid, "items": [
+                    {"id": t["id"], "inbox_id": t["inbox_id"], "event_type": t["event_type"],
+                     "project_id": t.get("project_id"), "source_notification_id": t.get("source_notification_id"),
+                     "created_at": t["created_at"], "inbox_created_at": inbox[str(t["inbox_id"])]["created_at"],
+                     "cap_deferred_at": t.get("cap_deferred_at")}
+                    for t in batch_items if str(t["inbox_id"]) in inbox]}
+            return None
+
+    # ── A6.3 finish ──
+
+    def _p8_finish(self, p: dict) -> dict:
+        status, error = p.get("p_status"), p.get("p_error_kind")
+        entries = p.get("p_items") if p.get("p_items") is not None else []
+        if (p.get("p_run_id") is None or p.get("p_worker") is None or p.get("p_now") is None or status is None
+                or status not in ("decided", "skipped", "failed") or not isinstance(entries, list)
+                or (status == "decided" and error is not None)
+                or (status != "decided" and error not in P8_ERROR_KINDS)):
+            self._p8_bad("assistant_triage_finish")
+        usage = p.get("p_usage") or {}
+        with self._p7_lock:
+            p_now = _ts(p["p_now"])
+            stamp = _p7_s(p_now)
+            run = self._p8_run(p["p_run_id"])
+            if (run is None or run.get("claimed_by") != p["p_worker"] or run.get("status") != "claimed"
+                    or _ts(run["lease_until"]) <= self.now):
+                return {"fenced": False, "emitted": 0}
+            sett = self._p8_settings()
+
+            def claimed() -> list[dict]:
+                return sorted((t for t in self._p8_items() if str(t.get("run_id")) == str(run["id"])
+                               and t.get("status") == "claimed"), key=lambda t: str(t["id"]))
+
+            def item(entry: dict) -> dict | None:
+                if not P8_UUID.match(str(entry.get("id") or "")):
+                    return None
+                return next((t for t in claimed() if str(t["id"]) == str(entry["id"])), None)
+
+            # Per-item skips first, for every status (MC-6).
+            for entry in entries:
+                if not isinstance(entry, dict) or not entry.get("skip_reason"):
+                    continue
+                if entry["skip_reason"] not in ("dismissed", "stale", "cap"):
+                    raise CheckViolation("assistant_triage_finish: bad skip_reason (check_violation)")
+                target = item(entry)
+                if target is not None:
+                    self._p8_set(target, status="skipped", skip_reason=entry["skip_reason"],
+                                 next_attempt_at=None, updated_at=stamp)
+            # The company switch, fenced on the epoch, then the latch.
+            if (sett.get("triage_enabled") is not True or sett.get("triage_enabled_at") is None
+                    or _ts(run["claimed_at"]) < _ts(sett["triage_enabled_at"])):
+                status, error = "skipped", "switched_off"
+            elif sett.get("triage_fuse_tripped_at") is not None:
+                status, error = "skipped", "fuse"
+            emitted = 0
+            if status == "decided":
+                for entry in entries:
+                    if not isinstance(entry, dict) or entry.get("skip_reason"):
+                        continue
+                    target = item(entry)
+                    decision, reason = entry.get("decision"), entry.get("reason")
+                    action, severity = entry.get("action"), entry.get("severity_hint")
+                    if target is None or decision not in ("none", "suggest", "escalate"):
+                        continue
+                    if reason is None or not P8_WORD.match(str(reason)):
+                        continue
+                    if decision == "suggest":
+                        if action is None or not P8_WORD.match(str(action)):
+                            continue
+                    else:
+                        action = None
+                    if decision == "escalate":
+                        if severity not in ("normal", "high", "urgent"):
+                            continue
+                    else:
+                        severity = None
+                    self._p8_set(target, status="decided", decision=decision, reason=reason, action=action,
+                                 severity_hint=severity, decided_at=stamp, next_attempt_at=None, updated_at=stamp)
+                    if decision == "escalate":
+                        key = f"p8:esc:{target['inbox_id']}"
+                        event = next((e for e in self._p7_rows("assistant_events") if e.get("dedupe_key") == key), None)
+                        if event is None:
+                            event = self._insert("assistant_events", {
+                                "event_type": "assistant.triage_escalation", "dedupe_key": key,
+                                "project_id": target.get("project_id"), "subject_user_id": target["user_id"],
+                                "payload": {"inbox_id": target["inbox_id"], "triage_item_id": target["id"],
+                                            "run_id": run["id"], "reason": reason, "severity_hint": severity,
+                                            "source_kind": target["event_type"], "emitted_at": self.now_iso()},
+                                "occurred_at": stamp, "status": "pending", "source": "emit"})
+                            emitted += 1
+                        target["escalation_event_id"] = event["id"]
+                for left in claimed():
+                    self._p8_retry(left, "bad_answer", p_now)
+            elif error in ("cap_global", "cap_test"):
+                for left in claimed():
+                    self._p8_retry(left, "cap", p_now)
+            elif error in ("ineligible", "switched_off", "fuse"):
+                for left in claimed():
+                    self._p8_set(left, status="skipped", skip_reason=error, next_attempt_at=None, updated_at=stamp)
+            else:
+                for left in claimed():
+                    self._p8_retry(left, error, p_now)
+            model = usage.get("model")
+
+            def number(key):
+                value = usage.get(key)
+                return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+            run.update(
+                status=status, error_kind=error,
+                model=model if model is not None and P8_MODEL.match(str(model)) else run.get("model"),
+                reservation_id=(usage["reservation_id"] if P8_UUID.match(str(usage.get("reservation_id") or ""))
+                                else run.get("reservation_id")),
+                input_tokens=number("input_tokens"), cached_tokens=number("cached_tokens"),
+                output_tokens=number("output_tokens"), cost_usd=number("cost_usd"), finished_at=stamp)
+            return {"fenced": True, "emitted": emitted, "status": status, "error_kind": error}
+
+    # ── A6.4 skip-user, A6.8 skip-all ──
+
+    def _p8_skip_user(self, p: dict) -> int:
+        if (p.get("p_user_id") is None or p.get("p_now") is None
+                or p.get("p_reason") not in ("offboarded", "switched_off", "ineligible")):
+            self._p8_bad("assistant_triage_skip_user")
+        with self._p7_lock:
+            uid, stamp = str(p["p_user_id"]), _p7_s(p["p_now"])
+            self.advisory_locks.append(f"assistant_triage:{uid}")
+            kind = "ineligible" if p["p_reason"] == "ineligible" else "switched_off"
+            for run in self._p8_runs():
+                if str(run.get("user_id")) == uid and run.get("status") == "claimed":
+                    run.update(status="failed", error_kind=kind, finished_at=stamp)
+            mine = sorted((t for t in self._p8_items() if str(t["user_id"]) == uid
+                           and t.get("status") in ("pending", "claimed")),
+                          key=lambda t: (_ts(t["created_at"]), str(t["id"])))[:500]
+            for t in mine:
+                self._p8_set(t, status="skipped", skip_reason=p["p_reason"], next_attempt_at=None, updated_at=stamp)
+            return len(mine)
+
+    def _p8_skip_all(self, p: dict) -> int:
+        reason, limit = p.get("p_reason"), p.get("p_limit")
+        if reason not in ("switched_off", "fuse") or p.get("p_now") is None or limit is None \
+                or not 1 <= int(limit) <= 1000:
+            self._p8_bad("assistant_triage_skip_all")
+        with self._p7_lock:
+            sett = self._p8_settings()
+            if reason == "fuse" and sett.get("triage_fuse_tripped_at") is None:
+                return 0
+            if (reason == "switched_off" and sett.get("enabled") is True and sett.get("proactive_enabled") is True
+                    and sett.get("triage_enabled") is True):
+                return 0
+            stamp = _p7_s(p["p_now"])
+            pending = sorted((t for t in self._p8_items() if t.get("status") == "pending"),
+                             key=lambda t: (_ts(t["created_at"]), str(t["id"])))[: int(limit)]
+            for t in pending:
+                self._p8_set(t, status="skipped", skip_reason=reason, next_attempt_at=None, updated_at=stamp)
+            return len(pending)
+
+    # ── A6.7 company spend, A6.5 counts ──
+
+    def _p8_company_spend(self, p: dict) -> dict:
+        since = self._pacific_day_start()
+        log = self.tables.get("llm_call_log", [])
+        spent = sum((_D(r.get("cost_usd")) for r in log if str(r.get("user_id")) == COMPANY_SPEND_ID
+                     and r.get("created_at") and _ts(r["created_at"]) >= since), Decimal("0"))
+        held = Decimal("0")
+        for res in self.tables.get("assistant_spend_reservations", []):
+            if (res.get("kind") != "triage" or str(res.get("user_id")) != COMPANY_SPEND_ID
+                    or res.get("status") != "active" or _ts(res["expires_at"]) <= self.now):
+                continue
+            logged = sum((_D(r.get("cost_usd")) for r in log
+                          if str(r.get("spend_reservation_id")) == str(res["id"])), Decimal("0"))
+            held += max(_D(res.get("amount_usd")) - logged, Decimal("0"))
+        return {"spent": float(spent), "held": float(held), "since": since.isoformat()}
+
+    def _p8_counts(self, p: dict) -> dict:
+        if p.get("p_since") is None or p.get("p_now") is None:
+            self._p8_bad("assistant_triage_counts")
+        since, p_now = _ts(p["p_since"]), _ts(p["p_now"])
+        sett = self._p8_settings()
+        sample = sample_esc = hour_esc = 0
+        if sett.get("triage_enabled_at") is not None:
+            sample, sample_esc, hour_esc = self._p8_fuse_sample(sett, p_now)
+        items = [t for t in self._p8_items() if _ts(t["created_at"]) >= since]
+        runs = [r for r in self._p8_runs() if _ts(r["created_at"]) >= since]
+
+        def tally(rows, key):
+            out: dict = {}
+            for r in rows:
+                if r.get(key) is not None:
+                    out[r[key]] = out.get(r[key], 0) + 1
+            return out
+
+        state = self._spend_state({"p_user_id": None, "p_user_cap_default": 0, "p_global_cap_default": 50})
+        browser = Decimal("0")
+        log = self.tables.get("llm_call_log", [])
+        for res in self.tables.get("assistant_spend_reservations", []):
+            if res.get("kind") == "browser_task" and res.get("status") == "active" and _ts(res["expires_at"]) > self.now:
+                logged = sum((_D(r.get("cost_usd")) for r in log
+                              if str(r.get("spend_reservation_id")) == str(res["id"])), Decimal("0"))
+                browser += max(_D(res.get("amount_usd")) - logged, Decimal("0"))
+        company = self._p8_company_spend({})
+        roles = {str(r["id"]): r.get("role") for r in self.tables.get("profiles", [])}
+        cells: dict[str, dict] = {}
+        for t in items:
+            role = roles.get(str(t["user_id"])) or "unknown"
+            cell = cells.setdefault(role, {"people": set(), "items": 0, "escalations": 0})
+            cell["people"].add(str(t["user_id"]))
+            cell["items"] += 1
+            cell["escalations"] += 1 if t.get("decision") == "escalate" else 0
+        hidden = any(len(c["people"]) < 3 for c in cells.values())
+        return {
+            "since": _p7_s(since), "triage_enabled": bool(sett.get("triage_enabled")),
+            "triage_enabled_at": sett.get("triage_enabled_at"), "fuse_tripped_at": sett.get("triage_fuse_tripped_at"),
+            "status": tally(items, "status"), "decision": tally(items, "decision"), "reason": tally(items, "reason"),
+            "severity_hint": tally(items, "severity_hint"), "skip_reason": tally(items, "skip_reason"),
+            "error_kind": tally(runs, "error_kind"), "runs": len(runs),
+            "cost_usd": float(sum((_D(r.get("cost_usd")) for r in runs), Decimal("0"))),
+            "cap_deferred_pending": sum(1 for t in self._p8_items()
+                                        if t.get("status") == "pending" and t.get("cap_deferred_at") is not None),
+            "fuse": {"sample": sample, "sample_escalations": sample_esc, "hour_escalations": hour_esc},
+            "spend": {"global_cap": state["global_cap"], "global_spent": state["global_spent"],
+                      "global_held": state["global_held"], "browser_held": float(browser),
+                      "triage_spent": company["spent"], "triage_held": company["held"]},
+            "roles": [] if hidden else [{"role": k, "items": v["items"], "escalations": v["escalations"]}
+                                        for k, v in sorted(cells.items())],
+            "roles_suppressed": hidden,
+        }
+
+    # ── B4 purge ──
+
+    def _p8_purge(self, p: dict) -> dict:
+        days, limit = p.get("p_run_days"), p.get("p_limit")
+        if p.get("p_now") is None or days is None or not 7 <= int(days) <= 3650 or limit is None \
+                or not 1 <= int(limit) <= 5000:
+            self._p8_bad("assistant_triage_purge")
+        with self._p7_lock:
+            cutoff = _ts(p["p_now"]) - timedelta(days=int(days))
+            held = {str(r["user_id"]) for r in self.tables.get("assistant_profiles", []) if r.get("legal_hold")}
+            fresh_runs = {str(t.get("run_id")) for t in self._p8_items() if _ts(t["created_at"]) >= cutoff}
+            doomed = sorted((r for r in self._p8_runs() if r.get("status") != "claimed"
+                             and _ts(r["created_at"]) < cutoff and str(r["user_id"]) not in held
+                             and str(r["id"]) not in fresh_runs), key=lambda r: _ts(r["created_at"]))[: int(limit)]
+            gone = {str(r["id"]) for r in doomed}
+            self.tables["assistant_triage_runs"] = [r for r in self._p8_runs() if str(r["id"]) not in gone]
+            for t in self._p8_items():          # run_id references the run on delete set null
+                if str(t.get("run_id")) in gone:
+                    t["run_id"] = None
+            return {"locked": True, "assistant_triage_runs": len(gone)}
+
+    # ── B6 the company triage switch ──
+
+    def _p8_set_enabled(self, p: dict) -> dict:
+        """0196 B6 in Python: one guarded update of the company row; a flip
+        to on sets the epoch from the database clock (FakeDB.now) and clears
+        the latch in the same update; no flip writes nothing."""
+        user, enabled = p.get("p_user_id"), p.get("p_enabled")
+        if user is None or not isinstance(enabled, bool) or str(user) == COMPANY_SPEND_ID:
+            self._p8_bad("assistant_triage_set_enabled")
+        with self._p7_lock:
+            row = self._p8_settings()
+            if not row:
+                raise AssertionError("assistant_triage_set_enabled: the settings row is missing")
+            # The column is NOT NULL DEFAULT false (A2): a row without the
+            # key reads as off, as SQL would see it.
+            changed = bool(row.get("triage_enabled")) is not enabled
+            if changed:
+                patch: dict = {"triage_enabled": enabled, "updated_by": str(user)}
+                if enabled:
+                    patch.update(triage_enabled_at=self.now_iso(), triage_fuse_tripped_at=None)
+                self._p8_update_settings(row, patch)
+            return {"triage_enabled": row.get("triage_enabled"), "triage_enabled_at": row.get("triage_enabled_at"),
+                    "triage_fuse_tripped_at": row.get("triage_fuse_tripped_at"),
+                    "updated_at": row.get("updated_at"), "changed": changed}
+
+
+def triage_item_row(**over) -> dict:
+    """A pending assistant_triage_items row (0196 A4)."""
+    stamp = P7_T0.isoformat()
+    base = {
+        "id": str(uuid.uuid4()), "user_id": USER, "inbox_id": INBOX, "event_type": "bell.drawing_changed",
+        "project_id": PROJECT, "source_notification_id": None, "status": "pending", "skip_reason": None,
+        "run_id": None, "attempts": 0, "infra_retries": 0, "next_attempt_at": None, "cap_deferred_at": None,
+        "decision": None, "reason": None, "action": None, "severity_hint": None, "escalation_event_id": None,
+        "decided_at": None, "created_at": stamp, "enqueued_at": stamp, "updated_at": stamp,
+    }
+    base.update(over)
+    return base
+
+
+def triage_run_row(**over) -> dict:
+    """A claimed assistant_triage_runs row (0196 A3)."""
+    stamp = P7_T0.isoformat()
+    base = {
+        "id": str(uuid.uuid4()), "user_id": USER, "status": "claimed", "claimed_by": "w1", "claimed_at": stamp,
+        "lease_until": (P7_T0 + timedelta(seconds=420)).isoformat(), "item_count": 1, "model": None,
+        "reservation_id": None, "input_tokens": None, "cached_tokens": None, "output_tokens": None,
+        "cost_usd": None, "error_kind": None, "finished_at": None, "created_at": stamp,
+    }
+    base.update(over)
+    return base
+
+
+class FakeDB(_Phase7Mixin, _Phase8Mixin):
     def __init__(self, now: datetime = NOW, **tables):
         self.tables = {k: list(v) for k, v in tables.items()}
         self.now = now
@@ -1445,9 +2012,13 @@ class FakeDB(_Phase7Mixin):
         if (p.get("p_kind") not in RESERVATION_KINDS or amount is None or amount < 0
                 or ttl is None or int(ttl) < 30 or int(ttl) > 43200):
             raise CheckViolation("assistant_spend_reserve: bad arguments (check_violation)")
+        # 0196 B2: a triage hold is the company's, and the company id holds nothing else.
+        if (p.get("p_kind") == "triage") != (str(p.get("p_user_id")) == COMPANY_SPEND_ID):
+            raise CheckViolation("assistant_spend_reserve: bad arguments (check_violation)")
         with self._spend_lock:
             state = self._spend_state(p)
-            if _D(state["user_spent"]) + _D(state["user_held"]) + amount >= _D(state["user_cap"]):
+            if (p.get("p_kind") != "triage"
+                    and _D(state["user_spent"]) + _D(state["user_held"]) + amount >= _D(state["user_cap"])):
                 return {"ok": False, "reason": "user_cap", "id": None, "state": state}
             if _D(state["global_spent"]) + _D(state["global_held"]) + amount >= _D(state["global_cap"]):
                 return {"ok": False, "reason": "global_cap", "id": None, "state": state}
@@ -1479,6 +2050,7 @@ class FakeDB(_Phase7Mixin):
         "assistant_memories": "_update_memory",
         "assistant_memory_revisions": "_update_revision",
         "assistant_reports": "_update_report",
+        "assistant_settings": "_p8_update_settings",
         **P7_UPDATE_HOOKS,
     }
     PHASE4_RPCS = {
@@ -2413,6 +2985,9 @@ class FakeDB(_Phase7Mixin):
         if name in P7_RPCS:
             data = getattr(self, P7_RPCS[name])(dict(params))
             return SimpleNamespace(execute=lambda: SimpleNamespace(data=data))
+        if name in P8_RPCS:
+            data = getattr(self, P8_RPCS[name])(dict(params))
+            return SimpleNamespace(execute=lambda: SimpleNamespace(data=data))
         if name in self.PHASE3_RPCS:
             data = getattr(self, self.PHASE3_RPCS[name])(dict(params))
             return SimpleNamespace(execute=lambda: SimpleNamespace(data=data))
@@ -3157,10 +3732,10 @@ class FakeGraphEmail(_Scripted):
         self.session_checks = 0
 
     def send_mail(self, *, to, subject, body_html, cc=None, attachments=None, inline_images=None,
-                  project_id=None, rfq_id=None, sent_by=None, importance=None) -> dict:
+                  project_id=None, rfq_id=None, sent_by=None, importance=None, actor_kind=None) -> dict:
         call = {"to": list(to), "subject": subject, "body_html": body_html, "cc": cc, "attachments": attachments,
                 "inline_images": inline_images, "project_id": project_id, "rfq_id": rfq_id, "sent_by": sent_by,
-                "importance": importance}
+                "importance": importance, "actor_kind": actor_kind}
         self._step(call)
         call["log_id"] = str(uuid.uuid4())
         return {"id": call["log_id"], "status": "sent", "subject": subject, "to_addresses": list(to)}

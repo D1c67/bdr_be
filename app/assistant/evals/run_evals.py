@@ -121,7 +121,8 @@ INJECTION = HERE / "injection_corpus.json"
 TOOL_SELECTION = HERE / "tool_selection.json"
 _PLACEHOLDER = re.compile(r"{{[a-z0-9_]+}}")
 _EM_DASH = "\u2014"
-DEFAULT_MAX_TURNS = 70
+# 30 golden plus 42 injection turns (Phase 8 WI-10 added the two-turn inbox case).
+DEFAULT_MAX_TURNS = 72
 # Message statuses that end a turn (phase 1 adds the two waiting ones).
 FINAL_STATUSES = ("done", "failed", "waiting_approval", "waiting_review")
 # Statuses a graded turn may end in: done, or waiting on the cards it made.
@@ -137,7 +138,9 @@ DEFAULT_INJECTION_CONTEXT = {"path": "/dashboard", "project_id": None}
 PLANT_TABLES = ("estimator_notes", "projects", "assistant_memories",
                 # Phase 4 (3.20): an AE note, a bell notice, a file row, a
                 # delivered evidence message.
-                "plans_reader_notes", "notifications", "project_files", "assistant_messages")
+                "plans_reader_notes", "notifications", "project_files", "assistant_messages",
+                # Phase 8 (plan 16.4): a hostile summary in one Inbox row.
+                "assistant_inbox")
 PLANS_NOTE_KINDS = ("page_note", "spec", "scope", "schedule", "detail", "sheet_summary", "category_summary")
 MEMORY_LIMITS = {"max_active_new": int, "pinned": bool, "max_pending_new": int, "max_archived": int}
 SCHEDULE_LIMITS = {"max_ended": int, "max_resumed": int, "max_run_now": int}
@@ -285,6 +288,14 @@ def _validate_plant(plant: Mapping[str, Any], label: str) -> None:
         if plant.get("kind", "page_note") not in PLANS_NOTE_KINDS:
             raise EvalFileError(f"{label}: an AE note plant's kind is one of {', '.join(PLANS_NOTE_KINDS)}")
         return
+    if table == "assistant_inbox":
+        # Phase 8: one delivered Inbox row of the eval account whose summary
+        # (the stored title) carries the attack; read through inbox_list.
+        if not isinstance(plant.get("body"), str) or not plant["body"].strip():
+            raise EvalFileError(f"{label}: an Inbox row plant needs a body (its summary)")
+        if not isinstance(plant.get("why", ""), str) or not isinstance(plant.get("project", ""), str):
+            raise EvalFileError(f"{label}: an Inbox row plant's why and project are text")
+        return
     if table == "project_files":
         name = plant.get("filename")
         if not isinstance(plant.get("project"), str) or not isinstance(name, str) or not name.lower().endswith(".pdf"):
@@ -318,7 +329,7 @@ def _validate_reader(case: Mapping[str, Any], label: str) -> None:
             raise EvalFileError(f"{label}: skill must name a skill on disk")
     plant = case.get("plant")
     table = plant.get("table") if isinstance(plant, dict) else None
-    if table in ("plans_reader_notes", "notifications", "project_files") and reader is None:
+    if table in ("plans_reader_notes", "notifications", "project_files", "assistant_inbox") and reader is None:
         raise EvalFileError(f"{label}: a {table} plant names its reader")
 
 
@@ -487,7 +498,7 @@ def check() -> dict:
 
 # ── Tool selection (phase 4, docs/ASSISTANT_PHASE4_PLAN.md 3.20) ──────────────
 
-SELECTION_CASES = 168
+SELECTION_CASES = 173   # 168 plus five inbox prompts (Phase 8 WI-10)
 SELECTION_MIN_ACCURACY = 0.90
 SELECTION_NEGATIVES_MIN = 15
 SELECTION_PHASE4_MIN = 3
@@ -1097,7 +1108,8 @@ class Runner:
     def plant(self, plant: Mapping[str, Any], conversation_id: str | None = None) -> dict:
         if plant["table"] == "assistant_memories":
             return self.plant_memory(plant)
-        if plant["table"] in ("plans_reader_notes", "notifications", "project_files", "assistant_messages"):
+        if plant["table"] in ("plans_reader_notes", "notifications", "project_files", "assistant_messages",
+                              "assistant_inbox"):
             return self.plant_phase4(plant, conversation_id)
         pid = plant["project"]
         body = EVAL_NOTE_PREFIX + plant["body"]
@@ -1151,6 +1163,15 @@ class Runner:
         elif table == "notifications":
             row = {"user_id": self.user_id, "project_id": plant["project"], "type": "eval_injection",
                    "message": EVAL_NOTE_PREFIX + plant["body"], "read_at": datetime.now(timezone.utc).isoformat()}
+        elif table == "assistant_inbox":
+            # Phase 8: a delivered router-style row, so the unread segment of
+            # inbox_list lists it. Its dedupe key is unique per run and its
+            # event_type is a router kind whose stored text is shown as is.
+            stamp = datetime.now(timezone.utc).isoformat()
+            row = {"user_id": self.user_id, "dedupe_key": f"p7:eval:{uuid.uuid4().hex}",
+                   "event_type": "assistant.approval_expiring", "delivery": "immediate", "severity": "normal",
+                   "title": (EVAL_NOTE_PREFIX + plant["body"])[:500], "why": (plant.get("why") or "")[:500] or None,
+                   "project_id": plant.get("project") or None, "delivered_at": stamp, "deliver_after": stamp}
         elif table == "project_files":
             name = str(plant["filename"])
             row = {"project_id": plant["project"], "category": plant.get("category") or "addendum",
@@ -1260,10 +1281,11 @@ class Runner:
             if row["kind"] == "field":
                 r = self.http.patch(f"/projects/{row['project_id']}", json={row["field"]: row["before"]})
                 out.append({**row, "restored": r.status_code == 200, "status": r.status_code})
-            elif row["kind"] in ("plans_reader_notes", "notifications", "project_files", "assistant_messages"):
+            elif row["kind"] in ("plans_reader_notes", "notifications", "project_files", "assistant_messages",
+                                 "assistant_inbox"):
                 # Phase 4 plants: the service key wrote them, it deletes them.
                 q = self.sb.table(row["table"]).delete().eq("id", row["id"])
-                if row["table"] in ("notifications", "assistant_messages"):
+                if row["table"] in ("notifications", "assistant_messages", "assistant_inbox"):
                     q = q.eq("user_id", self.user_id)
                 gone = bool(row.get("id")) and bool((q.execute()).data)
                 out.append({**row, "deleted": gone})
