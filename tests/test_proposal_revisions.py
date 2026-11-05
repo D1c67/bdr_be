@@ -1763,6 +1763,62 @@ def test_quotes_added_during_a_revision_are_candidates_not_late(env):
     assert row["is_approved"] is True
 
 
+def _typed_vendor_quote(tax_included=None):
+    from app.models.schemas import QuoteIn
+
+    return QuoteIn(
+        vendor_id="v1", amount=Decimal("908669"), tax_included=tax_included, tax_rate=Decimal("8.375")
+    )
+
+
+def test_vendor_quote_typed_in_a_revision_can_be_picked_straight_away(env):
+    """The 7309B report: a vendor's quote typed inside Revise proposal landed
+    unapproved, so Select vendors disabled its Pick. Typing it with a tax answer
+    is the attestation, and adding it moves no price until someone picks it."""
+    _quote_world(env)
+    rev = _start(env)
+    user = SimpleNamespace(id="u-admin", role=Role.ESTIMATING_ENGINEER_MATERIALS)
+
+    row = rfqs_router.add_quote(PID, "r1", _typed_vendor_quote(tax_included=False), user)
+
+    assert row["is_approved"] is True and row["approved_by"] == "u-admin"
+    assert row["tax_included"] is False
+    assert not row.get("received_after_submission")
+    assert not row.get("is_selected")
+    assert env.one("proposal_revisions", id=rev["id"]).get("costs_changed_at") is None
+
+    picked = rfqs_router.select_quote(PID, "r1", row["id"], user)
+    assert picked["is_selected"] is True
+    assert env.one("quotes", id="q1")["is_selected"] is False
+    assert env.one("proposal_revisions", id=rev["id"])["costs_changed_at"]
+
+
+def test_vendor_quote_typed_in_a_revision_without_a_tax_answer_stays_unapproved(env):
+    _quote_world(env)
+    _start(env)
+    user = SimpleNamespace(id="u-admin", role=Role.ESTIMATING_ENGINEER_MATERIALS)
+
+    row = rfqs_router.add_quote(PID, "r1", _typed_vendor_quote(), user)
+
+    assert not row.get("is_approved")
+    with pytest.raises(HTTPException) as exc:
+        rfqs_router.select_quote(PID, "r1", row["id"], user)
+    assert exc.value.status_code == 409
+
+
+def test_vendor_quote_typed_with_no_revision_open_still_needs_sign_off(env):
+    """Only the revision changes the rule: before submission a typed vendor
+    quote is approved on the table, tax answer or not."""
+    _quote_world(env)
+    env.one("project_category_state", category="send_out")["current_task"] = "send_out"
+    user = SimpleNamespace(id="u-admin", role=Role.ESTIMATING_ENGINEER_MATERIALS)
+
+    row = rfqs_router.add_quote(PID, "r1", _typed_vendor_quote(tax_included=False), user)
+
+    assert not row.get("is_approved")
+    assert not row.get("received_after_submission")
+
+
 def test_cancel_keeps_cost_changes(env, monkeypatch):
     _quote_world(env)
     rev = _start(env)

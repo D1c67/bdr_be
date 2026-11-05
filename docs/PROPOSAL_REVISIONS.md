@@ -249,7 +249,7 @@ set against the app's routes.
 | Scope lines save / approve | 409 (any sent row) | Open (only a send in flight refuses). A save on a draft a sent document was built from creates a NEW draft |
 | Quote selection / approval / tax / override / delete / quotes-confirmed | 0138 late-quote lock | Allowed; records a cost change on the revision (no Verify bounce) |
 | Labor, markup, general material | Bounce to Verify | Allowed; records a cost change on the revision (no Verify bounce) |
-| New quotes | Tagged `received_after_submission` (record only) | Ordinary candidates (not tagged late); a previously late quote that becomes the winner loses the tag |
+| New quotes | Tagged `received_after_submission` (record only) | Ordinary candidates (not tagged late); a previously late quote that becomes the winner loses the tag. A vendor quote typed in the modal with its tax answer lands approved and can be picked at once; emailed quotes still need approval on the Quotes step |
 | GC amounts, GC in the revision (checked, not sent) | 409 (sent) | Writer edits directly, no 0118 approval; refused while a cost change waits on approval |
 | GC amounts, GC unchecked or already sent in this revision | 409 | 409 |
 | GC amounts, GC added (no sent row) | Executive approval (0118) for non-executives | Writer edits directly; refused while a cost change waits on approval |

@@ -57,7 +57,14 @@ from app.models.schemas import (
     TaxIn,
 )
 from app.routers.pricing import tax_info, taxed_amount
-from app.services import rfq_inbox, rfq_nudges, rfq_sending, vendor_selection, workflow
+from app.services import (
+    proposal_revisions,
+    rfq_inbox,
+    rfq_nudges,
+    rfq_sending,
+    vendor_selection,
+    workflow,
+)
 from app.services.notifications import audit, dismiss_notifications, notify_role
 from app.services.sanitize import sanitize_rich_text
 
@@ -378,7 +385,8 @@ def add_reply_manual_quote(
 
     The quote itself is a candidate like any other vendor quote: unapproved
     until someone signs it off on the table (an optional tax answer given here
-    is recorded on the row, saving that later trip).
+    is recorded on the row, saving that later trip). Inside an open revision a
+    tax answer also approves it (see _attested_in_revision).
     """
     sb = get_supabase()
     row = _message_in_project(sb, project_id, message_id)
@@ -416,15 +424,17 @@ def add_reply_manual_quote(
     if body.tax_included is not None:
         payload["tax_included"] = body.tax_included
         payload["tax_rate"] = str(body.tax_rate)
-    if window:
+    approved = window or _attested_in_revision(sb, project_id, body.tax_included)
+    if approved:
         payload.update(
             {
-                "received_after_submission": True,
                 "is_approved": True,
                 "approved_by": user.id,
                 "approved_at": "now()",
             }
         )
+    if window:
+        payload["received_after_submission"] = True
     quote = sb.table("quotes").insert(payload).execute().data[0]
 
     sb.table("rfq_messages").update(
@@ -447,6 +457,7 @@ def add_reply_manual_quote(
             "amount": str(body.amount),
             "tax_included": body.tax_included,
             "quote_file_id": body.quote_file_id,
+            "approved_on_entry": approved,
         },
     )
     if window:
@@ -586,6 +597,15 @@ def _post_submission(sb, project_id: str) -> bool:
     return workflow.in_post_submission_window(project_id, sb)
 
 
+def _attested_in_revision(sb, project_id: str, tax_included: bool | None) -> bool:
+    """A vendor's figure typed inside an open revision lands approved, like one
+    typed after submission: the person typing it attests to the amount and the
+    tax answer, which is all an approval says. Without a tax answer there is
+    nothing to attest to, so the row waits for sign-off on the table. Quotes
+    that arrive by email are never typed, so they still need that sign-off."""
+    return tax_included is not None and proposal_revisions.revision_open(project_id, sb)
+
+
 def _refuse_if_sent_quote(window: bool, quote: dict) -> None:
     """409 when `quote` is the category's selected quote in the window."""
     if window and quote.get("is_selected"):
@@ -693,9 +713,10 @@ def add_quote(project_id: str, rfq_id: str, body: QuoteIn, user: CurrentUser = D
     """Type in a quote that a VENDOR gave (origin stays 'vendor' - the number
     came from them, it just didn't arrive through the mailbox). It lands
     unapproved with its tax question unanswered, exactly like an extracted one,
-    so Receive Quotes still has to sign it off before it can win. An optional
-    quote_file_id binds an already-uploaded quote document to the row; the file
-    is reference only, never extracted."""
+    so Receive Quotes still has to sign it off before it can win. Inside an open
+    revision a tax answer also approves it (see _attested_in_revision). An
+    optional quote_file_id binds an already-uploaded quote document to the row;
+    the file is reference only, never extracted."""
     sb = get_supabase()
     rfq = _rfq_in_project(sb, project_id, rfq_id)
     # After submission (0138) the tax answer is required, and the late quote
@@ -715,15 +736,17 @@ def add_quote(project_id: str, rfq_id: str, body: QuoteIn, user: CurrentUser = D
         payload.pop("tax_rate", None)
     payload["rfq_id"] = rfq_id
     payload["source"] = "manual"
-    if window:
+    approved = window or _attested_in_revision(sb, project_id, body.tax_included)
+    if approved:
         payload.update(
             {
-                "received_after_submission": True,
                 "is_approved": True,
                 "approved_by": user.id,
                 "approved_at": "now()",
             }
         )
+    if window:
+        payload["received_after_submission"] = True
     row = sb.table("quotes").insert(payload).execute().data[0]
     sb.table("rfqs").update({"status": "quotes_in"}).eq("id", rfq_id).execute()
     if window:
@@ -734,7 +757,12 @@ def add_quote(project_id: str, rfq_id: str, body: QuoteIn, user: CurrentUser = D
             "quote.add",
             "quote",
             row["id"],
-            {"amount": str(body.amount), "quote_file_id": body.quote_file_id},
+            {
+                "amount": str(body.amount),
+                "quote_file_id": body.quote_file_id,
+                "tax_included": body.tax_included,
+                "approved_on_entry": approved,
+            },
         )
     return row
 

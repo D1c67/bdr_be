@@ -1229,6 +1229,7 @@ class QuoteIn(BaseModel):
     quote_file_id: str | None = None
     # Optional sales-tax answer recorded with the row. REQUIRED once the bid
     # has been submitted (a late quote, 0138): the router 422s without it.
+    # Inside an open revision, giving it also approves the row.
     tax_included: bool | None = None
     tax_rate: Decimal = Field(Decimal("8.375"), ge=0, le=Decimal("100"), decimal_places=3)
 

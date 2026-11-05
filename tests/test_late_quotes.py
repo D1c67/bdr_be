@@ -423,6 +423,24 @@ def test_late_reply_quote_requires_tax_then_tags(env):
     assert {n[1] for n in env["notes"]} == {"late_quote.received"}
 
 
+@pytest.mark.parametrize(
+    "tax_included, approved", [(False, True), (True, True), (None, False)]
+)
+def test_reply_quote_typed_in_a_revision_is_approved_by_its_tax_answer(
+    env, monkeypatch, tax_included, approved
+):
+    """Same rule as the add-quote form: inside an open revision the tax answer
+    is the attestation. It is a candidate for the revised bid, not a late quote."""
+    monkeypatch.setattr("app.services.proposal_revisions.revision_open", lambda *_a, **_k: True)
+    env["db"] = _reply_db("submitted")
+    row = rfqs_router.add_reply_manual_quote(
+        PID, "m1", ReplyManualQuoteIn(amount=Decimal("800"), tax_included=tax_included), _user()
+    )
+    assert bool(row.get("is_approved")) is approved
+    assert not row.get("received_after_submission")
+    assert env["notes"] == []
+
+
 def test_late_quotes_never_count_as_lowest(env):
     env["db"].tables["quotes"].append(_quote("q-late", "r-fix", "10", late=True))
     out = rfqs_router.list_quotes(PID, "r-fix", _user())
