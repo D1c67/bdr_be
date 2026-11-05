@@ -266,6 +266,7 @@ def env(monkeypatch):
             self.db = db
             monkeypatch.setattr(psend, "get_supabase", lambda: db)
             monkeypatch.setattr(workflow, "get_supabase", lambda: db)
+            monkeypatch.setattr(psend, "auto_sent_gc_ids_required", lambda pid: set())
             monkeypatch.setattr(psend, "_pricing_basis_for", lambda pid: BASIS)
             monkeypatch.setattr(
                 psend, "amounts_overview", lambda pid: {"gcs": [], "basis": BASIS}

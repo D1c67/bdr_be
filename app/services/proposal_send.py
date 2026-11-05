@@ -41,6 +41,7 @@ from app.services.proposal_docx import (
     DOCX_MIME,
     ProposalContext,
     ProposalRenderError,
+    REVISED_DATE_MARKER,
     build_filename,
     load_template_bytes,
     render_proposal,
@@ -298,17 +299,24 @@ def revised_cover_subject(project: dict) -> str:
     return f"[G3 Electrical] Revised Proposal: {project['name']} ({project['number']})"
 
 
-def build_revised_cover_email(project: dict, revision_number: int) -> tuple[str, str]:
+def build_revised_cover_email(
+    project: dict, revision_number: int | None = None
+) -> tuple[str, str]:
     """Default subject + plain-text body for a revised proposal
     (docs/PROPOSAL_REVISIONS.md). Same tone and signature rule as
-    build_cover_email; the body says this is Revision N and that it
-    supersedes the proposal sent earlier. The sender may edit both."""
+    build_cover_email; the body says this is a revision and that it supersedes
+    the proposal sent earlier. Revise proposal names Revision N; a Send Out to a
+    GC that already got an auto send has no number. The sender may edit both."""
     subject = revised_cover_subject(project)
+    attached = (
+        f"Please find Revision {revision_number} of our proposal attached."
+        if revision_number
+        else "Please find our revised proposal attached."
+    )
     body = (
         f"Dear {GC_NAME_TOKEN},\n\n"
         f"G3 Electrical is pleased to submit our revised proposal for "
-        f"{project['name']} ({project['number']}). Please find Revision "
-        f"{revision_number} of our proposal attached. It supersedes the proposal we "
+        f"{project['name']} ({project['number']}). {attached} It supersedes the proposal we "
         f"sent earlier for this project.\n\n"
         f"We appreciate the opportunity to bid and look forward to working with you.\n\n"
         f"Thank you,"
@@ -327,6 +335,36 @@ def auto_sent_gc_ids(project_id: str) -> set[str]:
     except Exception:  # noqa: BLE001 - a subject choice must never block a send
         logger.exception("auto sent GC lookup failed for %s", project_id)
         return set()
+
+
+def auto_sent_gc_ids_required(project_id: str) -> set[str]:
+    """auto_sent_gc_ids for the paths that decide whether a document must say
+    it is revised. Unlike the subject lookup above this one fails closed: a read
+    hiccup must not send a GC an unmarked second proposal."""
+    from app.services import auto_send
+
+    try:
+        return {str(g) for g in auto_send.auto_sent_gc_ids(project_id)}
+    except Exception as exc:  # noqa: BLE001 - reported to the user as a retry
+        logger.exception("auto sent GC lookup failed for %s", project_id)
+        raise ProposalSendError(
+            "Could not check which GCs already received a proposal. Nothing was changed. Retry."
+        ) from exc
+
+
+UNMARKED_DOCUMENT_MESSAGE = (
+    "This GC already received a proposal, so this one must be marked as revised. "
+    "Regenerate its document."
+)
+
+
+def holds_revised_document(row: dict, file_row: dict, project: dict) -> bool:
+    """The document is the unnumbered revised form (a Send Out to a GC that
+    already got an auto send). The filename is that record: it is checked
+    against the row's GC and the markers are proven in the bytes."""
+    return file_row.get("filename") == build_filename(
+        project["number"], row["gc_name"], revised=True
+    )
 
 
 def cover_subject_for(project: dict, gc_id: str | None, auto_sent: set[str]) -> str:
@@ -1716,6 +1754,9 @@ def generate_documents(
             status_code=400,
         )
 
+    # A GC that already got an auto send is getting its second proposal, so its
+    # document says so. A GC new to this bid gets the normal document.
+    revised_ids = auto_sent_gc_ids_required(project_id) & {gc["id"] for gc in targets}
     amounts = proposal_amounts(_verify_originals(project_id), verification)
     # The generator caption rides on the live section decomposition; the gear
     # row itself must also be rendered (build_base_context enforces that).
@@ -1730,7 +1771,13 @@ def generate_documents(
 
     # Render + validate EVERYTHING before touching storage or the DB.
     rendered = render_gc_documents(
-        project, targets, base_ctx, amounts, includes_generator, all_names
+        project,
+        targets,
+        base_ctx,
+        amounts,
+        includes_generator,
+        all_names,
+        revised_gc_ids=revised_ids,
     )
 
     created: list[dict] = []
@@ -1855,12 +1902,14 @@ def render_gc_documents(
     includes_generator: bool,
     all_names: list[str],
     revision_number: int | None = None,
+    revised_gc_ids: set[str] | frozenset[str] = frozenset(),
 ) -> list[tuple[dict, str, bytes, dict[str, Decimal | None]]]:
     """Render and validate one document per target GC, nothing stored yet:
     (gc, filename, docx bytes, the figures stamped into it). Shared by Send
     Out generation and revised-proposal generation (`revision_number` set:
     the document is retitled, carries "(Revision N)" on its date line and
-    "Rev N" in its filename, and validation demands both markers)."""
+    "Rev N" in its filename, and validation demands both markers). A GC in
+    `revised_gc_ids` gets the same treatment with "(Revised)" and "Revised"."""
     template = load_template_bytes()
     rendered: list[tuple[dict, str, bytes, dict[str, Decimal | None]]] = []
     for gc in targets:
@@ -1879,10 +1928,15 @@ def render_gc_documents(
             "includes_generator": includes_generator and gc_amounts["gear"] is not None,
         }
         revision_kwargs: dict = {}
+        revised = not revision_number and gc["id"] in revised_gc_ids
         if revision_number:
             overrides["revision_number"] = revision_number
             overrides["date_str"] = f"{base_ctx.date_str} ({revision_label(revision_number)})"
             revision_kwargs["revision_number"] = revision_number
+        elif revised:
+            overrides["revised"] = True
+            overrides["date_str"] = f"{base_ctx.date_str} {REVISED_DATE_MARKER}"
+            revision_kwargs["revised"] = True
         ctx = replace(base_ctx, **overrides)
         try:
             docx = render_proposal(template, ctx)
@@ -1900,10 +1954,8 @@ def render_gc_documents(
                 ),
                 **revision_kwargs,
             )
-            filename = (
-                build_filename(project["number"], gc["name"], revision_number)
-                if revision_number
-                else build_filename(project["number"], gc["name"])
+            filename = build_filename(
+                project["number"], gc["name"], revision_number, revised=revised
             )
         except ProposalRenderError as exc:
             raise ProposalSendError(f"Generation failed for {gc['name']}: {exc}", 422) from exc
@@ -2059,6 +2111,7 @@ def assert_send_isolation(
     expected_amounts: dict[str, Decimal] | None = None,
     includes_generator: bool = False,
     revision_number: int | None = None,
+    revised: bool = False,
 ) -> None:
     """Defense-in-depth before the ONE network call that can leak a document.
     Pure: raises ProposalSendError with the reason; callers pass live rows
@@ -2069,7 +2122,10 @@ def assert_send_isolation(
 
     A revised proposal (docs/PROPOSAL_REVISIONS.md) passes its claimed
     proposal_revision_sends row (same columns) and `revision_number`: the
-    filename must then carry "Rev N" and the bytes the revision markers."""
+    filename must then carry "Rev N" and the bytes the revision markers.
+    `revised` is the Send Out form for a GC that already got an auto send: the
+    filename must carry "Revised" and the bytes the revised markers, so a
+    document generated before that auto send cannot go out unmarked."""
     gc_id = row["gc_id"]
     if not live_gc or live_gc.get("id") != gc_id:
         raise ProposalSendError("GC is no longer on this project — regenerate.")
@@ -2095,12 +2151,14 @@ def assert_send_isolation(
             "ISOLATION: recipient list does not match the claimed send row — retry."
         )
 
-    expected = (
-        build_filename(project["number"], row["gc_name"], revision_number)
-        if revision_number
-        else build_filename(project["number"], row["gc_name"])
+    expected = build_filename(
+        project["number"], row["gc_name"], revision_number, revised=revised
     )
     if file_row.get("filename") != expected:
+        if revised and file_row.get("filename") == build_filename(
+            project["number"], row["gc_name"]
+        ):
+            raise ProposalSendError(UNMARKED_DOCUMENT_MESSAGE)
         raise ProposalSendError("ISOLATION: filename does not match this GC — regenerate.")
 
     if draft is None or draft.get("id") != row.get("draft_id"):
@@ -2134,6 +2192,7 @@ def assert_send_isolation(
         amounts=stamp_figures(stamped) if stamped is not None else (),
         **section_validation_kwargs(stamped, includes_generator),
         **({"revision_number": revision_number} if revision_number else {}),
+        **({"revised": True} if revised else {}),
     )
 
 
@@ -2267,9 +2326,10 @@ def send_proposals(
 
     _, default_body = build_cover_email(project)
     body_template = email_body or default_body
-    # Per-GC subject: a GC that already got an auto send gets the Revised
-    # Proposal subject, and its reclaim matches on that same subject.
-    auto_sent = auto_sent_gc_ids(project_id)
+    # Per-GC subject, cover note and document: a GC that already got an auto
+    # send gets the revised form, and its reclaim matches on that same subject.
+    auto_sent = auto_sent_gc_ids_required(project_id)
+    revised_body = email_body or build_revised_cover_email(project)[1]
     # Validated/downloaded once, before any row is claimed: a bad pick fails
     # the whole request cleanly instead of stranding rows at 'sending'.
     extra_attachments = _prepare_extra_attachments(sb, project_id, extra_file_ids)
@@ -2408,6 +2468,7 @@ def send_proposals(
                     else None
                 ),
                 includes_generator=includes_generator,
+                revised=row["gc_id"] in auto_sent,
             )
 
             # Convert the EXACT validated docx bytes to an immutable PDF so the
@@ -2443,7 +2504,9 @@ def send_proposals(
             )
             pdf_name = office_preview.pdf_filename(file_row["filename"])
 
-            body = body_template.replace(GC_NAME_TOKEN, row["gc_name"])
+            body = (revised_body if row["gc_id"] in auto_sent else body_template).replace(
+                GC_NAME_TOKEN, row["gc_name"]
+            )
             # User-chosen same-GC CCs first, then the standing internal desk
             # (dropped when it's already addressed either way).
             cc_addrs = [*gc_cc_addrs, *cc_recipients([*recipients, *gc_cc_addrs])]
@@ -2585,12 +2648,10 @@ def assert_resend_isolation(
 
     # A GC holding a revised proposal (revision_number > 0) is re-sent that
     # revised document: its filename carries "Rev N" and its bytes the markers.
+    # The unnumbered revised form works the same way with "Revised".
     revision = row.get("revision_number") or None
-    expected = (
-        build_filename(project["number"], row["gc_name"], revision)
-        if revision
-        else build_filename(project["number"], row["gc_name"])
-    )
+    revised = not revision and holds_revised_document(row, file_row, project)
+    expected = build_filename(project["number"], row["gc_name"], revision, revised=revised)
     if file_row.get("filename") != expected:
         raise ProposalSendError("ISOLATION: filename does not match this GC.")
 
@@ -2603,6 +2664,7 @@ def assert_resend_isolation(
         amounts=stamp_figures(stamped) if stamped is not None else (),
         **resend_section_kwargs(row, stamped, includes_generator),
         **({"revision_number": revision} if revision else {}),
+        **({"revised": True} if revised else {}),
     )
     if row.get("origin") == "auto_send" and stamped is not None:
         from app.services import auto_send
@@ -2824,6 +2886,12 @@ def resend_proposals(
                     "The document that was sent is no longer on file — it cannot be re-sent."
                 )
             docx_bytes = storage.download_file(file_row["storage_path"])
+            # The email matches the document being re-attached, whatever the
+            # auto sent lookup answered.
+            if holds_revised_document(row, file_row, project):
+                subject = row.get("subject") or revised_cover_subject(project)
+                if email_body is None:
+                    row_template = build_revised_cover_email(project)[1]
             draft = drafts.get(row.get("draft_id")) or {}
             if row.get("origin") == "auto_send" and row.get("auto_send_run_id"):
                 if row["auto_send_run_id"] not in run_lines:
@@ -2978,7 +3046,7 @@ def mark_submitted(project_id: str, user_id: str, proposal_ids: list[str]) -> di
     that we never emailed it."""
     sb = get_supabase()
     project = (
-        sb.table("projects").select("id, current_stage").eq("id", project_id)
+        sb.table("projects").select("id, number, current_stage").eq("id", project_id)
         .single().execute()
     ).data
     if not project:
@@ -2997,6 +3065,7 @@ def mark_submitted(project_id: str, user_id: str, proposal_ids: list[str]) -> di
             status_code=404,
         )
 
+    auto_sent = auto_sent_gc_ids_required(project_id)
     drafts = {
         d["id"]: d
         for d in (
@@ -3034,6 +3103,15 @@ def mark_submitted(project_id: str, user_id: str, proposal_ids: list[str]) -> di
             continue
         try:
             live_gc = live_gcs.get(row["gc_id"])
+            # The document uploaded to the portal is the one on file, so a GC
+            # that already got an auto send needs the marked form here too.
+            if row["gc_id"] in auto_sent and row.get("file_id"):
+                file_row = (
+                    sb.table("project_files").select("filename").eq("id", row["file_id"])
+                    .single().execute()
+                ).data
+                if not holds_revised_document(row, file_row or {}, project):
+                    raise ProposalSendError(UNMARKED_DOCUMENT_MESSAGE)
             assert_mark_ready(
                 row=row,
                 draft=drafts.get(row.get("draft_id")),

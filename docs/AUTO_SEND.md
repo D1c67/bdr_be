@@ -49,7 +49,9 @@ All times below are America/Los_Angeles. No em dashes in any user-facing text.
   every internal role (accountant read only, estimator never).
 - "Accept auto-send as submitted" (Executive, Estimating Admin, IT Admin) records the auto sent
   numbers as the bid.
-- A later normal Send Out email to a GC that already got an auto send says "Revised Proposal".
+- A later normal Send Out proposal to a GC that already got an auto send is marked revised: email
+  subject, cover note, document title and date line, and filename (section 6.4). A GC that never
+  got one gets a normal proposal.
 - IT Admin Settings has the on/off switch (DB row, default OFF).
 
 ## 2. Safety rails
@@ -325,11 +327,18 @@ and the parser's `REASON_MESSAGES`. Examples:
 3. `routers/projects.py`: `auto_send_pending: bool = False` on `ProjectOut` and
    `BidsTodayProjectOut`, filled from `auto_send.pending_project_ids(ids)` in `list_projects`,
    `bids_today` and `get_project` (best effort: an error there must not 500 the list).
-4. `proposal_send.py`: when a GC is in `auto_sent_gc_ids(project_id)`, the normal Send Out email
-   subject for that GC is `[G3 Electrical] Revised Proposal: {name} ({number})`. The
+4. `proposal_send.py`: when a GC is in `auto_sent_gc_ids(project_id)`, its normal Send Out proposal
+   is marked revised. The email subject is `[G3 Electrical] Revised Proposal: {name} ({number})`,
+   the default cover note says it supersedes the earlier proposal, the document is titled "Revised
+   Bid Proposal" with `MM/DD/YYYY (Revised)` on its date line, and the filename ends in `Revised`.
+   There is no number, because revision numbers belong to Revise proposal, whose count is unchanged.
+   Per GC: others in the same send get the normal proposal. A document generated before the auto
+   send fails closed at send and at Mark as submitted (regenerate). An edited cover note goes out
+   as written. Only `auto_send_gcs.status = 'sent'` counts, so an outcome-unknown auto send does
+   not. Generate, send and mark fail closed if the lookup fails. The
    `_reclaim_stuck_sending` / `_reclaim_stuck_event` match accepts either Send Out subject
    (`send_out_subjects`: normal or revised), since the auto sent set a crashed request saw can
-   differ from the reclaiming request's. Filenames unchanged. The auto send subject
+   differ from the reclaiming request's. The auto send subject
    `[G3 Electrical] Proposal: {name} ({number})` differs from both so crash reclaim can never
    mistake an auto email for a Send Out email.
    Re-send of an accepted auto send row (`origin='auto_send'`) validates against the run's frozen

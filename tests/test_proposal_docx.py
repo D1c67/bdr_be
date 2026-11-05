@@ -675,3 +675,42 @@ def test_pdf_scope_exemption_does_not_hide_other_gc():
             PDF_OK + " " + lines[0], gc_name=CTX.gc_name, scope_lines=lines,
             other_gc_names=("Turner Construction",), removed_sections=("low_voltage",),
         )
+
+
+# ── revised without a number (Send Out to a GC that already got an auto send) ──
+
+
+def test_build_filename_revised():
+    assert (
+        pdx.build_filename("26.4.7080", "A/B Co", revised=True)
+        == "Proposal 7080 - A-B Co Revised.docx"
+    )
+    # A numbered revision keeps its own form.
+    assert pdx.build_filename("26.4.7080", "A/B Co", 2) == "Proposal 7080 - A-B Co Rev 2.docx"
+
+
+@needs_template
+def test_render_revised_marks_title_and_date_without_a_number():
+    template = pdx.load_template_bytes()
+    ctx = replace(CTX, revised=True, date_str=f"{CTX.date_str} {pdx.REVISED_DATE_MARKER}")
+    out = pdx.render_proposal(template, ctx)
+    text = pdx.extract_document_text(out)
+    assert pdx.REVISED_TITLE in text
+    assert f"{CTX.date_str} (Revised)" in text
+    assert "Revision" not in text
+    pdx.validate_output(out, gc_name=CTX.gc_name, scope_lines=CTX.scope_lines, revised=True)
+
+
+@needs_template
+def test_validate_output_demands_the_revised_markers():
+    template = pdx.load_template_bytes()
+    normal = pdx.render_proposal(template, CTX)
+    assert pdx.REVISED_TITLE not in pdx.extract_document_text(normal)
+    with pytest.raises(ProposalRenderError, match="Revised marker"):
+        pdx.validate_output(normal, gc_name=CTX.gc_name, scope_lines=CTX.scope_lines, revised=True)
+    # The title alone is not enough: the date line must say it too.
+    title_only = pdx.render_proposal(template, replace(CTX, revised=True))
+    with pytest.raises(ProposalRenderError, match="Revised marker"):
+        pdx.validate_output(
+            title_only, gc_name=CTX.gc_name, scope_lines=CTX.scope_lines, revised=True
+        )

@@ -723,6 +723,39 @@ def test_send_uses_the_revised_subject_only_for_auto_sent_gcs(monkeypatch, fake_
     }
 
 
+def test_send_uses_the_revised_cover_note_only_for_auto_sent_gcs(monkeypatch, fake_auto_send):
+    _, sent = _send_env(monkeypatch, fake_auto_send, "generated")
+    psend.send_proposals(PID, "u1", ["ps-A", "ps-B"])
+    bodies = {tuple(m["to"]): m["body_html"] for m in sent}
+    assert "supersedes" in bodies[("gA@gc.com",)]
+    assert "Dear Alpha," in bodies[("gA@gc.com",)]
+    assert "revised" not in bodies[("gB@gc.com",)].lower()
+
+
+def test_an_edited_cover_note_goes_out_as_written_to_every_gc(monkeypatch, fake_auto_send):
+    _, sent = _send_env(monkeypatch, fake_auto_send, "generated")
+    psend.send_proposals(PID, "u1", ["ps-A", "ps-B"], email_body="Hello <GC Name>.")
+    assert {tuple(m["to"]): m["body_html"] for m in sent} == {
+        ("gA@gc.com",): "Hello Alpha.",
+        ("gB@gc.com",): "Hello Bravo.",
+    }
+    assert {m["subject"] for m in sent} == {REVISED, NORMAL}
+
+
+def test_send_refuses_when_the_auto_sent_lookup_fails(monkeypatch, fake_auto_send):
+    """Without the answer the document cannot be checked, so nothing is sent."""
+    db, sent = _send_env(monkeypatch, fake_auto_send, "generated")
+
+    def _boom(pid, sb=None):
+        raise RuntimeError("connection reset")
+
+    fake_auto_send(auto_sent_gc_ids=_boom)
+    with pytest.raises(psend.ProposalSendError, match="already received a proposal"):
+        psend.send_proposals(PID, "u1", ["ps-A", "ps-B"])
+    assert sent == []
+    assert {r["status"] for r in db.tables["proposal_sends"]} == {"generated"}
+
+
 def test_send_reclaim_accepts_either_send_out_subject(monkeypatch, fake_auto_send):
     """Finding 25: the reclaim proves a crashed send by either Send Out
     subject, never by the one this request's auto sent set happens to pick."""
@@ -817,6 +850,8 @@ def test_email_preview_shows_the_revised_subject(monkeypatch, fake_auto_send):
     assert out["subject"] == NORMAL
     assert out["revised_subject"] == REVISED
     assert out["revised_gc_ids"] == ["gA", "gB"]
+    assert "supersedes" in out["revised_body"] and "Revision" not in out["revised_body"]
+    assert psend.GC_NAME_TOKEN in out["revised_body"]
 
 
 # ── 6.5 notification meta, deep link, subject ────────────────────────────────

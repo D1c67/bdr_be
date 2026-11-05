@@ -601,11 +601,12 @@ def email_preview(project_id: str, user: CurrentUser = Depends(get_current_user)
     subject, body = proposal_send.build_cover_email(project)
     return {
         "subject": subject,
-        # GCs that already got an auto send are emailed under the revised
-        # subject instead (docs/AUTO_SEND.md 6.4), exactly as send picks it.
+        # GCs that already got an auto send are emailed the revised subject and
+        # cover note instead (docs/AUTO_SEND.md 6.4), exactly as send picks them.
         "revised_subject": proposal_send.revised_cover_subject(project),
         "revised_gc_ids": sorted(proposal_send.auto_sent_gc_ids(project_id)),
         "body": body,
+        "revised_body": proposal_send.build_revised_cover_email(project)[1],
         "gc_name_token": proposal_send.GC_NAME_TOKEN,
         # Per-GC To lines are not known until send time; this is the standing
         # internal CC so the confirm dialog can show who else is copied.

@@ -78,6 +78,10 @@ class ProposalContext:
     # Set on a revised proposal (docs/PROPOSAL_REVISIONS.md): the title reads
     # REVISED_TITLE and the date line carries "(Revision N)".
     revision_number: int | None = None
+    # A Send Out proposal to a GC that already holds an auto send: the same
+    # title, with "(Revised)" on the date line and no number, because the
+    # numbers belong to the Revise proposal flow.
+    revised: bool = False
 
 
 # Section breakout rows in the pricing box, keyed by the backend section keys.
@@ -162,11 +166,16 @@ def sanitize_component(name: str) -> str:
 
 
 def build_filename(
-    project_number: str, gc_name: str, revision_number: int | None = None
+    project_number: str,
+    gc_name: str,
+    revision_number: int | None = None,
+    *,
+    revised: bool = False,
 ) -> str:
-    """A revised proposal carries "Rev N" so the GC (and the Files list)
-    can tell it from the original it supersedes."""
-    rev = f" Rev {revision_number}" if revision_number else ""
+    """A revised proposal carries "Rev N" (Revise proposal) or "Revised" (Send
+    Out to a GC that already got an auto send), so the GC and the Files list can
+    tell it from the proposal it supersedes."""
+    rev = f" Rev {revision_number}" if revision_number else " Revised" if revised else ""
     return f"Proposal {last4(project_number)} - {sanitize_component(gc_name)}{rev}.docx"
 
 
@@ -174,13 +183,14 @@ def build_filename(
 
 ORIGINAL_TITLE = "Bid Proposal"
 REVISED_TITLE = "Revised Bid Proposal"
+REVISED_DATE_MARKER = "(Revised)"
 
 
 def revision_label(revision_number: int) -> str:
     return f"Revision {revision_number}"
 
 
-def mark_revision(doc, revision_number: int) -> None:
+def mark_revision(doc, revision_number: int | None = None) -> None:
     """Retitle the document "Revised Bid Proposal". The title is its own
     paragraph ("Bid Proposal"); only its first run's text changes, so the
     title keeps the template's formatting. The "(Revision N)" marker rides on
@@ -437,7 +447,7 @@ def remove_absent_section_rows(doc, ctx: ProposalContext) -> None:
 def render_proposal(template_bytes: bytes, ctx: ProposalContext) -> bytes:
     doc = Document(io.BytesIO(template_bytes))
     remove_absent_section_rows(doc, ctx)
-    if ctx.revision_number:
+    if ctx.revision_number or ctx.revised:
         mark_revision(doc, ctx.revision_number)
     # placeholder_map excludes tokens for absent sections (their rows were
     # just removed), so this missing check is the DYNAMIC expected set.
@@ -499,6 +509,7 @@ def validate_output(
     includes_generator: bool = False,
     removed_sections: tuple[str, ...] | list[str] = (),
     revision_number: int | None = None,
+    revised: bool = False,
 ) -> None:
     """Prove the rendered bytes are complete and belong to exactly one GC.
 
@@ -586,6 +597,13 @@ def validate_output(
             if marker not in body:
                 raise ProposalRenderError(
                     f"Revision marker {marker!r} is missing from the document: "
+                    "stale or wrong render."
+                )
+    if revised:
+        for marker in (REVISED_TITLE, REVISED_DATE_MARKER):
+            if marker not in body:
+                raise ProposalRenderError(
+                    f"Revised marker {marker!r} is missing from the document: "
                     "stale or wrong render."
                 )
 

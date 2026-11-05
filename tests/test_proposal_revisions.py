@@ -460,6 +460,7 @@ class Env:
             "low_voltage_cost": None, "labor_cost": Decimal("30000"),
         })
         mp.setattr(psend, "auto_sent_gc_ids", lambda pid: set())
+        mp.setattr(psend, "auto_sent_gc_ids_required", lambda pid: set())
         # Storage, PDF, Graph.
         mp.setattr(storage, "build_object_path", lambda pid, cat, fn: f"{pid}/{cat}/{fn}")
         mp.setattr(storage, "upload_file", lambda path, data, mime, **k: self.blobs.__setitem__(path, data))
@@ -1847,3 +1848,132 @@ def test_held_figures_are_what_each_gc_holds(env):
     assert held["g1"]["total"] == "371791.63" and held["g2"]["total"] == "76000"
     assert costs["held_total_range"] == {"min": "76000", "max": "371791.63"}
     assert costs["current"]["prices"]["total"] != held["g1"]["total"]
+
+
+# ── GCs that already got an auto send (docs/AUTO_SEND.md 6.4) ─────────────────
+
+
+AUTO_SENT = {"g3"}
+
+
+def _auto_sent_world(env, monkeypatch, auto_sent=AUTO_SENT):
+    """g3 got an auto send, g4 is new to the bid. Neither holds a real proposal."""
+    env.db.tables["project_gcs"].append(_gc_link("g3", "Charlie Co"))
+    env.db.tables["project_gcs"].append(_gc_link("g4", "Delta Co"))
+    monkeypatch.setattr(psend, "auto_sent_gc_ids_required", lambda pid: set(auto_sent))
+    monkeypatch.setattr(psend, "auto_sent_gc_ids", lambda pid: set(auto_sent))
+
+
+def _doc_text(env, row):
+    file = env.one("project_files", id=row["file_id"])
+    return file["filename"], extract_document_text(env.blobs[file["storage_path"]])
+
+
+def _mail_to(env, gc_id):
+    return next(m for m in env.mails if m["to"] == [f"pat@{gc_id}.com"])
+
+
+def test_auto_sent_gc_gets_every_revision_cue_and_a_new_gc_gets_none(env, monkeypatch):
+    _auto_sent_world(env, monkeypatch)
+    created = psend.generate_documents(PID, "d1", "u-admin", gc_ids=["g3", "g4"])
+    rows = {r["gc_id"]: r for r in created}
+
+    name, text = _doc_text(env, rows["g3"])
+    assert name == "Proposal 7201 - Charlie Co Revised.docx"
+    assert "Revised Bid Proposal" in text and "(Revised)" in text
+    assert "Revision" not in text
+    name, text = _doc_text(env, rows["g4"])
+    assert name == "Proposal 7201 - Delta Co.docx"
+    assert "Revised" not in text
+
+    out = psend.send_proposals(PID, "u-admin", [rows["g3"]["id"], rows["g4"]["id"]])
+    assert [r["status"] for r in out["results"]] == ["sent", "sent"]
+
+    marked = _mail_to(env, "g3")
+    assert marked["subject"] == psend.revised_cover_subject(PROJECT)
+    assert "supersedes" in marked["body_html"] and "Charlie Co" in marked["body_html"]
+    assert marked["attachments"][0][0] == "Proposal 7201 - Charlie Co Revised.pdf"
+    normal = _mail_to(env, "g4")
+    assert normal["subject"] == psend.build_cover_email(PROJECT)[0]
+    assert "revised" not in normal["body_html"].lower()
+    assert normal["attachments"][0][0] == "Proposal 7201 - Delta Co.pdf"
+
+
+def test_document_generated_before_the_auto_send_cannot_go_out_unmarked(env, monkeypatch):
+    _auto_sent_world(env, monkeypatch, auto_sent=set())
+    row = psend.generate_documents(PID, "d1", "u-admin", gc_ids=["g3"])[0]
+    assert _doc_text(env, row)[0] == "Proposal 7201 - Charlie Co.docx"
+
+    # The auto send lands after generation, then a person sends the old document.
+    monkeypatch.setattr(psend, "auto_sent_gc_ids_required", lambda pid: {"g3"})
+    out = psend.send_proposals(PID, "u-admin", [row["id"]])
+    assert out["results"][0]["status"] == "failed"
+    assert out["results"][0]["error"] == psend.UNMARKED_DOCUMENT_MESSAGE
+    assert env.mails == []
+
+    # Regenerating fixes it, and the row is free to go out.
+    row = psend.generate_documents(PID, "d1", "u-admin", gc_ids=["g3"])[0]
+    assert _doc_text(env, row)[0] == "Proposal 7201 - Charlie Co Revised.docx"
+    assert psend.send_proposals(PID, "u-admin", [row["id"]])["results"][0]["status"] == "sent"
+    assert _mail_to(env, "g3")["attachments"][0][0] == "Proposal 7201 - Charlie Co Revised.pdf"
+
+
+def test_mark_submitted_refuses_an_unmarked_document_for_an_auto_sent_gc(env, monkeypatch):
+    _auto_sent_world(env, monkeypatch, auto_sent=set())
+    row = psend.generate_documents(PID, "d1", "u-admin", gc_ids=["g3"])[0]
+    monkeypatch.setattr(psend, "auto_sent_gc_ids_required", lambda pid: {"g3"})
+    out = psend.mark_submitted(PID, "u-admin", [row["id"]])
+    assert out["results"][0]["status"] == "failed"
+    assert out["results"][0]["error"] == psend.UNMARKED_DOCUMENT_MESSAGE
+    assert env.one("proposal_sends", id=row["id"])["status"] == "generated"
+
+    row = psend.generate_documents(PID, "d1", "u-admin", gc_ids=["g3"])[0]
+    assert psend.mark_submitted(PID, "u-admin", [row["id"]])["results"][0]["status"] == "marked"
+
+
+def test_generate_refuses_when_the_auto_sent_lookup_fails(env, monkeypatch):
+    env.db.tables["project_gcs"].append(_gc_link("g3", "Charlie Co"))
+
+    def _boom(pid):
+        raise ProposalSendError("Could not check which GCs already received a proposal.")
+
+    monkeypatch.setattr(psend, "auto_sent_gc_ids_required", _boom)
+    with pytest.raises(ProposalSendError, match="already received a proposal"):
+        psend.generate_documents(PID, "d1", "u-admin", gc_ids=["g3"])
+    assert env.rows("proposal_sends", gc_id="g3") == []
+    assert env.rows("project_files", gc_id="g3") == []
+
+
+def test_resend_of_a_marked_document_keeps_every_cue(env, monkeypatch):
+    _auto_sent_world(env, monkeypatch)
+    row = psend.generate_documents(PID, "d1", "u-admin", gc_ids=["g3"])[0]
+    psend.send_proposals(PID, "u-admin", [row["id"]])
+    env.mails.clear()
+
+    # Even if the best-effort lookup misses, the email follows the document.
+    monkeypatch.setattr(psend, "auto_sent_gc_ids", lambda pid: set())
+    out = psend.resend_proposals(PID, "u-admin", [row["id"]])
+    assert out["results"][0]["status"] == "sent"
+    mail = _mail_to(env, "g3")
+    assert mail["subject"] == psend.revised_cover_subject(PROJECT)
+    assert "supersedes" in mail["body_html"]
+    assert mail["attachments"][0][0] == "Proposal 7201 - Charlie Co Revised.pdf"
+
+
+def test_a_later_revision_keeps_its_own_numbering_for_an_auto_sent_gc(env, monkeypatch):
+    _auto_sent_world(env, monkeypatch)
+    row = psend.generate_documents(PID, "d1", "u-admin", gc_ids=["g3"])[0]
+    psend.send_proposals(PID, "u-admin", [row["id"]])
+
+    rev = _start(env)
+    assert rev["revision_number"] == 1
+    pr.set_included_gcs(PID, rev["id"], "u-admin", ["g3"])
+    pr.generate_revision_documents(PID, rev["id"], "u-admin")
+    file = env.one("project_files", id=_rev_row_for(env, rev, "g3")["file_id"])
+    assert file["filename"] == "Proposal 7201 - Charlie Co Rev 1.docx"
+    text = extract_document_text(env.blobs[file["storage_path"]])
+    assert "Revision 1" in text and "(Revised)" not in text
+
+
+def _rev_row_for(env, rev, gc_id):
+    return env.one("proposal_revision_sends", revision_id=rev["id"], gc_id=gc_id)
