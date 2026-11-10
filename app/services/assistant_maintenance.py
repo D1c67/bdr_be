@@ -490,7 +490,8 @@ def run_orphans(now: datetime | None = None, *, worker: str) -> dict | None:
     approved card, an active schedule, an open task, an active hold, or a
     queued assistant job) or with phase 7 state (an own subscription
     override, a project mute, an undelivered inbox row, a pending external
-    send) whose profile is missing, inactive or not internal is offboarded
+    send) or browser v2 state (a grant, hold, saved login, cookie jar, ...)
+    whose profile is missing, inactive or not internal is offboarded
     in mode 'sweep'. Covers deactivations and deletes done outside
     app/routers/users.py within a day (offboarding map G2). None when it
     did not run."""
@@ -510,6 +511,12 @@ def run_orphans(now: datetime | None = None, *, worker: str) -> dict | None:
         owners |= set(repo.phase7_owners_with_open_state(None, limit=ORPHAN_LIMIT))
     except Exception:  # noqa: BLE001 - the other owners are still checked
         logger.exception("assistant maintenance: phase 7 owners could not be read")
+    try:
+        # Browser v2 state (grants, holds, saved logins, cookie jars, ...),
+        # docs/ASSISTANT_BROWSER_V2_PLAN.md 17.5.
+        owners |= set(repo.browser_v2_owners_with_open_state(None, limit=ORPHAN_LIMIT))
+    except Exception:  # noqa: BLE001 - the other owners are still checked
+        logger.exception("assistant maintenance: browser v2 owners could not be read")
     result = {"checked": 0, "offboarded": 0, "failed": 0}
     for user_id in sorted(owners):
         result["checked"] += 1
@@ -736,15 +743,37 @@ def run_mail_audit(now: datetime | None = None) -> dict:
 
 
 def run_browser_tasks() -> dict:
-    """Expire private work and purge expired envelopes, even with execution off."""
+    """Expire private work and purge expired envelopes, even with execution off.
+
+    Browser v2 (docs/ASSISTANT_BROWSER_V2_PLAN.md 4.5, 6.6, 12.3), only
+    while ASSISTANT_BROWSER_V2_ENABLED is on (0192 must exist): the v2 sweep
+    (holds, parks, lapsed leases, admissions) runs before the notices, so the
+    jobs it ends reach the inbox and the chat in the same tick; then the chat
+    outbox drains (one server-built message per event, no model call; a
+    finished task may enqueue its one follow-up turn job). A v2 failure is
+    logged and never stops the rest."""
     from app.assistant import repo
+    from app.core.config import get_settings
     from app.services import assistant_browser_records, notifications
 
     counts = repo.browser_rpc(None, "assistant_browser_sweep", {"p_limit": 100})
+    v2 = bool(getattr(get_settings(), "assistant_browser_v2_enabled", False))
+    if v2:
+        try:
+            counts["v2"] = repo.browser_sweep_v2(None, limit=100)
+        except Exception:  # noqa: BLE001 - the v1 sweep, notices and retention still run
+            logger.exception("assistant maintenance: browser v2 sweep failed")
     notices = repo.browser_rpc(None, "assistant_browser_notice_claim", {"p_limit": 100})
     rows = notices.get("rows") or []
     if rows:
         notifications.deliver(rows, email=True)
     counts["notices"] = len(rows)
     counts["retention"] = assistant_browser_records.purge_expired_records(limit=100)
+    if v2:
+        from app.services import assistant_browser_chat
+
+        try:
+            counts["chat"] = assistant_browser_chat.drain_outbox(limit=100)
+        except Exception:  # noqa: BLE001 - rows stay in the outbox for the next tick
+            logger.exception("assistant maintenance: browser chat outbox drain failed")
     return counts

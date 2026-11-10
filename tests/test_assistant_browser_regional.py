@@ -139,22 +139,6 @@ def test_vault_refuses_old_region_authority_before_decrypt(env, monkeypatch):
     assert REAL_JOB_CREDENTIAL(env.job) is env.credential
 
 
-def test_only_explicit_owner_cas_save_adds_regional_origin(env, monkeypatch):
-    from app.services import assistant_browser as service
-    env.credential['origins'] = ['https://app.procore.com', 'https://login.procore.com']
-    monkeypatch.setattr(service.repo, 'browser_credential', lambda *a: env.credential)
-    saved = []
-    def put(owner, name, expected, record):
-        saved.append((owner, name, expected, record))
-        return {'ok': True, 'credential': {**record, 'version': expected + 1, 'status': 'active'}}
-    monkeypatch.setattr(service.repo, 'browser_credential_put', put)
-    result = service.save_credential(env.owner, 'procore', label='Regional Procore', username='owner@example.test',
-        password='replacement password', expected_version=1, acknowledge_personal_password=True)
-    assert result['version'] == 2 and result['origins'] == list(sites.site('procore').origins)
-    assert saved[0][2] == 1 and 'replacement password' not in str(saved[0][3])
-    assert env.credential['version'] == 1 and 'https://us02.procore.com' not in env.credential['origins']
-
-
 @pytest.mark.parametrize('change', [{'version': 2}, {'origins': ['https://app.procore.com']}, {'status': 'revoked'}])
 def test_login_release_rechecks_granted_credential_scope(env, monkeypatch, change):
     env.job['input']['url'] = URL

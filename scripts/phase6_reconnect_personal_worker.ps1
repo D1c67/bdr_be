@@ -1,13 +1,12 @@
 # Run in elevated Windows PowerShell. This reconnects only the enrolled personal worker.
 [CmdletBinding()]
-param([Parameter(Mandatory = $true)][string]$ApiBase)
+param([Parameter(Mandatory = $true)][string]$ApiBase, [Parameter(Mandatory = $true)][string]$ExpectedWorkerId)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 3.0
 $ProgressPreference = 'SilentlyContinue'
 $ServiceName = 'BDRAgentUser'
 $WorkerHome = 'C:\ProgramData\BDRAgentUser'
-$ExpectedWorkerId = 'e0846bf6-ea57-4927-9d12-de514532a6e3'
 $ConfigPath = Join-Path $WorkerHome 'worker.json'
 $ServiceDir = Join-Path $WorkerHome 'service'
 
@@ -41,6 +40,11 @@ function Wait-PersonalService([string]$Status, [int]$Seconds) {
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw 'Run this block in an elevated PowerShell window.'
+}
+# The id comes from the Mac helper (the one approved personal worker row); the
+# 1.1.0 rollout re-enrolls the service, which gives it a new row.
+if ($ExpectedWorkerId -cnotmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') {
+    throw 'ExpectedWorkerId must be the lowercase worker UUID printed by the Mac helper.'
 }
 if ($ApiBase -cnotmatch '^https://[a-z0-9]+(?:-[a-z0-9]+)*\.trycloudflare\.com/?$') {
     throw 'ApiBase must be an exact https trycloudflare.com tunnel origin, without credentials, port, query or path.'

@@ -75,4 +75,4 @@ def test_build_output_is_deterministic_for_identical_inputs(tmp_path):
 def test_source_release_version_matches_package_metadata():
     import tomllib
     declared=tomllib.loads((ROOT/'pyproject.toml').read_text())['project']['version']
-    assert declared==package_version()=='1.0.6'
+    assert declared==package_version()=='1.1.0'

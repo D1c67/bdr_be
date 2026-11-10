@@ -1,0 +1,12 @@
+{
+  "model": "UserHoldRelease",
+  "v2_endpoint": "user_site_hold",
+  "direction": "response",
+  "body": {
+    "hold_id": "40000000-0000-4000-8000-000000000002",
+    "kind": "site",
+    "status": "released",
+    "site_release": "full",
+    "policy_version": 4
+  }
+}

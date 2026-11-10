@@ -1,0 +1,14 @@
+{
+  "model": "LiveFrameMeta",
+  "v2_endpoint": "live_frames",
+  "direction": "request",
+  "body": {
+    "session_id": "e0000000-0000-4000-8000-000000000001",
+    "seq": 17,
+    "width": 1280,
+    "height": 800,
+    "mime_type": "image/jpeg",
+    "size_bytes": 143210,
+    "captured_at": "2026-11-02T18:05:00Z"
+  }
+}

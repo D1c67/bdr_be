@@ -152,7 +152,9 @@ PHASE_FOUR_DEFERRED = (PHASE_FOUR_PLANS | PHASE_FOUR_PM | PHASE_FOUR_REPORTS | P
 
 
 PHASE_FIVE_DEFERRED = {"email_search", "email_read", "email_attachment_to_staging", "email_draft", "read_mailbox", "web_search", "web_fetch"}
-PHASE_SIX_DEFERRED = {"user_browser_task", "user_browser_status"}
+# Browser v2 (docs/ASSISTANT_BROWSER_V2_PLAN.md 4.3) replaced the two Phase 6 tools.
+PHASE_SIX_DEFERRED = {"browser_task_start", "browser_task_status", "browser_task_cancel", "browser_sites_list",
+                      "request_site_access", "request_site_credential"}
 # Phase 8 (docs/ASSISTANT_PHASE8_PLAN.md 6.1): the one deferred inbox read tool.
 PHASE_EIGHT_DEFERRED = {"inbox_list"}
 
@@ -165,7 +167,7 @@ def test_registered_set_is_pinned():
                      | PHASE_EIGHT_DEFERRED)
     assert set(tools) == offered_names | HIDDEN
     offered = {name for name, spec in tools.items() if spec.offered}
-    assert offered == offered_names and len(offered) == 65
+    assert offered == offered_names and len(offered) == 69
     assert {name for name, spec in tools.items() if not spec.offered} == HIDDEN
 
 
@@ -280,7 +282,7 @@ def test_request_builders_stay_inside_declared_routes():
     own = {
         "find_tools": {"query": "drawings sheet notes"},
         "web_fetch": {"url": "https://example.com"},
-        "user_browser_status": {"job_id": "44444444-4444-4444-8444-444444444444"},
+        "browser_task_status": {"task_id": "44444444-4444-4444-8444-444444444444"},
         "email_search": {"mailbox": "owner@example.test", "query": "subject", "window_days": 30},
         "email_read": {"mailbox": "owner@example.test", "message_id": "graph-id"},
         "memory_search": {"q": "bid reminders"},

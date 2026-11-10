@@ -349,11 +349,11 @@ def test_spend_state_reads_the_rpc_with_holds(world):
     state = loop.spend_state(USER, settings_row(), {"daily_cost_cap_usd": 5})
     assert state["user_spent"] == Decimal("1") and state["global_spent"] == Decimal("3")
     assert state["user_held"] == Decimal("1.5") and state["global_held"] == Decimal("1.5")
-    assert state["user_cap"] == Decimal("5") and state["global_cap"] == Decimal("50")
+    assert state["user_cap"] == Decimal("15") and state["global_cap"] == Decimal("50")
     assert state["over_cap"] is False
     assert [n for n, _p in world.db.rpc_calls] == ["assistant_spend_state"]
     # A live hold counts toward the cap.
-    world.db.tables["assistant_spend_reservations"][0]["amount_usd"] = "4"
+    world.db.tables["assistant_spend_reservations"][0]["amount_usd"] = "14"
     assert loop.spend_state(USER)["over_cap"] is True
 
 

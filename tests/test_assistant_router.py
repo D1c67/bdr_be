@@ -176,7 +176,8 @@ def test_send_message_creates_rows_and_enqueues_one_turn(api):
                           json={"content": "What is due today?", "context": {"path": "/dashboard", "project_id": None}})
     assert res.status_code == 202, res.text
     body = res.json()
-    assert set(body) == {"user_message", "assistant_message", "job_id"}
+    assert set(body) == {"user_message", "assistant_message", "job_id", "browser_code_card"}
+    assert body["browser_code_card"] is False
     assert body["user_message"]["role"] == "user" and body["user_message"]["status"] == "done"
     assert body["user_message"]["content"] == "What is due today?"
     assert body["assistant_message"]["role"] == "assistant" and body["assistant_message"]["status"] == "pending"

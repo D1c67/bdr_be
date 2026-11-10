@@ -1,6 +1,6 @@
 [project]
 name = "bdr-agent"
-version = "1.0.6"
+version = "1.1.0"
 description = "BDR browser agent worker (Windows service)"
 requires-python = ">=3.12,<3.13"
 # Exact pins. The release bundle installs with uv pip install --require-hashes
@@ -8,7 +8,7 @@ requires-python = ">=3.12,<3.13"
 # every model call is proxied by BDR (spec D1, D3).
 dependencies = [
     "httpx==0.28.1",
-    "playwright==1.48.0",
+    "playwright==1.64.0",
     "pydantic==2.13.4",
     "cryptography==48.0.0",
 ]

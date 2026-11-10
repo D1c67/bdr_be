@@ -1,0 +1,11 @@
+{
+  "model": "UserDownloadResponse",
+  "v2_endpoint": "user_downloads",
+  "direction": "response",
+  "body": {
+    "download_id": "d0000000-0000-4000-8000-000000000001",
+    "status": "saved_to_project",
+    "file_id": "f0000000-0000-4000-8000-000000000001",
+    "reason": null
+  }
+}

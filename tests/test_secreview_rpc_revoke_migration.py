@@ -105,3 +105,37 @@ def test_0145_house_style():
         "search_submittals(text, text)",
     ):
         assert f"grant execute on function public.{sig} to service_role;" in sql
+
+
+# Browser v2 (0192, docs/ASSISTANT_BROWSER_V2_PLAN.md 14.1): every function it
+# creates or replaces revokes EXECUTE explicitly, piece by piece.
+FUNCTIONS_0192 = (
+    "assistant_browser_v2_ttl_guard", "assistant_browser_v2_host", "assistant_browser_v2_origin",
+    "assistant_browser_v2_is_idp", "assistant_browser_v2_site_matches", "assistant_browser_admission_needs",
+    "assistant_browser_admission_status", "assistant_browser_site_grant", "assistant_browser_scope_extend",
+    "assistant_browser_admission_create", "assistant_browser_start_decide", "assistant_browser_request_create",
+    "assistant_browser_request_decide", "assistant_browser_task_enqueue_v2", "assistant_browser_credential_put_v2",
+    "assistant_browser_credential_revoke_v2", "assistant_browser_v2_authority", "assistant_browser_user_fence_v2",
+    "assistant_browser_user_fence", "assistant_browser_job_guard", "assistant_browser_scope_allows",
+    "assistant_browser_job_policy", "assistant_browser_login_begin_v2", "assistant_browser_login_finish_v2",
+    "assistant_browser_session_get_v2", "assistant_browser_help_open_v2", "assistant_browser_help_reply_v2",
+    "assistant_browser_help_consume_v2", "assistant_browser_help_secret_from_mail", "assistant_browser_hold_open", "assistant_browser_hold_expire", "assistant_browser_inspect",
+    "assistant_browser_hold_decide", "assistant_browser_hold_release_get", "assistant_browser_hold_consume",
+    "assistant_browser_turn_begin_v2", "assistant_browser_job_requeue_v2", "assistant_browser_job_requeue",
+    "assistant_browser_sweep_v2", "assistant_browser_safe_rule_add", "assistant_browser_download_record",
+    "assistant_browser_live_session_open", "assistant_browser_outbox_drain", "assistant_browser_outbox_ack",
+    "assistant_browser_claim_user", "assistant_browser_terminal", "assistant_browser_site_revoke",
+    "assistant_browser_session_signout", "assistant_browser_safe_rule_remove", "assistant_browser_live_session_close",
+    "assistant_browser_purge_v2", "assistant_browser_revoke_owner", "assistant_browser_sweep",
+)
+
+
+def test_0192_functions_revoke_execute_explicitly():
+    sql = (MIGRATIONS / "0192_assistant_browser_v2.sql").read_text(encoding="utf-8")
+    created = {m.group(1).lower() for m in CREATE_RE.finditer(sql)}
+    assert created == set(FUNCTIONS_0192)
+    missing = sorted(n for n in FUNCTIONS_0192
+                     if not (_revoked_from(sql, n, "public") and _revoked_from(sql, n, r"anon\s*,\s*authenticated")))
+    assert missing == []
+    for name in FUNCTIONS_0192:
+        assert name in _live_functions()

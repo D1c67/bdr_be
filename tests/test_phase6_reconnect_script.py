@@ -8,10 +8,18 @@ SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "phase6_reconnect_per
 
 def test_reconnect_is_bound_to_the_enrolled_personal_service():
     text = SCRIPT.read_text()
-    assert "param([Parameter(Mandatory = $true)][string]$ApiBase)" in text
+    assert ("param([Parameter(Mandatory = $true)][string]$ApiBase, "
+            "[Parameter(Mandatory = $true)][string]$ExpectedWorkerId)") in text
     assert "$WorkerHome = 'C:\\ProgramData\\BDRAgentUser'" in text
     assert "$ServiceName = 'BDRAgentUser'" in text
-    assert "$ExpectedWorkerId = 'e0846bf6-ea57-4927-9d12-de514532a6e3'" in text
+    # Browser v2 rollout re-enrolls the service (a new worker row), so the id
+    # is a parameter from the Mac helper, never pinned in the script.
+    assert not re.search(r"\$ExpectedWorkerId\s*=", text)
+    pattern = re.search(r"\$ExpectedWorkerId -cnotmatch '([^']+)'", text).group(1)
+    assert re.fullmatch(pattern, "e0846bf6-ea57-4927-9d12-de514532a6e3")
+    for value in ("E0846BF6-EA57-4927-9D12-DE514532A6E3", "e0846bf6", "x'; Remove-Item", ""):
+        assert not re.fullmatch(pattern, value)
+    assert text.index("$ExpectedWorkerId -cnotmatch") < text.index("Stop-Service -Name")
     assert "$config.worker_id -cne $ExpectedWorkerId" in text
     assert "$install.pool -cne 'user'" in text
     assert "$serviceInfo.PathName.Trim" in text

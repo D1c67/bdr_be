@@ -619,11 +619,23 @@ def send_message(
         if missing:
             raise _file_not_available(missing)
 
+    # Browser v2 (docs/ASSISTANT_BROWSER_V2_PLAN.md 7.7, 8.2): a password is
+    # refused before anything is stored; a sign-in code goes to the open code
+    # card's one-time path and is stored as [code].
+    from app.services import assistant_browser_secrets as browser_secrets
+
+    try:
+        guarded = browser_secrets.guard_message(user.id, conversation_id, body.content)
+        content = guarded.content
+    except browser_secrets.SecretInMessage:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, browser_secrets.SECRET_IN_MESSAGE_TEXT,
+                            headers={"X-Error-Code": browser_secrets.SECRET_IN_MESSAGE}) from None
+
     context = body.context.model_dump() if body.context is not None else None
     user_row = repo.insert_message(user.id, {
         "conversation_id": conversation_id,
         "role": "user",
-        "content": body.content,
+        "content": content,
         "context": context,
         "status": "done",
         "incognito": body.incognito,
@@ -685,6 +697,7 @@ def send_message(
         user_message=_message_out(user_row, [_message_file_out(staged[i], "staged") for i in file_ids]),
         assistant_message=_message_out({**assistant_row, "status": "pending"}),
         job_id=job_id,
+        browser_code_card=guarded.ask_for_code_card is True,
     )
 
 

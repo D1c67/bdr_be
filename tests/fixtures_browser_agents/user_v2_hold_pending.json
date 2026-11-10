@@ -1,0 +1,11 @@
+{
+  "model": "UserHoldRelease",
+  "v2_endpoint": "user_hold_release",
+  "direction": "response",
+  "body": {
+    "hold_id": "40000000-0000-4000-8000-000000000001",
+    "kind": "final_action",
+    "status": "pending",
+    "retry_after": 0
+  }
+}

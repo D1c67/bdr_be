@@ -1,0 +1,104 @@
+{
+  "model": "UserJobPolicy",
+  "v2_endpoint": "user_policy",
+  "direction": "response",
+  "body": {
+    "policy_version": 3,
+    "job_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+    "start_origin": "https://app.procore.com",
+    "sites": [
+      {
+        "site_key": "procore",
+        "label": "Procore",
+        "kind": "curated",
+        "scope": "domain",
+        "grant_version": 1,
+        "registrable_domains": [
+          "procore.com"
+        ],
+        "login_paths": [
+          "^/sessions$"
+        ],
+        "profile": {
+          "safe_mutations": [
+            {
+              "method": "POST",
+              "host": "app.procore.com",
+              "path_regex": "^/graphql$",
+              "graphql_operations": [
+                "RfiList"
+              ]
+            }
+          ],
+          "final_actions": [
+            {
+              "method": "POST",
+              "host": "app.procore.com",
+              "path_regex": "^/rest/v1\\.0/projects/\\d+/rfis/\\d+/replies$",
+              "label": "Submit RFI response"
+            }
+          ],
+          "final_get": [],
+          "websocket_ok": false,
+          "websocket_reason": null,
+          "logged_in_probe": {
+            "path": "/rest/v1.0/companies",
+            "selector": "body"
+          }
+        }
+      },
+      {
+        "site_key": "domain:example-supplier.com",
+        "label": "example-supplier.com",
+        "kind": "ad_hoc",
+        "scope": "domain",
+        "grant_version": 2,
+        "registrable_domains": [
+          "example-supplier.com"
+        ]
+      },
+      {
+        "site_key": "origin:docs.google.com",
+        "label": "Google Docs (one folder)",
+        "kind": "ad_hoc",
+        "scope": "origin",
+        "grant_version": 1,
+        "exact_origins": [
+          "https://docs.google.com"
+        ],
+        "path_prefix": "/document/d/"
+      }
+    ],
+    "credentials": [
+      {
+        "credential_id": "c0000000-0000-4000-8000-000000000001",
+        "site_key": "procore",
+        "account_label": "default",
+        "version": 2,
+        "login_origins": [
+          "https://login.procore.com"
+        ],
+        "cookie_domains": [
+          ".procore.com"
+        ],
+        "sso_required": false
+      }
+    ],
+    "safe_rules": [
+      {
+        "site_key": "procore",
+        "method": "POST",
+        "host": "app.procore.com",
+        "path_pattern": "^/rest/v1\\.0/projects/:id/drafts$"
+      }
+    ],
+    "caps": {
+      "offsite_query_bytes": 4096,
+      "download_file_bytes": 104857600,
+      "download_task_bytes": 524288000,
+      "download_files": 20,
+      "hold_timeout_seconds": 600,
+      "park_max_minutes": 15
+    }
+  }
+}

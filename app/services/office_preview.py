@@ -217,12 +217,17 @@ def _mark(file_id: str, **fields) -> None:
     get_supabase().table("project_files").update(fields).eq("id", file_id).execute()
 
 
-def generate_preview(file_id: str) -> None:
+def generate_preview(file_id: str, *, fresh_path: bool = False) -> None:
     """Convert one project_file to its PDF derivative and record the outcome.
 
     Safe everywhere it's called from (BackgroundTasks threadpool, the inbox
     poller thread, the backfill script): idempotent, single retry, and no
     exception ever escapes - failures land in preview_status/preview_error.
+
+    `fresh_path` writes the derivative to a new object and deletes the old
+    one, for a file whose content changed (Edit in Excel, services/excel_edit):
+    a new path means a new signed URL, so no memoized URL, CDN or browser
+    cache can keep serving the previous PDF.
     """
     try:
         rec = (
@@ -286,9 +291,17 @@ def generate_preview(file_id: str) -> None:
             return
 
         path = preview_object_path(rec["project_id"], file_id)
+        if fresh_path:
+            path = f"{path[:-len('.pdf')]}-{uuid.uuid4().hex[:12]}.pdf"
         # upsert: a retried/backfilled conversion may overwrite a stale derivative
         storage.upload_file(path, pdf, "application/pdf", upsert=True)
         _mark(file_id, preview_path=path, preview_status="ready", preview_error=None)
+        old_path = rec.get("preview_path")
+        if fresh_path and old_path and old_path != path:
+            try:
+                storage.delete_file(old_path)
+            except Exception:  # noqa: BLE001 - a leftover derivative is cosmetic
+                logger.warning("Could not delete the old preview %s", old_path)
     except Exception:  # noqa: BLE001 - never break the caller (poller/bg task)
         logger.exception("Preview generation crashed for file %s", file_id)
         try:

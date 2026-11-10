@@ -16,8 +16,25 @@ Stop reasons and what reaches BDR:
   drain        update drain timeout: /requeue drain (service_stop=true, uncharged)
   timeout      max_active_seconds: /finish failed cannot_complete
   unreachable  15 min without BDR: nothing (local abort; spool uploads later)
-An unexpected exception in the runner is /requeue crash (charged).
+An unexpected exception in the runner is /requeue crash (charged); a setup
+refusal that is not the job's fault (SetupUnavailable, for example the user
+pool egress floor not being proven) is /requeue interrupted (uncharged), with a
+retry_at so the job is not handed straight back.
 StaleBoot propagates to the supervisor, which exits the process with code 3.
+
+Personal (principal_kind "user") jobs, docs/ASSISTANT_BROWSER_V2_PLAN.md 12.3:
+  - only USER_AGENT_TYPES run for a user principal, and a user type never runs
+    for an org principal;
+  - `user_browser` (v2) gets its client and memory-only spool from its own
+    runner through `user_slot_parts(base_client)` (UserSlotParts), so this
+    module never imports a personal adapter; a runner without that hook is
+    refused before anything runs;
+  - every slot is independent (own client wrapper, spool, step log, browser
+    process, job-scoped secrets), so several user jobs run at once on one PC;
+    the pool size comes from BDR config (supervisor.compute_pools).
+  - `user_browser_read` (v1) is retired: the package is gone, so a job of
+    that type is refused for any principal (detail "retired_type") before
+    anything runs; its lease lapses and BDR sweeps it.
 Power loss at any line is safe: BDR requeues the lease at the next /hello and
 the spool replays the steps as late rows.
 """
@@ -28,7 +45,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, Protocol
 from uuid import UUID
 
@@ -61,6 +78,11 @@ from .redact import LiveSecrets
 from .spool import Spool, StepLog
 
 log = logging.getLogger("bdr_agent.slot")
+
+USER_BROWSER_TYPE = "user_browser"
+RETIRED_USER_TYPE = "user_browser_read"     # v1 personal agent, deleted in 1.1.0
+USER_AGENT_TYPES = frozenset({USER_BROWSER_TYPE})
+SETUP_UNAVAILABLE_RETRY_SECONDS = 300
 
 StopReason = Literal["lost", "cancel", "shutdown", "drain", "timeout", "unreachable"]
 _STOP_PRIORITY: dict[str, int] = {"lost": 3, "shutdown": 2, "drain": 2, "cancel": 1, "timeout": 1,
@@ -105,12 +127,35 @@ class _ServiceRequeue:
     retry_at: datetime | None = None
 
 
+class SetupUnavailable(RuntimeError):
+    """This worker cannot set the job up right now for a reason that is not
+    the job's fault. The slot requeues it uncharged with a retry_at."""
+
+
 class JobRunner(Protocol):
     """One per agent type (W3/W4 register them in bdr_agent.agents.REGISTRY)."""
     version: str            # advertised in /hello capabilities.types
     needs_browser: bool
 
     async def run(self, ctx: "JobContext") -> JobResult: ...
+
+
+@dataclass(frozen=True)
+class UserSlotParts:
+    """What a personal job uses instead of the org transport: a client that
+    only reaches the private user routes, a memory-only spool (personal steps
+    never touch the disk) and its StepLog class."""
+    client: Any
+    spool: Any
+    step_log_class: type[StepLog] = StepLog
+
+
+class UserJobRunner(JobRunner, Protocol):
+    """A runner for a personal type. `user_slot_parts` is called once per job
+    with the worker's authenticated BdrClient (reuse its transport, never
+    close it)."""
+
+    def user_slot_parts(self, base_client: BdrClient) -> UserSlotParts: ...
 
 
 class BrowserProvider(Protocol):
@@ -208,6 +253,7 @@ class Slot:
         self.ctx: JobContext | None = None
         self.stop_reason: StopReason | None = None
         self._task: asyncio.Task | None = None
+        self._step_log_class: type[StepLog] = StepLog
 
     @property
     def busy(self) -> bool:
@@ -231,20 +277,34 @@ class Slot:
 
     async def run(self, job: ClaimedJob, type_config: TypeConfig) -> SlotOutcome:
         original = self.deps
+        self._step_log_class = StepLog
+        if job.agent_type == RETIRED_USER_TYPE:
+            return self._refuse(job, "retired_type")
         if job.principal_kind == "user":
-            if job.agent_type != "user_browser_read" or not job.principal_user_id:
-                self.deps.tracker.unregister(job.job_id)
-                return SlotOutcome(job.job_id, job.agent_type, "none", detail="principal_mismatch")
-            from .agents.user_browser.client import UserClient
-            from .agents.user_browser.spool import MemorySpool
-            self.deps = replace(original, client=UserClient(original.client), spool=MemorySpool())
-        elif job.agent_type == "user_browser_read":
-            self.deps.tracker.unregister(job.job_id)
-            return SlotOutcome(job.job_id, job.agent_type, "none", detail="principal_mismatch")
+            if job.agent_type not in USER_AGENT_TYPES or not job.principal_user_id:
+                return self._refuse(job, "principal_mismatch")
+            hook = getattr(original.runners.get(job.agent_type), "user_slot_parts", None)
+            if hook is None:
+                return self._refuse(job, "no_user_adapter")
+            parts = hook(original.client)
+            if not isinstance(parts, UserSlotParts) or parts.client is original.client:
+                return self._refuse(job, "no_user_adapter")
+            self.deps = replace(original, client=parts.client, spool=parts.spool)
+            self._step_log_class = parts.step_log_class
+        elif job.agent_type in USER_AGENT_TYPES:
+            return self._refuse(job, "principal_mismatch")
         try:
             return await self._run_job(job, type_config)
         finally:
             self.deps = original
+            self._step_log_class = StepLog
+
+    def _refuse(self, job: ClaimedJob, detail: str) -> SlotOutcome:
+        """Nothing runs and nothing reaches BDR: the lease lapses and the
+        server sweeps it (same as a principal mismatch since 1.0.1)."""
+        self.deps.tracker.unregister(job.job_id)
+        log.error("refused job %s (%s): %s", job.job_id, job.agent_type, detail)
+        return SlotOutcome(job.job_id, job.agent_type, "none", detail=detail)
 
     async def _run_job(self, job: ClaimedJob, type_config: TypeConfig) -> SlotOutcome:
         d = self.deps
@@ -254,11 +314,7 @@ class Slot:
         if not d.tracker.holds(job.job_id, job.epoch):
             d.tracker.register(job.job_id, job.epoch, job.agent_type)
         job_spool = d.spool.for_job(job.job_id, job.epoch)
-        log_class = StepLog
-        if job.principal_kind == "user":
-            from .agents.user_browser.spool import UserStepLog
-            log_class = UserStepLog
-        steps = log_class(job_spool, d.secrets, on_logged=lambda n: d.tracker.set_steps(job.job_id, n))
+        steps = self._step_log_class(job_spool, d.secrets, on_logged=lambda n: d.tracker.set_steps(job.job_id, n))
         d.tracker.attach_steps(job.job_id, steps)
         flusher = asyncio.create_task(self._flush_loop(steps), name=f"flush-{job.job_id}")
         outcome = SlotOutcome(job.job_id, job.agent_type, "none")
@@ -340,6 +396,11 @@ class Slot:
         except LeaseLost:
             self.stop_reason = "lost"
             return None, "lease_lost"
+        except SetupUnavailable as exc:
+            steps.log("error.setup_unavailable", "This worker cannot start the job now", ok=False,
+                      result={"error": _clip(d.secrets.scrub_text(str(exc)), 1000)})
+            return Requeue("interrupted", retry_at=datetime.now(UTC) + timedelta(
+                seconds=SETUP_UNAVAILABLE_RETRY_SECONDS)), "setup_unavailable"
         except Exception as exc:   # context creation failed
             steps.log("error.crash", f"Job setup failed: {type(exc).__name__}", ok=False,
                       result={"error": _clip(d.secrets.scrub_text(str(exc)), 1000)})

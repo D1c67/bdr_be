@@ -66,7 +66,7 @@ def test_run_command_refuses_without_enrollment(paths, capsys):
 
 def test_load_runners_finds_the_agent_types():
     runners, provider = load_runners()
-    assert set(runners) == {"rfi_from_email", "canary", "user_browser_read"}
+    assert set(runners) == {"rfi_from_email", "canary", "user_browser"}
     assert all(r.needs_browser and r.version == "1.0.0" for r in runners.values())
     assert callable(provider)
 

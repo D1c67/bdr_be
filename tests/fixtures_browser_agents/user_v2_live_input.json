@@ -1,0 +1,36 @@
+{
+  "model": "LiveInputBatch",
+  "v2_endpoint": "live_input",
+  "direction": "response",
+  "body": {
+    "events": [
+      {
+        "seq": 1,
+        "type": "mousePressed",
+        "x": 640,
+        "y": 400,
+        "button": "left",
+        "click_count": 1
+      },
+      {
+        "seq": 2,
+        "type": "mouseReleased",
+        "x": 640,
+        "y": 400,
+        "button": "left",
+        "click_count": 1
+      },
+      {
+        "seq": 3,
+        "type": "keyDown",
+        "key": "Tab",
+        "code": "Tab"
+      },
+      {
+        "seq": 4,
+        "type": "char",
+        "text": "x"
+      }
+    ]
+  }
+}

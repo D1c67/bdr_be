@@ -1,3 +1,13 @@
+-- RETIRED (browser v2, migration 0192): this script checks the regional Procore host authority of the v1 personal browser (0189 origins on v1 credentials and user_browser_task approvals).
+-- It inserts user_browser_task approvals and user_browser_read jobs, a type that
+-- 0192 relabels "Retired personal browser read" and disables; no application code
+-- or worker reaches those v1 SQL functions any more, and they stay in the database
+-- only until a later cleanup migration drops them. It is NOT acceptance for v2.
+-- v2 acceptance is scripts/check_assistant_browser_v2.sql (admissions, site
+-- grants, credentials per site, claim limits, holds, downloads, purge) and the
+-- race probe scripts/check_assistant_browser_concurrency.py. Run this script
+-- only to confirm the old v1 functions still behave while they remain; delete it
+-- with the cleanup migration.
 -- DEV ONLY after 0189. Synthetic fixtures; no real credential/site/model calls.
 -- Existing credentials and flags are unchanged after rollback.
 begin;

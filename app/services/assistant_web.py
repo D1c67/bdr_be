@@ -3,6 +3,18 @@
 The gateway must resolve/pin public destination IPs on every hop and refuse
 redirects. We never fetch a model-provided URL directly from the BDR backend.
 Its authenticated response must attest this contract, not merely echo the URL.
+
+Browser v2 (docs/ASSISTANT_BROWSER_V2_PLAN.md 13): the model searches with
+OpenAI's hosted web_search tool instead (ASSISTANT_HOSTED_SEARCH_ENABLED,
+llm_messages.HOSTED_WEB_SEARCH). The query is chosen and run inside the
+provider call, so the typed-phrase rule below cannot apply to it, and the
+owner dropped that rule for the model (BROWSER_V2_OWNER_DECISIONS item 4).
+Hosted search is never offered in a tainted conversation, which is the
+control that replaces it. This gateway adapter and its two rules (a search
+phrase must be typed by the user, a fetch URL must be typed or server-minted)
+are kept unchanged for a future gateway provider; while hosted search is on
+the gateway tools web_search and web_fetch are not offered to the model
+(registry.toolset_for).
 """
 from __future__ import annotations
 
@@ -17,6 +29,15 @@ from app.core.config import get_settings
 
 MAX_BYTES = 512 * 1024
 POLICY = "public-https-no-redirects-v1"
+
+
+def hosted_search_enabled(settings=None) -> bool:
+    """True when OpenAI's hosted web search replaces the gateway tools."""
+    try:
+        s = settings or get_settings()
+        return bool(getattr(s, "assistant_enabled", False) and getattr(s, "assistant_hosted_search_enabled", False))
+    except Exception:  # noqa: BLE001 - unreadable settings: the gateway tools stay as they were
+        return False
 
 
 class WebUnavailable(ValueError):
@@ -84,6 +105,7 @@ def search(query: str, limit: int = 5, *, user_texts: list[str]) -> dict:
             or type(limit) is not int or not 1 <= limit <= 10):
         raise WebUnavailable()
     from app.assistant.mail_binding import typed_texts
+    # Gateway path only: the hosted search tool has no such rule (module docstring).
     phrase = " ".join(query.split()).casefold()
     if not any(phrase in " ".join(text.split()).casefold() for text in typed_texts(user_texts)):
         raise WebUnavailable()

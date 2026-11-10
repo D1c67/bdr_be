@@ -1,0 +1,68 @@
+{
+  "model": "tool_calls",
+  "agent_type": "user_browser",
+  "calls": [
+    {
+      "tool": "switch_tab",
+      "args": {
+        "tab_id": "tab_2"
+      }
+    },
+    {
+      "tool": "fill_credential",
+      "args": {
+        "ref": "ref_12",
+        "field": "username"
+      }
+    },
+    {
+      "tool": "fill_credential",
+      "args": {
+        "ref": "ref_13",
+        "field": "password"
+      }
+    },
+    {
+      "tool": "user_request_help",
+      "args": {
+        "reason_code": "needs_site",
+        "message": "The drawings are on the architect's portal."
+      }
+    },
+    {
+      "tool": "user_finish",
+      "args": {
+        "outcome": "completed",
+        "result": "Found 3 open RFIs.",
+        "facts": [
+          {
+            "text": "RFI 198 is due 2026-11-06.",
+            "source_url": "https://app.procore.com/3167322/project/rfi/show/27914290"
+          }
+        ]
+      }
+    },
+    {
+      "tool": "user_finish",
+      "args": {
+        "outcome": "cannot_complete",
+        "result": "The owner declined the submit.",
+        "error_kind": "declined"
+      }
+    },
+    {
+      "tool": "click",
+      "args": {
+        "ref": "ref_4"
+      }
+    },
+    {
+      "tool": "type_text",
+      "args": {
+        "ref": "ref_7",
+        "text": "89119",
+        "submit": false
+      }
+    }
+  ]
+}

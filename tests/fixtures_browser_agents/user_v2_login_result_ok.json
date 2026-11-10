@@ -1,0 +1,24 @@
+{
+  "model": "UserCredentialResultRequest",
+  "v2_endpoint": "user_login_result_v2",
+  "direction": "request",
+  "body": {
+    "credential_id": "c0000000-0000-4000-8000-000000000001",
+    "attempt_id": "d1d1d1d1-0000-4000-8000-000000000002",
+    "origin": "https://login.procore.com",
+    "outcome": "ok",
+    "cookies": [
+      {
+        "name": "_procore_session",
+        "value": "<secret-in-fixture>",
+        "domain": ".procore.com",
+        "path": "/",
+        "expires": -1,
+        "secure": true,
+        "httpOnly": true,
+        "sameSite": "Lax"
+      }
+    ]
+  },
+  "note": "Placeholder only. Real secrets are never in a fixture, log or step."
+}

@@ -1,0 +1,10 @@
+{
+  "model": "UserCredentialFillResponse",
+  "v2_endpoint": "user_login_begin_v2",
+  "direction": "response",
+  "body": {
+    "granted": false,
+    "reason": "login_busy",
+    "retry_at": "2026-11-02T18:10:00Z"
+  }
+}

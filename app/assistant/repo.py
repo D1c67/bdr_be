@@ -1180,6 +1180,36 @@ def _freshly_claimed(row: Mapping[str, Any], cutoff: datetime) -> bool:
     return when > cutoff
 
 
+def staged_downloads_to_purge(user_id: str | None, *, limit: int) -> list[dict]:
+    """Staged browser downloads (assistant_browser_downloads, status staged,
+    docs/ASSISTANT_BROWSER_V2_PLAN.md 11.4) whose 7 days are over and whose
+    storage object is still there, oldest first: [{id, user_id,
+    storage_path}]. Never a row whose owner is on legal hold. `user_id` is
+    the person whose own rows are swept; None is the SYSTEM SWEEP across
+    every user, called only from assistant_staging.purge_browser_downloads
+    (and the maintenance rider that calls it)."""
+    limit = max(1, min(200, int(limit)))
+    held = _legal_hold_owners(user_id)
+    if user_id is not None and str(user_id) in held:
+        return []
+    def scoped(query: Any) -> Any:
+        if user_id is not None:
+            return query.eq("user_id", user_id)
+        return query.not_.in_("user_id", sorted(held)) if held else query
+
+    query = (_sb().table(BV2_DOWNLOADS_TABLE).select("id, user_id, storage_path")
+             .eq("status", "staged").is_("purged_at", "null").lte("expires_at", _now_iso()))
+    rows = _rows(scoped(query).order("created_at").limit(limit).execute())
+    # A claim that died mid "Add to project" leaves the row stored with no
+    # file and the object in place; a day past expiry no click can still be
+    # copying it, so its object is purged like a staged one.
+    stuck = (_sb().table(BV2_DOWNLOADS_TABLE).select("id, user_id, storage_path")
+             .eq("status", "stored").is_("file_id", "null").is_("purged_at", "null")
+             .not_.is_("storage_path", "null").lte("expires_at", _iso_ago(86400)))
+    rows += _rows(scoped(stuck).order("created_at").limit(limit).execute())
+    return [r for r in rows if str(r.get("user_id")) not in held][:limit]
+
+
 # ── Tasks (phase 2) ──────────────────────────────────────────────────────────
 
 
@@ -3493,6 +3523,135 @@ def browser_records_purge(user_id: str | None, *, limit: int = 100) -> dict:
     return _rpc_data(_sb().rpc("assistant_browser_records_purge", {"p_limit": max(1, min(500, limit))}).execute())
 
 
+# WI-18 (docs/ASSISTANT_BROWSER_V2_PLAN.md 17.5): browser v2 retention sweeps
+# and the orphan-sweep reader. They sit here, next to the other browser
+# retention sweep, and not in the browser v2 block below on purpose:
+# tests/test_assistant_repo_browser_v2.py pins that block's optional-user
+# functions to exactly its four RPC sweeps. Every one is a SYSTEM SWEEP:
+# only None is accepted. Legal hold suspends the deletes of a person's rows.
+BV2_HOLD_TERMINAL = ("declined", "expired", "aborted", "consumed")
+BV2_ADMISSION_OPEN = ("waiting_grant", "waiting_credential", "waiting_link", "waiting_start", "ready")
+
+
+def _bv2_delete_by_owner(user_id: str | None, table: str, rows: Sequence[Mapping[str, Any]]) -> int:
+    """Delete rows (each {id, user_id}) one owner at a time, every delete
+    filtered by that owner and the ids. `user_id` is the sweep scope (None,
+    the callers are system sweeps); it never widens a delete."""
+    by_owner: dict[str, list[str]] = {}
+    for row in rows:
+        if row.get("id") and row.get("user_id"):
+            by_owner.setdefault(str(row["user_id"]), []).append(str(row["id"]))
+    deleted = 0
+    for owner, ids in by_owner.items():
+        deleted += len(_rows(_sb().table(table).delete().eq("user_id", owner).in_("id", ids).execute()))
+    return deleted
+
+
+def browser_holds_retention_delete(user_id: str | None, *, days: int = 90, limit: int = 500) -> int:
+    """System sweep: delete browser holds that ended (declined, expired,
+    aborted or consumed) more than `days` days ago, oldest first, never a
+    row whose owner is on legal hold. An open or approved hold is never
+    deleted. Returns the count."""
+    if user_id is not None:
+        raise ValueError("the browser hold retention is a system sweep: pass user_id None")
+    held = _legal_hold_owners(None)
+    query = (_sb().table(BV2_HOLDS_TABLE).select("id, user_id, job_id").in_("status", list(BV2_HOLD_TERMINAL))
+             .lt("created_at", _iso_ago(max(1, int(days)) * 86400)))
+    if held:
+        query = query.not_.in_("user_id", sorted(held))
+    rows = _rows(query.order("created_at").limit(max(1, min(1000, int(limit)))).execute())
+    rows = [r for r in rows if str(r.get("user_id")) not in held]
+    # The hold row is what keeps IT Admin inspection away from the job's hold
+    # content and its original final-action screenshot (10.7): it stays
+    # while any encrypted record of its job is still there.
+    kept = _bv2_jobs_with_records(user_id, [str(r["job_id"]) for r in rows if r.get("job_id")])
+    return _bv2_delete_by_owner(user_id, BV2_HOLDS_TABLE, [r for r in rows if str(r.get("job_id")) not in kept])
+
+
+def _bv2_jobs_with_records(user_id: str | None, job_ids: Sequence[str], *, chunk: int = 100,
+                           rounds: int = 20) -> set[str]:
+    """The ids among `job_ids` that still have an assistant_browser_records
+    row (`user_id` scopes the read; None is the system sweep's scope). Fails
+    closed: a job not proven record-free within the bounded reads counts as
+    having records."""
+    found: set[str] = set()
+    pending = sorted(set(job_ids))
+    for start in range(0, len(pending), chunk):
+        remaining = pending[start:start + chunk]
+        for _ in range(rounds):
+            if not remaining:
+                break
+            page = _rows(_scope(_sb().table("assistant_browser_records").select("job_id"), user_id)
+                         .in_("job_id", remaining).limit(1000).execute())
+            hit = {str(r["job_id"]) for r in page if r.get("job_id")}
+            found |= hit
+            remaining = [j for j in remaining if j not in hit]
+            if len(page) < 1000:
+                remaining = []
+        found |= set(remaining)
+    return found
+
+
+def browser_downloads_retention_delete(user_id: str | None, *, days: int = 90, limit: int = 500) -> int:
+    """System sweep: delete the metadata rows of browser downloads older
+    than `days` days that no longer own a storage object (rejected; stored
+    with no staging path or purged; staged and purged), oldest first, never
+    a row whose owner is on legal hold. A staged row, or a stored row whose
+    claim died before the object was deleted, is never deleted while its
+    object is still there. Returns the count."""
+    if user_id is not None:
+        raise ValueError("the browser download retention is a system sweep: pass user_id None")
+    held = _legal_hold_owners(None)
+    cutoff = _iso_ago(max(1, int(days)) * 86400)
+    size = max(1, min(1000, int(limit)))
+
+    def scoped(query: Any) -> Any:
+        query = query.lt("created_at", cutoff)
+        return query.not_.in_("user_id", sorted(held)) if held else query
+
+    base = "id, user_id"
+    rows = _rows(scoped(_sb().table(BV2_DOWNLOADS_TABLE).select(base).eq("status", "rejected"))
+                 .order("created_at").limit(size).execute())
+    # A stored row goes only once its staging object is gone: no path, or
+    # purged. A claim that died mid "Add to project" (stored, no file, not
+    # purged) keeps its row until the staged purge deletes the object.
+    rows += _rows(scoped(_sb().table(BV2_DOWNLOADS_TABLE).select(base).eq("status", "stored")
+                         .is_("storage_path", "null")).order("created_at").limit(size).execute())
+    rows += _rows(scoped(_sb().table(BV2_DOWNLOADS_TABLE).select(base).eq("status", "stored")
+                         .not_.is_("storage_path", "null").not_.is_("purged_at", "null"))
+                  .order("created_at").limit(size).execute())
+    rows += _rows(scoped(_sb().table(BV2_DOWNLOADS_TABLE).select(base).eq("status", "staged")
+                         .not_.is_("purged_at", "null")).order("created_at").limit(size).execute())
+    return _bv2_delete_by_owner(user_id, BV2_DOWNLOADS_TABLE, [r for r in rows if str(r.get("user_id")) not in held][:size])
+
+
+def browser_v2_owners_with_open_state(user_id: str | None, *, limit: int = 200) -> list[str]:
+    """System sweep: users with browser v2 state that offboarding clears (an
+    active site grant, a waiting admission, an open or approved hold, an
+    open live session, a safe rule, a pinned job credential, a live staged
+    download, an active saved login or a cookie jar), sorted. The orphan
+    sweep reads it next to owners_with_open_state. None is the system
+    sweep."""
+    limit = max(1, min(1000, int(limit)))
+    reads = (
+        _scope(_sb().table(BV2_GRANTS_TABLE).select("user_id"), user_id).eq("status", "active"),
+        _scope(_sb().table(BV2_ADMISSIONS_TABLE).select("user_id"), user_id).in_("status", list(BV2_ADMISSION_OPEN)),
+        _scope(_sb().table(BV2_HOLDS_TABLE).select("user_id"), user_id).in_("status", ["open", "approved"]),
+        _scope(_sb().table(BV2_LIVE_SESSIONS_TABLE).select("user_id"), user_id).eq("status", "open"),
+        _scope(_sb().table(BV2_SAFE_RULES_TABLE).select("user_id"), user_id),
+        _scope(_sb().table(BV2_JOB_CREDENTIALS_TABLE).select("user_id"), user_id),
+        _scope(_sb().table(BV2_DOWNLOADS_TABLE).select("user_id"), user_id).eq("status", "staged")
+        .is_("purged_at", "null"),
+        # Saved logins and cookie jars: browser_revoke_owner clears both.
+        _scope(_sb().table("assistant_credentials").select("user_id"), user_id).eq("status", "active"),
+        _scope(_sb().table("assistant_browser_sessions").select("user_id"), user_id),
+    )
+    owners: set[str] = set()
+    for query in reads:
+        owners.update(str(r["user_id"]) for r in _rows(query.limit(limit).execute()) if r.get("user_id"))
+    return sorted(owners)[:limit]
+
+
 def browser_turn_history(user_id: str, job_id: str, *, before_turn: int) -> list[dict]:
     return _rows(_sb().table('assistant_browser_turns').select('*').eq('user_id', user_id)
                  .eq('job_id', job_id).eq('status', 'done').lt('turn_no', before_turn)
@@ -3507,6 +3666,740 @@ def browser_secret_hashes(user_id: str, job_id: str) -> dict[str, list[str]]:
         if row.get('secret_hash') and row.get('secret_key_id'):
             out.setdefault(row['secret_key_id'], []).append(row['secret_hash'])
     return out
+
+
+# ── Browser v2: sites, grants, admissions, credentials (0192, WI-3) ─────────
+#
+# docs/ASSISTANT_BROWSER_V2_PLAN.md 5, 7, 11, 12. Thin wrappers over the 0192
+# tables and RPCs. Every function takes user_id first. The site registry
+# (assistant_browser_sites) is shared by every user: a registry read takes
+# the caller's id for the convention and returns no per-user data. Owner
+# reads filter by user_id. RPCs that a lease-fenced worker calls go through
+# `browser_rpc` (as the phase 6 runtime does); the wrappers below are the
+# owner-side, human-route and system calls. A function typed
+# `user_id: str | None` is a SYSTEM SWEEP: only None is accepted. Kept out of
+# the phase 7 block on purpose: tests/test_assistant_repo_phase7.py pins every
+# public function from the phase 7 marker to the end of this file.
+
+BV2_SITES_TABLE = "assistant_browser_sites"
+BV2_GRANTS_TABLE = "assistant_browser_site_grants"
+BV2_ADMISSIONS_TABLE = "assistant_browser_admissions"
+BV2_JOB_CREDENTIALS_TABLE = "assistant_browser_job_credentials"
+BV2_REQUESTS_TABLE = "assistant_browser_requests"
+BV2_HOLDS_TABLE = "assistant_browser_holds"
+BV2_SAFE_RULES_TABLE = "assistant_browser_user_safe_rules"
+BV2_DOWNLOADS_TABLE = "assistant_browser_downloads"
+BV2_LIVE_SESSIONS_TABLE = "assistant_browser_live_sessions"
+BV2_AGENT_TYPE = "user_browser"
+BV2_SITE_GRANT_RPC = "assistant_browser_site_grant"
+BV2_SITE_REVOKE_RPC = "assistant_browser_site_revoke"
+BV2_SCOPE_EXTEND_RPC = "assistant_browser_scope_extend"
+BV2_ADMISSION_CREATE_RPC = "assistant_browser_admission_create"
+BV2_START_DECIDE_RPC = "assistant_browser_start_decide"
+BV2_REQUEST_CREATE_RPC = "assistant_browser_request_create"
+BV2_REQUEST_DECIDE_RPC = "assistant_browser_request_decide"
+BV2_ENQUEUE_RPC = "assistant_browser_task_enqueue_v2"
+BV2_CREDENTIAL_PUT_RPC = "assistant_browser_credential_put_v2"
+BV2_CREDENTIAL_REVOKE_RPC = "assistant_browser_credential_revoke_v2"
+BV2_HELP_REPLY_RPC = "assistant_browser_help_reply_v2"
+BV2_HELP_FROM_MAIL_RPC = "assistant_browser_help_secret_from_mail"
+BV2_HOLD_DECIDE_RPC = "assistant_browser_hold_decide"
+BV2_SAFE_RULE_ADD_RPC = "assistant_browser_safe_rule_add"
+BV2_SAFE_RULE_REMOVE_RPC = "assistant_browser_safe_rule_remove"
+BV2_SESSION_SIGNOUT_RPC = "assistant_browser_session_signout"
+BV2_LIVE_OPEN_RPC = "assistant_browser_live_session_open"
+BV2_LIVE_CLOSE_RPC = "assistant_browser_live_session_close"
+BV2_SWEEP_RPC = "assistant_browser_sweep_v2"
+BV2_PURGE_RPC = "assistant_browser_purge_v2"
+BV2_OUTBOX_DRAIN_RPC = "assistant_browser_outbox_drain"
+BV2_OUTBOX_ACK_RPC = "assistant_browser_outbox_ack"
+BV2_DOWNLOAD_RECORD_RPC = "assistant_browser_download_record"
+# Session columns safe to list (no cookie envelope).
+BV2_SESSION_COLUMNS = (
+    "id, user_id, credential_id, credential_version, site_key, account_label, origin, source, "
+    "expires_at, created_at"
+)
+# Rows a provenance lookup reads per source (each query is bounded).
+BV2_URL_LOOKUP_LIMIT = 10
+
+
+def _bv2_rpc(user_id: str | None, name: str, params: Mapping[str, Any]) -> dict:
+    """One 0192 RPC; the caller has put the owner (or None) in params."""
+    return _rpc_data(_sb().rpc(name, dict(params)).execute())
+
+
+def _bv2_system_only(user_id: str | None, what: str) -> None:
+    if user_id is not None:
+        raise ValueError(f"{what} is a system sweep: pass user_id None")
+
+
+def _bv2_one(query: Any) -> dict | None:
+    rows = _rows(query.limit(1).execute())
+    return rows[0] if rows else None
+
+
+def _bv2_urls(urls: Sequence[str]) -> list[str]:
+    out: list[str] = []
+    for value in urls or ():
+        if isinstance(value, str) and value and value not in out and len(value) <= 2048:
+            out.append(value)
+    return out[:8]
+
+
+def browser_platform_config_v2(user_id: str) -> tuple[dict, dict]:
+    """The `user_browser` type row and the platform settings row (3.4).
+    The phase 6 `browser_platform_config` keeps reading the retired type."""
+    types = _rows(_sb().table("browser_agent_types").select("*").eq("key", BV2_AGENT_TYPE).limit(1).execute())
+    settings = _rows(_sb().table("browser_agent_settings").select("*").eq("id", 1).limit(1).execute())
+    return (types[0] if types else {}), (settings[0] if settings else {})
+
+
+def browser_sites(user_id: str, *, include_disabled: bool = False, kind: str | None = None,
+                  limit: int = 200) -> list[dict]:
+    """Registry rows (shared by every user), curated first."""
+    query = _sb().table(BV2_SITES_TABLE).select("*")
+    if not include_disabled:
+        query = query.eq("enabled", True)
+    if kind is not None:
+        query = query.eq("kind", kind)
+    return _rows(query.order("kind", desc=True).order("site_key").limit(max(1, min(500, int(limit)))).execute())
+
+
+def browser_site(user_id: str, site_key: str) -> dict | None:
+    """One registry row by key (enabled or not), or None."""
+    return _bv2_one(_sb().table(BV2_SITES_TABLE).select("*").eq("site_key", site_key))
+
+
+def browser_sites_by_keys(user_id: str, site_keys: Sequence[str]) -> dict[str, dict]:
+    """Registry rows by key, as {site_key: row}."""
+    keys = [str(k) for k in site_keys or () if k][:200]
+    if not keys:
+        return {}
+    rows = _rows(_sb().table(BV2_SITES_TABLE).select("*").in_("site_key", keys).limit(len(keys)).execute())
+    return {str(r["site_key"]): r for r in rows if r.get("site_key")}
+
+
+def browser_sites_for_url(user_id: str, *, origin: str, registrable_domain: str | None) -> list[dict]:
+    """Registry rows that may match one URL (5.1): every curated row, the ad
+    hoc rows naming its registrable domain, and the rows naming its exact
+    origin. The caller (assistant_browser_sites.site_for_url) does the exact
+    match; this only bounds the read."""
+    found: dict[str, dict] = {}
+    for row in _rows(_sb().table(BV2_SITES_TABLE).select("*").eq("kind", "curated").limit(200).execute()):
+        found[str(row["site_key"])] = row
+    if registrable_domain:
+        for row in _rows(_sb().table(BV2_SITES_TABLE).select("*").eq("kind", "ad_hoc")
+                         .contains("registrable_domains", [registrable_domain]).limit(50).execute()):
+            found[str(row["site_key"])] = row
+    for row in _rows(_sb().table(BV2_SITES_TABLE).select("*").contains("exact_origins", [origin])
+                     .limit(50).execute()):
+        found[str(row["site_key"])] = row
+    return list(found.values())
+
+
+def browser_site_grants(user_id: str, *, status: str | None = "active", limit: int = 200) -> list[dict]:
+    """The user's site grants, newest first (status None: every row)."""
+    query = _sb().table(BV2_GRANTS_TABLE).select("*").eq("user_id", user_id)
+    if status is not None:
+        query = query.eq("status", status)
+    return _rows(query.order("granted_at", desc=True).order("id", desc=True)
+                 .limit(max(1, min(500, int(limit)))).execute())
+
+
+def browser_site_grant(user_id: str, site_key: str) -> dict | None:
+    """The user's active grant for one site, or None."""
+    return _bv2_one(_sb().table(BV2_GRANTS_TABLE).select("*").eq("user_id", user_id)
+                    .eq("site_key", site_key).eq("status", "active"))
+
+
+def browser_site_grant_by_id(user_id: str, grant_id: str) -> dict | None:
+    return _bv2_one(_sb().table(BV2_GRANTS_TABLE).select("*").eq("user_id", user_id).eq("id", grant_id))
+
+
+def browser_site_grant_put(user_id: str, site_key: str, *, scope: str, value: str, path_prefix: str | None,
+                           granted_via: str, provenance: str, request_id: str | None = None,
+                           ad_hoc: Mapping[str, Any] | None = None) -> dict:
+    """RPC assistant_browser_site_grant (0192 A2.3): create (or return) the
+    active grant; an unknown `domain:` or `origin:` key becomes an ad hoc
+    registry row. Returns {ok, grant, waiting_admissions} or {ok:false, code}."""
+    return _bv2_rpc(user_id, BV2_SITE_GRANT_RPC, {
+        "p_user_id": user_id, "p_site_key": site_key, "p_scope": scope, "p_value": value,
+        "p_path_prefix": path_prefix, "p_granted_via": granted_via, "p_provenance": provenance,
+        "p_request_id": request_id, "p_ad_hoc": dict(ad_hoc) if ad_hoc is not None else None,
+    })
+
+
+def browser_site_revoke(user_id: str, grant_id: str, expected_version: int) -> dict:
+    """RPC assistant_browser_site_revoke (0192 part B): revoke, remove the
+    site's sessions, cancel queued jobs, fence running ones."""
+    return _bv2_rpc(user_id, BV2_SITE_REVOKE_RPC, {
+        "p_user_id": user_id, "p_grant_id": grant_id, "p_expected_version": int(expected_version),
+    })
+
+
+def browser_scope_extend(user_id: str, job_id: str, site_key: str) -> dict:
+    """RPC assistant_browser_scope_extend (5.4 step 2): {ok, policy_version}."""
+    return _bv2_rpc(user_id, BV2_SCOPE_EXTEND_RPC, {"p_user_id": user_id, "p_job_id": job_id, "p_site_key": site_key})
+
+
+# Credentials re-keyed by (site_key, account_label) (7.2). The phase 6
+# `browser_credential(user_id, service)` stays for the retired type.
+def browser_credential_v2(user_id: str, site_key: str, account_label: str | None = None, *,
+                          active_only: bool = False) -> dict | None:
+    """One saved account for a site: the named label, else the default
+    account (is_default), else the oldest active one. Server-side only: the
+    row carries the envelope columns."""
+    query = _sb().table("assistant_credentials").select("*").eq("user_id", user_id).eq("site_key", site_key)
+    if active_only:
+        query = query.eq("status", "active")
+    if account_label is not None:
+        return _bv2_one(query.eq("account_label", account_label))
+    rows = _rows(query.order("created_at").limit(20).execute())
+    for row in rows:
+        if row.get("is_default") and row.get("status") == "active":
+            return row
+    active = next((r for r in rows if r.get("status") == "active"), None)
+    if active is not None or active_only:
+        return active
+    return rows[0] if rows else None
+
+
+def browser_credentials_for_site(user_id: str, site_key: str) -> list[dict]:
+    """Every saved account of the user for one site, oldest first."""
+    return _rows(_sb().table("assistant_credentials").select("*").eq("user_id", user_id)
+                 .eq("site_key", site_key).order("created_at").limit(20).execute())
+
+
+BV2_CREDENTIAL_LIST_COLUMNS = ("id,user_id,site_key,service,account_label,status,fingerprint,username,version,"
+                               "is_default,sso_required,login_origins,created_at,updated_at")
+BV2_CREDENTIAL_LIST_MAX = 500
+
+
+def browser_credentials_v2_all(user_id: str) -> list[dict]:
+    """Every credential row of the user, revoked rows included, with only
+    the metadata columns (no envelope). The chat password guard, the reuse
+    check and Settings need the full set, never the first 20."""
+    return _rows(_sb().table("assistant_credentials").select(BV2_CREDENTIAL_LIST_COLUMNS).eq("user_id", user_id)
+                 .or_("site_key.not.is.null,service.not.is.null")
+                 .order("site_key").order("account_label").limit(BV2_CREDENTIAL_LIST_MAX).execute())
+
+
+def browser_credential_put_v2(user_id: str, site_key: str, account_label: str, expected_version: int,
+                              record: Mapping[str, Any], request_id: str | None = None) -> dict:
+    """RPC assistant_browser_credential_put_v2 (7.2, 7.3)."""
+    return _bv2_rpc(user_id, BV2_CREDENTIAL_PUT_RPC, {
+        "p_user_id": user_id, "p_site_key": site_key, "p_account_label": account_label,
+        "p_expected_version": int(expected_version), "p_record": dict(record), "p_request_id": request_id,
+    })
+
+
+def browser_credential_revoke_v2(user_id: str, credential_id: str, expected_version: int) -> dict:
+    """RPC assistant_browser_credential_revoke_v2 (by credential id)."""
+    return _bv2_rpc(user_id, BV2_CREDENTIAL_REVOKE_RPC, {
+        "p_user_id": user_id, "p_credential_id": credential_id, "p_expected_version": int(expected_version),
+    })
+
+
+def browser_sessions_v2(user_id: str, *, site_key: str | None = None, limit: int = 100) -> list[dict]:
+    """The user's saved site sessions (metadata columns only, no cookies)."""
+    query = _sb().table("assistant_browser_sessions").select(BV2_SESSION_COLUMNS).eq("user_id", user_id)
+    if site_key is not None:
+        query = query.eq("site_key", site_key)
+    return _rows(query.order("created_at", desc=True).limit(max(1, min(200, int(limit)))).execute())
+
+
+def browser_session_signout(user_id: str, session_id: str) -> dict:
+    """RPC assistant_browser_session_signout (Settings)."""
+    return _bv2_rpc(user_id, BV2_SESSION_SIGNOUT_RPC, {"p_user_id": user_id, "p_session_id": session_id})
+
+
+def browser_session_rows_v2(user_id: str, *, site_key: str, account_label: str,
+                            origin: str | None = None, limit: int = 20) -> list[dict]:
+    """Saved session rows of one account, newest first. Server side only:
+    the rows carry the cookie envelope (the runtime's SecretSet and the
+    object id a login result encrypts under; WI-6)."""
+    query = (_sb().table("assistant_browser_sessions").select("*").eq("user_id", user_id)
+             .eq("site_key", site_key).eq("account_label", account_label))
+    if origin is not None:
+        query = query.eq("origin", origin)
+    return _rows(query.order("created_at", desc=True).limit(max(1, min(50, int(limit)))).execute())
+
+
+# Admissions, requests and jobs (5.3).
+def browser_admission(user_id: str, admission_id: str) -> dict | None:
+    return _bv2_one(_sb().table(BV2_ADMISSIONS_TABLE).select("*").eq("user_id", user_id).eq("id", admission_id))
+
+
+def browser_admissions_waiting(user_id: str, *, site_key: str | None = None, limit: int = 50) -> list[dict]:
+    """The user's open admissions (waiting_* or ready, unexpired), oldest
+    first; with `site_key`, only those whose start site is that site."""
+    query = (_sb().table(BV2_ADMISSIONS_TABLE).select("*").eq("user_id", user_id)
+             .in_("status", ["waiting_grant", "waiting_credential", "waiting_link", "waiting_start", "ready"])
+             .gt("expires_at", _now_iso()))
+    if site_key is not None:
+        query = query.eq("start_site_key", site_key)
+    return _rows(query.order("created_at").limit(max(1, min(200, int(limit)))).execute())
+
+
+def browser_admission_create(user_id: str, record: Mapping[str, Any]) -> dict:
+    """RPC assistant_browser_admission_create (5.3 step 7)."""
+    return _bv2_rpc(user_id, BV2_ADMISSION_CREATE_RPC, {"p_user_id": user_id, "p_record": dict(record)})
+
+
+def browser_start_decide(user_id: str, admission_id: str, decision: str) -> dict:
+    """RPC assistant_browser_start_decide (start card and email link card)."""
+    return _bv2_rpc(user_id, BV2_START_DECIDE_RPC, {
+        "p_user_id": user_id, "p_admission_id": admission_id, "p_decision": decision,
+    })
+
+
+def browser_task_enqueue_v2(user_id: str, admission_id: str, job_input: Mapping[str, Any], *,
+                            user_cap_default: Any, global_cap_default: Any) -> dict:
+    """RPC assistant_browser_task_enqueue_v2 (5.3 step 8, 12.1). Money
+    arguments travel as strings."""
+    return _bv2_rpc(user_id, BV2_ENQUEUE_RPC, {
+        "p_user_id": user_id, "p_admission_id": admission_id, "p_input": dict(job_input),
+        "p_user_cap_default": _money(user_cap_default), "p_global_cap_default": _money(global_cap_default),
+    })
+
+
+def browser_job_by_admission(user_id: str, admission_id: str) -> dict | None:
+    return _bv2_one(_sb().table("browser_agent_jobs").select("*").eq("principal_kind", "user")
+                    .eq("principal_user_id", user_id).eq("assistant_admission_id", admission_id))
+
+
+def browser_job_credentials(user_id: str, *, job_id: str | None = None,
+                            admission_id: str | None = None) -> list[dict]:
+    """The credentials pinned for one job or admission (5.3 step 7)."""
+    if job_id is None and admission_id is None:
+        raise ValueError("browser_job_credentials needs a job or an admission")
+    query = _sb().table(BV2_JOB_CREDENTIALS_TABLE).select("*").eq("user_id", user_id)
+    if job_id is not None:
+        query = query.eq("job_id", job_id)
+    if admission_id is not None:
+        query = query.eq("admission_id", admission_id)
+    return _rows(query.order("created_at").limit(50).execute())
+
+
+def browser_request(user_id: str, request_id: str) -> dict | None:
+    return _bv2_one(_sb().table(BV2_REQUESTS_TABLE).select("*").eq("user_id", user_id).eq("id", request_id))
+
+
+def browser_requests_open(user_id: str, *, conversation_id: str | None = None, job_id: str | None = None,
+                          admission_id: str | None = None, kind: str | None = None,
+                          limit: int = 50) -> list[dict]:
+    """The user's open card requests (status requested, unexpired)."""
+    query = (_sb().table(BV2_REQUESTS_TABLE).select("*").eq("user_id", user_id).eq("status", "requested")
+             .gt("expires_at", _now_iso()))
+    if conversation_id is not None:
+        query = query.eq("conversation_id", conversation_id)
+    if job_id is not None:
+        query = query.eq("job_id", job_id)
+    if admission_id is not None:
+        query = query.eq("admission_id", admission_id)
+    if kind is not None:
+        query = query.eq("kind", kind)
+    return _rows(query.order("created_at", desc=True).limit(max(1, min(200, int(limit)))).execute())
+
+
+def browser_request_create(user_id: str, record: Mapping[str, Any]) -> dict:
+    """RPC assistant_browser_request_create (a card request row)."""
+    return _bv2_rpc(user_id, BV2_REQUEST_CREATE_RPC, {"p_user_id": user_id, "p_record": dict(record)})
+
+
+def browser_request_decide(user_id: str, request_id: str, decision: str) -> dict:
+    """RPC assistant_browser_request_decide (decline, cancel, link approve)."""
+    return _bv2_rpc(user_id, BV2_REQUEST_DECIDE_RPC, {
+        "p_user_id": user_id, "p_request_id": request_id, "p_decision": decision,
+    })
+
+
+# Help, holds, safe rules, downloads, live sign-in (6, 8, 9, 11).
+def browser_help_reply_v2(user_id: str, job_id: str, help_id: str, client_msg_id: str, action: str,
+                          record: Mapping[str, Any]) -> dict:
+    """RPC assistant_browser_help_reply_v2 (8.1)."""
+    return _bv2_rpc(user_id, BV2_HELP_REPLY_RPC, {
+        "p_user_id": user_id, "p_job_id": job_id, "p_help_id": help_id, "p_client_msg_id": client_msg_id,
+        "p_action": action, "p_record": dict(record),
+    })
+
+
+def browser_help_secret_from_mail(user_id: str, job_id: str, help_id: str, message_sha256: str,
+                                  record: Mapping[str, Any]) -> dict:
+    """RPC assistant_browser_help_secret_from_mail (8.3, server reader only)."""
+    return _bv2_rpc(user_id, BV2_HELP_FROM_MAIL_RPC, {
+        "p_user_id": user_id, "p_job_id": job_id, "p_help_id": help_id,
+        "p_message_sha256": message_sha256, "p_record": dict(record),
+    })
+
+
+def browser_holds(user_id: str, job_id: str, *, status: str | Sequence[str] | None = None,
+                  limit: int = 50) -> list[dict]:
+    """The holds of one of the user's jobs, newest first."""
+    query = _sb().table(BV2_HOLDS_TABLE).select("*").eq("user_id", user_id).eq("job_id", job_id)
+    query = _status_filter(query, status)
+    return _rows(query.order("created_at", desc=True).limit(max(1, min(200, int(limit)))).execute())
+
+
+def browser_hold(user_id: str, hold_id: str) -> dict | None:
+    return _bv2_one(_sb().table(BV2_HOLDS_TABLE).select("*").eq("user_id", user_id).eq("id", hold_id))
+
+
+def browser_hold_decide(user_id: str, hold_id: str, decision: str, *, token: str | None = None,
+                        token_exp: Any = None) -> dict:
+    """RPC assistant_browser_hold_decide (6.5 step 3, human route only)."""
+    return _bv2_rpc(user_id, BV2_HOLD_DECIDE_RPC, {
+        "p_user_id": user_id, "p_hold_id": hold_id, "p_decision": decision, "p_token": token,
+        "p_token_exp": _p7_iso_or_none(token_exp),
+    })
+
+
+def browser_safe_rules(user_id: str, *, site_key: str | None = None, limit: int = 200) -> list[dict]:
+    """The owner's own "not a final action" rules (6.3)."""
+    query = _sb().table(BV2_SAFE_RULES_TABLE).select("*").eq("user_id", user_id)
+    if site_key is not None:
+        query = query.eq("site_key", site_key)
+    return _rows(query.order("created_at", desc=True).limit(max(1, min(500, int(limit)))).execute())
+
+
+def browser_safe_rule_add(user_id: str, hold_id: str, *, method: str, host: str, path_pattern: str,
+                          graphql_operation: str | None = None) -> dict:
+    """RPC assistant_browser_safe_rule_add (6.3)."""
+    return _bv2_rpc(user_id, BV2_SAFE_RULE_ADD_RPC, {
+        "p_user_id": user_id, "p_hold_id": hold_id, "p_method": method, "p_host": host,
+        "p_path_pattern": path_pattern, "p_graphql_operation": graphql_operation,
+    })
+
+
+def browser_safe_rule_remove(user_id: str, rule_id: str) -> dict:
+    """RPC assistant_browser_safe_rule_remove (Settings)."""
+    return _bv2_rpc(user_id, BV2_SAFE_RULE_REMOVE_RPC, {"p_user_id": user_id, "p_rule_id": rule_id})
+
+
+def browser_downloads(user_id: str, job_id: str, *, limit: int = 50) -> list[dict]:
+    """The download rows of one of the user's jobs (11.2), oldest first."""
+    return _rows(_sb().table(BV2_DOWNLOADS_TABLE).select("*").eq("user_id", user_id).eq("job_id", job_id)
+                 .order("created_at").limit(max(1, min(200, int(limit)))).execute())
+
+
+def browser_live_sessions(user_id: str, *, job_id: str | None = None, limit: int = 20) -> list[dict]:
+    """The user's live sign-in sessions (metadata only, wave E)."""
+    query = _sb().table(BV2_LIVE_SESSIONS_TABLE).select("*").eq("user_id", user_id)
+    if job_id is not None:
+        query = query.eq("job_id", job_id)
+    return _rows(query.order("created_at", desc=True).limit(max(1, min(100, int(limit)))).execute())
+
+
+def browser_live_session_open(user_id: str, job_id: str, site_key: str, account_label: str) -> dict:
+    """RPC assistant_browser_live_session_open (9)."""
+    return _bv2_rpc(user_id, BV2_LIVE_OPEN_RPC, {
+        "p_user_id": user_id, "p_job_id": job_id, "p_site_key": site_key, "p_account_label": account_label,
+    })
+
+
+def browser_live_session_close(user_id: str, session_id: str, outcome: str,
+                               session: Mapping[str, Any] | None = None) -> dict:
+    """RPC assistant_browser_live_session_close (9 step 6)."""
+    return _bv2_rpc(user_id, BV2_LIVE_CLOSE_RPC, {
+        "p_user_id": user_id, "p_session_id": session_id, "p_outcome": outcome,
+        "p_session": dict(session) if session is not None else None,
+    })
+
+
+# System sweeps (only None is accepted).
+def browser_sweep_v2(user_id: str | None, *, limit: int = 100) -> dict:
+    """RPC assistant_browser_sweep_v2 (6.6, 12.3). System sweep."""
+    _bv2_system_only(user_id, "the browser v2 sweep")
+    return _bv2_rpc(user_id, BV2_SWEEP_RPC, {"p_limit": max(1, min(1000, int(limit)))})
+
+
+def browser_purge_v2(user_id: str | None, *, limit: int = 1000) -> dict:
+    """RPC assistant_browser_purge_v2 (expired sessions and live frames).
+    System sweep."""
+    _bv2_system_only(user_id, "the browser v2 purge")
+    return _bv2_rpc(user_id, BV2_PURGE_RPC, {"p_limit": max(1, min(5000, int(limit)))})
+
+
+def browser_outbox_drain(user_id: str | None, *, limit: int = 50) -> dict:
+    """RPC assistant_browser_outbox_drain (4.5). System sweep."""
+    _bv2_system_only(user_id, "the browser outbox drain")
+    return _bv2_rpc(user_id, BV2_OUTBOX_DRAIN_RPC, {"p_limit": max(1, min(500, int(limit)))})
+
+
+def browser_outbox_ack(user_id: str | None, ids: Sequence[int]) -> int:
+    """RPC assistant_browser_outbox_ack: rows written to chat. System sweep."""
+    _bv2_system_only(user_id, "the browser outbox ack")
+    values = [int(i) for i in ids or ()]
+    if not values:
+        return 0
+    data = _sb().rpc(BV2_OUTBOX_ACK_RPC, {"p_ids": values}).execute().data
+    if isinstance(data, list):
+        data = data[0] if data else 0
+    try:
+        return int(data or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+# URL provenance sources (5.5). Each returns small dicts naming the source
+# class, never the row's text. Email-written rows are never `bdr_record`.
+def browser_url_email_sources(user_id: str, urls: Sequence[str]) -> list[dict]:
+    """Rows written from outside senders' email that hold one of `urls`:
+    RFP harvest bid sheet URLs and harvested links, the bidding link of a
+    project the RFP slice created, a portal files-needed link, a PM link the
+    email trigger made. [{"source", "sender_domain"}]."""
+    values = _bv2_urls(urls)
+    if not values:
+        return []
+    out: list[dict] = []
+    harvests = _rows(_sb().table("rfp_harvests").select("id, rfp_email_id").in_("external_url", values)
+                     .limit(BV2_URL_LOOKUP_LIMIT).execute())
+    for value in values:
+        harvests += _rows(_sb().table("rfp_harvests").select("id, rfp_email_id")
+                          .contains("data", {"links": [{"url": value}]}).limit(BV2_URL_LOOKUP_LIMIT).execute())
+    email_ids = _uuids([h.get("rfp_email_id") for h in harvests])
+    senders: dict[str, str | None] = {}
+    if email_ids:
+        for row in _rows(_sb().table("rfp_emails").select("id, from_address").in_("id", email_ids)
+                         .limit(len(email_ids)).execute()):
+            address = str(row.get("from_address") or "")
+            senders[str(row.get("id"))] = (address.rpartition("@")[2].lower() or None) if "@" in address else None
+    for harvest in harvests:
+        out.append({"source": "rfp_harvest", "sender_domain": senders.get(str(harvest.get("rfp_email_id")))})
+    projects = _rows(_sb().table("projects").select("id").in_("bidding_url", values)
+                     .limit(BV2_URL_LOOKUP_LIMIT).execute())
+    if projects:
+        created = _rows(_sb().table("rfp_created_projects").select("project_id")
+                        .in_("project_id", [str(p["id"]) for p in projects]).limit(BV2_URL_LOOKUP_LIMIT).execute())
+        out += [{"source": "rfp_project", "sender_domain": None} for _ in created]
+    if _rows(_sb().table("projects").select("id").in_("files_needed_url", values).limit(1).execute()):
+        out.append({"source": "rfp_portal", "sender_domain": None})
+    if _rows(_sb().table("pm_external_links").select("id").in_("external_url", values)
+             .eq("linked_via", "email").limit(1).execute()):
+        out.append({"source": "pm_link_email", "sender_domain": None})
+    return out
+
+
+def browser_url_bdr_records(user_id: str, urls: Sequence[str]) -> list[dict]:
+    """Rows a BDR user typed or BDR generated that hold one of `urls`: a
+    project's bidding link (not one the RFP slice created), a PM link saved by
+    hand, an RFI link the Procore sync built. [{"source"}]."""
+    values = _bv2_urls(urls)
+    if not values:
+        return []
+    out: list[dict] = []
+    projects = _rows(_sb().table("projects").select("id").in_("bidding_url", values)
+                     .limit(BV2_URL_LOOKUP_LIMIT).execute())
+    if projects:
+        ids = [str(p["id"]) for p in projects]
+        created = {str(r.get("project_id")) for r in _rows(
+            _sb().table("rfp_created_projects").select("project_id").in_("project_id", ids)
+            .limit(len(ids)).execute())}
+        out += [{"source": "project_field"} for pid in ids if pid not in created]
+    if _rows(_sb().table("pm_external_links").select("id").in_("external_url", values)
+             .eq("linked_via", "manual").limit(1).execute()):
+        out.append({"source": "pm_link"})
+    if _rows(_sb().table("rfis").select("id").in_("external_url", values).limit(1).execute()):
+        out.append({"source": "rfi_sync"})
+    return out
+
+
+# Browser v2 admission reads and the model's own cancel (WI-5, plan 4.3, 5.3).
+def browser_message_turn(user_id: str, message_id: str) -> dict | None:
+    """{id, role, origin} of one of the user's messages. `origin` (0192) is
+    browser_result for the automatic follow-up turn, null for a turn the
+    user's own message started."""
+    return _bv2_one(_sb().table(MESSAGES_TABLE).select("id, role, origin").eq("user_id", user_id)
+                    .eq("id", message_id))
+
+
+def browser_project_exists(user_id: str, project_id: str) -> bool:
+    """Whether the project row exists (deleted projects are moved out of the
+    table, 0141). The caller has checked the user's writer role."""
+    return _bv2_one(_sb().table("projects").select("id").eq("id", project_id)) is not None
+
+
+def browser_project_in_context(user_id: str, conversation_id: str, project_id: str) -> bool:
+    """Whether one of the user's own messages in this conversation was sent
+    from that project's page (message context.project_id, set by the app)."""
+    return _bv2_one(_sb().table(MESSAGES_TABLE).select("id").eq("user_id", user_id)
+                    .eq("conversation_id", conversation_id).eq("role", "user")
+                    .eq("context->>project_id", project_id)) is not None
+
+
+def browser_job_cancel_request(user_id: str, job_id: str) -> dict | None:
+    """Ask one of the user's own active v2 jobs to stop: cancel_requested_at
+    is set once; the fence refuses the lease at once and the v2 sweep ends
+    the job `canceled` (settlement and the chat outbox run in its trigger).
+    Returns the updated row, or None when nothing changed."""
+    rows = _rows(_sb().table("browser_agent_jobs").update({"cancel_requested_at": _now_iso(),
+                                                          "cancel_requested_by": user_id})
+                 .eq("principal_kind", "user").eq("principal_user_id", user_id).eq("agent_type", BV2_AGENT_TYPE)
+                 .eq("id", job_id).in_("status", ["queued", "running", "waiting_help"])
+                 .is_("cancel_requested_at", "null").execute())
+    return rows[0] if rows else None
+
+
+# WI-4: the chat secret guard (7.7, 8.2) asks whether a code card is open.
+def browser_open_code_helps(user_id: str, conversation_id: str) -> list[dict]:
+    """Open mfa or mfa_step_up helps on the user's own v2 jobs of one
+    conversation (the code card is open, 8.2): [{"job_id", "help_id",
+    "site_key"}]. Ids only, no help content."""
+    jobs = _rows(_sb().table("browser_agent_jobs").select("id, platform").eq("principal_kind", "user")
+                 .eq("principal_user_id", user_id).eq("agent_type", BV2_AGENT_TYPE)
+                 .eq("assistant_conversation_id", conversation_id).in_("status", ["running", "waiting_help"])
+                 .limit(20).execute())
+    if not jobs:
+        return []
+    sites = {str(j["id"]): j.get("platform") for j in jobs if j.get("id")}
+    helps = _rows(_sb().table("assistant_browser_help_state").select("id, job_id, reason_code")
+                  .eq("user_id", user_id).in_("job_id", list(sites)).eq("status", "open")
+                  .in_("reason_code", ["mfa", "mfa_step_up"]).gt("expires_at", _now_iso()).limit(20).execute())
+    return [{"job_id": str(h["job_id"]), "help_id": str(h["id"]), "site_key": sites.get(str(h["job_id"]))}
+            for h in helps if h.get("id") and h.get("job_id")]
+
+
+# WI-14: the mail scrub (8.3) masks every message while the owner has an
+# open mfa or mfa_step_up help on any of their jobs (any conversation).
+def browser_owner_code_help_open(user_id: str) -> bool:
+    """Whether the user has any open, unexpired mfa or mfa_step_up help."""
+    return _bv2_one(_sb().table("assistant_browser_help_state").select("id").eq("user_id", user_id)
+                    .eq("status", "open").in_("reason_code", ["mfa", "mfa_step_up"])
+                    .gt("expires_at", _now_iso())) is not None
+
+# WI-15: downloads (11.2, 11.4). The record RPC is lease-fenced and writes the
+# audit row of a download; the rest are the owner's reads and the staged
+# row's life (claim for "Add to project", purge).
+def browser_download_record(user_id: str, job_id: str, worker_id: str, boot_id: str, epoch: int,
+                            record: Mapping[str, Any]) -> dict:
+    """RPC assistant_browser_download_record: one row per (job, sha256);
+    {"ok", "created", "download"}. `download` is None when the row already
+    existed (a retry); the caller then reads it with browser_download_by_sha."""
+    return _bv2_rpc(user_id, BV2_DOWNLOAD_RECORD_RPC, {
+        "p_job": job_id, "p_worker": worker_id, "p_boot": boot_id, "p_epoch": epoch, "p_record": dict(record),
+    })
+
+
+def browser_download_get(user_id: str, download_id: str) -> dict | None:
+    """One of the user's own download rows."""
+    return _bv2_one(_sb().table(BV2_DOWNLOADS_TABLE).select("*").eq("user_id", user_id).eq("id", str(download_id)))
+
+
+def browser_download_by_sha(user_id: str, job_id: str, sha256: str) -> dict | None:
+    """The user's download row of this job and content hash (a retry)."""
+    return _bv2_one(_sb().table(BV2_DOWNLOADS_TABLE).select("*").eq("user_id", user_id)
+                    .eq("job_id", str(job_id)).eq("sha256", sha256))
+
+
+def browser_downloads_staged_bytes(user_id: str) -> int:
+    """Bytes of the user's live staged downloads (the 2 GB staging cap)."""
+    rows = _rows(_sb().table(BV2_DOWNLOADS_TABLE).select("size_bytes").eq("user_id", user_id)
+                 .eq("status", "staged").is_("purged_at", "null").gt("expires_at", _now_iso())
+                 .limit(1000).execute())
+    return sum(int(r.get("size_bytes") or 0) for r in rows)
+
+
+def browser_download_claim(user_id: str, download_id: str, project_id: str) -> dict | None:
+    """"Add to project" step 1: take the staged row (staged to stored, project
+    set), fenced on live and unpurged; None when another click got there
+    first or the 7 days are over."""
+    rows = _rows(_sb().table(BV2_DOWNLOADS_TABLE).update({"status": "stored", "project_id": str(project_id)})
+                 .eq("user_id", user_id).eq("id", str(download_id)).eq("status", "staged")
+                 .is_("purged_at", "null").gt("expires_at", _now_iso()).execute())
+    return rows[0] if rows else None
+
+
+def browser_download_unclaim(user_id: str, download_id: str) -> bool:
+    """Undo a claim whose project write failed (stored with no file back to
+    staged)."""
+    return bool(_rows(_sb().table(BV2_DOWNLOADS_TABLE).update({"status": "staged", "project_id": None})
+                      .eq("user_id", user_id).eq("id", str(download_id)).eq("status", "stored")
+                      .is_("file_id", "null").is_("purged_at", "null").execute()))
+
+
+def browser_download_finish(user_id: str, download_id: str, file_id: str) -> bool:
+    """"Add to project" step 3: the project file exists; record it and mark
+    the staged object gone (the caller deletes it)."""
+    return bool(_rows(_sb().table(BV2_DOWNLOADS_TABLE).update({"file_id": str(file_id), "purged_at": _now_iso()})
+                      .eq("user_id", user_id).eq("id", str(download_id)).eq("status", "stored")
+                      .is_("file_id", "null").execute()))
+
+
+def browser_download_mark_purged(user_id: str, download_id: str) -> bool:
+    """purged_at = now(), once: the staged storage object is gone."""
+    return bool(_rows(_sb().table(BV2_DOWNLOADS_TABLE).update({"purged_at": _now_iso()})
+                      .eq("user_id", user_id).eq("id", str(download_id)).is_("purged_at", "null").execute()))
+
+
+# WI-13: browser results and cards in the chat (4.4, 4.5). Owner reads only;
+# the outbox drain and ack above are the system sweeps.
+def browser_chat_recent_messages(user_id: str, conversation_id: str, *, limit: int = 50) -> list[dict]:
+    """The newest messages of one of the user's conversations, newest first:
+    id, role, status, origin and created_at only (the follow-up gate reads
+    whether a turn is in flight, the last user message and the chain)."""
+    return _rows(_sb().table(MESSAGES_TABLE).select("id, role, status, origin, created_at")
+                 .eq("user_id", user_id).eq("conversation_id", conversation_id)
+                 .order("created_at", desc=True).order("id", desc=True)
+                 .limit(max(1, min(200, int(limit)))).execute())
+
+
+def browser_help_state_by_id(user_id: str, help_id: str) -> dict | None:
+    """One help row of the user's own jobs (status, reason, credential and
+    hold ids). No help content: messages and secrets live in records."""
+    return _bv2_one(_sb().table("assistant_browser_help_state")
+                    .select("id, job_id, status, reason_code, credential_id, hold_id, expires_at, created_at")
+                    .eq("user_id", user_id).eq("id", help_id))
+
+
+# WI-18: browser v2 offboarding (docs/ASSISTANT_BROWSER_V2_PLAN.md 17.5). Owner
+# wrappers with one caller, assistant_offboarding.browser_v2_offboard. The
+# grants, admissions, card requests, holds, live sessions, safe rules and
+# cookie jars are cleared by the RPC assistant_browser_revoke_owner
+# (browser_revoke_owner); these cover what that RPC leaves.
+def browser_offboard_pins_delete(user_id: str) -> int:
+    """Delete the person's pinned job credentials (the per-job credential
+    choices; the credentials themselves are revoked by the RPC). Returns
+    the count."""
+    return len(_rows(_sb().table(BV2_JOB_CREDENTIALS_TABLE).delete().eq("user_id", user_id).execute()))
+
+
+def browser_offboard_staged_downloads(user_id: str, *, limit: int = 200) -> list[dict]:
+    """The person's staged browser downloads whose object is still there,
+    whatever their expiry, plus any stored row whose "Add to project" claim
+    died before the object was deleted (no file, not purged, a path):
+    [{id, user_id, storage_path}], oldest first."""
+    size = max(1, min(200, int(limit)))
+
+    def mine() -> Any:
+        return _sb().table(BV2_DOWNLOADS_TABLE).select("id, user_id, storage_path").eq("user_id", user_id)
+
+    rows = _rows(mine().eq("status", "staged").is_("purged_at", "null").order("created_at").limit(size).execute())
+    rows += _rows(mine().eq("status", "stored").is_("file_id", "null").is_("purged_at", "null")
+                  .not_.is_("storage_path", "null").order("created_at").limit(size).execute())
+    return rows[:size]
+
+
+def browser_offboard_open_state(user_id: str) -> dict[str, int]:
+    """What browser v2 offboarding should have cleared, counted for the
+    person (each at most 1000): grants, admissions, requests, holds, live,
+    safe_rules, pins, staged. The hook reads it after the revoke to see
+    whether anything is left."""
+    def count(query: Any) -> int:
+        return len(_rows(query.limit(1000).execute()))
+
+    def table(name: str) -> Any:
+        return _sb().table(name).select("id").eq("user_id", user_id)
+
+    return {
+        "grants": count(table(BV2_GRANTS_TABLE).eq("status", "active")),
+        "admissions": count(table(BV2_ADMISSIONS_TABLE).in_("status", list(BV2_ADMISSION_OPEN))),
+        "requests": count(table(BV2_REQUESTS_TABLE).eq("status", "requested")),
+        "holds": count(table(BV2_HOLDS_TABLE).in_("status", ["open", "approved"])),
+        "live": count(table(BV2_LIVE_SESSIONS_TABLE).eq("status", "open")),
+        "safe_rules": count(table(BV2_SAFE_RULES_TABLE)),
+        "pins": count(table(BV2_JOB_CREDENTIALS_TABLE)),
+        "staged": count(table(BV2_DOWNLOADS_TABLE).eq("status", "staged").is_("purged_at", "null")),
+    }
 
 
 # ── Phase 7: the proactive router (docs/ASSISTANT_PHASE7_PLAN.md, WI-3) ──────

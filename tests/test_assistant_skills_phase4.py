@@ -79,7 +79,7 @@ def test_every_listed_tool_is_registered_deferred_and_never_core(name):
         assert tool not in CORE_NAMES
     # The phase 0 to 3 skills list none (they use core tools only).
     for other, skill in _skills().items():
-        if other not in TOOLS and other not in {"drafting-emails", "reading-websites"}:
+        if other not in TOOLS and other not in {"drafting-emails", "using-the-browser"}:
             assert skill.tools == (), other
 
 

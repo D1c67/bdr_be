@@ -28,6 +28,62 @@ def _error(status: int, message: str) -> HTTPException:
     return HTTPException(status, message, headers=HEADERS)
 
 
+# Browser v2 (docs/ASSISTANT_BROWSER_V2_PLAN.md 10.7): an IT Admin reading a
+# conversation never sees what the owner approved or typed in a browser card.
+# The cards carry ids and statuses only (secrets never enter chat), so this is
+# a second fence: the cards that mirror a held request, a sign-in code, a
+# credential or a live sign-in lose everything but their type and status, and
+# a browser result loses its list of released actions (their labels are page
+# text from the held request). Only browser blocks and the results of the
+# browser tools are touched; every other block and result passes unchanged.
+BROWSER_PRIVATE_CARDS = frozenset({
+    "browser_final_action", "browser_code_request", "browser_credential_request", "browser_live_signin",
+})
+BROWSER_PRIVATE_KEYS = frozenset({
+    "release_token", "body_summary", "body_sha256", "url_sha256", "secret", "password", "cookies",
+})
+BROWSER_TOOLS = frozenset({
+    "browser_task_start", "browser_task_status", "browser_task_cancel", "browser_sites_list",
+    "request_site_access", "request_site_credential",
+})
+
+
+def _scrub_browser_value(value: object) -> object:
+    if isinstance(value, list):
+        return [_scrub_browser_value(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    out: dict = {}
+    for key, item in value.items():
+        if key in BROWSER_PRIVATE_KEYS:
+            continue
+        if key == "released_actions":
+            out["released_action_count"] = len(item) if isinstance(item, list) else 0
+            continue
+        out[key] = _scrub_browser_value(item)
+    return out
+
+
+def _scrub_block(block: object) -> object:
+    if not isinstance(block, dict) or not str(block.get("type") or "").startswith("browser_"):
+        return block
+    if block["type"] in BROWSER_PRIVATE_CARDS:
+        return {"type": block["type"], "status": block.get("status"), "private": True}
+    return _scrub_browser_value(block)
+
+
+def _scrub_browser(result: dict) -> dict:
+    """Apply the 10.7 exclusions to the blocks of the messages and the
+    payloads of the browser tools' results in one inspection result."""
+    for message in result.get("messages") or []:
+        if isinstance(message, dict) and isinstance(message.get("blocks"), list):
+            message["blocks"] = [_scrub_block(block) for block in message["blocks"]]
+    for item in result.get("tool_results") or []:
+        if isinstance(item, dict) and item.get("tool_name") in BROWSER_TOOLS and item.get("payload") is not None:
+            item["payload"] = _scrub_browser_value(item["payload"])
+    return result
+
+
 def _inspect(conversation_id: UUID, body: InspectionIn, action: str, user: CurrentUser) -> dict:
     _refuse_assistant_principal(user)
     if user.role != Role.IT_ADMIN or user.is_active is not True:
@@ -41,7 +97,7 @@ def _inspect(conversation_id: UUID, body: InspectionIn, action: str, user: Curre
         code = result.get("code")
         status = {"forbidden": 403, "not_found": 404, "reason_required": 422}.get(code, 409)
         raise _error(status, "Conversation inspection is unavailable.")
-    return result
+    return _scrub_browser(result)
 
 
 @router.post("/inspection/conversations/{conversation_id}/read")

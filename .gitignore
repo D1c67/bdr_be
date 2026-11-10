@@ -22,3 +22,5 @@ __pycache__/
 
 # Next.js build artifacts (stray frontend build output)
 .next/
+/dist/browser-v2-worker-*/
+*.egg-info/

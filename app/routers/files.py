@@ -91,6 +91,7 @@ from app.core.supabase_client import get_supabase
 from app.models.schemas import FilesExportIn
 from app.services import (
     estimator_rounds,
+    excel_edit,
     file_access,
     file_export,
     files_needed,
@@ -748,6 +749,61 @@ def _notify_drawing_changed(
         notify_user(est_id, project_id, "drawing_changed", msg)
 
 
+class AddendumMetadataIn(BaseModel):
+    addendum_number: str
+    addendum_issued_on: date
+
+    @field_validator("addendum_number")
+    @classmethod
+    def _number(cls, value: str) -> str:
+        value = value.strip()
+        if not value or len(value) > ADDENDUM_NUMBER_MAX_CHARS:
+            raise ValueError("A valid addendum number is required")
+        return value
+
+    @field_validator("addendum_issued_on")
+    @classmethod
+    def _issued_on(cls, value: date) -> date:
+        if value > datetime.now(timezone.utc).date() + timedelta(days=1):
+            raise ValueError("The addendum issue date cannot be in the future")
+        return value
+
+
+@router.patch("/{file_id}/addendum")
+def update_addendum_metadata(
+    project_id: str,
+    file_id: str,
+    body: AddendumMetadataIn,
+    user: CurrentUser = Depends(require_project_assignment),
+):
+    """Complete or correct an uploaded addendum before it is sent."""
+    if user.role not in WRITER_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not permitted")
+    sb = get_supabase()
+    rows = (
+        sb.table("project_files").select("id, category, sent_to_estimators_at")
+        .eq("id", file_id).eq("project_id", project_id).limit(1).execute()
+    ).data or []
+    if not rows:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found")
+    if rows[0]["category"] != ADDENDUM_CATEGORY:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "File is not an addendum")
+    if rows[0].get("sent_to_estimators_at"):
+        raise HTTPException(status.HTTP_409_CONFLICT, SENT_IMMUTABLE_MESSAGE)
+    updates = body.model_dump(mode="json")
+    # Recheck the sent flag on the write so a concurrent send cannot silently
+    # change the metadata of an addendum that has already gone out.
+    updated = (
+        sb.table("project_files").update(updates)
+        .eq("id", file_id).eq("project_id", project_id)
+        .eq("category", ADDENDUM_CATEGORY).is_("sent_to_estimators_at", "null").execute()
+    ).data or []
+    if not updated:
+        raise HTTPException(status.HTTP_409_CONFLICT, SENT_IMMUTABLE_MESSAGE)
+    audit(user.id, "file.addendum_updated", "project_file", file_id, updates)
+    return updated[0]
+
+
 class FileNoteIn(BaseModel):
     note: str
 
@@ -1222,6 +1278,14 @@ def delete_file(
                 status.HTTP_409_CONFLICT, "Sent proposals are immutable and cannot be deleted"
             )
 
+    # Earlier versions saved by Edit in Excel (0193) go with the file. Read
+    # before the row goes: the versions cascade with it.
+    try:
+        version_objects = set(excel_edit.version_paths(file_id))
+    except Exception:  # noqa: BLE001 - an orphan must never block the delete
+        logger.exception("files: could not list the versions of %s", file_id)
+        version_objects = set()
+
     if user.role == Role.ESTIMATOR:
         # Row first, and conditionally: a Send racing this delete seals the row,
         # the condition then matches nothing, and the file stays part of its
@@ -1249,6 +1313,7 @@ def delete_file(
         rec.get("preview_path"),
         office_preview.preview_object_path(project_id, file_id),
     }
+    cleanup_paths |= version_objects - {rec["storage_path"]}
     for path in filter(None, cleanup_paths):
         try:
             storage.delete_file(path)

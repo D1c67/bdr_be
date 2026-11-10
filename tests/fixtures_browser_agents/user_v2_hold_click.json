@@ -1,0 +1,15 @@
+{
+  "model": "UserHoldRequest",
+  "v2_endpoint": "user_holds",
+  "direction": "request",
+  "body": {
+    "trigger": "click",
+    "frame": "main",
+    "method": "GET",
+    "url": "https://portal.example-supplier.com/bids/88/accept",
+    "origin": "https://portal.example-supplier.com",
+    "url_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "body_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "element_label": "Accept bid"
+  }
+}

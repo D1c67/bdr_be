@@ -8,6 +8,8 @@ import httpx
 
 from scripts import reconnect_phase6_acceptance as repair
 
+WORKER = 'a1b2c3d4-0000-4000-8000-000000000001'
+
 
 @pytest.mark.parametrize('value', [None, {}, {'ready': False}, {'run': 'a' * 32, 'ready': 1},
     {'run': 'private-invalid', 'ready': True}, {'run': 12, 'ready': True},
@@ -28,9 +30,11 @@ def test_only_new_tunnel_is_owned_and_same_run_is_verified(monkeypatch, failure)
     monkeypatch.setattr(repair.preparation, 'stop_tunnel', stopped)
     preflight = Mock(side_effect=AssertionError('Worker-upgrade preflight must not block tunnel repair'))
     monkeypatch.setattr(repair.setup, 'acceptance_preflight', preflight)
+    monkeypatch.setattr(repair.setup, 'personal_worker_id', lambda: WORKER)
 
     def connect(client, children, env):
-        assert env == {'PHASE6_ACCEPTANCE_RUN': 'a' * 32}
+        assert env == {'PHASE6_ACCEPTANCE_RUN': 'a' * 32, 'PHASE6_ACCEPTANCE': 'true',
+                       'PHASE6_ACCEPTANCE_WORKER': WORKER}
         children.append(child)
         if failure == 'verification':
             raise repair.setup.SetupError('Remote instance mismatch')
@@ -42,6 +46,44 @@ def test_only_new_tunnel_is_owned_and_same_run_is_verified(monkeypatch, failure)
     stopped.assert_called_once_with(child)
     preflight.assert_not_called()
     assert fetch.call_args.args[1] == 'http://127.0.0.1:5071/phase6-acceptance/ready'
+
+
+def _no_single_worker(monkeypatch, rows):
+    from app.core import supabase_client
+
+    monkeypatch.setattr(repair, 'get_settings', lambda: SimpleNamespace(supabase_url=repair.setup.DEV_URL))
+    monkeypatch.setattr(repair.preparation, 'fetch', Mock(return_value=json.dumps({'run': 'a' * 32, 'ready': True}).encode()))
+    def none():
+        raise repair.setup.SetupError('Exactly one approved personal worker is needed')
+    monkeypatch.setattr(repair.setup, 'personal_worker_id', none)
+    monkeypatch.setattr(supabase_client, 'get_supabase', lambda: object())
+    monkeypatch.setattr(repair.setup, 'personal_workers', lambda sb: rows)
+    monkeypatch.setattr(repair.preparation, 'stop_tunnel', Mock())
+
+
+def test_two_approved_workers_refuse_before_any_tunnel(monkeypatch):
+    _no_single_worker(monkeypatch, [{'id': WORKER, 'status': 'active'}, {'id': WORKER, 'status': 'active'}])
+    connect = Mock()
+    monkeypatch.setattr(repair.setup, 'connect_acceptance_tunnel', connect)
+    assert repair.main() == 1
+    connect.assert_not_called()
+
+
+@pytest.mark.parametrize('rows', [[], [{'id': WORKER, 'status': 'pending'}]])
+def test_the_reenrollment_window_still_gets_a_tunnel_and_the_reenroll_blocks(monkeypatch, rows):
+    """Between revoking the old worker row and approving the new one there is
+    no approved worker: the replacement tunnel still starts, verifies the
+    firewall endpoint and prints the re-enroll and firewall blocks."""
+    _no_single_worker(monkeypatch, rows)
+    seen = {}
+
+    def connect(client, children, env):
+        seen.update(env)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(repair.setup, 'connect_acceptance_tunnel', connect)
+    assert repair.main() == 0
+    assert seen == {'PHASE6_ACCEPTANCE_RUN': 'a' * 32, 'PHASE6_ACCEPTANCE': 'true'}
 
 
 def test_other_project_refused_before_local_or_public_network(monkeypatch):
@@ -82,10 +124,45 @@ def test_transient_tunnel_response_retries_both_verified_endpoints(tunnel_check,
                               request=httpx.Request('GET', url))
 
     children = []
-    repair.setup.connect_acceptance_tunnel(SimpleNamespace(get=get), children, {'PHASE6_ACCEPTANCE_RUN': 'a' * 32})
+    repair.setup.connect_acceptance_tunnel(SimpleNamespace(get=get), children,
+                                           {'PHASE6_ACCEPTANCE_RUN': 'a' * 32, 'PHASE6_ACCEPTANCE_WORKER': WORKER})
     assert children == [child] and clock[0] == 1
     assert calls[-2:] == [api + '/phase6-acceptance/ready', api + '/phase6-acceptance/reconnect.ps1']
-    assert 'Get-FileHash' in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert 'Get-FileHash' in out and f"-ExpectedWorkerId '{WORKER}'" in out
+    assert '-Reenroll' not in out  # a replacement tunnel never prints the rollout block
+
+
+def first_start_get(template, firewall):
+    def get(url, **kwargs):
+        if url.endswith('/ready'):
+            body = json.dumps({'run': 'a' * 32, 'ready': True}).encode()
+        else:
+            body = firewall if url.endswith('/firewall.ps1') else template
+        return httpx.Response(200, content=body, request=httpx.Request('GET', url))
+    return get
+
+
+def test_first_start_prints_the_reenroll_and_firewall_blocks_without_a_worker(tunnel_check, capsys):
+    import hashlib
+    child, api, clock, template = tunnel_check
+    firewall = repair.setup.FIREWALL_SCRIPT.read_bytes()
+    repair.setup.connect_acceptance_tunnel(SimpleNamespace(get=first_start_get(template, firewall)), [],
+                                           {'PHASE6_ACCEPTANCE_RUN': 'a' * 32, 'PHASE6_ACCEPTANCE': 'true'})
+    out = capsys.readouterr().out
+    assert 'bdr-personal-reconnect.ps1' not in out and 'No approved personal worker yet' in out
+    assert '-Pool user -Reenroll' in out and api in out
+    assert '/phase6-acceptance/firewall.ps1' in out and hashlib.sha256(firewall).hexdigest() in out
+    assert out.index('-Reenroll') < out.index('firewall.ps1')
+
+
+def test_a_changed_firewall_script_stops_before_any_block(tunnel_check, capsys):
+    child, api, clock, template = tunnel_check
+    with pytest.raises(repair.setup.SetupError, match='firewall'):
+        repair.setup.connect_acceptance_tunnel(SimpleNamespace(get=first_start_get(template, b'tampered')), [],
+                                               {'PHASE6_ACCEPTANCE_RUN': 'a' * 32, 'PHASE6_ACCEPTANCE': 'true'})
+    out = capsys.readouterr().out
+    assert 'Get-FileHash' not in out and '-Reenroll' not in out
 
 
 @pytest.mark.parametrize('failure', ['persistent530', '401', 'redirect', 'wrong_run', 'wrong_script'])
@@ -105,6 +182,9 @@ def test_failed_verification_never_prints_reconnect_command(tunnel_check, capsys
         return httpx.Response(status, content=body, request=httpx.Request('GET', url))
 
     with pytest.raises((repair.setup.SetupError, repair.preparation.PreparationError)):
-        repair.setup.connect_acceptance_tunnel(SimpleNamespace(get=get), [], {'PHASE6_ACCEPTANCE_RUN': 'a' * 32})
-    assert 'Get-FileHash' not in capsys.readouterr().out
+        repair.setup.connect_acceptance_tunnel(SimpleNamespace(get=get), [], {'PHASE6_ACCEPTANCE_RUN': 'a' * 32,
+                                                                              'PHASE6_ACCEPTANCE_WORKER': WORKER,
+                                                                              'PHASE6_ACCEPTANCE': 'true'})
+    out = capsys.readouterr().out
+    assert 'Get-FileHash' not in out and '-Reenroll' not in out
     assert clock[0] <= 182

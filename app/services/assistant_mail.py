@@ -56,6 +56,18 @@ def metadata(row: dict) -> dict:
             "received_at": row.get("receivedDateTime"), "has_attachments": bool(row.get("hasAttachments"))}
 
 
+def scrubber(user_id: str, *, review_target: str | None = None):
+    """Browser v2 8.3 (WI-14): codes become [code] and sign-in links
+    [sign-in link] in code emails (and in every message while the owner
+    has an open mfa help) before a result is returned or stored. In a
+    Mailbox review the reviewed mailbox's owner counts too."""
+    from app.services import assistant_browser_mfa_mail
+
+    if review_target is not None:
+        return assistant_browser_mfa_mail.review_scrubber_for(user_id, review_target)
+    return assistant_browser_mfa_mail.scrubber_for(user_id)
+
+
 def save_raw(user_id: str, tool: str, payload: Any, *, conversation_id=None, review=False) -> str:
     encoded = json.dumps(payload, ensure_ascii=True, default=str)
     row = repo.insert_tool_result(user_id, {
@@ -85,6 +97,7 @@ def search(user_id: str, mailbox: str, query="", window_days=30, limit=20) -> di
         filters += " and contains(subject,'" + query.replace("'", "''") + "')"
     params = {"$select": "id,subject,from,receivedDateTime,hasAttachments",
               "$filter": filters, "$top": str(min(limit, 50))}
+    scrub = scrubber(user_id)
     rows = []
     next_url = path
     seen = set()
@@ -99,7 +112,7 @@ def search(user_id: str, mailbox: str, query="", window_days=30, limit=20) -> di
         values = page.get("value")
         if not isinstance(values, list):
             raise MailError()
-        rows.extend(metadata(row) for row in values[:limit - len(rows)] if isinstance(row, dict))
+        rows.extend(metadata(scrub.view(row)[0]) for row in values[:limit - len(rows)] if isinstance(row, dict))
         following = page.get("@odata.nextLink")
         if not following or len(rows) >= limit:
             return {"mailbox": mailbox, "messages": rows, "truncated": bool(following), "window_days": window_days}
@@ -116,13 +129,18 @@ def read(user_id: str, mailbox: str, message_id: str, *, conversation_id=None, r
     body = raw.get("body") or {}
     if body.get("contentType", "text").casefold() != "text":
         raise MailError()
+    scrub = scrubber(user_id)
+    raw, code_email = scrub.view(raw)
+    body = raw.get("body") or {}
     text = str(body.get("content") or "")[:MAX_BODY]
     result_id = save_raw(user_id, "email_read", {"mailbox": mailbox, "message": raw},
                          conversation_id=conversation_id)
     from app.services.assistant_mail_review import extract
     if not run_id:
         raise MailError("turn_context_unavailable")
-    summary = extract(user_id, run_id, [{**metadata(raw), "body": text}])
+    # A code email reaches the extractor with no body (8.3).
+    summary = scrub.text(extract(user_id, run_id, [metadata(raw) if code_email else {**metadata(raw), "body": text}]),
+                         code_email=code_email)
     attachments = []
     if raw.get("hasAttachments"):
         mailbox, token = assistant_ms.for_mailbox(user_id, mailbox)

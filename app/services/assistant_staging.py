@@ -219,6 +219,83 @@ def purge_expired(user_id: str | None, limit: int) -> int:
     return done
 
 
+# ── Staged kind `browser_download` (docs/ASSISTANT_BROWSER_V2_PLAN.md 11.4) ──
+#
+# A file the assistant browser downloaded for a task with no project waits as
+# the owner's staged object for 7 days. The record is the owner's
+# assistant_browser_downloads row (status staged, storage_path, expires_at),
+# not an assistant_files row: that table is the PDF-only splitter tray, and a
+# row there would show in the tray and could be linked to a message or claimed
+# by split-drop. The object lives under assistant-files/<owner>/browser/ in
+# the private bucket, is stored as application/octet-stream and is never
+# served from here. Only a human route can move it into a project
+# (assistant_browser_downloads.add_to_project); no model tool names it.
+
+BROWSER_DOWNLOAD_KIND = "browser_download"
+BROWSER_DOWNLOAD_TTL_SECONDS = 7 * 24 * 3600
+BROWSER_DOWNLOAD_CAP_BYTES = 2 * 1024 * 1024 * 1024     # live staged downloads per person
+BROWSER_DOWNLOAD_MIME = "application/octet-stream"
+SWEEP_ON_BROWSER_DOWNLOAD = 20
+
+
+def browser_download_path(user_id: str, filename: str) -> str:
+    """The object path of a staged download: assistant-files/<owner>/browser/<uuid>-<safe name>.
+    Not a project path, so delete_project_prefix never touches it."""
+    import uuid
+
+    return f"assistant-files/{user_id}/browser/{uuid.uuid4()}-{storage.safe_key_component(filename)}"
+
+
+def browser_downloads_room(user_id: str, size_bytes: int) -> bool:
+    """Whether `size_bytes` more fits under the person's 2 GB of live staged downloads."""
+    return _repo().browser_downloads_staged_bytes(user_id) + int(size_bytes) <= BROWSER_DOWNLOAD_CAP_BYTES
+
+
+def put_browser_download(user_id: str, filename: str, content: bytes) -> tuple[str, str]:
+    """Write the object of a staged download; returns (storage_path,
+    expires_at ISO). The caller records the row and calls
+    `discard_browser_download` when that fails."""
+    from datetime import datetime, timedelta, timezone
+
+    path = browser_download_path(user_id, filename)
+    storage.upload_file(path, content, BROWSER_DOWNLOAD_MIME)
+    expires = datetime.now(timezone.utc) + timedelta(seconds=BROWSER_DOWNLOAD_TTL_SECONDS)
+    return path, expires.isoformat()
+
+
+def read_browser_download(storage_path: str) -> bytes:
+    """The bytes of a staged download (add-to-project re-checks them)."""
+    return storage.download_file(storage_path)
+
+
+def discard_browser_download(storage_path: str) -> bool:
+    """Delete one staged download object; False (logged) when storage refused."""
+    return _delete_object(storage_path)
+
+
+def purge_browser_downloads(user_id: str | None, limit: int = SWEEP_ON_BROWSER_DOWNLOAD) -> int:
+    """Delete the objects of staged downloads past their 7 days and mark the
+    rows purged (rows stay); returns how many were purged. `user_id` None is
+    the SYSTEM SWEEP across every user; otherwise only that person's rows.
+    Owners on legal hold are skipped in both modes. Best effort: never raises."""
+    try:
+        repo = _repo()
+        rows = repo.staged_downloads_to_purge(user_id, limit=limit)
+    except Exception:  # noqa: BLE001 - the sweep is best effort; the next call retries
+        logger.exception("assistant staging: browser download purge query failed")
+        return 0
+    done = 0
+    for row in rows:
+        try:
+            if not _delete_object(str(row.get("storage_path") or "")):
+                continue
+            if repo.browser_download_mark_purged(str(row.get("user_id")), str(row.get("id"))):
+                done += 1
+        except Exception:  # noqa: BLE001 - one bad row never stops the sweep
+            logger.exception("assistant staging: purge of browser download %s failed", row.get("id"))
+    return done
+
+
 def _delete_object(path: str) -> bool:
     """Delete one staging object; a missing object counts as deleted. False
     (logged) when storage refused, so the row stays unpurged for the next

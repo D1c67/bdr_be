@@ -89,6 +89,9 @@ def review(user_id: str, run_id: str, approval_id: str, body: dict) -> dict:
         if not isinstance(rows, list):
             raise mail.MailError()
         raw = []
+        extract_input = []
+        any_code_email = False
+        scrub = mail.scrubber(user_id, review_target=preflight["target_upn"])
         for row in rows[:limit]:
             if not isinstance(row, dict) or not row.get("id"):
                 continue
@@ -97,11 +100,18 @@ def review(user_id: str, run_id: str, approval_id: str, body: dict) -> dict:
             message = graph.read_json(path + "/" + quote(str(row["id"]), safe=""),
                 params={"$select": "id,subject,from,receivedDateTime,body"},
                 prefer='outlook.body-content-type="text"')
+            # Browser v2 8.3: codes and sign-in links masked; a code email
+            # reaches the extractor with no body.
+            message, code_email = scrub.view(message) if isinstance(message, dict) else (message, False)
+            any_code_email = any_code_email or code_email
             raw.append(message)
+            extract_input.append({k: v for k, v in message.items() if k not in ("body", "bodyPreview", "uniqueBody")}
+                                 if code_email else message)
             ids.append(str(row["id"]))
         raw_id = mail.save_raw(user_id, "read_mailbox", {"mailbox": preflight["target_upn"], "messages": raw},
                                conversation_id=preflight["conversation_id"], review=True)
-        summary = extract(user_id, run_id, raw) if raw else "No messages in this window."
+        summary = (scrub.text(extract(user_id, run_id, extract_input), code_email=any_code_email)
+                   if raw else "No messages in this window.")
         outcome = repo.mailbox_access_outcome(user_id, access_id, "succeeded", message_ids=ids)
         if not outcome.get("ok"):
             raise mail.MailError("audit_failed")

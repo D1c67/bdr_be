@@ -1,0 +1,13 @@
+{
+  "model": "UserCredentialResultRequest",
+  "v2_endpoint": "user_login_result_v2",
+  "direction": "request",
+  "body": {
+    "credential_id": "c0000000-0000-4000-8000-000000000001",
+    "attempt_id": "d1d1d1d1-0000-4000-8000-000000000002",
+    "origin": "https://login.procore.com",
+    "outcome": "push",
+    "step": "push_prompt",
+    "cookies": null
+  }
+}

@@ -31,6 +31,21 @@ def existing_run(client) -> str:
         raise setup.SetupError('The existing port 5071 server is not a ready Phase 6 acceptance API.') from None
 
 
+def approved_worker_or_none() -> str | None:
+    """The one approved personal worker, or None while there is none (the
+    1.1.0 rollout window between revoking the old row and approving the
+    re-enrolled one). Read only. More than one approved row still refuses."""
+    try:
+        return setup.personal_worker_id()
+    except setup.SetupError:
+        from app.core.supabase_client import get_supabase
+
+        workers = setup.personal_workers(get_supabase())
+        if any(w.get('status') == 'active' for w in workers):
+            raise
+        return None
+
+
 def main() -> int:
     children = []
     try:
@@ -38,8 +53,17 @@ def main() -> int:
         with httpx.Client(timeout=15, trust_env=False, follow_redirects=False) as client:
             print('Checking the existing isolated test API on port 5071...', flush=True)
             run = existing_run(client)
+            # Read only: the one approved personal worker (the 1.1.0 rollout
+            # re-enrolls it, so its id is looked up, not pinned), or none yet.
+            worker = approved_worker_or_none()
+            env = {'PHASE6_ACCEPTANCE_RUN': run, 'PHASE6_ACCEPTANCE': 'true'}
+            if worker is not None:
+                env['PHASE6_ACCEPTANCE_WORKER'] = worker
             print('Starting a replacement tunnel to that same test API...', flush=True)
-            setup.connect_acceptance_tunnel(client, children, {'PHASE6_ACCEPTANCE_RUN': run})
+            # PHASE6_ACCEPTANCE: the API on 5071 is always the acceptance app,
+            # so the firewall endpoint is verified and the re-enroll and
+            # firewall blocks are printed for the new tunnel URL.
+            setup.connect_acceptance_tunnel(client, children, env)
         print('Keep this terminal open. Ctrl+C stops only this replacement tunnel.', flush=True)
         print('Run the printed Windows block, then report its result so the worker update can be verified.', flush=True)
         while all(child.poll() is None for child in children):

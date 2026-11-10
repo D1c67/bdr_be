@@ -33,6 +33,15 @@ visibly "unknown". Rows and their check dates:
   input price). The spec's draft $0.20 (and the bundled claude-api
   reference) is the older figure; the row uses the page's $0.10.
 
+- OpenAI hosted web search (developers.openai.com/api/docs/pricing, read
+  2026-11-02: "$10.00 / 1k calls + Search content tokens billed at model
+  rates" for reasoning models): WEB_SEARCH_CALL_PRICE, USD 0.01 per
+  web_search_call item. The search content tokens are already inside the
+  call's reported input tokens. Every web_search_call item counts, whether
+  its action is a search, an open_page or a find_in_page (the conservative
+  reading). It is not a per-model row: cost_for adds it when the usage
+  carries a `web_search_calls` count (llm_messages.WebSearchUsage).
+
 Every self-hosted model has no row: self-hosted calls have no per-token
 price at all.
 
@@ -74,6 +83,19 @@ _QUANT = Decimal("0.000001")
 _DATE_SUFFIX_RE = re.compile(r"^(\d{8}|\d{4}-\d{2}-\d{2})$")
 
 PROVIDERS = ("openai", "anthropic")
+
+# OpenAI hosted web search: USD 10 per 1,000 tool calls (see the module
+# docstring for the check date). Billed per web_search_call item.
+WEB_SEARCH_CALL_PRICE = Decimal("0.01")
+
+
+def web_search_cost(calls: int) -> Decimal:
+    """The tool-call fee of `calls` hosted web_search_call items."""
+    try:
+        count = max(0, int(calls or 0))
+    except (TypeError, ValueError):
+        count = 0
+    return (WEB_SEARCH_CALL_PRICE * count).quantize(_QUANT, rounding=ROUND_HALF_UP)
 
 
 @dataclass(frozen=True)
@@ -239,14 +261,15 @@ def cost_for(model: str | None, usage: Any) -> Decimal | None:
     output_tokens (including reasoning), and the optional Anthropic
     cache_write_5m_tokens / cache_write_1h_tokens. reasoning_tokens is
     accepted and ignored for pricing because it is already inside
-    output_tokens.
+    output_tokens. A usage with `web_search_calls` (hosted web search) adds
+    WEB_SEARCH_CALL_PRICE per call on top of the token cost.
     """
     if usage is None:
         return None
     price = price_for(model)
     if price is None:
         return None
-    return estimate_cost(
+    cost = estimate_cost(
         price,
         input_tokens=_field(usage, "input_tokens"),
         cached_tokens=_field(usage, "cached_tokens"),
@@ -254,6 +277,10 @@ def cost_for(model: str | None, usage: Any) -> Decimal | None:
         cache_write_5m_tokens=_field(usage, "cache_write_5m_tokens"),
         cache_write_1h_tokens=_field(usage, "cache_write_1h_tokens"),
     )
+    searches = _field(usage, "web_search_calls")
+    if cost is not None and searches:
+        cost = (cost + web_search_cost(searches)).quantize(_QUANT, rounding=ROUND_HALF_UP)
+    return cost
 
 
 def estimate_cost(

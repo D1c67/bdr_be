@@ -1,0 +1,22 @@
+{
+  "model": "UserHoldRelease",
+  "v2_endpoint": "user_hold_release",
+  "direction": "response",
+  "body": {
+    "hold_id": "40000000-0000-4000-8000-000000000001",
+    "kind": "final_action",
+    "status": "released",
+    "token": {
+      "job_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "lease_epoch": 3,
+      "hold_id": "40000000-0000-4000-8000-000000000001",
+      "method": "POST",
+      "origin": "https://app.procore.com",
+      "url_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "body_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "exp": 1793664120,
+      "key_id": "hold-2026-11",
+      "signature": "<signature-in-fixture>"
+    }
+  }
+}

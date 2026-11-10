@@ -72,6 +72,14 @@ FakeTeamsAlerts and FakeEmailBranding (record calls, raise scripted errors;
 `install_delivery_fakes` patches the real helper modules). The link-bell
 and fold twins follow 0191 (severity from the payload; the fold keeps the
 prior precedence in payload folded_from_precedence and the un-fold restores
+it).
+
+Browser v2 (docs/ASSISTANT_BROWSER_V2_PLAN.md, WI-3) adds, per 0192: twins
+of assistant_browser_site_grant, _site_revoke and _scope_extend (see the
+_BrowserV2Mixin comment), `bv2_rpc_results` to script any other 0192 RPC
+per test, and the row builders site_row, curated_site_rows, grant_row,
+credential_v2_row, admission_row and bv2_job_row.
+
 Phase 8 (docs/ASSISTANT_PHASE8_PLAN.md, WI-5) adds, per 0196: the company
 spend identity COMPANY_SPEND_ID; the reserve twin mirrors B2 (kind triage
 only under the company id, with no per-person cap check, and the company id
@@ -1271,6 +1279,247 @@ class _Phase7Mixin:
         return {"since": p["p_since"], "floor": floor, "kinds": kinds, "health": health}
 
 
+# ── Browser v2 (0192, docs/ASSISTANT_BROWSER_V2_PLAN.md, WI-3) ──────────────
+#
+# Python twins of the three site RPCs WI-3 wraps: assistant_browser_site_grant
+# (eligibility through `bv2_ineligible`, the argument checks, the ad hoc
+# registry insert, the one active grant per user and site, the site access
+# request approval, the waiting admissions), assistant_browser_site_revoke
+# (version check, sessions removed, queued jobs cancelled, running jobs'
+# policy_version bumped) and assistant_browser_scope_extend. Any other 0192
+# RPC can be scripted per test without editing this file:
+# `db.bv2_rpc_results[name] = dict_or_callable(params)`; an unscripted 0192
+# RPC still raises "unexpected rpc". Row builders: site_row, grant_row,
+# credential_v2_row, admission_row, bv2_job_row.
+
+BV2_SITE_KEY = re.compile(r"^[a-z0-9_.:-]{2,80}$")
+BV2_PROVENANCES = ("typed", "bdr_record", "search", "email", "page", "unknown", "settings")
+BV2_RPCS = {
+    "assistant_browser_site_grant": "_bv2_site_grant",
+    "assistant_browser_site_revoke": "_bv2_site_revoke",
+    "assistant_browser_scope_extend": "_bv2_scope_extend",
+}
+BV2_USER2 = "12121212-1212-4121-8121-121212121212"
+BV2_JOB = "13131313-1313-4131-8131-131313131313"
+BV2_ADMISSION = "14141414-1414-4141-8141-141414141414"
+
+
+class _BrowserV2Mixin:
+    @property
+    def bv2_rpc_results(self) -> dict:
+        """{rpc name: dict or callable(params)}: scripted 0192 RPC answers."""
+        if "_bv2_results" not in self.__dict__:
+            self.__dict__["_bv2_results"] = {}
+        return self.__dict__["_bv2_results"]
+
+    @property
+    def bv2_ineligible(self) -> set:
+        """Users assistant_browser_owner_eligible refuses."""
+        if "_bv2_ineligible_users" not in self.__dict__:
+            self.__dict__["_bv2_ineligible_users"] = set()
+        return self.__dict__["_bv2_ineligible_users"]
+
+    @bv2_ineligible.setter
+    def bv2_ineligible(self, users) -> None:
+        self.__dict__["_bv2_ineligible_users"] = set(users)
+
+    def _bv2_scripted(self) -> dict:
+        return self.bv2_rpc_results
+
+    def _bv2_ineligible(self) -> set:
+        return self.bv2_ineligible
+
+    def _bv2_rpc(self, name: str, params: dict):
+        scripted = self._bv2_scripted().get(name)
+        if scripted is not None:
+            return scripted(dict(params)) if callable(scripted) else copy.deepcopy(scripted)
+        with self._spend_lock:
+            return getattr(self, BV2_RPCS[name])(dict(params))
+
+    @staticmethod
+    def _bv2_in_scope(admission: dict, site_key: str) -> bool:
+        return any(isinstance(s, dict) and s.get("site_key") == site_key for s in admission.get("site_scope") or [])
+
+    def _bv2_site_grant(self, p: dict) -> dict:
+        user, key = str(p["p_user_id"]), p.get("p_site_key")
+        if user in self._bv2_ineligible():
+            return {"ok": False, "code": "ineligible"}
+        value = p.get("p_value") or ""
+        if (not isinstance(key, str) or not BV2_SITE_KEY.match(key) or p.get("p_scope") not in ("domain", "origin")
+                or not 1 <= len(value) <= 300 or p.get("p_granted_via") not in ("chat_card", "settings")
+                or p.get("p_provenance") not in BV2_PROVENANCES):
+            return {"ok": False, "code": "invalid"}
+        sites = self.tables.setdefault("assistant_browser_sites", [])
+        site = next((s for s in sites if s["site_key"] == key), None)
+        if site is None:
+            ad_hoc = p.get("p_ad_hoc")
+            if (not isinstance(ad_hoc, dict) or not re.match(r"^(domain|origin):", key)
+                    or not 1 <= len(str(ad_hoc.get("label") or "")) <= 100):
+                return {"ok": False, "code": "unknown_site"}
+            domain = p["p_scope"] == "domain"
+            site = site_row(site_key=key, label=ad_hoc["label"], kind="ad_hoc",
+                            registrable_domains=[value.lower()] if domain else [],
+                            exact_origins=[] if domain else [value.lower()],
+                            path_prefix=None if domain else p.get("p_path_prefix"), login_kind="password",
+                            login_origins=[], cookie_domains=[],
+                            code_email_senders=[value.lower()] if domain else [], created_by=user)
+            sites.append(site)
+        if not site.get("enabled", True):
+            return {"ok": False, "code": "site_disabled"}
+        grants = self.tables.setdefault("assistant_browser_site_grants", [])
+        grant = next((g for g in grants if g["user_id"] == user and g["site_key"] == key
+                      and g["status"] == "active"), None)
+        if grant is None:
+            grant = grant_row(user_id=user, site_key=key, scope=p["p_scope"], value=value.lower(),
+                              path_prefix=p.get("p_path_prefix"), granted_via=p["p_granted_via"],
+                              provenance=p["p_provenance"], request_id=p.get("p_request_id"),
+                              granted_at=self.now_iso())
+            grants.append(grant)
+        request_id = p.get("p_request_id")
+        if request_id is not None:
+            for r in self.tables.get("assistant_browser_requests", []):
+                if (str(r["id"]) == str(request_id) and r["user_id"] == user and r.get("kind") == "site_access"
+                        and r.get("status") == "requested"):
+                    r.update(status="approved", decided_at=self.now_iso(),
+                             result={"grant_id": grant["id"], "grant_version": grant["version"]})
+        waiting = [a["id"] for a in self.tables.get("assistant_browser_admissions", [])
+                   if a["user_id"] == user and str(a.get("status", "")).startswith("waiting_")
+                   and _ts(a["expires_at"]) > self.now
+                   and (a.get("start_site_key") == key or self._bv2_in_scope(a, key))]
+        return {"ok": True, "grant": dict(grant), "waiting_admissions": waiting}
+
+    def _bv2_site_revoke(self, p: dict) -> dict:
+        user, grant_id = str(p["p_user_id"]), str(p["p_grant_id"])
+        grant = next((g for g in self.tables.get("assistant_browser_site_grants", [])
+                      if str(g["id"]) == grant_id and g["user_id"] == user), None)
+        if grant is None:
+            return {"ok": False, "code": "not_found"}
+        if grant["version"] != p["p_expected_version"] or grant["status"] != "active":
+            return {"ok": False, "code": "version_conflict"}
+        grant.update(status="revoked", version=grant["version"] + 1, revoked_at=self.now_iso(),
+                     updated_at=self.now_iso())
+        key = grant["site_key"]
+        before = self.tables.get("assistant_browser_sessions", [])
+        kept = [s for s in before if not (s.get("user_id") == user and s.get("site_key") == key)]
+        self.tables["assistant_browser_sessions"] = kept
+        admissions = {str(a["id"]): a for a in self.tables.get("assistant_browser_admissions", [])}
+        canceled = 0
+        for job in self.tables.get("browser_agent_jobs", []):
+            admission = admissions.get(str(job.get("assistant_admission_id")))
+            if job.get("principal_user_id") != user or admission is None or not self._bv2_in_scope(admission, key):
+                continue
+            if job.get("status") == "queued":
+                job.update(status="canceled", error_kind="scope_revoked", error="Site approval revoked.",
+                           cancel_requested_at=self.now_iso(), finished_at=self.now_iso())
+                canceled += 1
+            elif job.get("status") in ("running", "waiting_help"):
+                job["policy_version"] = int(job.get("policy_version") or 1) + 1
+        return {"ok": True, "version": grant["version"], "canceled_jobs": canceled,
+                "sessions_removed": len(before) - len(kept)}
+
+    def _bv2_scope_extend(self, p: dict) -> dict:
+        user, job_id, key = str(p["p_user_id"]), str(p["p_job_id"]), p["p_site_key"]
+        job = next((j for j in self.tables.get("browser_agent_jobs", []) if str(j["id"]) == job_id
+                    and j.get("principal_user_id") == user and j.get("agent_type") == "user_browser"), None)
+        if job is None or job.get("status") not in ("queued", "running", "waiting_help"):
+            return {"ok": False, "code": "job_changed"}
+        grant = next((g for g in self.tables.get("assistant_browser_site_grants", [])
+                      if g["user_id"] == user and g["site_key"] == key and g["status"] == "active"), None)
+        if grant is None:
+            return {"ok": False, "code": "no_grant"}
+        admission = next((a for a in self.tables.get("assistant_browser_admissions", [])
+                          if str(a["id"]) == str(job.get("assistant_admission_id"))), None)
+        if admission is not None and not self._bv2_in_scope(admission, key):
+            admission["site_scope"] = list(admission.get("site_scope") or []) + [
+                {"site_key": key, "grant_id": grant["id"], "grant_version": grant["version"]}]
+            admission["updated_at"] = self.now_iso()
+            job["policy_version"] = int(job.get("policy_version") or 1) + 1
+        return {"ok": True, "policy_version": int(job.get("policy_version") or 1)}
+
+
+def site_row(**over) -> dict:
+    """An assistant_browser_sites row (0192 A1.1 defaults); curated Procore
+    unless overridden."""
+    row = {
+        "site_key": "procore", "label": "Procore", "kind": "curated", "registrable_domains": ["procore.com"],
+        "exact_origins": [], "path_prefix": None, "login_origins": ["https://login.procore.com"],
+        "login_paths": [], "login_kind": "password_mfa", "cookie_domains": [".procore.com"],
+        "code_email_senders": ["procore.com"], "code_email_regex": None, "profile": {}, "needs_headed": False,
+        "challenge_count": 0, "prefer_api": None, "enabled": True, "created_by": None,
+        "created_at": NOW.isoformat(), "updated_at": NOW.isoformat(),
+    }
+    row.update(over)
+    return row
+
+
+def curated_site_rows() -> list[dict]:
+    """The four curated seed rows of 0192 A1.16."""
+    return [
+        site_row(),
+        site_row(site_key="autodesk", label="Autodesk Construction Cloud", registrable_domains=["autodesk.com"],
+                 login_origins=["https://accounts.autodesk.com"], cookie_domains=[".autodesk.com"],
+                 code_email_senders=["autodesk.com"]),
+        site_row(site_key="buildingconnected", label="BuildingConnected",
+                 registrable_domains=["buildingconnected.com", "autodesk.com"],
+                 login_origins=["https://accounts.autodesk.com"],
+                 cookie_domains=[".buildingconnected.com", ".autodesk.com"], code_email_senders=["autodesk.com"]),
+        site_row(site_key="smartbid", label="SmartBid", registrable_domains=["smartbidnet.com"],
+                 login_origins=["https://www.smartbidnet.com"], login_kind="password",
+                 cookie_domains=[".smartbidnet.com"], code_email_senders=["smartbidnet.com"]),
+    ]
+
+
+def grant_row(**over) -> dict:
+    """An assistant_browser_site_grants row (active, version 1)."""
+    row = {
+        "id": str(uuid.uuid4()), "user_id": USER, "site_key": "procore", "scope": "domain", "value": "procore.com",
+        "path_prefix": None, "version": 1, "status": "active", "granted_at": NOW.isoformat(),
+        "granted_via": "chat_card", "provenance": "typed", "request_id": None, "revoked_at": None,
+        "updated_at": NOW.isoformat(),
+    }
+    row.update(over)
+    return row
+
+
+def credential_v2_row(**over) -> dict:
+    """An assistant_credentials row after 0192 (re-keyed by site and label)."""
+    row = {
+        "id": str(uuid.uuid4()), "user_id": USER, "service": None, "site_key": "procore",
+        "account_label": "default", "label": "Procore", "username": "me@example.com", "status": "active",
+        "version": 1, "is_default": False, "sso_required": False, "login_origins": ["https://login.procore.com"],
+        "cookie_domains": [".procore.com"], "attempts_day_count": 0, "attempts_day_started_at": None,
+        "created_at": NOW.isoformat(), "updated_at": NOW.isoformat(),
+    }
+    row.update(over)
+    return row
+
+
+def admission_row(**over) -> dict:
+    """An assistant_browser_admissions row waiting on a grant."""
+    row = {
+        "id": BV2_ADMISSION, "user_id": USER, "role": "executive", "conversation_id": CONV, "run_id": RUN,
+        "goal": "Read the RFI list", "start_url": "https://app.procore.com/1/project/rfi/list",
+        "start_provenance": "typed", "start_site_key": "procore", "site_scope": [], "account_label": None,
+        "project_id": None, "model": "gpt-5.4", "max_cost_usd": "5.00", "tainted": False,
+        "fresh_user_message": True, "start_approved_at": None, "link_approved_at": None, "needs": ["site_access"],
+        "status": "waiting_grant", "job_id": None, "expires_at": (NOW + timedelta(hours=24)).isoformat(),
+        "created_at": NOW.isoformat(), "updated_at": NOW.isoformat(),
+    }
+    row.update(over)
+    return row
+
+
+def bv2_job_row(**over) -> dict:
+    """A browser_agent_jobs row of the v2 personal type."""
+    row = {
+        "id": BV2_JOB, "agent_type": "user_browser", "principal_kind": "user", "principal_user_id": USER,
+        "assistant_admission_id": BV2_ADMISSION, "status": "running", "policy_version": 1,
+        "side_effects_at": None, "created_at": NOW.isoformat(),
+    }
+    row.update(over)
+    return row
+
+
 # ── Phase 8 (0196): model triage ─────────────────────────────────────────────
 #
 # Python twins of the triage RPCs of docs/ASSISTANT_PHASE8_PLAN.md 4.1 A6 and
@@ -1828,7 +2077,7 @@ def triage_run_row(**over) -> dict:
     return base
 
 
-class FakeDB(_Phase7Mixin, _Phase8Mixin):
+class FakeDB(_Phase7Mixin, _BrowserV2Mixin, _Phase8Mixin):
     def __init__(self, now: datetime = NOW, **tables):
         self.tables = {k: list(v) for k, v in tables.items()}
         self.now = now
@@ -2982,6 +3231,9 @@ class FakeDB(_Phase7Mixin, _Phase8Mixin):
             self.tables["assistant_browser_sessions"] = [
                 row for row in self.tables.get("assistant_browser_sessions", []) if row.get("user_id") != owner]
             return SimpleNamespace(execute=lambda: SimpleNamespace(data=count))
+        if name in BV2_RPCS or name in self._bv2_scripted():
+            data = self._bv2_rpc(name, dict(params))
+            return SimpleNamespace(execute=lambda: SimpleNamespace(data=data))
         if name in P7_RPCS:
             data = getattr(self, P7_RPCS[name])(dict(params))
             return SimpleNamespace(execute=lambda: SimpleNamespace(data=data))

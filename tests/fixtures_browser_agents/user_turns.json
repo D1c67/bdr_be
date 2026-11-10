@@ -1,0 +1,45 @@
+{
+  "endpoint": "user_turns",
+  "method": "POST",
+  "path": "/agent-worker/v1/jobs/1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d/user/turns",
+  "headers": {
+    "Authorization": "Bearer bdrw_<token>",
+    "X-Agent-Boot": "b0075eed-0000-4000-8000-000000000001",
+    "X-Agent-Lease": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d:3",
+    "Idempotency-Key": "<uuid>"
+  },
+  "request": {
+    "prev_turn_no": 4,
+    "tool_results": [
+      {
+        "call_id": "call_04",
+        "ok": false,
+        "content": "{\"error\":\"timeout\",\"detail\":\"page did not settle\"}"
+      }
+    ],
+    "screenshot_artifact_id": "c1c1c1c1-0000-4000-8000-000000000001",
+    "url": "https://app.example-portal.com/orders",
+    "title": "Home",
+    "helper_message_ids_seen": [
+      "e2e2e2e2-0000-4000-8000-000000000002"
+    ]
+  },
+  "status": 200,
+  "response": {
+    "turn_no": 5,
+    "assistant_text": "The page did not settle. Open the orders list again.",
+    "action": {
+      "call_id": "call_05",
+      "tool": "navigate",
+      "args": {
+        "url": "https://app.example-portal.com/orders"
+      }
+    },
+    "caps": {
+      "steps_left": 35,
+      "tokens_left": 351200,
+      "cost_left_usd": 1.71
+    }
+  },
+  "note": "Personal job: helper_message_ids_seen are UUIDs."
+}

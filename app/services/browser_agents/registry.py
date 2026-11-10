@@ -182,11 +182,14 @@ def _register_builtins() -> None:
     the claim-time short-circuits of SPEC.md 5.2) and the procore adapter
     (pm_apps/procore.py: seed and capture validation)."""
     from app.services.browser_agents.pm_apps import procore as procore_app
-    from app.services.browser_agents.types import canary, rfi_from_email, user_browser_read
+    from app.services.browser_agents.types import canary, rfi_from_email, user_browser, user_browser_read
 
     register_type(canary.SPEC, replace=True)
     register_type(rfi_from_email.SPEC, replace=True)
     register_type(user_browser_read.SPEC, replace=True)
+    # Browser v2 (docs/ASSISTANT_BROWSER_V2_PLAN.md 3.4): the only personal
+    # type the claim selects; the retired read type stays for its rows.
+    register_type(user_browser.SPEC, replace=True)
     register_pm_app(procore_app.ADAPTER, replace=True)
 
 

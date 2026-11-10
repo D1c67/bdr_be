@@ -163,7 +163,7 @@ def test_worker_userclient_roundtrip_uuid_help_and_private_step_finish(env, monk
     # The vendored worker speaks to the real dedicated routes; only repository
     # persistence and the server-owned model response are replaced here.
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "agent_worker"))
-    from bdr_agent.agents.user_browser.client import UserClient
+    from bdr_agent.agents.user_browser_v2.client import UserV2Client
     from bdr_agent.client import BdrClient, Lease, RetryPolicy
     from bdr_agent import protocol as worker_protocol
 
@@ -224,8 +224,7 @@ def test_worker_userclient_roundtrip_uuid_help_and_private_step_finish(env, monk
             transport=httpx.MockTransport(transport),
             retry=RetryPolicy(max_attempts=1),
         )
-        client = UserClient(base)
-        client.bind_host("app.procore.com")
+        client = UserV2Client(base)        # v1 UserClient was retired in worker 1.1.0
         lease = Lease(UUID(env.job["id"]), env.job["lease_epoch"])
         step = await client.append_steps(
             lease,
@@ -234,8 +233,8 @@ def test_worker_userclient_roundtrip_uuid_help_and_private_step_finish(env, monk
         assert step.appended == 1
         messages = await client.help_messages(lease, UUID(help_id))
         assert messages.messages[0].id == UUID(message_id)
-        client.login_attempt_id = UUID(attempt_id)
-        code = await client.help_secret_use(lease, UUID(help_id), UUID(message_id))
+        code = await client.help_secret_use(lease, UUID(help_id), UUID(message_id),
+                                            login_attempt_id=UUID(attempt_id))
         assert code.value.get_secret_value() == "123456"
         await client.finish(
             lease,
@@ -299,7 +298,7 @@ def test_running_worker_cap_stop_finishes_failed_without_park(env, monkeypatch, 
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "agent_worker"))
     from bdr_agent.agent.help import HelpDesk
     from bdr_agent.agent.loop import AgentLoop
-    from bdr_agent.agents.user_browser.client import UserClient
+    from bdr_agent.agents.user_browser_v2.client import UserV2Client
     from bdr_agent.client import BdrClient, Lease, RetryPolicy
     from bdr_agent import protocol as worker_protocol
     from bdr_agent.slot import Finish
@@ -322,7 +321,7 @@ def test_running_worker_cap_stop_finishes_failed_without_park(env, monkeypatch, 
     async def run():
         base = BdrClient("https://testserver", token=env.token, boot_id=UUID(env.boot),
                          transport=httpx.MockTransport(transport), retry=RetryPolicy(max_attempts=1))
-        client = UserClient(base)
+        client = UserV2Client(base)
         lease = Lease(UUID(env.job["id"]), env.job["lease_epoch"])
         ctx = SimpleNamespace(client=client, lease=lease, steps=SimpleNamespace(log=lambda *a, **kw: None),
                               type_config=SimpleNamespace(max_steps=40))

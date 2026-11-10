@@ -1,0 +1,11 @@
+{
+  "model": "UserCredentialFillRequest",
+  "v2_endpoint": "user_login_begin_v2",
+  "direction": "request",
+  "body": {
+    "credential_id": "c0000000-0000-4000-8000-000000000001",
+    "origin": "https://login.procore.com",
+    "frame_origin": "https://login.procore.com",
+    "rejected_jar_logged_in_at": null
+  }
+}

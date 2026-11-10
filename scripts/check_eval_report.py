@@ -14,7 +14,7 @@ passes only when all of these hold:
               vouches for code it did not run;
   selection   (phase 4, docs/ASSISTANT_PHASE4_PLAN.md 3.20) the report
               carries a `tool_selection` section from `run_evals --select`
-              over exactly SELECTION_CASES prompts (173), none skipped, accuracy at least
+              over exactly SELECTION_CASES prompts (178), none skipped, accuracy at least
               0.90, started after the newest change under app/assistant/.
 
   triage      (phase 8, docs/ASSISTANT_PHASE8_PLAN.md 16.4, WI-14b) only when
@@ -55,7 +55,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 ASSISTANT_DIR = ROOT / "app" / "assistant"
 GOLDEN_MIN = 0.9
-SELECTION_CASES = 173   # run_evals.SELECTION_CASES (Phase 8 WI-10 added five inbox prompts)
+SELECTION_CASES = 178   # run_evals.SELECTION_CASES (browser v2 WI-19 added four prompts, Phase 8 WI-10 five more)
 SELECTION_MIN = 0.9
 
 # Phase 8 triage gate (WI-14b). The numbers mirror run_triage_evals.py

@@ -13,6 +13,7 @@ from app.routers.assistant import _refuse_assistant_principal
 from app.routers.assistant_browser import _enabled, _human
 from app.services import assistant_browser_help as help_flow
 from app.services import assistant_browser_records as records
+from app.services.assistant_browser_secrets import SECRET_IN_MESSAGE, SecretInMessage
 
 router = APIRouter(prefix="/assistant", tags=["assistant-browser"])
 HEADERS = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff"}
@@ -22,7 +23,7 @@ class HelpReplyIn(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     expected_help_id: UUID
     client_msg_id: UUID
-    action: Literal["message", "retry", "give_up"]
+    action: Literal["message", "retry", "give_up", "continue"]  # continue: v2 push approved (8.4)
     body: str | None = Field(default=None, max_length=2000)
     secret_value: SecretStr | None = Field(default=None, max_length=64)
 
@@ -48,6 +49,12 @@ def _run(call, *, status: int = 404):
         raise HTTPException(409, help_flow.CAPPED, headers=HEADERS) from None
     except records.BrowserContentUnavailable:
         raise HTTPException(status, "Browser content is unavailable.", headers=HEADERS) from None
+    except SecretInMessage as exc:
+        # v2 help text guard (8.1): the text was not stored, logged or sent.
+        # X-Error-Code is what the frontend reads (lib/api.ts errorCode); msg
+        # is what detailToMessage shows.
+        raise HTTPException(422, {"code": SECRET_IN_MESSAGE, "message": str(exc), "msg": str(exc)},
+                            headers={**HEADERS, "X-Error-Code": SECRET_IN_MESSAGE}) from None
     except Exception:
         raise HTTPException(503, "Browser content is unavailable.", headers=HEADERS) from None
 

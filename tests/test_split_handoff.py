@@ -401,7 +401,7 @@ def test_refusals_leave_nothing_behind(env, monkeypatch):
 
     monkeypatch.setattr(split_handoff, "estimate_split_usd",
                         lambda pages, s=None: split_handoff.SplitEstimate(Decimal("0.68"), "m", "anthropic"))
-    env.db.tables["llm_call_log"] = [{"id": "c1", "user_id": USER, "cost_usd": 4.9, "feature": "assistant",
+    env.db.tables["llm_call_log"] = [{"id": "c1", "user_id": USER, "cost_usd": 14.9, "feature": "assistant",
                                       "assistant_run_id": None, "spend_reservation_id": None,
                                       "created_at": NOW.isoformat()}]
     with pytest.raises(split_handoff.SplitRefused) as exc:
@@ -512,7 +512,7 @@ def test_split_preview_reports_every_problem(env, monkeypatch):
     assert out["project"] == {"id": PROJECT, "number": NUMBER, "name": "Monument"}
     assert out["limits"] == {"max_files": 10, "max_pages": 400}
     assert out["estimate"] == {"usd": "0.68", "model": "claude-opus-5", "provider": "anthropic", "priced": True}
-    assert out["spend"] == {"user_remaining_usd": "5.00", "global_remaining_usd": "50.00"}
+    assert out["spend"] == {"user_remaining_usd": "15.00", "global_remaining_usd": "50.00"}
     assert out["splitter"] == {"available": True, "reason": None} and out["handoff_locked"] is False
     assert out["totals"]["files"] == 6
     with pytest.raises(split_handoff.SplitRefused) as exc:
@@ -815,7 +815,7 @@ def test_status_for_lists_the_turns_staged_files_jobs_and_tasks(env):
                              "files": 1, "failure_reason": None, "created_at": NOW.isoformat()}]
     assert out["project"] == {"id": PROJECT, "number": NUMBER, "handoff_locked": False}
     assert out["limits"] == {"max_files_per_card": 10, "max_pages_per_card": 400}
-    assert out["spend"] == {"user_remaining_usd": "5.00", "global_remaining_usd": "50.00"}
+    assert out["spend"] == {"user_remaining_usd": "15.00", "global_remaining_usd": "50.00"}
     from app.assistant.schemas import SplitStatusOut
 
     SplitStatusOut(**out)

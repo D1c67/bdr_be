@@ -85,7 +85,8 @@ $user = Get-LocalUser -Name $ServiceUser -ErrorAction SilentlyContinue
 if ($user) {
     $sid = $user.SID.Value
     Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $sid } | ForEach-Object {
-        try { Remove-CimInstance -InputObject $_ } catch { Write-Host "Could not delete the profile folder $($_.LocalPath); delete it later." }
+        $userProfile = $_
+        try { Remove-CimInstance -InputObject $userProfile } catch { Write-Host "Could not delete the profile folder $($userProfile.LocalPath); delete it later." }
     }
     Remove-LocalUser -Name $ServiceUser
 }

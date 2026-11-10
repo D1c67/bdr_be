@@ -309,6 +309,9 @@ def test_user_claim_trims_private_authority_and_skips_org_ledgers(h,monkeypatch)
                'credential_id':str(uuid.uuid4()),'credential_version':7,'client_request_id':'private','max_cost_usd':'2'},
         checkpoint={'private':'should not reach worker'},turn_count=3)
     monkeypatch.setattr(user_browser_read,'enabled',lambda:True)
+    # Browser v2 (WI-6): the personal claim gate is the v2 type's enabled().
+    from app.services.browser_agents.types import user_browser
+    monkeypatch.setattr(user_browser,'enabled',lambda:True)
     monkeypatch.setattr(assistant_browser_vault,'job_credential',lambda job:{})
     monkeypatch.setattr(queue,'_held_leases',lambda wid:0)
     monkeypatch.setattr(agent_auth,'rpc',lambda *a:[row])

@@ -1003,3 +1003,23 @@ def test_the_router_is_registered_in_the_app():
 
     paths = {(m, r.path) for r in app.routes if hasattr(r, "methods") for m in r.methods}
     assert {("GET", "/assistant/inbox"), ("PUT", "/assistant/alerts/company")} <= paths
+
+
+def test_main_features_carries_the_browser_v2_gate(api, monkeypatch):
+    """Review finding: GET /features never sent assistant_browser_v2, so the
+    frontend v2 gate stayed closed."""
+    from app import main
+    from app.services import assistant_browser as browser_service
+
+    me = CurrentUser(id=USER, email="tom@g3.test", role=Role.EXECUTIVE, is_active=True)
+    monkeypatch.setattr(main.assistant, "features_flag", lambda user: True)
+    monkeypatch.setattr(browser_service, "v2_enabled", lambda: True)
+    assert main.features(me)["assistant_browser_v2"] is True
+    monkeypatch.setattr(browser_service, "v2_enabled", lambda: False)
+    assert main.features(me)["assistant_browser_v2"] is False
+    monkeypatch.setattr(browser_service, "v2_enabled", lambda: True)
+    monkeypatch.setattr(main.assistant, "features_flag", lambda user: False)
+    assert main.features(me)["assistant_browser_v2"] is False
+    monkeypatch.setattr(main.assistant, "features_flag", lambda user: True)
+    accountant = CurrentUser(id=USER, email="tom@g3.test", role=Role.ACCOUNTANT, is_active=True)
+    assert main.features(accountant)["assistant_browser_v2"] is False

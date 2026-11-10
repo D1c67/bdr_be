@@ -631,3 +631,47 @@ def test_validate_pdf_isolation_removed_label_is_case_sensitive():
         gc_name="Taylor International Corp.",
         removed_sections=("low_voltage",),
     )
+
+
+SECTION_SCOPE = (
+    "Furnish and install Low Voltage includes Conduit & Pull strings only.",
+    "Furnish and install Underground conduit.",
+    "Furnish and install Gear and Power Distribution Equipment.",
+)
+
+
+@needs_template
+def test_removed_pricing_sections_allow_labels_in_scope():
+    ctx = replace(CTX, scope_lines=SECTION_SCOPE)
+    out = pdx.render_proposal(pdx.TEMPLATE_PATH.read_bytes(), ctx)
+    assert _pricing_labels(out) == ["Description", "Material", "Labor", "TOTAL"]
+    pdx.validate_output(
+        out, gc_name=ctx.gc_name, scope_lines=ctx.scope_lines,
+        removed_sections=("gear", "underground", "low_voltage"),
+    )
+
+
+def test_pdf_removed_sections_allow_approved_scope_with_wrapping():
+    pdx.validate_pdf_isolation(
+        PDF_OK + " " + " ".join(SECTION_SCOPE).replace("Low Voltage", "Low\n Voltage"),
+        gc_name=CTX.gc_name, scope_lines=SECTION_SCOPE,
+        removed_sections=("gear", "underground", "low_voltage"),
+    )
+
+
+def test_pdf_scope_does_not_hide_leftover_pricing_section():
+    with pytest.raises(ProposalRenderError, match="Removed section label"):
+        pdx.validate_pdf_isolation(
+            PDF_SECTIONS + " " + " ".join(SECTION_SCOPE),
+            gc_name=CTX.gc_name, scope_lines=SECTION_SCOPE, includes_generator=True,
+            removed_sections=("low_voltage",),
+        )
+
+
+def test_pdf_scope_exemption_does_not_hide_other_gc():
+    lines = ("Coordinate Low Voltage with Turner Construction.",)
+    with pytest.raises(ProposalRenderError, match="ISOLATION"):
+        pdx.validate_pdf_isolation(
+            PDF_OK + " " + lines[0], gc_name=CTX.gc_name, scope_lines=lines,
+            other_gc_names=("Turner Construction",), removed_sections=("low_voltage",),
+        )

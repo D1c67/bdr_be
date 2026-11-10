@@ -31,6 +31,7 @@ def settings(monkeypatch):
     value = SimpleNamespace(supabase_url=acceptance.DEV_URL, is_production=False,
         assistant_enabled=True, assistant_browser_enabled=True, browser_agents_enabled=True,
         llm_queue_enabled=True, assistant_concurrency=1,
+        assistant_browser_v2_enabled=True, assistant_hosted_search_enabled=True,
         llm_queue_claim_types=','.join(sorted(acceptance.CLAIM_TYPES)))
     monkeypatch.setattr(acceptance, 'get_settings', lambda: value)
     return value
@@ -45,6 +46,7 @@ def claimed(kind='assistant_turn'):
 @pytest.mark.parametrize('field,value', [('supabase_url', 'https://other.supabase.co'),
     ('is_production', True), ('assistant_enabled', False), ('assistant_browser_enabled', False),
     ('browser_agents_enabled', False), ('llm_queue_enabled', False), ('assistant_concurrency', 2),
+    ('assistant_browser_v2_enabled', False), ('assistant_hosted_search_enabled', False),
     ('llm_queue_claim_types', 'assistant_turn,assistant_approval_execute,bid_split'),
     ('rfp_ingest_enabled', True), ('assistant_scheduler_enabled', True)])
 def test_guard_refuses_broader_or_nondev_configuration(settings, field, value):
@@ -60,6 +62,21 @@ def test_explicit_mode_and_identity_guards(settings, monkeypatch):
         acceptance.guard(settings)
     monkeypatch.setenv('PHASE6_ACCEPTANCE', 'true')
     monkeypatch.setenv('PHASE6_ACCEPTANCE_WORKER', 'malformed')
+    with pytest.raises(acceptance.AcceptanceError):
+        acceptance.guard(settings)
+    # Before the 1.1.0 re-enrollment is approved there is no personal worker.
+    monkeypatch.delenv('PHASE6_ACCEPTANCE_WORKER')
+    acceptance.guard(settings)
+    monkeypatch.setenv('PHASE6_ACCEPTANCE_OWNER', 'malformed')
+    with pytest.raises(acceptance.AcceptanceError):
+        acceptance.guard(settings)
+
+
+def test_teams_and_outlook_are_the_only_flags_the_window_turns_on(settings):
+    settings.teams_alerts_enabled = True
+    settings.assistant_outlook_enabled = True
+    acceptance.guard(settings)
+    settings.notification_emails_enabled = True
     with pytest.raises(acceptance.AcceptanceError):
         acceptance.guard(settings)
 
@@ -100,14 +117,41 @@ async def test_malformed_claim_stops_claiming_without_executing(settings, monkey
 
 
 @pytest.mark.asyncio
-async def test_maintenance_calls_only_personal_sweep(monkeypatch):
+async def test_maintenance_calls_only_personal_sweeps_and_the_chat_outbox(monkeypatch):
     stop, calls = asyncio.Event(), []
     monkeypatch.setattr(acceptance.repo, 'browser_rpc', lambda *args: calls.append(args))
+    monkeypatch.setattr(acceptance.repo, 'browser_sweep_v2', lambda *a, **k: calls.append(('v2', a, k)))
+    monkeypatch.setattr(acceptance, 'drain_browser_chat', lambda: calls.append('outbox'))
+    from app.services import assistant_maintenance
+    monkeypatch.setattr(assistant_maintenance, 'run_browser_tasks', lambda: pytest.fail('general maintenance ran'))
     async def pause(*args):
         stop.set()
     monkeypatch.setattr(acceptance, 'pause', pause)
     await acceptance.browser_loop(stop)
-    assert calls == [(None, 'assistant_browser_sweep', {'p_limit': 10})]
+    assert calls == [(None, 'assistant_browser_sweep', {'p_limit': 10}), ('v2', (None,), {'limit': 10}), 'outbox']
+
+
+@pytest.mark.asyncio
+async def test_one_failing_sweep_does_not_skip_the_others(monkeypatch):
+    stop, calls = asyncio.Event(), []
+    def boom(*args, **kwargs):
+        raise RuntimeError('db down')
+    monkeypatch.setattr(acceptance.repo, 'browser_rpc', boom)
+    monkeypatch.setattr(acceptance.repo, 'browser_sweep_v2', boom)
+    monkeypatch.setattr(acceptance, 'drain_browser_chat', lambda: calls.append('outbox'))
+    async def pause(*args):
+        stop.set()
+    monkeypatch.setattr(acceptance, 'pause', pause)
+    await acceptance.browser_loop(stop)
+    assert calls == ['outbox']
+
+
+def test_outbox_drain_is_bounded(monkeypatch):
+    from app.services import assistant_browser_chat
+    seen = []
+    monkeypatch.setattr(assistant_browser_chat, 'drain_outbox', lambda **kw: seen.append(kw) or 0)
+    assert acceptance.drain_browser_chat() == 0
+    assert seen == [{'limit': 20}]
 
 
 @pytest.mark.asyncio
@@ -153,4 +197,22 @@ def test_reconnect_script_requires_ready_and_serves_only_fixed_file(tmp_path, mo
     assert response.headers['content-disposition'].startswith('attachment;')
     path.unlink()
     assert acceptance.reconnect_script().status_code == 503
+    acceptance.app.state.phase6_acceptance_ready = False
+
+
+def test_firewall_script_is_the_checked_worker_file_and_needs_ready(tmp_path, monkeypatch):
+    assert acceptance.FIREWALL_SCRIPT.name == 'apply_user_pool_firewall.ps1' and acceptance.FIREWALL_SCRIPT.is_file()
+    path = tmp_path / 'firewall.ps1'
+    path.write_bytes(b'<# fixed firewall script #>\n')
+    monkeypatch.setattr(acceptance, 'FIREWALL_SCRIPT', path)
+    acceptance.app.state.phase6_acceptance_ready = False
+    assert acceptance.firewall_script().status_code == 503
+    acceptance.app.state.phase6_acceptance_ready = True
+    acceptance.app.state.phase6_acceptance_failed = False
+    acceptance.app.state.phase6_acceptance_run = 'a' * 32
+    response = acceptance.firewall_script()
+    assert response.body == path.read_bytes()
+    assert 'apply_user_pool_firewall.ps1' in response.headers['content-disposition']
+    path.unlink()
+    assert acceptance.firewall_script().status_code == 503
     acceptance.app.state.phase6_acceptance_ready = False

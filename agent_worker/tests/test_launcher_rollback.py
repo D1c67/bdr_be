@@ -349,3 +349,21 @@ def test_run_forever_cleans_partials_and_stale_health_markers(tmp_path):
     lch.run_forever(max_cycles=1)
     assert not (paths.versions_dir / "1.3.0.partial-7").exists()
     assert not (paths.health_dir / "old.ok").exists()
+
+
+def test_every_start_syncs_the_stable_runtime_first(tmp_path, monkeypatch):
+    from bdr_launcher import release
+    calls = []
+    monkeypatch.setattr(release, "sync_stable_runtime_if_wanted", lambda p, v: calls.append(v))
+    lch, paths, _script, _clock = _launcher(tmp_path, {"1.0.0": [{"code": 0, "runtime": 3, "health_at": 1}]})
+    save_state(paths.state_file, _state(current="1.0.0"))
+    lch.step()
+    assert calls == ["1.0.0"] and [r[0] for r in lch.runs] == ["1.0.0"]
+
+
+def test_a_failed_runtime_sync_never_stops_the_worker(tmp_path):
+    # Real hook on an org-pool home: not wanted, so nothing is copied and the worker starts.
+    lch, paths, _script, _clock = _launcher(tmp_path, {"1.0.0": [{"code": 0, "runtime": 3, "health_at": 1}]})
+    save_state(paths.state_file, _state(current="1.0.0"))
+    lch.step()
+    assert [r[0] for r in lch.runs] == ["1.0.0"] and not (paths.home / "runtime").exists()

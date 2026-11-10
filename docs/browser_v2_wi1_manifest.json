@@ -1,0 +1,127 @@
+{
+ "plan": "bdr_be/docs/ASSISTANT_BROWSER_V2_PLAN.md 17.6 read only, 17.7 gates (WI-1)",
+ "generated_at": "2026-11-02T07:35:38-08:00",
+ "root": "paths are relative to the BDR folder",
+ "read_only": {
+  "bdr_be/agent_worker/bdr_agent/agents/pm_apps/__init__.py": {
+   "group": "org_worker",
+   "sha256": "e28b7570efc77cded51c0c68b0c3b42f1aa6598a02b0c218ae5647f6c016c699",
+   "size": 69
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/pm_apps/procore/__init__.py": {
+   "group": "org_worker",
+   "sha256": "cd3c2feb205a5dce615f7d9b80b6bfbddccaa534364938b0f95b11eccce0ac8f",
+   "size": 115
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/pm_apps/procore/ceiling.py": {
+   "group": "org_worker",
+   "sha256": "294a13f9703f0fd60c44d7d9e4910506f77361c93515cd78c9b87227b0275121",
+   "size": 486
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/pm_apps/procore/identity.py": {
+   "group": "org_worker",
+   "sha256": "86fc16cc80e1356fcd34891c42914560290c55a7c639e3249bc22c60108722ac",
+   "size": 17506
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/pm_apps/procore/login.py": {
+   "group": "org_worker",
+   "sha256": "03a14a453157cd0e3a324b55553dbfc8c25dc03c777bb884e72ef5d80daeffe1",
+   "size": 11184
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/pm_apps/procore/paths.py": {
+   "group": "org_worker",
+   "sha256": "2f9504e8b5a5dd5b53c0c6649e7d9a3309983316a3ef2ce59578b2bdd5012a46",
+   "size": 2184
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/pm_apps/procore/rest.py": {
+   "group": "org_worker",
+   "sha256": "df5004be93dcbeddfc29c950bd9f52a781fa3213087558b5c46130e4d7b5426c",
+   "size": 7421
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/rfi_from_email/__init__.py": {
+   "group": "org_worker",
+   "sha256": "a8c6f34d0fc0bb705f00d704bbcb67c3b78eae25cfaf35558225bfa92428039c",
+   "size": 78
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/rfi_from_email/runner.py": {
+   "group": "org_worker",
+   "sha256": "9d868ee2f6dd4fecf426064bdc0949d3d6427baab66f53706b2547f8909d6bc1",
+   "size": 2513
+  },
+  "bdr_be/agent_worker/bdr_agent/agents/rfi_from_email/tools.py": {
+   "group": "org_worker",
+   "sha256": "547f2d28ff6442fdd2bfe46859e71e030d81097eccfe73ef7386f3c118aae50d",
+   "size": 16259
+  },
+  "bdr_be/agent_worker/bdr_agent/browser/guard.py": {
+   "group": "org_worker",
+   "sha256": "a8b20d1aebf6c7ae437aa635445a03ad031b96f8ff177cccf7108a01b67e3438",
+   "size": 19780
+  },
+  "bdr_be/app/assistant/proactive.py": {
+   "group": "phase7",
+   "sha256": "b55e615378fe9122bce6edf24307f1d5614ad6a8778b2a325f58e3671e515e43",
+   "size": 68976
+  },
+  "bdr_be/app/routers/agent_worker_rfi.py": {
+   "group": "org_server",
+   "sha256": "51534d7c68383813d0c3a57a65d6855eba787f3b5868a45efdd3dc05ed2fc1f7",
+   "size": 7898
+  },
+  "bdr_be/app/routers/assistant_inbox.py": {
+   "group": "phase7",
+   "sha256": "eac48f80663b613c6eeb2148ea3beb56b45d53fd8130782e28edb8a73cef0f09",
+   "size": 34432
+  },
+  "bdr_be/app/services/assistant_delivery.py": {
+   "group": "phase7",
+   "sha256": "5519461f79d920da3b6f1a1be7672e9f6909461eea7cac9c697cd6132616db78",
+   "size": 26634
+  },
+  "bdr_be/app/services/assistant_proactive.py": {
+   "group": "phase7",
+   "sha256": "2d49e2a43b1f463f0f00b713e0d33c845a5157c6a607a02a6d43a9d9da26f54e",
+   "size": 73670
+  },
+  "bdr_be/app/services/browser_agents/redaction.py": {
+   "group": "org_server",
+   "sha256": "2629f41db79f282a30aacf38150ffaaf993826a9b0658276602229738644e496",
+   "size": 11388
+  },
+  "bdr_be/app/services/teams_alerts.py": {
+   "group": "phase7",
+   "sha256": "6a6f14337f5d2a725310150400f55e3911b812c2ae2eeb7c189751cbd1b94010",
+   "size": 22788
+  },
+  "bdr_be/supabase/migrations/0186_assistant_browser_foundation.sql": {
+   "group": "migrations",
+   "sha256": "7f343efdf946e4057869c77edc0a5333c0a480d644e2cc8cc50a7eb54a008e3e",
+   "size": 37367
+  },
+  "bdr_be/supabase/migrations/0187_assistant_browser_runtime.sql": {
+   "group": "migrations",
+   "sha256": "366d15dde5130be5c5a595d2d16a53d7a5c70ad18aeb2dd0aa4c500cc0f92e16",
+   "size": 40177
+  },
+  "bdr_be/supabase/migrations/0188_assistant_browser_claims.sql": {
+   "group": "migrations",
+   "sha256": "3d7c99c93ffae85bc1718f385399ee534ab9f242e8449789a6a98ac59fdcd521",
+   "size": 26819
+  },
+  "bdr_be/supabase/migrations/0189_assistant_browser_regional_procore.sql": {
+   "group": "migrations",
+   "sha256": "af4b5cf8098af253fd0b5c82db7f24a511497bad73cbee7e8cb29f298d7a90fe",
+   "size": 19433
+  },
+  "bdr_be/supabase/migrations/0190_assistant_phase7.sql": {
+   "group": "migrations",
+   "sha256": "339708cf592ec07bea5663afd7d0cd174599efbe36d7da4a71a6de7447ab5518",
+   "size": 72770
+  },
+  "bdr_be/supabase/migrations/0191_assistant_phase7_fold_fix.sql": {
+   "group": "migrations",
+   "sha256": "219b8cf17be2956f3712710ec4fd50a4d0b080ba857d1e3ca159e8cbff607d42",
+   "size": 11425
+  }
+ }
+}

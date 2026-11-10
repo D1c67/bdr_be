@@ -62,10 +62,23 @@ inside the turn. Across turns, earlier messages are replayed as plain text.
 Taint: a tainted tool result marks the message and the conversation
 (sticky, Prompt injection and taint) and every later ledger row in the run
 carries tainted_context.
+
+Browser v2 (docs/ASSISTANT_BROWSER_V2_PLAN.md 4.5, WI-13): the browser blocks
+the server posts are UI blocks, served only with their ids. A browser result
+message is server_data: later turns read its fixed sentence plus the result
+text and facts from its block (assistant_browser_chat.history_text) as a
+user-role data block. The automatic follow-up turn (origin browser_result,
+the third turn mode, registry.MODE_BROWSER_RESULT) answers a finished task
+without a new user message: the user messages before it stay the binding
+texts, the turn is tainted and Incognito, and it is one text-only model
+call (FOLLOW_UP_MAX_ROUNDS = 1, owner answer 1: no tool is offered, not
+even registry.followup_toolset's plain reads), reserved against the
+owner's daily cap like any turn.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -177,7 +190,36 @@ _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]+")
 UI_BLOCK_TYPES = (
     "text", "project_link", "table", "citation", "action_card", "split_result", "memory_note",
     "report_file", "task_result",
+    # Browser v2 (4.5): server-built cards and results, each served only
+    # with its uuid id (BROWSER_BLOCK_IDS).
+    "browser_task", "browser_task_start", "browser_result", "browser_site_access",
+    "browser_credential_request", "browser_final_action", "browser_code_request", "browser_link_open",
+    "browser_live_signin",
 )
+# The id a browser block must carry as a uuid to be served.
+BROWSER_BLOCK_IDS = {
+    "browser_task": "job_id", "browser_task_start": "admission_id", "browser_result": "job_id",
+    "browser_site_access": "request_id", "browser_credential_request": "request_id",
+    "browser_final_action": "hold_id", "browser_code_request": "job_id", "browser_link_open": "request_id",
+    "browser_live_signin": "job_id",
+}
+# The automatic follow-up turn after a browser task (4.5).
+FOLLOW_UP_ORIGIN = "browser_result"
+FOLLOW_UP_MAX_ROUNDS = 1
+FOLLOW_UP_TEXT = (
+    "[Server note, not from the user] A browser task from this conversation has ended; its result is in the "
+    "data above. Tell the user briefly what it found, or why it stopped and what they can do next. You cannot "
+    "start another browser task or change anything in this answer."
+)
+# Hosted web search (browser v2 plan 13.1). The spend hold of a call that
+# offers it adds this many tool-call fees; the tool name is the progress
+# entry's, the result tool name starts with "web_" so the browser's URL
+# provenance reads the stored citations as `search`.
+HOSTED_SEARCH_RESERVE_CALLS = llm_messages.HOSTED_SEARCH_MAX_CALLS   # the per-response cap sent to the API
+HOSTED_SEARCH_PROGRESS = "web_search"
+HOSTED_SEARCH_LABEL = "Searching the web"
+HOSTED_SEARCH_RESULT_TOOL = "web_search_hosted"
+MAX_SEARCH_CITATIONS = 50
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 
@@ -249,12 +291,15 @@ def spend_state(user_id: str, settings_row: dict | None = None, profile_row: dic
     }
 
 
-def _reserve_call(user_id: str, model: str, est_input_tokens: int, *, run_id: str, settings: Settings) -> str:
+def _reserve_call(user_id: str, model: str, est_input_tokens: int, *, run_id: str, settings: Settings,
+                  extra: Decimal | None = None) -> str:
     """Hold the estimate of one model call (kind turn_call); returns the
     hold id. A refusal raises SpendCapReached with the phase 0 sentences;
     any other failure fails the turn closed (SpendCheckFailed)."""
     estimate = llm_pricing.estimate_cost(model, input_tokens=est_input_tokens, output_tokens=EST_OUTPUT_TOKENS)
     estimate = estimate if estimate is not None else Decimal("0")
+    if extra:
+        estimate += extra   # the hosted web search tool-call fees (13.1)
     try:
         return spend.reserve(user_id, kind=spend.KIND_TURN_CALL, amount=estimate,
                              ttl=spend.TURN_CALL_TTL_SECONDS, run_id=run_id, settings=settings)
@@ -354,6 +399,7 @@ def ui_blocks(blocks: Any) -> list[dict]:
         and (b.get("type") != "memory_note" or _is_uuid_text(b.get("memory_id")))
         and (b.get("type") != "report_file" or _is_uuid_text(b.get("report_id")))
         and (b.get("type") != "task_result" or _is_uuid_text(b.get("task_id")))
+        and (b.get("type") not in BROWSER_BLOCK_IDS or _is_uuid_text(b.get(BROWSER_BLOCK_IDS[b.get("type")])))
     ]
 
 
@@ -367,6 +413,32 @@ def server_data_text(text: str) -> str:
     if len(body) > HISTORY_MESSAGE_MAX_CHARS:
         body = body[:HISTORY_MESSAGE_MAX_CHARS] + " [cut]"
     return f"{SERVER_DATA_LABEL}\n{body}"
+
+
+def _server_data_body(row: dict) -> str:
+    """The stored text of a server_data row; a browser result adds its
+    result text and facts from the block (4.5 Replay)."""
+    blocks = row.get("blocks") if isinstance(row.get("blocks"), list) else []
+    if any(isinstance(b, dict) and b.get("type") == "browser_result" for b in blocks):
+        from app.services import assistant_browser_chat
+
+        return assistant_browser_chat.history_text(row)
+    return row.get("content") or ""
+
+
+def _follow_up_mode() -> str:
+    """registry.MODE_BROWSER_RESULT (the third turn mode)."""
+    return str(getattr(registry, "MODE_BROWSER_RESULT", FOLLOW_UP_ORIGIN))
+
+
+def _follow_up_specs(specs: list[registry.ToolSpec]) -> list[registry.ToolSpec]:
+    """The follow-up toolset (registry.followup_toolset), applied again here
+    so the turn stays text plus BDR reads whatever toolset_for returned."""
+    narrow = getattr(registry, "followup_toolset", None)
+    if callable(narrow):
+        return list(narrow(specs))
+    return [s for s in specs if s.effect == registry.EFFECT_READ and not s.confirm and s.write is None
+            and s.namespace not in {"browser", "web", "mail", *registry.OWN_ROW_NAMESPACES}]
 
 
 def loaded_skill_names(blocks: Any) -> list[str]:
@@ -442,6 +514,7 @@ def run_turn(
     now: datetime | None = None,
     sleep: Callable[[float], None] = time.sleep,
     settings: Settings | None = None,
+    origin: str | None = None,
 ) -> None:
     s = settings or get_settings()
     message = repo.get_message(user_id, message_id)
@@ -458,6 +531,9 @@ def run_turn(
         s=s, user_id=user_id, message=message, lease_owner=lease_owner or f"assistant:{uuid.uuid4()}",
         renew_lease=renew_lease, now=now, sleep=sleep,
     )
+    # Browser v2 (4.5): the job payload or the row names the follow-up turn;
+    # either one is enough (the restricted mode is the safe side).
+    turn.follow_up = FOLLOW_UP_ORIGIN in (origin, message.get("origin"))
     try:
         with llm_messages.attributed(user_id, turn.run_id):
             turn.execute()
@@ -529,6 +605,17 @@ class _Turn:
         self.role: Role | None = None
         self.enabled_map: dict[str, bool] = {}
         self.prior_answer: dict | None = None
+        # Browser v2 (4.5): the automatic follow-up turn after a browser
+        # task (run_turn sets it) and this turn's model call limit.
+        self.follow_up = False
+        self.max_rounds = MAX_ROUNDS
+        # Hosted web search (13.1): whether the conversation and mode allow
+        # offering it at all; whether this round's call offers it; the
+        # normalized result URLs the turn's searches listed.
+        self.hosted_static = False
+        self.hosted_offered = False
+        self.search_urls: set[str] = set()
+        self.search_calls = 0
 
     # ── setup ────────────────────────────────────────────────────────────
 
@@ -549,11 +636,12 @@ class _Turn:
             raise PermanentTurnFailure("The assistant is switched off.")
         return human, role, settings_row, profile_row
 
-    def _history(self) -> tuple[list[dict], dict | None, dict | None]:
+    def _history(self, *, include_current: bool = False) -> tuple[list[dict], dict | None, dict | None]:
         """(earlier messages as input items, the user message of this turn,
         the user message before it). Waiting messages (approval or review)
         are history too; an answer that carried approval cards is followed
-        by one status line per card."""
+        by one status line per card. The browser follow-up turn keeps the
+        current user message in place (include_current): it has no new one."""
         rows = repo.list_messages(self.user_id, self.conversation_id)
         mine_at = str(self.message.get("created_at") or "")
         before = [r for r in rows if str(r.get("id")) != self.message_id
@@ -576,18 +664,20 @@ class _Turn:
         )
         history = [
             r for r in before
-            if r is not current and r.get("status") in ("done", *WAITING_STATUSES)
+            if (r is not current or include_current) and r.get("status") in ("done", *WAITING_STATUSES)
             and (r.get("content") or "").strip()
             and r.get("role") in ("user", "assistant")
         ][-HISTORY_MAX_MESSAGES:]
         items: list[dict] = []
         for row in history:
             if row.get("server_data"):
-                items.append(llm_messages.user_message(server_data_text(row.get("content") or "")))
+                body = _server_data_body(row)
+                items.append(llm_messages.user_message(server_data_text(body)))
                 # Server-built text is outsider data: binding strips it
-                # from a card's bound fields and the proposed reason.
-                if self.executor is not None and (row.get("content") or "").strip():
-                    self.executor.tainted_texts.append(("server_data", row.get("content") or ""))
+                # from a card's bound fields and the proposed reason (a
+                # browser result's page text included).
+                if self.executor is not None and body.strip():
+                    self.executor.tainted_texts.append(("server_data", body))
                 continue
             text = (row.get("content") or "").strip()
             if len(text) > HISTORY_MESSAGE_MAX_CHARS:
@@ -684,24 +774,38 @@ class _Turn:
         # Incognito (phase 3, 3.9.2): no note is read, offered or touched.
         review_mode = bool(conversation.get("mailbox_tainted_at")) or conversation.get("mode") == registry.MODE_MAILBOX_REVIEW
         self.mailbox_tainted = bool(conversation.get("mailbox_tainted_at"))
-        self.incognito = bool(self.message.get("incognito")) or review_mode
+        if self.follow_up and review_mode:
+            raise PermanentTurnFailure("A browser follow-up never runs in a Mailbox review.")
+        # The browser follow-up turn (4.5) is Incognito: no note is read or
+        # touched, and its toolset is the text-only follow-up set.
+        self.incognito = bool(self.message.get("incognito")) or review_mode or self.follow_up
         specs = registry.toolset_for(
             user_like, enabled_map, settings_row=settings_row,
             mode=registry.MODE_MAILBOX_REVIEW if review_mode else str(conversation.get("mode") or registry.MODE_NORMAL),
             incognito=self.incognito,
-        )
+        ) if not self.follow_up else _follow_up_specs(registry.toolset_for(
+            user_like, enabled_map, settings_row=settings_row, mode=_follow_up_mode(), incognito=True,
+        ))
+        if self.follow_up:
+            # Owner answer 1 (2026-11-02): one text-only call per task. The
+            # single round is the last one, so no tool is offered at all.
+            self.max_rounds = min(MAX_ROUNDS, FOLLOW_UP_MAX_ROUNDS)
+            specs = []
         skills = skills_index.available(role, enabled_map)
         self.role, self.enabled_map = role, dict(enabled_map)
         self.core_specs = [spec for spec in specs if not spec.deferred]
         self.deferred = {spec.name: spec for spec in specs if spec.deferred}
         context = self.message.get("context") if isinstance(self.message.get("context"), dict) else {}
-        inherited_taint = bool(conversation.get("tainted_at"))
+        # The follow-up answers a browser result: outside content, tainted.
+        inherited_taint = bool(conversation.get("tainted_at")) or self.follow_up
         # Sticky conversation taint (docs/ASSISTANT.md, Prompt injection and
         # taint): every later message in a tainted conversation is tainted
         # too, not only the tool context the executor sees.
         self.tainted = inherited_taint
         self.conversation_tainted = inherited_taint
         self.message_tainted = inherited_taint
+        self.hosted_static = self._hosted_search_allowed(
+            role, conversation, settings_row, review_mode=review_mode)
         if not self.incognito:
             self.memories = self._load_memories(context.get("project_id"))
         routine_lines = [] if review_mode else self._routine_lines()
@@ -724,20 +828,25 @@ class _Turn:
             notes_data = memory.render_data_block(self.memories)
             if notes_data:
                 self._taint_from_notes(self.memories.data)
-        history, current, previous = self._history()
+        history, current, previous = self._history(include_current=self.follow_up)
         if current is None:
             raise PermanentTurnFailure("The question this answer belongs to no longer exists.")
         self.surfaced = self._carried_over()
         user_text = (current.get("content") or "").strip()
         previous_text = ((previous or {}).get("content") or "").strip()
+        # The follow-up has no new user message: binding keeps the user
+        # messages before the task (4.5).
         self.user_texts = tuple(t for t in (user_text, previous_text) if t)
-        data_block = prompts.context_data_block(context, file_ids=self._attached_file_ids(current))
         items: list[dict] = list(history)
-        if data_block:
-            items.append(llm_messages.user_message(data_block))
-        if notes_data:
-            items.append(llm_messages.user_message(notes_data))
-        items.append(llm_messages.user_message(user_text))
+        if self.follow_up:
+            items.append(llm_messages.user_message(FOLLOW_UP_TEXT))
+        else:
+            data_block = prompts.context_data_block(context, file_ids=self._attached_file_ids(current))
+            if data_block:
+                items.append(llm_messages.user_message(data_block))
+            if notes_data:
+                items.append(llm_messages.user_message(notes_data))
+            items.append(llm_messages.user_message(user_text))
 
         system = prompts.build_system_prompt(
             full_name=human.get("full_name"), role=role.value, enabled_map=enabled_map,
@@ -817,20 +926,26 @@ class _Turn:
         (the turn then ends without another model call)."""
         assert self.executor is not None
         turn_items: list[dict] = []
-        for round_no in range(1, MAX_ROUNDS + 1):
-            last = round_no == MAX_ROUNDS
+        for round_no in range(1, self.max_rounds + 1):
+            last = round_no == self.max_rounds
             offered = None if last else self.tool_definitions()
-            if last:
+            if last and not self.follow_up:   # the follow-up ends on FOLLOW_UP_TEXT
                 items.append(llm_messages.user_message(LAST_ROUND_TEXT))
                 turn_items.append(items[-1])
+            offered = self._with_hosted_search(offered)
             est_input = llm_messages.estimate_input_tokens(system, items, offered)
-            hold = _reserve_call(self.user_id, self.model, est_input, run_id=self.run_id, settings=self.s)
+            if self.hosted_offered:
+                hold = _reserve_call(self.user_id, self.model, est_input, run_id=self.run_id, settings=self.s,
+                                     extra=llm_pricing.web_search_cost(HOSTED_SEARCH_RESERVE_CALLS))
+            else:
+                hold = _reserve_call(self.user_id, self.model, est_input, run_id=self.run_id, settings=self.s)
             try:
                 with llm_messages.attributed(self.user_id, self.run_id, reservation_id=hold):
                     result = self._call_model(system, items, offered)
             finally:
                 _settle_call(self.user_id, hold)
             self._record(result)
+            self._hosted_search_used(result)
             items.extend(result.output_items)
             turn_items.extend(self._stored_items(result.output_items))
             if not result.tool_calls:
@@ -890,6 +1005,115 @@ class _Turn:
                 redacted = REDACTED_ARGUMENTS
             out.append({**item, "arguments": redacted})
         return out
+
+    # ── hosted web search (browser v2 plan 13.1) ──────────────────────────
+
+    def _hosted_search_allowed(self, role: Role, conversation: dict, settings_row: dict | None, *,
+                               review_mode: bool) -> bool:
+        """The static half of the offer rule (tools/web.hosted_search_offered):
+        flags, role, mode, follow-up and the conversation's taint. The turn's
+        own taint is checked each round (_with_hosted_search)."""
+        from app.assistant.access import disabled_tools
+        from app.assistant.tools import web as web_tools
+
+        try:
+            return web_tools.hosted_search_offered(
+                role=role,
+                mode=registry.MODE_MAILBOX_REVIEW if review_mode
+                else str(conversation.get("mode") or registry.MODE_NORMAL),
+                follow_up=self.follow_up,
+                conversation_tainted=bool(conversation.get("tainted_at")),
+                mailbox_tainted=bool(conversation.get("mailbox_tainted_at")),
+                settings=self.s, disabled=disabled_tools(settings_row),
+            )
+        except Exception:  # noqa: BLE001 - fail closed: no search this turn
+            logger.warning("assistant: hosted search offer rule failed", exc_info=True)
+            return False
+
+    def _with_hosted_search(self, offered: list[dict] | None) -> list[dict] | None:
+        """This round's tools plus the hosted web_search entry, only when the
+        conversation allows it and nothing in this turn has tainted it yet
+        (a tainted tool result, the notes block, or an earlier search)."""
+        self.hosted_offered = False
+        if offered is None or not self.hosted_static or self.tainted:
+            return offered
+        self.hosted_offered = True
+        return [*offered, dict(llm_messages.HOSTED_WEB_SEARCH)]
+
+    def _hosted_search_used(self, result: llm_messages.MessagesResult) -> None:
+        """A response that carries web_search_call items: taint the turn and
+        the conversation first, record the citations as `search` provenance,
+        then run the action audit. A page action outside the call's own
+        results, an unknown action, or a search that was not offered fails
+        the turn closed (the answer is not shown)."""
+        from app.assistant.tools import web as web_tools
+
+        extra = result.extra or {}
+        calls = list(extra.get("web_search") or [])
+        if not calls:
+            return
+        assert self.executor is not None
+        self.search_calls += len(calls)
+        self.tainted = True
+        self.message_tainted = True
+        self.executor.tainted_context = True
+        if not self.conversation_tainted:
+            try:
+                repo.mark_conversation_tainted(self.user_id, self.conversation_id)
+                self.conversation_tainted = True
+            except Exception:  # noqa: BLE001 - the failed or tainted message row marks it too (0170 trigger)
+                logger.exception("assistant: conversation taint mark failed")
+        audit = web_tools.audit_search(calls, known=self.search_urls)
+        citations = self._search_citations(audit.sources, extra.get("citations") or [])
+        self._record_search(citations)
+        for action in audit.actions:
+            logger.info("assistant: hosted web search action %s %s", action["type"], action["url"])
+        offered = self.hosted_offered
+        ok = offered and audit.ok
+        self.progress.append({
+            "seq": len(self.progress) + 1, "tool_name": HOSTED_SEARCH_PROGRESS,
+            "progress_label": HOSTED_SEARCH_LABEL, "ok": ok, "duration_ms": 0,
+        })
+        self._save_progress()
+        if not ok:
+            for bad in audit.violations or [{"type": "search", "url": "", "why": "not_offered"}]:
+                logger.warning("assistant: hosted web search refused for %s: %s %s %s", self.message_id,
+                               bad["why"], bad["type"], bad["url"])
+            raise PermanentTurnFailure(web_tools.SEARCH_BLOCKED_TEXT)
+
+    @staticmethod
+    def _search_citations(sources: list[str], cited: list[str]) -> list[str]:
+        from app.assistant.tools import web as web_tools
+
+        seen: dict[str, None] = {}
+        for url in [*cited, *sources]:
+            norm = web_tools.normalize_url(url)
+            if norm and norm not in seen:
+                seen[norm] = None
+        return list(seen)[:MAX_SEARCH_CITATIONS]
+
+    def _record_search(self, urls: list[str]) -> None:
+        """The turn's search URLs: remembered for the next audit, kept out of
+        any card the turn proposes (the binding corpus), and stored as a
+        tainted web_ result so the browser's URL provenance reads them as
+        `search` (5.5). A failed write never fails the turn."""
+        if not urls or self.executor is None:
+            return
+        self.search_urls.update(urls)
+        self.executor.tainted_texts.extend(("web_search", url) for url in urls)
+        payload = {"citations": urls}
+        text = json.dumps(payload, separators=(",", ":"))
+        try:
+            repo.insert_tool_result(self.user_id, {
+                "conversation_id": self.conversation_id, "message_id": self.message_id,
+                "tool_call_id": None, "tool_name": HOSTED_SEARCH_RESULT_TOOL,
+                "retention_class": "standard", "tainted": True,
+                "taint_corpus": [{"f": "url", "t": url} for url in urls],
+                "payload": payload, "payload_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                "size_bytes": len(text.encode("utf-8")),
+            })
+        except Exception:  # noqa: BLE001 - provenance then reads `unknown`, never a wrong grant
+            logger.warning("assistant: search citations could not be stored for %s", self.message_id)
 
     def _call_model(self, system: str, items: list[dict], tools: list[dict] | None) -> llm_messages.MessagesResult:
         attempt = 0

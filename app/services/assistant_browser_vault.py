@@ -80,14 +80,29 @@ def decrypt_credential(row: dict) -> str:
                            "credential", row).decode("utf-8")
 
 
-def job_credential(job: dict) -> dict:
+def job_credential(job: dict, credential_id: str | None = None) -> dict | None:
+    """The credential a fenced job may use, after the owner checks.
+
+    v2 (`user_browser`, docs/ASSISTANT_BROWSER_V2_PLAN.md 3.3, 5.3): the
+    credential is named by id and must be in the job's credential set
+    (assistant_browser_job_credentials) at its pinned version, for the
+    pinned site and account. A job may have no credential at all (a site
+    without login): with `credential_id` None the owner checks run and None
+    comes back. No service check.
+
+    The retired `user_browser_read` type keeps its single pinned Procore
+    credential (service and URL checked) and ignores `credential_id`."""
     from app.assistant import access, repo
     settings = get_settings()
     owner = str(job.get("principal_user_id") or "")
+    v2 = job.get("agent_type") == "user_browser"
     if (not getattr(settings, "assistant_browser_enabled", False)
+            or (v2 and not getattr(settings, "assistant_browser_v2_enabled", False))
             or job.get("principal_kind") != "user" or not owner
             or access.owner_check(owner, require_writer=True).problem):
         raise VaultUnavailable("Personal browser vault is unavailable.")
+    if v2:
+        return _job_credential_v2(repo, owner, job, credential_id)
     row = repo.browser_credential_by_id(owner, str(job.get("user_credential_id") or ""))
     if (not row or row.get("status") != "active"
             or row.get("version") != job.get("user_credential_version")
@@ -100,6 +115,25 @@ def job_credential(job: dict) -> dict:
     except (ValueError, TypeError):
         allowed = False
     if not allowed:
+        raise VaultUnavailable("Personal browser vault is unavailable.")
+    return row
+
+
+def _job_credential_v2(repo, owner: str, job: dict, credential_id: str | None) -> dict | None:
+    if credential_id is None:
+        return None
+    wanted = str(credential_id)
+    pins = [pin for pin in repo.browser_job_credentials(owner, job_id=str(job.get("id") or ""))
+            if str(pin.get("credential_id") or "") == wanted]
+    if len(pins) != 1:
+        raise VaultUnavailable("Personal browser vault is unavailable.")
+    pin = pins[0]
+    row = repo.browser_credential_by_id(owner, wanted)
+    if (not row or row.get("status") != "active" or str(row.get("user_id") or "") != owner
+            or str(pin.get("user_id") or owner) != owner
+            or row.get("version") != pin.get("credential_version")
+            or row.get("site_key") != pin.get("site_key")
+            or row.get("account_label") != pin.get("account_label")):
         raise VaultUnavailable("Personal browser vault is unavailable.")
     return row
 

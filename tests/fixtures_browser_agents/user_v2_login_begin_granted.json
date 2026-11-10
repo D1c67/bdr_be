@@ -1,0 +1,15 @@
+{
+  "model": "UserCredentialFillResponse",
+  "v2_endpoint": "user_login_begin_v2",
+  "direction": "response",
+  "body": {
+    "granted": true,
+    "attempt_id": "d1d1d1d1-0000-4000-8000-000000000002",
+    "username": "estimator@g3electrical.example",
+    "password": "<secret-in-fixture>",
+    "reason": null,
+    "retry_at": null,
+    "help_id": null
+  },
+  "note": "Placeholder only. Real secrets are never in a fixture, log or step."
+}

@@ -74,15 +74,15 @@ def pinned_node() -> Path:
         node = driver / ("node.exe" if os.name == "nt" else "node")
         package = driver / "package/package.json"
         if node.is_file() and package.is_file():
-            # The pinned Python 1.48.0 wheel bundles the JS package 1.48.1.
+            # The pinned Python 1.64.0 wheel bundles the same JS package version.
             # Pin the Python distribution, not its internal JS patch number.
-            assert "version = '1.48.0'" in (driver.parent / "_repo_version.py").read_text()
+            assert "version = '1.64.0'" in (driver.parent / "_repo_version.py").read_text()
             return node
     pytest.skip("Installed pinned Playwright driver is unavailable for socket-free parser check")
 
 
 PARSER = r"""
-const {HTTPParser:P} = process.binding('http_parser');
+const {HTTPParser:P} = require('_http_common');
 const {AsyncResource} = require('node:async_hooks');
 const p = new P();
 // Zero means the process default, as used by Playwright's https.request.

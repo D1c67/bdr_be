@@ -31,8 +31,21 @@ find_tools or a skill surfaces them) and `keywords` (the find resolver).
 `per_person_violation` refuses a non-sensitive request that names one
 person on a per-person route.
 
-Nothing here reads the database: `toolset_for` takes the rows it needs.
-The tool modules under app/assistant/tools register themselves on import;
+Browser v2 (docs/ASSISTANT_BROWSER_V2_PLAN.md 4.3, 4.5) adds the
+server_gated tier: a POST whose authority check happens in the server
+route, not in a card the model proposes (start a browser task, post a site
+access or sign-in card, cancel a task). It runs in the turn like a
+housekeeping step, under a begun ledger row the route reads back as its
+trusted turn context, is never re-sent after an earlier attempt began it,
+is capped per turn by max_proposals_per_turn and never reaches a Mailbox
+review. `toolset_for` offers the browser namespace only while the browser
+is available (both flags and the user_browser type row, read once per
+turn), and `followup_toolset` is the text-only toolset of the automatic
+turn after a browser task finishes (read tools on BDR data only).
+
+Nothing here reads the database: `toolset_for` takes the rows it needs,
+except the one browser availability read above (skipped while the flags
+are off). The tool modules under app/assistant/tools register themselves on import;
 `all_tools()` imports them lazily so this module stays import-light.
 """
 
@@ -51,7 +64,7 @@ RoutePair = tuple[str, str]
 
 # POST routes that only read (phase 1 previews): a write spec may list them
 # in extra_routes next to GET routes.
-READ_POST_ROUTES: frozenset[RoutePair] = frozenset({("POST", "/projects/similar"), ("POST", "/assistant/mail/authority"), ("POST", "/assistant/browser-tasks/preview")})
+READ_POST_ROUTES: frozenset[RoutePair] = frozenset({("POST", "/projects/similar"), ("POST", "/assistant/mail/authority")})
 
 EFFECT_READ = "read"
 EFFECT_SENSITIVE_READ = "sensitive_read"
@@ -60,10 +73,23 @@ EFFECT_EXTERNAL_SEND = "external_send"
 EFFECT_EXPENSIVE = "expensive"
 # Phase 3: inline writes to the user's own assistant rows, ledgered, no card.
 EFFECT_HOUSEKEEPING = "housekeeping"
+# Browser v2 (4.3): a POST whose authority check is in the server route; the
+# route posts any card itself and never grants, fills or approves.
+EFFECT_SERVER_GATED = "server_gated"
 EFFECTS: frozenset[str] = frozenset({
     EFFECT_READ, EFFECT_SENSITIVE_READ, EFFECT_WRITE_INTERNAL, EFFECT_EXTERNAL_SEND,
-    EFFECT_EXPENSIVE, EFFECT_HOUSEKEEPING,
+    EFFECT_EXPENSIVE, EFFECT_HOUSEKEEPING, EFFECT_SERVER_GATED,
 })
+# The namespaces a server_gated tool may live in, and the most calls of one
+# such tool a turn may make (refused or not).
+SERVER_GATED_NAMESPACES: frozenset[str] = frozenset({"browser"})
+SERVER_GATED_MAX_PER_TURN = 3
+# The automatic text-only turn after a browser task finishes (4.5): plain
+# reads only, and none from these namespaces (outside content, or a way to
+# start more browser work).
+FOLLOWUP_EFFECTS: frozenset[str] = frozenset({EFFECT_READ})
+FOLLOWUP_EXCLUDED_NAMESPACES: frozenset[str] = frozenset({"browser", "web", "mail"})
+BROWSER_NAMESPACE = "browser"
 # The tiers a Mailbox review conversation may hold (Prompt injection and taint).
 READ_EFFECTS: frozenset[str] = frozenset({EFFECT_READ, EFFECT_SENSITIVE_READ})
 # Effects that never run inside the turn: they write an approval card.
@@ -115,6 +141,10 @@ _KEYWORD_RE = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$")
 
 MODE_NORMAL = "normal"
 MODE_MAILBOX_REVIEW = "mailbox_review"
+# Browser v2 (4.5, WI-13): the automatic follow-up turn after a browser task
+# (assistant_messages.origin browser_result). toolset_for treats it as a
+# normal conversation with followup=True.
+MODE_BROWSER_RESULT = "browser_result"
 
 # Arguments every tool accepts (Skills and tools: response_format and limit).
 RESPONSE_FORMATS = ("concise", "detailed")
@@ -353,6 +383,7 @@ def validate(spec: ToolSpec) -> ToolSpec:
         # turn_allowlist, propose answers not_offered): refuse it here.
         raise RegistryError(f"tool {spec.name}: a {spec.effect} tool needs a write spec")
     housekeeping = spec.effect == EFFECT_HOUSEKEEPING
+    server_gated = spec.effect == EFFECT_SERVER_GATED
     for limit_name in ("max_cards_per_turn", "max_proposals_per_turn", "max_tainted_calls_per_turn"):
         limit = getattr(spec, limit_name)
         if limit is None:
@@ -361,9 +392,12 @@ def validate(spec: ToolSpec) -> ToolSpec:
             raise RegistryError(f"tool {spec.name}: {limit_name} must be a positive integer or None")
         if limit_name == "max_cards_per_turn" and not spec.confirm:
             raise RegistryError(f"tool {spec.name}: {limit_name} applies to confirm tools only")
-        if limit_name == "max_proposals_per_turn" and not (spec.confirm or housekeeping):
-            # On a housekeeping tool it bounds the calls, refused or not.
-            raise RegistryError(f"tool {spec.name}: {limit_name} applies to confirm and housekeeping tools only")
+        if limit_name == "max_proposals_per_turn" and not (spec.confirm or housekeeping or server_gated):
+            # On a housekeeping or server_gated tool it bounds the calls,
+            # refused or not.
+            raise RegistryError(
+                f"tool {spec.name}: {limit_name} applies to confirm and housekeeping tools only, and to server_gated tools"
+            )
         if limit_name == "max_tainted_calls_per_turn" and not housekeeping:
             raise RegistryError(f"tool {spec.name}: {limit_name} applies to housekeeping tools only")
     for hook_name in ("redact_args", "precheck"):
@@ -387,6 +421,23 @@ def validate(spec: ToolSpec) -> ToolSpec:
             raise RegistryError(f"tool {spec.name}: the extra routes of a housekeeping tool are GET only")
         if spec.namespace == "memory" and spec.redact_args is None:
             raise RegistryError(f"tool {spec.name}: a memory housekeeping tool needs redact_args")
+    if server_gated:
+        # Inline like housekeeping, but the route decides: no card, no write
+        # spec, one POST plus GET reads, a per-turn cap, browser only.
+        if spec.confirm:
+            raise RegistryError(f"tool {spec.name}: a server_gated tool never confirms")
+        if spec.write is not None:
+            raise RegistryError(f"tool {spec.name}: a server_gated tool has no write spec")
+        if spec.namespace not in SERVER_GATED_NAMESPACES:
+            raise RegistryError(f"tool {spec.name}: a server_gated tool lives in the browser namespace")
+        if route[0] != "POST":
+            raise RegistryError(f"tool {spec.name}: the primary route of a server_gated tool is a POST")
+        if any(r[0] != "GET" for r in extras):
+            raise RegistryError(f"tool {spec.name}: the extra routes of a server_gated tool are GET only")
+        if spec.max_proposals_per_turn is None or spec.max_proposals_per_turn > SERVER_GATED_MAX_PER_TURN:
+            raise RegistryError(
+                f"tool {spec.name}: a server_gated tool sets max_proposals_per_turn, at most {SERVER_GATED_MAX_PER_TURN}"
+            )
     if spec.write is not None:
         if not isinstance(spec.write, WriteSpec):
             raise RegistryError(f"tool {spec.name}: write must be a WriteSpec")
@@ -547,6 +598,8 @@ def toolset_for(
     settings_row: Mapping[str, Any] | None = None,
     mode: str = MODE_NORMAL,
     incognito: bool = False,
+    browser: bool | None = None,
+    followup: bool = False,
 ) -> list[ToolSpec]:
     """The tools offered to `user` right now, sorted by name.
 
@@ -557,19 +610,30 @@ def toolset_for(
     15); in Mailbox review mode only read and sensitive_read tools remain
     and every memory or schedule tool is dropped whatever its effect
     (Prompt injection and taint); an Incognito turn has no memory tools
-    (phase 3, 3.7.1)."""
+    (phase 3, 3.7.1).
+
+    Browser v2 (4.1 item 3): the browser namespace is offered only while
+    the browser is available. `browser` None reads it once, lazily, when a
+    browser spec gets that far (browser_tools_available); True or False
+    decides without a read. `followup` True gives the text-only toolset of
+    the automatic turn after a browser task finishes (followup_toolset)."""
     from app.assistant.access import disabled_tools
 
     try:
         role = Role(getattr(user, "role", None))
     except ValueError:
         return []
+    if mode == MODE_BROWSER_RESULT:
+        mode, followup = MODE_NORMAL, True
     if role not in INTERNAL_ROLES or mode not in {MODE_NORMAL, MODE_MAILBOX_REVIEW}:
         return []
     if mode == MODE_MAILBOX_REVIEW and role not in EVIDENCE_ROLES:
         return []
     off = disabled_tools(settings_row)
+    if followup:
+        browser = False   # never offered there, so never read
     out: list[ToolSpec] = []
+    hosted_search: bool | None = None
     for spec in all_tools().values():
         if role not in spec.roles:
             continue
@@ -587,8 +651,53 @@ def toolset_for(
             continue
         if not spec.offered:
             continue
+        if spec.namespace == "web":
+            # Hosted web search (plan 13.1) replaces the gateway tools.
+            if hosted_search is None:
+                from app.services.assistant_web import hosted_search_enabled
+
+                hosted_search = hosted_search_enabled()
+            if hosted_search:
+                continue
+        if spec.namespace == BROWSER_NAMESPACE:
+            if browser is None:
+                browser = browser_tools_available()
+            if not browser:
+                continue
         out.append(spec)
+    if followup:
+        out = followup_toolset(out)
     return sorted(out, key=lambda s: s.name)
+
+
+def browser_tools_available() -> bool:
+    """ASSISTANT_BROWSER_ENABLED and ASSISTANT_BROWSER_V2_ENABLED plus the
+    enabled `user_browser` type row (4.1 item 3). The flags are checked
+    first, so nothing is read while they are off; a read failure answers
+    False (the tools are simply not offered)."""
+    try:
+        # The type registry first: importing the type module on its own
+        # first is a circular import (its registry imports it back).
+        import app.services.browser_agents.registry  # noqa: F401
+        from app.services.browser_agents.types import user_browser
+
+        return bool(user_browser.enabled())
+    except Exception:  # noqa: BLE001 - fail closed: no browser tools this turn
+        return False
+
+
+def followup_toolset(specs: Iterable[ToolSpec]) -> list[ToolSpec]:
+    """The toolset of the automatic follow-up turn after a browser task
+    finishes (4.5, origin browser_result): plain read tools on BDR data
+    only. No browser, web or mail tool, no server_gated, housekeeping,
+    sensitive_read or other card tool, so a result that says "start another
+    task" or "send this" cannot chain. Sorted by name."""
+    return sorted(
+        (spec for spec in specs
+         if spec.effect in FOLLOWUP_EFFECTS and spec.namespace not in FOLLOWUP_EXCLUDED_NAMESPACES
+         and not spec.confirm and spec.write is None),
+        key=lambda s: s.name,
+    )
 
 
 def tool_definitions(specs: Iterable[ToolSpec]) -> list[dict]:
@@ -610,12 +719,13 @@ def allowlist_for(specs: Iterable[ToolSpec]) -> frozenset[RoutePair]:
 
 
 def turn_allowlist(specs: Iterable[ToolSpec]) -> frozenset[RoutePair]:
-    """Read and housekeeping specs: all routes. Write specs: extra_routes
-    only (previews). The write route of a confirm tool is never reachable
-    inside a turn. A confirm spec without a write spec contributes nothing."""
+    """Read, housekeeping and server_gated specs: all routes. Write specs:
+    extra_routes only (previews). The write route of a confirm tool is never
+    reachable inside a turn. A confirm spec without a write spec contributes
+    nothing."""
     pairs: set[RoutePair] = set()
     for spec in specs:
-        if spec.effect in (EFFECT_READ, EFFECT_HOUSEKEEPING):
+        if spec.effect in (EFFECT_READ, EFFECT_HOUSEKEEPING, EFFECT_SERVER_GATED):
             pairs.update(spec.routes)
         elif spec.write is not None:
             pairs.update(spec.extra_routes)

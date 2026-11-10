@@ -71,7 +71,7 @@ def test_assistant_defaults_boot_and_are_off():
     s = _s()
     assert s.assistant_enabled is False and s.assistant_scheduler_enabled is False
     assert s.assistant_model == "gpt-5.4" and s.assistant_reasoning_effort == "low"
-    assert (s.assistant_daily_cap_usd, s.assistant_global_daily_cap_usd) == (5.0, 50.0)
+    assert (s.assistant_daily_cap_usd, s.assistant_global_daily_cap_usd) == (15.0, 50.0)
     assert s.assistant_concurrency == 2
     assert _on().assistant_enabled is True
 

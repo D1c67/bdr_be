@@ -5,8 +5,16 @@ Recipes are code over the due digest, the scheduler and the maintenance
 riders call no model, and offboarding calls none either; the phase 7 router,
 its sender and its rules (docs/ASSISTANT_PHASE7_PLAN.md 12.3) call none. A source scan pins
 it: none of these modules names the model message builder, the turn loop,
-the model service or its completion call, in any import form. The registry
-still knows only the two turn modes (no unattended mode was added).
+the model service or its completion call, in any import form.
+
+Browser v2 (docs/ASSISTANT_BROWSER_V2_PLAN.md 4.5, owner answer 1 of
+2026-11-02, the D4 change in docs/ASSISTANT.md decisions log 22): the one
+model call not started by a user message is the automatic follow-up turn
+after a browser task finishes, the third named turn mode browser_result.
+The browser chat writer that enqueues it is on the scan list too: it only
+inserts the pending message and the assistant_turn job; the turn loop runs
+it as one model call with no tool offered, at most once per user message
+chain.
 
 Phase 8 (docs/ASSISTANT_PHASE8_PLAN.md D1, decisions log entry 24): triage
 makes one unattended model call per batch of items, not per item. assistant_triage is scanned so it
@@ -23,6 +31,7 @@ from pathlib import Path
 
 from app.assistant import proactive, recipes, registry
 from app.services import (
+    assistant_browser_chat,
     assistant_delivery,
     assistant_maintenance,
     assistant_offboarding,
@@ -34,7 +43,7 @@ from app.services import (
 
 MODULES = (
     assistant_scheduler, assistant_maintenance, assistant_recipes, recipes, assistant_offboarding,
-    assistant_proactive, assistant_delivery, proactive,
+    assistant_proactive, assistant_delivery, proactive, assistant_browser_chat,
     assistant_triage,
 )
 FORBIDDEN_TEXT = (
@@ -75,6 +84,15 @@ def test_no_unattended_module_imports_the_loop_or_the_model_service():
                     assert alias.name not in ("app.assistant.loop", "app.services.llm"), module.__name__
 
 
-def test_the_registry_has_only_the_two_turn_modes():
+def test_the_registry_has_exactly_three_turn_modes():
     modes = {v for k, v in vars(registry).items() if k.startswith("MODE_") and isinstance(v, str)}
-    assert modes == {"normal", "mailbox_review"}
+    assert modes == {"normal", "mailbox_review", "browser_result"}
+
+
+def test_the_third_mode_is_the_browser_follow_up_and_is_text_only():
+    from app.assistant import loop
+
+    assert registry.MODE_BROWSER_RESULT == assistant_browser_chat.FOLLOW_UP_ORIGIN == loop.FOLLOW_UP_ORIGIN
+    # The writer enqueues the ordinary turn job; it never runs a turn itself.
+    assert assistant_browser_chat.TURN_JOB_TYPE == "assistant_turn"
+    assert loop.FOLLOW_UP_MAX_ROUNDS == 1   # owner answer 1: one text-only call

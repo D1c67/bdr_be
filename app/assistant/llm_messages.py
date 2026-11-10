@@ -9,7 +9,15 @@ server keeps nothing and the reasoning comes back encrypted in the output
 items, which the loop persists in assistant_messages.blocks and replays in
 order on the next round. Nothing here uses previous_response_id.
 
-Only function tools are accepted. The call runs inside services/llm._guarded
+Only function tools are accepted, plus (browser v2, plan 13.1) one hosted
+`web_search` entry with the narrowest options the API offers (HOSTED_WEB_SEARCH:
+no user location, the smallest context size, no domain filter). The caller
+decides whether to offer it (tools/web.hosted_search_offered); here it is also
+refused unless ASSISTANT_HOSTED_SEARCH_ENABLED is on. A response that used it
+carries web_search_call items: they are replayed like any other item, their
+actions and sources come back in MessagesResult.extra["web_search"] for the
+loop's action audit, the url_citation annotations in extra["citations"], and
+each item is billed by llm_pricing (WebSearchUsage). The call runs inside services/llm._guarded
 (the concurrency gate, usage capture, the llm_call_log row, the cassette and
 eval-ledger hooks) and renews the queue lease right before sending, like
 complete_parts. services/llm.py is not edited: the `assistant` feature entry
@@ -40,7 +48,18 @@ DEFAULT_MAX_OUTPUT_TOKENS = 8_000
 DEFAULT_REASONING_EFFORT = "low"
 DEFAULT_TIMEOUT_SECONDS = 120.0
 
-REPLAYABLE_TYPES: frozenset[str] = frozenset({"reasoning", "function_call", "message"})
+REPLAYABLE_TYPES: frozenset[str] = frozenset({"reasoning", "function_call", "message", "web_search_call"})
+
+# Browser v2 (plan 13.1): the one hosted tool entry the assistant may send.
+# `search_context_size` low is the smallest the API offers; there is no
+# user_location and no filters, so nothing about the person goes with it.
+HOSTED_WEB_SEARCH_TYPE = "web_search"
+HOSTED_WEB_SEARCH: dict = {"type": HOSTED_WEB_SEARCH_TYPE, "search_context_size": "low"}
+WEB_SEARCH_SOURCES_INCLUDE = "web_search_call.action.sources"
+# The most built-in tool calls (search, open_page, find_in_page) one response
+# may run; the loop's spend hold reserves exactly this many call fees.
+HOSTED_SEARCH_MAX_CALLS = 3
+MAX_STORED_SOURCES = 25
 INPUT_ITEM_TYPES: frozenset[str] = REPLAYABLE_TYPES | {"function_call_output"}
 
 
@@ -75,6 +94,16 @@ def attributed(user_id: str, run_id: str, reservation_id: str | None = None) -> 
 
 
 @dataclass(frozen=True)
+class WebSearchUsage(llm.LlmUsage):
+    """The token usage of a call that also ran hosted web search, plus the
+    number of web_search_call items. llm_pricing.cost_for bills each one at
+    WEB_SEARCH_CALL_PRICE, so the llm_call_log row and the spend settle see
+    the fee without any change to services/llm."""
+
+    web_search_calls: int = 0
+
+
+@dataclass(frozen=True)
 class MessagesResult:
     text: str
     tool_calls: list[dict]            # [{call_id, name, arguments: dict}]
@@ -106,11 +135,29 @@ def _route(feature: str, settings: Settings | None) -> tuple[llm.Route, Settings
     return route, base
 
 
+def is_hosted_search(tool: Any) -> bool:
+    return isinstance(tool, dict) and tool.get("type") == HOSTED_WEB_SEARCH_TYPE
+
+
 def validate_tools(tools: list[dict] | None) -> list[dict]:
+    """The function tools plus at most one hosted web_search entry. The
+    hosted entry must be exactly `{"type": "web_search"}` (optionally with
+    the low context size); any other option (a location, a filter, a larger
+    context) is refused, and the canonical copy is what goes out."""
     out: list[dict] = []
+    hosted = 0
     for tool in tools or []:
+        if is_hosted_search(tool):
+            if {k: v for k, v in tool.items() if k != "search_context_size"} != {"type": HOSTED_WEB_SEARCH_TYPE} \
+                    or tool.get("search_context_size", "low") != "low":
+                raise ValueError("the hosted web_search tool takes no options")
+            hosted += 1
+            if hosted > 1:
+                raise ValueError("only one hosted web_search tool is accepted")
+            out.append(dict(HOSTED_WEB_SEARCH))
+            continue
         if not isinstance(tool, dict) or tool.get("type") != "function":
-            raise ValueError("complete_messages accepts function tools only")
+            raise ValueError("complete_messages accepts function tools and one hosted web_search only")
         if not tool.get("name") or not isinstance(tool.get("parameters"), dict):
             raise ValueError("every function tool needs a name and a parameters schema")
         out.append(tool)
@@ -184,7 +231,82 @@ def replayable_items(output: Any) -> list[dict]:
                 if item.get("id"):
                     entry["id"] = item["id"]
                 items.append(entry)
+        elif kind == "web_search_call":
+            entry = _web_search_item(item)
+            if entry is not None:
+                items.append(entry)
     return items
+
+
+def _source_urls(action: dict) -> list[str]:
+    urls: list[str] = []
+    for source in action.get("sources") or []:
+        source = _to_dict(source) if not isinstance(source, str) else {"url": source}
+        url = source.get("url")
+        if isinstance(url, str) and url.strip():
+            urls.append(url.strip())
+    return urls
+
+
+def _web_search_item(item: dict) -> dict | None:
+    """One web_search_call as a valid input item for the next round: id,
+    status and the action (type, query, url, pattern and the source URLs,
+    capped). Anything else the provider added is dropped."""
+    action = _to_dict(item.get("action") or {})
+    kind = action.get("type")
+    if not item.get("id") or not isinstance(kind, str):
+        return None
+    out: dict = {"type": kind}
+    for key in ("query", "url", "pattern"):
+        if isinstance(action.get(key), str):
+            out[key] = action[key]
+    if isinstance(action.get("queries"), list):
+        out["queries"] = [q for q in action["queries"] if isinstance(q, str)][:10]
+    sources = _source_urls(action)[:MAX_STORED_SOURCES]
+    if sources:
+        out["sources"] = [{"type": "url", "url": u} for u in sources]
+    status = item.get("status") if item.get("status") in ("in_progress", "searching", "completed", "failed") \
+        else "completed"
+    return {"type": "web_search_call", "id": item["id"], "status": status, "action": out}
+
+
+def web_search_calls(output: Any) -> list[dict]:
+    """The hosted search calls of a response, in order, for the action
+    audit: [{id, status, action_type, query, url, sources[]}]. The sources
+    are the search results the action listed (not capped here: the audit
+    compares against all of them). An unknown action type is kept as it
+    came so the audit can refuse it."""
+    calls: list[dict] = []
+    for raw in output or []:
+        item = _to_dict(raw)
+        if item.get("type") != "web_search_call":
+            continue
+        action = _to_dict(item.get("action") or {})
+        calls.append({
+            "id": str(item.get("id") or ""),
+            "status": str(item.get("status") or ""),
+            "action_type": str(action.get("type") or ""),
+            "query": action.get("query") if isinstance(action.get("query"), str) else None,
+            "url": action.get("url") if isinstance(action.get("url"), str) else None,
+            "sources": _source_urls(action),
+        })
+    return calls
+
+
+def citation_urls(output: Any) -> list[str]:
+    """The url_citation annotations of the response's assistant messages."""
+    urls: list[str] = []
+    for raw in output or []:
+        item = _to_dict(raw)
+        if item.get("type") != "message":
+            continue
+        for part in item.get("content") or []:
+            part = _to_dict(part)
+            for note in part.get("annotations") or []:
+                note = _to_dict(note)
+                if note.get("type") == "url_citation" and isinstance(note.get("url"), str) and note["url"].strip():
+                    urls.append(note["url"].strip())
+    return urls
 
 
 def function_call_output(call_id: str, output: Any) -> dict:
@@ -238,8 +360,14 @@ def complete_messages(
     effort = reasoning_effort or getattr(s, "assistant_reasoning_effort", None) or DEFAULT_REASONING_EFFORT
     if effort:
         kwargs["reasoning"] = {"effort": effort}
+    hosted = any(is_hosted_search(t) for t in function_tools)
+    if hosted and not getattr(s, "assistant_hosted_search_enabled", False):
+        raise ValueError("hosted web search is not enabled (ASSISTANT_HOSTED_SEARCH_ENABLED)")
     if function_tools:
         kwargs["tools"] = function_tools
+    if hosted:
+        kwargs["include"] = [*kwargs["include"], WEB_SEARCH_SOURCES_INCLUDE]
+        kwargs["max_tool_calls"] = HOSTED_SEARCH_MAX_CALLS
 
     effective_timeout = float(timeout if timeout is not None else DEFAULT_TIMEOUT_SECONDS)
     client = llm._client_for(route, s).with_options(timeout=effective_timeout, max_retries=0)
@@ -252,6 +380,21 @@ def complete_messages(
         tool_calls = llm._parse_tool_calls(resp)
         output = llm._get(resp, "output") or []
         items = replayable_items(output)
+        searches = web_search_calls(output)
+        extra: dict = {}
+        if searches:
+            # Each web_search_call is billed: hand the count to the usage the
+            # gate logs (llm_pricing.cost_for adds the per-call fee).
+            base = usage or llm.LlmUsage()
+            usage = WebSearchUsage(
+                input_tokens=base.input_tokens, cached_tokens=base.cached_tokens,
+                output_tokens=base.output_tokens, reasoning_tokens=base.reasoning_tokens,
+                cache_write_5m_tokens=base.cache_write_5m_tokens,
+                cache_write_1h_tokens=base.cache_write_1h_tokens,
+                web_search_calls=len(searches),
+            )
+            llm._record_usage(usage)
+            extra = {"web_search": searches, "citations": citation_urls(output)}
         if not text:
             text = "".join(
                 part.get("text", "") for item in items if item.get("type") == "message"
@@ -266,6 +409,7 @@ def complete_messages(
             model=route.model,
             cost_usd=llm_pricing.cost_for(route.model, usage) if usage is not None else None,
             raw_item_count=len(output),
+            extra=extra,
         )
 
     return llm._guarded(feature, route, s, call, request={"op": "messages", **kwargs})

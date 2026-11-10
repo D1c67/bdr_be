@@ -1,0 +1,12 @@
+{
+  "model": "UserCredentialResultResponse",
+  "v2_endpoint": "user_login_result_v2",
+  "direction": "response",
+  "body": {
+    "attempt_open": true,
+    "locked_until": null,
+    "login_failures": 0,
+    "attempts_today": 1,
+    "help_reason": "push"
+  }
+}

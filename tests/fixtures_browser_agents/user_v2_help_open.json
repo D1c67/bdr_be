@@ -1,0 +1,10 @@
+{
+  "model": "UserHelpOpenV2Request",
+  "v2_endpoint": "user_help_open_v2",
+  "direction": "request",
+  "body": {
+    "reason_code": "needs_credential",
+    "message": "No saved login works for this supplier portal.",
+    "credential_id": null
+  }
+}

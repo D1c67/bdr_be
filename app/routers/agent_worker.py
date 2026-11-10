@@ -293,6 +293,17 @@ def hello(
 
 
 def _user_execution_enabled() -> bool:
+    """Personal execution is the v2 type only (plan 3.4); the retired read
+    type is never claimed again."""
+    from app.services.browser_agents.types.user_browser import enabled
+    return enabled()
+
+
+def _user_type_enabled(key: str) -> bool:
+    """TypeConfig.enabled for a personal type: the v2 gate for user_browser;
+    the retired read type keeps its own (disabled) gate."""
+    if key == protocol.USER_BROWSER_TYPE:
+        return _user_execution_enabled()
     from app.services.browser_agents.types.user_browser_read import enabled
     return enabled()
 
@@ -341,7 +352,7 @@ def config(
             t["key"]: protocol.TypeConfig(
                 enabled=(bool(t.get("enabled")) and registry.has_type(t["key"])
                          and registry.get_type(t["key"]).principal_kind == worker.principal_kind
-                         and (worker.principal_kind == "org" or _user_execution_enabled())),
+                         and (worker.principal_kind == "org" or _user_type_enabled(t["key"]))),
                 identity=t.get("identity"),
                 max_concurrency=int(t.get("max_concurrency") or 0),
                 max_steps=int(t.get("max_steps") or 0),

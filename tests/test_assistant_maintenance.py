@@ -476,6 +476,32 @@ def test_orphans_offboard_a_person_with_only_an_undelivered_inbox_row_or_pending
     assert [a[1] for a in world.audits] == ["assistant.offboarded"]
 
 
+def test_orphans_offboard_a_person_whose_only_state_is_browser_v2(world, monkeypatch):
+    """A saved login (or any browser v2 state) of someone deactivated outside
+    app/routers/users.py is found by the daily sweep."""
+    db = world.db
+    db.tables["profiles"][1]["is_active"] = False
+    db.tables["assistant_credentials"] = [{"id": "c1", "user_id": OTHER_USER, "status": "active"}]
+    calls: list[tuple] = []
+    monkeypatch.setattr(assistant_offboarding, "offboard", lambda user_id, mode, *, actor_id: calls.append(
+        (user_id, mode)) or assistant_offboarding.OffboardResult(ok=True))
+    result = maint.run_orphans(DAY, worker="w1")
+    assert calls == [(OTHER_USER, "sweep")]
+    assert result == {"checked": 2, "offboarded": 1, "failed": 0}
+
+
+def test_orphans_go_on_when_the_browser_v2_owner_read_fails(world, monkeypatch):
+    world.db.tables["profiles"][1]["is_active"] = False
+    world.db.tables["assistant_schedules"].append(schedule(user_id=OTHER_USER))
+    monkeypatch.setattr(repo, "browser_v2_owners_with_open_state",
+                        lambda user_id, *, limit: (_ for _ in ()).throw(RuntimeError("supabase 503")))
+    calls: list[tuple] = []
+    monkeypatch.setattr(assistant_offboarding, "offboard", lambda user_id, mode, *, actor_id: calls.append(
+        (user_id, mode)) or assistant_offboarding.OffboardResult(ok=True))
+    assert maint.run_orphans(DAY, worker="w1") == {"checked": 2, "offboarded": 1, "failed": 0}
+    assert calls == [(OTHER_USER, "sweep")]
+
+
 def test_orphans_leave_an_active_person_with_phase7_state_alone(world, monkeypatch):
     _phase7_state(world.db, OTHER_USER)
     calls: list[tuple] = []
@@ -515,7 +541,7 @@ def test_every_system_sweep_is_bounded(world, monkeypatch):
     for name in ("pending_approvals_due", "pending_approvals_with_project", "approved_stranded",
                  "tool_results_to_purge", "memories_to_auto_archive", "memories_to_purge",
                  "project_notes_for_review", "owners_with_open_state", "phase7_owners_with_open_state",
-                 "claim_sweep"):
+                 "browser_v2_owners_with_open_state", "claim_sweep"):
         monkeypatch.setattr(repo, name, recorder(name))
     maint.run_approvals_sweep(NOW)
     maint.run_nightly(NIGHT, worker="w1")

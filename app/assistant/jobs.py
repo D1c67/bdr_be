@@ -59,12 +59,17 @@ def _renew_lease() -> bool:
 
 
 def run_assistant_turn(payload: dict) -> None:
-    """The job body: answers the pending assistant message in the payload."""
+    """The job body: answers the pending assistant message in the payload.
+    A browser follow-up (docs/ASSISTANT_BROWSER_V2_PLAN.md 4.5, enqueued by
+    assistant_browser_chat) carries origin browser_result; the loop then
+    runs the text-only follow-up mode."""
     message_id = str((payload or {}).get("message_id") or "").strip()
     user_id = str((payload or {}).get("user_id") or "").strip()
     if not message_id or not user_id:
         raise BadJobPayload(MISSING_PAYLOAD)
-    loop.run_turn(message_id, user_id=user_id, lease_owner=_lease_owner(), renew_lease=_renew_lease)
+    origin = str((payload or {}).get("origin") or "").strip()
+    extra = {"origin": origin} if origin == loop.FOLLOW_UP_ORIGIN else {}
+    loop.run_turn(message_id, user_id=user_id, lease_owner=_lease_owner(), renew_lease=_renew_lease, **extra)
 
 
 def _owner_for(target: str) -> str | None:

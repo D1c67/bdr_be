@@ -1,0 +1,19 @@
+{
+  "endpoint": "user_requeue",
+  "method": "POST",
+  "path": "/agent-worker/v1/jobs/1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d/user/requeue",
+  "headers": {
+    "Authorization": "Bearer bdrw_<token>",
+    "X-Agent-Boot": "b0075eed-0000-4000-8000-000000000001",
+    "X-Agent-Lease": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d:3",
+    "Idempotency-Key": "<uuid>"
+  },
+  "request": {
+    "reason": "provider_outage",
+    "retry_at": "2026-10-19T15:10:00Z",
+    "service_stop": false
+  },
+  "status": 204,
+  "response": null,
+  "note": "Personal (user_browser) job: the same wire shape as the org endpoint on the encrypted /user/ backend path."
+}

@@ -133,6 +133,65 @@ No AI provider addresses are needed: BDR makes every AI call itself.
 
 Also leave Windows Update and time sync (`time.windows.com`) reachable.
 
+**Personal browser pool (worker 1.1.0 and later).** The personal assistant
+browser may open any website its owner approves, so a host allowlist on the
+office firewall or router cannot list its sites. If the PC has such an
+allowlist, widen it for this PC to general outbound HTTPS (443) and HTTP (80),
+plus DNS (UDP and TCP 53) to `1.1.1.1`, `8.8.8.8` and `9.9.9.9` and HTTPS to
+`1.1.1.1` and `8.8.8.8` (the worker resolves names only through these public
+resolvers, never the office DNS server). Keep the Playwright download hosts
+above reachable while updates are staged.
+
+The office network is protected on the PC itself instead, in three layers:
+
+1. **Egress proxy (in the signed worker).** Every request of a personal task
+   (Chromium, and the worker's own page fetches) goes through a small proxy
+   process per task. It resolves names through the public resolvers above,
+   refuses every private, loopback, link-local, CGNAT (`100.64.0.0/10`),
+   multicast and reserved address (IPv4 and IPv6, including IPv4 written as
+   decimal, octal or hex numbers, IPv4-mapped, NAT64 and 6to4 forms), refuses
+   `localhost`, single-label names and `.local`, `.lan`, `.internal`,
+   `.home.arpa` names, and connects only to the address it checked.
+2. **Windows Firewall rules.** Run once, elevated, after installing the user
+   pool:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\apply_user_pool_firewall.ps1
+   ```
+
+   It blocks the private ranges and the local subnet for the worker's
+   `python.exe`, the browser driver `node.exe` and Chromium. The launcher keeps
+   the driver and Chromium at fixed paths under
+   `C:\ProgramData\BDRAgentUser\runtime\current\`, so updates never make
+   the rules stale; a SYSTEM scheduled task ("BDR Agent User Firewall")
+   re-applies them at startup and every 15 minutes. If the user pool uses a
+   shared Python runtime under Program Files (`-PythonPath`), the rules also
+   apply to the org worker's `python.exe`; the org worker never needs the
+   office network, so this is harmless. To undo: run the script with
+   `-Remove`.
+
+   The office's own public addresses are blocked too: its WAN IPv4 (a page
+   could otherwise reach port forwards or the router admin page through
+   hairpin NAT) and the routed IPv6 prefixes of the other office VLANs. The
+   script looks up the WAN IPv4 (`myip.opendns.com`) and adds the /56 of every
+   IPv6 address the PC got from the router. If the office has more than one
+   public address, or a known IPv6 site prefix, add them:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\apply_user_pool_firewall.ps1 -OfficeBlockedRanges 203.0.113.7,2001:db8:1200::/48
+   ```
+
+   They are kept in `firewall\floor.json` (`extra_blocked`), the scheduled
+   task keeps them, the self-test requires them in the rules and the egress
+   proxy refuses them. The script sets folder permissions only when run by
+   hand; the scheduled task changes rules only.
+3. **Boot self-test.** At every start, and before every claim, the worker
+   checks the rules name its real program paths and that `python.exe`,
+   `node.exe` and Chromium each get the Windows policy error (WSAEACCES) when
+   they try to reach the router. If anything fails it keeps running for org
+   work and heartbeats but takes no personal browser task (its log says
+   why). Rerun the script after replacing the router.
+
 ### A5b. Smart App Control off
 
 Windows 11 **Smart App Control** blocks DLLs without a publisher signature,
@@ -150,9 +209,24 @@ cause: ask whoever manages the PC to allow `C:\ProgramData\BDRAgent`.
 ### A6. Optional: antivirus exclusion
 
 If Microsoft Defender or another antivirus slows the browser down or flags it,
-add an exclusion for the folder `C:\ProgramData\BDRAgent`:
+add an exclusion for the folder `C:\ProgramData\BDRAgent` (and, for the
+personal pool, `C:\ProgramData\BDRAgentUser`):
 **Windows Security > Virus & threat protection > Manage settings > Exclusions >
 Add or remove exclusions > Add an exclusion > Folder**.
+
+**Never exclude `C:\ProgramData\BDRQuarantine`**, and never add an exclusion
+that covers it (such as `C:\ProgramData` or a wildcard). Files the personal
+assistant browser downloads wait there, unopened, until Microsoft Defender
+scans them; they are uploaded to BDR only when the scan is clean. The folder is
+outside both worker folders on purpose, so the exclusions above never reach it.
+
+Microsoft Defender must stay on for the personal pool. At every worker start
+the self-test writes the harmless EICAR antivirus test file into the
+quarantine and requires Defender to catch it; this is why Windows Security
+shows a "Threat found: EICAR test file" entry after each restart of the
+BDRAgentUser service. If Defender is off, or an exclusion covers the
+quarantine, the worker refuses every download (personal tasks still run, and
+the task result says the file was refused).
 
 ---
 
@@ -431,11 +505,11 @@ home `C:\ProgramData\BDRAgentUser`. Its DPAPI token, Chromium process, temporary
 profile, logs, release state and ACLs are separate from `BDRAgent` / `bdr-agent`.
 The signed release can contain both adapters; the authenticated server pool and
 allowed types determine which one runs. The org pool keeps `rfi_from_email` and
-`canary`; the user pool receives only `user_browser_read`. Pool identity cannot
-be changed by the worker or by editing local settings.
+`canary`; the user pool receives only `user_browser` (release 1.1.0 and
+later; the retired `user_browser_read` is refused). Pool identity cannot be
+changed by the worker or by editing local settings.
 
-After enrollment, approve the personal worker and allow **Personal browser
-read**. **Run self-test** runs the organization canary and does not apply to
+After enrollment, approve the personal worker and allow **Personal browser**. **Run self-test** runs the organization canary and does not apply to
 the personal pool. An organization self-test requires an online organization
 worker with `canary` allowed and the **Worker self-test** type enabled. If the PC
 is powered on but BDR still shows Offline, inspect the appropriate Windows
@@ -452,12 +526,19 @@ owner's personal credential vault.
 
 Personal task steps spool only in bounded process memory and upload to the
 private API. A crash loses unacknowledged steps. Personal screenshots, help and
-model traces use encrypted owner records on BDR. Password login runs on a
-dedicated page with the fixed Procore origin/path checks; no login screenshots
-are uploaded. Microsoft login, SSO, external redirects and arbitrary form tools
-are unavailable. Browser caches are ephemeral and the prior temporary profile
-is removed at process startup; Windows disk encryption and service ACL checks
-remain deployment acceptance items.
+model traces use encrypted owner records on BDR. Each personal task runs in
+its own Chromium process with its own temporary profile under
+`C:\ProgramData\BDRAgentUser\jobs\` and its own egress proxy (A5), and both
+are removed when the task ends or at the next service start. Sign-in uses
+`fill_credential`: the worker writes the saved username and password into a
+field on one of the credential's login origins only (never in a cross-origin
+frame, never on an identity provider such as Microsoft or Google sign-in) and
+no login screenshots are uploaded; the model never sees the values. Final
+actions (submit, send, delete, pay and similar) are held at the network until
+the owner approves them in chat, and a new site is held until the owner
+approves it. Downloads wait in `C:\ProgramData\BDRQuarantine` for a Defender
+scan. Windows disk encryption and service ACL checks remain deployment
+acceptance items.
 
 Re-enroll or uninstall the personal service with the same pool selection:
 
@@ -471,13 +552,15 @@ enrollment is verified, and the local Chromium fixture plus real-account
 read-only acceptance checks pass. The fixture commands are:
 
 ```powershell
-python -m pytest tests/test_user_browser.py tests/test_user_browser_live.py -q
+python -m pytest tests/test_user_browser_v2_egress.py tests/test_user_browser_v2_guard.py tests/test_user_browser_v2_selftest.py tests/test_user_browser_v2_tools.py tests/test_user_browser_retired_v1.py -q
 ```
 
-The live fixture uses a loopback TLS proxy and no external credentials. A test
-host must permit local socket binding and Chromium process startup. Its checks
-include a refused redirect that never reaches the destination server and the
-personal login/read flow using only private worker endpoints.
+The fixtures use a loopback TLS proxy and no external credentials. A test host
+must permit local socket binding and Chromium process startup. Their checks
+include private-network refusals in the egress proxy, held final actions and
+site holds, refused redirects that never reach the destination server, the
+exfiltration rules, and sign-in with `fill_credential` using only private
+worker endpoints.
 
 ### Prepare release 1.0.1 on the build Mac
 

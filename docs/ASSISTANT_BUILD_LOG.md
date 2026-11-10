@@ -1319,9 +1319,57 @@ Export gates: backend full suite 16099 passed, 13 failed (6 pre-existing: skills
 
 Left uncommitted on purpose: browser v2 (0192, its 54 files and its hunks in shared files), Edit in Excel (0193 and its files), the addendum metadata route and modal, the proposal scope-line fix, the PM email classification follow-up and tests/test_email_classification.py, docs/AI_ESTIMATING_BUILD_SPEC.md (holds real dollar figures), agent_worker egg-info. In the committed state the daily cap is 5 USD; the 15 USD owner decision lives in the browser v2 working tree.
 
+## 2026-11-02: Browser v2 wave 0 built; migration 0192 applied on dev (session bdr-94)
+
+Plan docs/ASSISTANT_BROWSER_V2_PLAN.md; decisions docs/BROWSER_V2_OWNER_DECISIONS.md (owner answers to plan section 22 on 11-02: automatic follow-up yes, shared 25 USD browser pool, live-view keystrokes via server accepted, OpenAI hosted search yes and typed-phrase rule dropped, 15 USD per user daily budget GLOBALLY). Browser v2 replaces Phase 6 user_browser_read; worker 1.0.6 is abandoned (never signed or published).
+
+- WI-1: supabase/migrations/0192_assistant_browser_v2.sql in six ledger pieces, all applied to dev bpidntbyvoooqvaispup: a1 20261102155546, a2 20261102155722, a3 20261102155840, a4 20261102161009, a5 20261102161107, b 20261102165032 (part B with the owner at the screen). scripts/check_assistant_browser_v2.sql PASS 72/72, rolled back, no fixture rows left. user_browser type row disabled. assistant_profiles.daily_cost_cap_usd default 15 (dev rows at 5 moved to 15); config assistant_daily_cap_usd and spend.DEFAULT_USER_CAP are 15. Config adds browser_hold_signing_key(_id), assistant_hosted_search_enabled, assistant_browser_v2_enabled. Stubs for every new wave A/C module. 0193 is taken on dev by 0193_excel_edit, so the curated-profile migration (plan WI-20) uses 0194 or later.
+- WI-2: both protocol.py copies byte-identical with the v2 section (user_browser type, hold token canonical bytes, USER_V2_ENDPOINTS); 22 user_v2_* fixtures.
+- Review: 2 Opus lenses, 14 findings, all fixed. Gate: 8 baseline failures unchanged; the 5 new cap-related test failures fixed in the tests.
+- Coordination: Phase 7 closed 08:12; the Phase 7 commit (bdr_be 72cd333, bdr_fe 766dab4) excludes all browser v2 work via the handoff in /private/tmp/claude-501/browser_v2_handoff/. In the committed state the cap is 5 USD; the 15 USD change lives only in the uncommitted v2 work.
+- Waves A (server) and B (worker 1.1.0) are being built next; nothing is committed.
+
+## 2026-11-02: Browser v2 wave A built (server core), session bdr-94
+
+- WI-3 repo v2 functions (placed before the Phase 7 marker), site registry and URL provenance, grants; publicsuffixlist dependency.
+- WI-4 human routes in app/routers/assistant_browser.py (sites, grants, credentials v2, holds, start decisions, safe rules; old Phase 6 task, preview and by-approval routes answer 410 `retired`), credential service, chat secret guard before insert_message (422 `secret_in_message`), firewall prefixes /assistant/browser-holds, /assistant/browser-live, /assistant/browser-results, main.py includes behind require_browser_v2.
+- WI-5 admission service and /assistant/browser-requests/* routes; WI-6 worker-facing server, Ed25519 hold tokens, help v2; WI-7 FE lib, cards and locales.
+- Opus review: 21 findings, 20 fixed with tests; the 21st (obsolete Phase 6 integration tests) handed to WI-12.
+- Dev DB: credential_put_v2, hold_open and inspect re-applied from 0192 (ledger name 0192_assistant_browser_v2_wavea_fixes).
+- Gate: FE eslint/tsc/npm test clean (413), ruff clean, no em dashes, manifest 0 problems. Backend new failures were the retired Phase 6 tests (WI-12), the v1 worker client imports in tests/test_agent_worker_user.py (wave B deletion) and a missing revoke list entry (fixed).
+
+## 2026-11-02: Browser v2 wave B built (worker 1.1.0 code, unsigned), session bdr-94
+
+- WI-8 per-job egress proxy process (blocks private, loopback, link-local, CGNAT, office WAN and routed IPv6 ranges; DNS re-checked per connection), boot self-test that fails closed and is re-checked before every personal browser launch, per-job Chromium with the sandbox on, a worker-wide kill-on-close Job Object (deviation from one per Chromium), install/apply_user_pool_firewall.ps1, README A5 and A6.
+- WI-9 guard v2 (redirect hops, worker requests, per-task site scope, site holds), final-action holds verified against signed hold tokens, exfiltration rules (typed text in query, path and headers; WebSocket, WebSocketStream and WebTransport removed from pages and workers).
+- WI-10 runner, identity (credential values written into the checked element, origin checked before and after), downloads (quarantine, shared byte cap, sniffing, macro Office files refused, Defender scan), tools with click and type for user_browser only.
+- WI-11 Playwright 1.64.0 (Chromium 156); the v1 agent agents/user_browser/ deleted with its 807 tests; user_browser_read now refused as retired_type.
+- Opus review: 16 findings, all fixed with tests. Gate: worker suite 676 passed 0 failed; backend protocol drift and browser agent tests show only the 2 baseline failures; ruff clean; manifest 0 problems.
+- Orchestrator: the launcher now calls release.sync_stable_runtime_if_wanted before each worker start (runner.py) with 2 tests. The launcher is replaced only by the installer, so shop-pc-1 needs a `-Reenroll` run for the 1.1.0 rollout.
+- Not yet proven on Windows: the firewall script, Defender EICAR check, Job Object cleanup, DNS packet capture. These are WI-20 live checks.
+
 ## 2026-11-02: Phase 8 (model triage) design: plan written and adversarially reviewed (session bdr-9a)
 
 Plan: docs/ASSISTANT_PHASE8_PLAN.md (933 lines). Built by workflow wf_73a24fca-9bd: five readers (Sonnet, Opus for the runtime and caps map), Opus architect, three Opus critics (security and injection, cost and concurrency, code fidelity), Opus apply. 31 findings, all 31 confirmed and applied (review log section 20.2). Shape: a separate model-free triage loop claims per-person batches of bell-sourced record rows, one gpt-5.4-mini classify call (none, suggest, escalate), code-checked fact predicates, escalations go through the Phase 7 router (rules R27, R28, R31, R32, read-bell severity cap, quiet hours) and its ledgered sends. Claims migration 0196 (0194 and 0195 left to browser v2); nothing applied, nothing built. Gate G0a: the owner answers the 28 questions in section 19 and the plan is updated. Gate G0b: bdr-94 releases its shared files before waves B to D.
+
+## 2026-11-02: Browser v2 wave C built (assistant integration), session bdr-94
+
+- WI-12 model tools in app/assistant/tools/browser.py (browser_task_start, browser_task_status, browser_task_cancel, browser_sites_list, request_site_access, request_site_credential), new effect tier server_gated (inline, ledger begun first, at most 3 calls of a tool per turn), toolset gate and follow-up toolset in registry.py, prompts and find.py, skill using-the-browser replaces reading-websites, ASSISTANT.md permissions item 5 and decisions log; obsolete Phase 6 integration tests rewritten on v2 or deleted.
+- WI-13 chat outbox drain, result messages, Teams alerts for open holds only, "Continue in a new chat", one automatic text-only follow-up per finished task (no tools, one model call, skipped if a newer user message exists).
+- WI-14 email code reader (DKIM/SPF/DMARC alignment from trusted Authentication-Results, owner in To or Cc, Date window, exactly one code, curated sites only through their subject regex) and the code scrub in email_read and Mailbox review.
+- WI-15 downloads into project_files (category other) or staged for "add to project"; WI-16 OpenAI hosted web search (max 3 calls per response, taint and audit, priced per call); WI-17 FE cards, sites and sign-ins settings, 422 secret handling.
+- Opus review: 18 findings, all fixed with tests. Gate: backend 6 failed (all baseline, none from 0192), 17190 passed; FE eslint/tsc clean, npm test 429/429; ruff clean; no em dashes; manifest 0 problems.
+- Dev DB: 0192 A5.6 (curated code email regexes for procore, autodesk, buildingconnected) and B7 (assistant_tool_calls_effect_v2 adds server_gated) applied (ledger 0192_assistant_browser_v2_wavec_a56_b7). The regexes are guesses until the WI-20 live probes.
+
+## 2026-11-02: Browser v2 wave D part 1 built (offboarding, evals, cleanup, release prep), session bdr-94
+
+- WI-18 offboarding hook browser_v2_offboard registered right after phase7_offboard; v2 retention (90 days for ended holds and download metadata, staged objects after 7 days, keeps running with the v2 flag off once 0192 exists); orphan sweep finds owners whose only state is browser v2; IT Admin inspection scrubs hold, code, credential and live sign-in cards and withholds screenshots of jobs with a final-action hold.
+- WI-19 the 16 plan 18.2 scenarios in app/assistant/evals; the injection grader also flags attack values in server_gated tool arguments. `uv run python -m app.assistant.evals.run_evals --check` exits 0 (61 browser v2 tests, 81 of 81 turns).
+- Cleanup: 16 user_* protocol fixtures (tests/test_agent_protocol_fixtures.py passes again); concurrency probe rewritten for v2 with the two 18.3 cases (not run); v1 SQL check scripts retired with a header; stale preview route removed from READ_POST_ROUTES.
+- WI-20 prep: docs/BROWSER_V2_RELEASE_RUNBOOK.md (owner steps for the hold key, signing 1.1.0, -Reenroll, firewall, probes, acceptance 1 to 10, rollback); Phase 6 acceptance helpers moved to v2; scripts/browser_v2_probe_site.py (dev only, read only); draft supabase/migrations/0194_assistant_browser_curated_profiles.sql that refuses to run while TODO values remain (NOT applied).
+- Found: the 0192 SmartBid seed origin was wrong (real sign-in is https://gocc.smartbid.co, password POST to https://apicc.smartinsight.co); fixed in the lookalike lists and in the 0194 draft.
+- Opus review: 12 findings, all fixed with tests. Gate: backend 5 failed (all pre-existing, none from browser v2), 17362 passed; worker 678 passed; FE eslint/tsc clean, npm test 430/430; ruff clean; no em dashes; manifest 0 problems.
+- Waiting on the owner: hold signing key and its public half in the worker, sign and publish 1.1.0, -Reenroll shop-pc-1, firewall script, live probes, approval to apply 0194 on dev, acceptance. Wave E (live view) starts after acceptance passes.
 
 ## 2026-11-02: Phase 8 owner decisions recorded, plan updated, wave 0 and wave A built, 0196 part A applied on dev (session bdr-9a)
 
@@ -1419,3 +1467,59 @@ Read-only inventory confirmed: bdr_be build at 72cd333, bdr_fe build at 766dab4,
 - Stale docs fixed: ASSISTANT.md decision 24 and the Phase 8 rollout paragraph (part B applied), Phase 8 plan status line and migration rule (marked historical), plan open decision 4 cite (672 under 667), tests/test_assistant_no_model_unattended.py "entry 24".
 - Spend this session: urgent tuning 0.059550 USD (7 live eval runs). Phase 8 real-model total now about 0.132 USD of the 1 USD budget.
 - Commit plan (session scratchpad phase8_commit_plan.md/.json, verified): BE 48 Phase 8 paths, 25 mixed, 197 other; FE 5, 11, 25. A Phase 8-only index fails 2 tests in tests/test_assistant_inbox_tool.py (:149, :156 use browser v2's toolset_for(followup=, browser=)); plan: stage a Phase 8-only blob of that file. Not committed: waiting for the owner.
+
+## 2026-11-03: Phase 8 committed locally (session bdr-86)
+
+Owner approved. bdr-94 paused for the staging and was released after. Index-only staging from the verified plan (session scratchpad stage/ lists and blob sources): bdr_be 74 paths (48 whole, 26 Phase 8-only synthesized: count pins 72 turns, 173 selection cases, 65 offered tools; tests/test_assistant_inbox_tool.py without browser v2's toolset_for arguments), bdr_fe 16 paths (5 whole, 11 mixed; 51 locale keys). Independent verify: whole-file blobs byte-identical to the tree, mixed blobs hold only Phase 8 hunks, nothing from browser v2, Excel edit, PM email follow-up, proposal work, docs/AI_ESTIMATING_BUILD_SPEC.md or the Phase 9 docs staged. Exported index trees: Phase 8 test files 1922 pass; full suite 7 failures, the same 7 as HEAD; ruff clean on 59 files; frontend tsc and eslint clean, npm test 394/394. Commits: bdr_be 111e544, bdr_fe 25b4a27 on build, not pushed, not deployed, nothing on prod. app/services/graph_email.py (Teams alerts owner's file; only the Phase 8 actor_kind hunks) is in the commit. Working trees unchanged (bdr_be 224 status entries after, bdr_fe 36).
+
+## 2026-11-03: Phase 9 design ready for the owner (session bdr-86)
+
+Design workflow wf_a6015ca5-dc5: five Sonnet reader maps (A email stamp, B health bells, C translations, D teammate escalation, E Stage 2 and open decisions), Opus architect, three Opus critics (security and injection, cost and concurrency, code fidelity), one Opus verifier per finding, Opus apply. 44 findings: 26 confirmed, 18 partly, 0 rejected, all applied (plan section 20.2). Plan docs/ASSISTANT_PHASE9_PLAN.md (Phase 8 section shape; 17.6 holds the Part 4 prod checklist, not executed). Brief docs/PHASE9_OWNER_QUESTIONS_BRIEF.md for a voice agent: 39 numbered questions plus the open decisions block, FQ1 to FQ11 and release watch limits; about 30 minutes on the recommended route (A, C, B), 45 with D and E. Corrections to the session prompt found by the readers: send_draft paths do write email_log rows (as human sends); revision_email.py is not on the read-only manifest; the translation test that breaks is assistantTriage.test.mjs:328-342. Plan status and 19.4 updated after the Phase 8 commit (G0c met). 0197 reserved, nothing built or applied. Waiting for the owner's answers (gate G0a).
+
+## 2026-11-03: browser v2 release 1.1.0 published on dev; runbook fixes; correction (session bdr-94)
+
+Owner ran runbook Parts A to C. Part A: BROWSER_HOLD_SIGNING_KEY and _ID=h1 written to the dev .env (value never shown). Part B: HOLD_SIGNING_PUBLIC_KEYS {"h1": ...} in agent_worker/bdr_agent/agents/user_browser_v2/holds.py; root confirmed it equals the public half of the .env key and the key id matches. Version 1.1.0 also had to be set in agent_worker/pyproject.toml, the bdr-agent entry of agent_worker/uv.lock and the literal in tests/test_release_bundle_inputs.py (runbook Part B step 3 now lists all four). Worker suite 678 passed; backend protocol drift plus holds 53 passed. Part C: dev row 1.1.0, sha256 fe1ae7fa0f3aa86ab2cc64c688bae644cffe1cae6fc5688de918734876c9e2c1, min_version 1.0.5, created 2026-11-03 00:31:49 UTC; root verified the Ed25519 signature with the configured release public key. Not selected yet.
+
+Part D step 1 (office network): from shop-pc-1, TCP 443 to acc.autodesk.com, example.com, 1.1.1.1 and 8.8.8.8 and TCP 80 to example.com all succeeded; the DNS checks to 1.1.1.1 and 9.9.9.9 still need re-reading (PowerShell table formatting hid them). Parts D2 to H not started.
+
+Runbook: the Part A config check and the Part C signature check are now single-line commands (the indented multi-line forms raised IndentationError when pasted). tests/test_assistant_browser_v2_retention.py dates NOW from the real clock (the fixed 2026-11-02 12:00Z broke one purge test once the wall clock passed it; others would have broken by 11-05).
+
+CORRECTION to the wave 0 entry above ("worker 1.0.6 is abandoned (never signed or published)"): 1.0.6 WAS signed and published on dev (sha256 eedfe39c..., row created 2026-10-29 21:08:13 UTC) and selected: browser_agent_settings.desired_worker_version is 1.0.6 and personal worker e0846bf6 reported 1.0.6 (last seen 2026-10-29 21:23 UTC). Org worker 5e96d0ed reports 1.0.0, last seen 2026-10-28. What was abandoned is the 1.0.6 Phase 6 read acceptance, not the release. Rollback (runbook) now names 1.0.6 as the prior selected version. Found by session bdr-a1 by read-only check; confirmed by root against dev.
+
+## 2026-11-04: Part D done on G3LAPTOP10; Part E blocked by Symantec; owner moving the personal worker to a separate PC (session bdr-94)
+
+Part D: acceptance helper started (5071/4510). The first quick tunnel never registered in DNS; the replacement tunnel from scripts/reconnect_phase6_acceptance.sh worked. Desired version is now 1.1.0. Old personal worker e0846bf6 (shop-pc-1.1) revoked. New personal worker 8671790c-2bb2-43b1-93b3-093428cbb074 ("shop-1.2", host G3LAPTOP10) enrolled with -Reenroll, approved 2026-11-04 17:00:51 UTC, allowed_types [user_browser], version 1.1.0, chromium_version not yet reported.
+
+Part E on G3LAPTOP10 FAILED: apply_user_pool_firewall.ps1 wrote all 7 block rules (enabled, Block, Profile Any) but the boot self-test reached the gateway 192.168.0.1 from python, node and chromium ("not blocked"), so claims False, downloads False. Diagnosis on the PC: Windows Firewall profiles ON and AllowLocalFirewallRules True, yet a plain temporary outbound block rule for powershell.exe to 192.168.0.1 did NOT block (also after `smc -disable -ntp`). Security Center lists two firewall products, Symantec Endpoint Protection 14.3.12167 (company managed; re-enables its firewall after restart) and a stale McAfee WPS registration (C:\Program Files\McAfee\wps no longer exists, no McAfee services). WinDefend stopped (Defender AV off, so the EICAR/MpCmdRun download check also fails). Owner chose not to remove either product and will use a separate dedicated PC instead. Rule for any personal-pool PC: no third-party firewall or antivirus; prove a plain Windows Firewall block rule works before installing.
+
+Also noted: the firewall script prints "office WAN IPv4 is unknown" whenever its own OpenDNS lookup fails, even when -OfficeBlockedRanges supplies the address (misleading warning, not yet fixed). The org worker BDRAgent 1.0.0 on G3LAPTOP10 (row 5e96d0ed) still runs but points at an old tunnel (last seen 2026-10-28).
+
+## 2026-11-04: personal worker removed from G3LAPTOP10; uninstaller bug fixed (session bdr-60, taking over from bdr-94)
+
+Session bdr-60 now drives the runbook; bdr-a1 and bdr-86 told. Owner revoked worker 8671790c (shop-1.2) in Settings at 2026-11-04 23:15:10 UTC; no non-revoked personal worker remains. Org worker 5e96d0ed row untouched. On G3LAPTOP10: "BDR user pool floor" rules (0 left), "BDR Agent User Firewall" task, service BDRAgentUser, account bdr-agent-user and C:\ProgramData\BDRAgentUser removed; BDRAgent service still Running and C:\ProgramData\BDRAgent present. Used -KeepPython.
+
+agent_worker/install/uninstall.ps1 stopped mid-run: Win32_UserProfile delete failed (profile Loaded True, no process running as the account), then the catch block read $_.LocalPath with $_ being the error record, which is fatal under Set-StrictMode. Account and folder were then removed by hand with the same steps. Fixed in the repo ($userProfile variable, so a locked profile only prints a message and the uninstall continues); tests/test_installer_files.py 13 passed. Not committed.
+
+Left on G3LAPTOP10, harmless, to clean after its next restart: profile folder C:\Users\bdr-agent-user (SID S-1-5-21-2926243319-2647277681-639287580-1005). Also left in place: C:\ProgramData\BDRQuarantine and C:\Program Files\BDR Python 3.12.10 (neither used by the org worker's own runtime).
+
+## 2026-11-06: new personal worker PC DESKTOP-D92HDKT passes the firewall proof (session bdr-60)
+
+Windows 11 Pro build 26200, 64-bit, not domain joined, Smart App Control off, Defender real-time on, all firewall profiles on. On Wi-Fi at 65 Mbps; sleep on AC was 15 minutes; BitLocker off (both still to fix per README A1 and A3). Norton Security 22.24.5.6 was installed: services disabled, but kernel drivers including SymNetS and IDSVia64 were running. Settings uninstall failed ("another installer is running"; the blocking InstStub was the uninstall attempt itself). Norton Remove and Reinstall, Remove Only, took two runs (second reported non-critical failed steps, error 111111, product removed). After restart: no Norton program, service, driver or folder; stale Security Center FirewallProduct entry removed by hand; firewall products empty, antivirus Windows Defender only.
+
+Firewall proof passed: gateway 192.168.0.1 answers on port 80; with a temporary outbound block rule for powershell.exe, Test-NetConnection False and socket error 10013 (WSAEACCES); rule removed, Test-NetConnection True, 0 rules left. Nothing BDR installed yet.
+
+## 2026-11-06: personal worker shop-pc-2.0 enrolled and approved on DESKTOP-D92HDKT (session bdr-60)
+
+Runbook Part D steps 6 to 8 done on the new PC. PC settings fixed first: never sleeps on AC, Fast Startup off, hibernate off, BitLocker on and encrypting after a restart (TPM and recovery password protectors; owner keeps the recovery key in the password manager). Owner stays on Wi-Fi for now: wire it before permanent production use, and treat Wi-Fi as the first suspect if Part G concurrency is flaky.
+
+The first fresh install stopped at the Python step: an existing all-users Python 3.12.10 was registered under C:\Users\baseb\AppData\Local\Programs\Python\Python312, which the installer rejects (it needs an admin-owned, PSF-signed Python under Program Files), so the -UseExistingPython advice it prints would also have failed there. Owner uninstalled that Python; the rerun installed the private runtime and enrolled.
+
+New worker 15333cb3-a531-4b75-aa9e-d33c28f373f6 ("shop-pc-2.0"), principal_kind user, active, approved 2026-11-06 21:29:38 UTC, version 1.1.0 (desired 1.1.0), heartbeat 3 seconds old when checked, reported types include user_browser and not user_browser_read. Approval left allowed_types as [user_browser, user_browser_read]; owner edited it to [user_browser] per the runbook, confirmed on dev. chromium_version not yet reported. The user_browser type is still disabled and model_probe_ok_at is null. Part E is next.
+
+The installer served by dev still embeds the old uninstall.ps1, so the locked-profile fix reaches PCs only when the installer is re-rendered at a future publish (--installer-from-settings).
+
+## 2026-11-06: Part E passed on DESKTOP-D92HDKT: user pool self-test ok (session bdr-60)
+
+apply_user_pool_firewall.ps1 (sha256 ea5483b1..., matched the Mac copy) run through the tunnel with -OfficeBlockedRanges set to the office public IPv4 from api.ipify.org. floor.json extra_blocked holds that address as a /32 and the detected site IPv6 /56; gateway 192.168.0.1 with ports 80, 443, 53; 7 rules in group "BDR user pool floor"; task "BDR Agent User Firewall" Ready.
+
+After Restart-Service BDRAgentUser, worker.log at 2026-11-06 14:34:58 PT: "user pool self-test: ok" and "claims True, downloads True". Defender logged one new detection, threat id 2147519003, on C:\ProgramData\BDRQuarantine\selftest-...\eicar-test.txt (the EICAR check passing). runtime\current\driver\node.exe and runtime\current\chrome\chrome.exe both exist. This is the check G3LAPTOP10 failed under Symantec, so the dedicated PC with no third-party firewall was the right fix. Part F is next.

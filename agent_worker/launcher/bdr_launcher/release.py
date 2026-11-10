@@ -473,3 +473,149 @@ def prune_versions(paths: LauncherPaths, keep: Iterable[str], *, max_keep: int =
         removed.append(v)
     return removed
 
+
+
+# Stable runtime for the user pool (docs/ASSISTANT_BROWSER_V2_PLAN.md 10.1 layer 2) ----------
+#
+# Windows Firewall rules name program paths, and the paths of a version change
+# on every release (versions/<v>/venv) and every Playwright bump
+# (ms-playwright/chromium-<revision>). So on each version switch, before the
+# worker starts, the launcher copies the Playwright driver's node.exe and the
+# full Chromium of that version into fixed folders:
+#
+#     <home>\runtime\current\driver\node.exe
+#     <home>\runtime\current\chrome\chrome.exe   (the whole chrome-win* folder)
+#     <home>\runtime\current\runtime.json        what was copied, from which version
+#
+# The worker starts its driver with PLAYWRIGHT_NODEJS_PATH and every per-job
+# Chromium with executable_path pointing there, so the firewall rules never go
+# stale. Python needs no copy: on Windows a venv python.exe is a redirector
+# that starts the base runtime's python.exe (pyvenv.cfg `home`), which is the
+# process the firewall sees and which does not move between releases.
+# Only the user pool does this (its home is BDRAgentUser, or a runtime folder
+# exists); the org pool never pays for the copy.
+
+RUNTIME_MANIFEST = "runtime.json"
+RUNTIME_FORMAT = 1
+_CHROME_DIRS = ("chrome-win64", "chrome-win", "chrome-linux64", "chrome-linux", "chrome-mac-arm64",
+                "chrome-mac-x64", "chrome-mac")
+_CHROME_EXES = ("chrome.exe", "chrome", "Chromium.app/Contents/MacOS/Chromium",
+                "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing")
+
+
+def stable_runtime_dir(paths: LauncherPaths) -> Path:
+    return paths.home / "runtime" / "current"
+
+
+def wants_stable_runtime(paths: LauncherPaths) -> bool:
+    return paths.home.name.lower() == "bdragentuser" or (paths.home / "runtime").is_dir()
+
+
+def _playwright_package(vdir: Path) -> Path:
+    pkg = _site_packages(vdir / "venv") / "playwright"
+    if not (pkg / "driver").is_dir():
+        raise ReleaseRejected("runtime_sync_failed", "playwright driver missing in the version")
+    return pkg
+
+
+def _chromium_revision(pkg: Path) -> str:
+    try:
+        data = json.loads((pkg / "driver" / "package" / "browsers.json").read_text(encoding="utf-8"))
+        rev = next(b["revision"] for b in data["browsers"] if b.get("name") == "chromium")
+    except (OSError, ValueError, KeyError, StopIteration, TypeError) as exc:
+        raise ReleaseRejected("runtime_sync_failed", "cannot read the Chromium revision") from exc
+    if not isinstance(rev, str) or not rev.isdigit():
+        raise ReleaseRejected("runtime_sync_failed", "bad Chromium revision")
+    return rev
+
+
+def _source_chrome(paths: LauncherPaths, revision: str) -> tuple[Path, str]:
+    base = paths.browsers_dir / f"chromium-{revision}"
+    for name in _CHROME_DIRS:
+        folder = base / name
+        for exe in _CHROME_EXES:
+            if (folder / exe).is_file():
+                return folder, exe
+    raise ReleaseRejected("runtime_sync_failed", f"Chromium {revision} is not installed")
+
+
+def _read_runtime_manifest(folder: Path) -> dict[str, Any] | None:
+    try:
+        data = json.loads((folder / RUNTIME_MANIFEST).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def sync_stable_runtime(paths: LauncherPaths, version: str) -> dict[str, Any]:
+    """Make <home>/runtime/current hold `version`'s driver node and Chromium.
+    Call it before starting the worker, never while one runs (Windows cannot
+    replace a running executable). Returns the runtime manifest; raises
+    ReleaseRejected and leaves the previous runtime in place on failure."""
+    vdir = paths.version_dir(version)
+    pkg = _playwright_package(vdir)
+    node_name = "node.exe" if sys.platform == "win32" else "node"
+    node_src = pkg / "driver" / node_name
+    if not node_src.is_file():
+        raise ReleaseRejected("runtime_sync_failed", "driver node missing")
+    revision = _chromium_revision(pkg)
+    chrome_src, chrome_exe = _source_chrome(paths, revision)
+    node_sha = sha256_file(node_src)
+    chrome_sha = sha256_file(chrome_src / chrome_exe)
+    current = stable_runtime_dir(paths)
+    have = _read_runtime_manifest(current)
+    if (have and have.get("format") == RUNTIME_FORMAT and have.get("version") == version
+            and have.get("chromium_revision") == revision and have.get("node_sha256") == node_sha
+            and have.get("chrome_sha256") == chrome_sha
+            and (current / str(have.get("node_exe", ""))).is_file()
+            and (current / str(have.get("chrome_exe", ""))).is_file()):
+        return have
+    root = current.parent
+    root.mkdir(parents=True, exist_ok=True)
+    nxt = root / f"next-{os.getpid()}"
+    old = root / f"old-{os.getpid()}"
+    _rmtree(nxt)
+    _rmtree(old)
+    manifest = {"format": RUNTIME_FORMAT, "version": version, "chromium_revision": revision,
+                "node_exe": f"driver/{node_name}", "chrome_exe": f"chrome/{chrome_exe}",
+                "node_sha256": node_sha, "chrome_sha256": chrome_sha,
+                "synced_at": datetime.now(UTC).isoformat()}
+    try:
+        (nxt / "driver").mkdir(parents=True)
+        shutil.copy2(node_src, nxt / "driver" / node_name)
+        shutil.copytree(chrome_src, nxt / "chrome", symlinks=True)
+        if sha256_file(nxt / manifest["node_exe"]) != node_sha \
+                or sha256_file(nxt / manifest["chrome_exe"]) != chrome_sha:
+            raise ReleaseRejected("runtime_sync_failed", "copy does not match the source")
+        atomic.write_json(nxt / RUNTIME_MANIFEST, manifest)
+        moved = False
+        if current.exists():
+            os.replace(current, old)
+            moved = True
+        try:
+            os.replace(nxt, current)
+        except OSError:
+            if moved:
+                os.replace(old, current)
+            raise
+    except OSError as exc:
+        _rmtree(nxt)
+        raise ReleaseRejected("runtime_sync_failed", str(exc)) from exc
+    except BaseException:
+        _rmtree(nxt)
+        raise
+    _rmtree(old)
+    log.info("stable runtime now holds version %s (Chromium %s)", version, revision)
+    return manifest
+
+
+def sync_stable_runtime_if_wanted(paths: LauncherPaths, version: str) -> dict[str, Any] | None:
+    """The launcher's pre-start hook: sync for the user pool, never fatal
+    (a stale runtime only makes the worker's self-test refuse personal jobs)."""
+    if not wants_stable_runtime(paths):
+        return None
+    try:
+        return sync_stable_runtime(paths, version)
+    except (ReleaseRejected, OSError) as exc:
+        log.error("stable runtime sync for %s failed: %s", version, exc)
+        return None

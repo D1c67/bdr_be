@@ -1,3 +1,13 @@
+-- RETIRED (browser v2, migration 0192): this script checks the foundation gate of the v1 personal browser (credential generations, org/user worker split, v1 claim).
+-- It inserts user_browser_task approvals and user_browser_read jobs, a type that
+-- 0192 relabels "Retired personal browser read" and disables; no application code
+-- or worker reaches those v1 SQL functions any more, and they stay in the database
+-- only until a later cleanup migration drops them. It is NOT acceptance for v2.
+-- v2 acceptance is scripts/check_assistant_browser_v2.sql (admissions, site
+-- grants, credentials per site, claim limits, holds, downloads, purge) and the
+-- race probe scripts/check_assistant_browser_concurrency.py. Run this script
+-- only to confirm the old v1 functions still behave while they remain; delete it
+-- with the cleanup migration.
 -- DEV ONLY: transactional fake-secret fixtures, all changes rolled back.
 -- Checks the foundation gate, not live Windows, login, MFA or browser execution.
 begin;

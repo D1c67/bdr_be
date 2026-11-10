@@ -36,6 +36,17 @@ stores `_ledger_args` (the spec's redact_args form when it has one), a
 spec's `precheck` refuses before anything is recorded or sent, and a memory
 tool's stored result names the full ids of the memories it shows.
 
+Browser v2 (docs/ASSISTANT_BROWSER_V2_PLAN.md 4.3) adds the server_gated
+tier: a POST whose authority check is the server route's (start a browser
+task, post a site access or sign-in card, cancel a task). `call` admits it
+like housekeeping: the begun row must be written (the route reads it back
+as its trusted turn), every request carries the ledger key, and the step is
+ledgered with its route, argument hash and outcome. Unlike housekeeping it
+is never re-sent: a begun row from an earlier attempt answers
+"already_sent" to the model, since the route may already have created an
+admission or posted a card. Each tool's max_proposals_per_turn bounds its
+calls in one turn (refused or not); a Mailbox review never offers one.
+
 Phase 1 (docs/ASSISTANT_PHASE1_PLAN.md 3.3) adds three entry points:
 `read(requests, spec)` sends a write spec's preview requests (no ledger
 row), `write(spec, request, ...)` sends the one approved write under the
@@ -74,6 +85,7 @@ from app.assistant.registry import (
     EFFECT_HOUSEKEEPING,
     EFFECT_READ,
     EFFECT_SENSITIVE_READ,
+    EFFECT_SERVER_GATED,
     RETENTION_STANDARD,
     ToolRequest,
     ToolSpec,
@@ -125,6 +137,12 @@ IDEMPOTENCY_HEADER = "X-Assistant-Idempotency-Key"
 MEMORY_ID_KEYS = ("id", "memory_id")
 LEDGER_UNAVAILABLE_TEXT = "The change could not be recorded, so it was not made. Try again."
 PRECHECK_FAILED_TEXT = "The tool could not check its arguments, so nothing was sent."
+# Browser v2 (4.3): the server_gated refusals the model reads.
+SERVER_GATED_LIMIT_TEXT = "This tool was already used the most times allowed in one answer. Tell the user what is waiting."
+SERVER_GATED_ALREADY_SENT_TEXT = (
+    "This request was already sent in an earlier attempt of this answer, so it was not sent again. "
+    "Check it with browser_task_status, or tell the user it may be waiting for them."
+)
 
 NARROWING_HINT = (
     "Result truncated at the size limit. Ask again with a smaller limit, "
@@ -232,6 +250,9 @@ class Executor:
     # Full assistant_reports ids a report-namespace result named under
     # `report_id`, in call order: the loop's report_file blocks (3.9.2).
     report_ids: list[str] = field(default_factory=list)
+    # Browser v2 (4.3): calls of each server_gated tool in this run, refused
+    # or not, against its max_proposals_per_turn.
+    gated_calls: dict[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.approval_id:
@@ -298,7 +319,7 @@ class Executor:
         spec = self.specs.get(name)
         if spec is None:
             return self._unknown(seq, name)
-        if spec.effect not in (EFFECT_READ, EFFECT_HOUSEKEEPING):
+        if spec.effect not in (EFFECT_READ, EFFECT_HOUSEKEEPING, EFFECT_SERVER_GATED):
             raise ConfirmRequired(f"{spec.name} needs an approval card.")
         args = self.expand(args or {})
         refused = self._precheck(spec, seq, args)
@@ -307,6 +328,8 @@ class Executor:
         project_id = args.get("project_id") if is_uuid(args.get("project_id")) else None
         if spec.effect == EFFECT_HOUSEKEEPING:
             return self._housekeeping(spec, seq, args, project_id)
+        if spec.effect == EFFECT_SERVER_GATED:
+            return self._server_gated(spec, seq, args, project_id)
         started = time.monotonic()
         key, begun_id = self._begin(spec, seq, args, project_id)
         return self._run(spec, seq, key, begun_id, args, project_id, started, ledger_key=key)
@@ -346,10 +369,38 @@ class Executor:
                                  duration_ms=int((time.monotonic() - started) * 1000))
         return self._run(spec, seq, key, begun_id, args, project_id, started, ledger_key=key)
 
+    def _server_gated(self, spec: ToolSpec, seq: int, args: Mapping[str, Any],
+                      project_id: str | None) -> ToolOutcome:
+        """A server_gated step (browser v2, 4.3): counted against the tool's
+        max_proposals_per_turn first (refused or not), then sent only under
+        a begun row this attempt wrote. A begun row an earlier attempt wrote
+        is never re-sent (the route may already have acted); no begun row at
+        all means nothing is sent. Every request carries the ledger key the
+        route reads its trusted turn from."""
+        started = time.monotonic()
+        used = self.gated_calls.get(spec.name, 0)
+        self.gated_calls[spec.name] = used + 1
+        cap = spec.max_proposals_per_turn
+        if cap is not None and used >= cap:
+            return self._refusal(spec, seq, "server_gated_limit", SERVER_GATED_LIMIT_TEXT)
+        try:
+            key, begun_id = self._begin(spec, seq, args, project_id)
+        except WriteMayHavePartiallyRun:
+            return self._refusal(spec, seq, "already_sent", SERVER_GATED_ALREADY_SENT_TEXT,
+                                 duration_ms=int((time.monotonic() - started) * 1000))
+        except Exception:  # noqa: BLE001 - no begun row means nothing is sent
+            logger.exception("assistant executor: no begun row for server_gated %s", spec.name)
+            begun_id = None
+        if not begun_id:
+            return self._refusal(spec, seq, "ledger_unavailable", LEDGER_UNAVAILABLE_TEXT,
+                                 duration_ms=int((time.monotonic() - started) * 1000))
+        return self._run(spec, seq, key, begun_id, args, project_id, started, ledger_key=key)
+
     def _run(self, spec: ToolSpec, seq: int, key: str, begun_id: str | None, args: Mapping[str, Any],
              project_id: str | None, started: float, *, ledger_key: str | None = None) -> ToolOutcome:
-        """Send, shape, record: the shared tail of a read and a housekeeping
-        step. `ledger_key` (housekeeping only) goes on every request."""
+        """Send, shape, record: the shared tail of a read, a housekeeping and
+        a server_gated step. `ledger_key` (housekeeping and server_gated)
+        goes on every request."""
         try:
             requests = spec.requests(args)
             if ledger_key is not None:
@@ -380,6 +431,9 @@ class Executor:
             "truncated": truncated,
             "tainted": tainted,
         }
+        if spec.effect == EFFECT_SERVER_GATED and isinstance(output, Mapping) and output.get("status"):
+            # The route's outcome (card_posted, waiting_grant, queued...).
+            summary["status"] = str(output.get("status"))[:40]
         self._finish(spec, seq, key, args, project_id, phase="completed", ok=True,
                      error_kind=None, duration_ms=duration, result_summary=summary)
         self._store_result(spec, begun_id, output, tainted, corpus, trimmed=trimmed)
@@ -573,7 +627,8 @@ class Executor:
                 if req.optional and status in (403, 404):
                     payloads.append(None)
                     continue
-                raise RequestFailed(f"http_{status}", _detail(payload, status))
+                detail = _browser_detail(payload, status) if spec.namespace == "browser" else None
+                raise RequestFailed(f"http_{status}", detail or _detail(payload, status))
             payloads.append(payload)
         return payloads
 
@@ -879,6 +934,21 @@ def _detail(payload: Any, status: int) -> str:
         if isinstance(detail, dict) and detail.get("code"):
             return f"HTTP {status}: {detail['code']}"
     return f"HTTP {status}"
+
+
+def _browser_detail(payload: Any, status: int) -> str | None:
+    """A browser route's refusal as "HTTP 409: code: fixed sentence". The
+    sentence is looked up by code in the server's own table
+    (assistant_browser.REFUSALS), never echoed from the payload, so the
+    model learns why without any request-derived text."""
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    code = detail.get("code") if isinstance(detail, dict) else None
+    if not isinstance(code, str):
+        return None
+    from app.services.assistant_browser import REFUSALS
+
+    message = REFUSALS.get(code)
+    return f"HTTP {status}: {code}: {message}" if message else None
 
 
 def _with_ledger_key(req: ToolRequest, key: str) -> ToolRequest:

@@ -191,7 +191,9 @@ class Settings(BaseSettings):
     # Spend caps in USD per calendar day (Pacific). The per-user default is
     # overridable per person in assistant_profiles.daily_cost_cap_usd; the
     # global cap is assistant_settings.global_daily_cap_usd's seed value.
-    assistant_daily_cap_usd: float = 5.0
+    # 15 USD per user for every user (owner answer 2026-11-02, browser v2
+    # plan 22 question 5; migration 0192 moves the column default to match).
+    assistant_daily_cap_usd: float = 15.0
     assistant_global_daily_cap_usd: float = 50.0
     # The planner model (OpenAI only; services/llm_pricing.PRICES must hold
     # a row for it, or every assistant call logs cost NULL) and its default
@@ -213,6 +215,17 @@ class Settings(BaseSettings):
     user_cred_kek: str = ""
     user_cred_kek_id: str = "u1"
     user_cred_old_keys: str = ""
+    # Assistant browser v2 (docs/ASSISTANT_BROWSER_V2_PLAN.md 3.4, 6.5, 13).
+    # Off by default. BROWSER_HOLD_SIGNING_KEY is the Ed25519 private seed
+    # (base64 of 32 random bytes) that signs final-action release tokens:
+    # Railway env only, never in a table, a backup or the worker (the signed
+    # worker carries only the public key). The key id names it in each token
+    # so a rotation can overlap. ASSISTANT_HOSTED_SEARCH_ENABLED offers
+    # OpenAI's hosted web search, only in untainted conversations (13.1).
+    assistant_browser_v2_enabled: bool = False
+    browser_hold_signing_key: str = ""
+    browser_hold_signing_key_id: str = "h1"
+    assistant_hosted_search_enabled: bool = False
     # Phase 4 knobs (docs/ASSISTANT_PHASE4_PLAN.md 3.21). Page reads: pages
     # per card (1 to 12), the run-details context assumed per read, the hold
     # factor over the estimate (1 to 3) and the page-read task timeout. AE
@@ -756,6 +769,19 @@ class Settings(BaseSettings):
     # BIDDING_ENABLED and Supabase. Tests pin it off (tests/conftest.py).
     call_in_enabled: bool = True
     call_in_poll_interval_seconds: int = 60
+
+    # Edit in Excel (services/excel_edit, docs/EXCEL_EDIT.md): internal users
+    # open an .xlsx/.xlsm project file in Excel for the web. The file is copied
+    # to the MS_DRIVE_OWNER OneDrive (Files.ReadWrite.All, already granted for
+    # the RFQ links), the user is granted write access, and the poller pulls
+    # Excel's autosaves back every excel_edit_poll_seconds. One editing session
+    # is one new version; a session closes on Finish editing or after
+    # excel_edit_idle_minutes without a change. Off by default; also needs
+    # Graph creds. Multi-worker safe (per-session lease).
+    excel_edit_enabled: bool = False
+    excel_edit_poll_seconds: int = 30
+    excel_edit_idle_minutes: int = 60
+    excel_edit_drive_folder: str = "BDR/excel-edit"
 
     # Auto send poller (services/auto_send_scheduler, docs/AUTO_SEND.md section
     # 7): the 3:00 PM preflight email, the 5:05 PM proposal send to every GC on
@@ -1434,6 +1460,39 @@ class Settings(BaseSettings):
                 raise ValueError("USER_CRED_OLD_KEYS contains an invalid or duplicate key id.")
             seen.add(name)
             _b64_key(value, "USER_CRED_OLD_KEYS")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_browser_v2(self) -> "Settings":
+        """Browser v2 and hosted search. The signing key is required once v2
+        is on and must differ from every other browser key; errors name the
+        variable, never the value."""
+        if self.assistant_hosted_search_enabled and not self.assistant_enabled:
+            raise ValueError("ASSISTANT_HOSTED_SEARCH_ENABLED needs ASSISTANT_ENABLED.")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,20}", self.browser_hold_signing_key_id or ""):
+            raise ValueError("BROWSER_HOLD_SIGNING_KEY_ID must be 1 to 20 letters, digits, _ or -.")
+        if not self.assistant_browser_v2_enabled:
+            return self
+        if not self.assistant_browser_enabled:
+            raise ValueError("ASSISTANT_BROWSER_V2_ENABLED needs ASSISTANT_BROWSER_ENABLED.")
+        seed = _b64_key(self.browser_hold_signing_key, "BROWSER_HOLD_SIGNING_KEY")
+        others = [self.user_cred_kek, self.browser_agent_secrets_key, self.browser_agent_fingerprint_key]
+        # Rotated keys count too (USER_CRED_OLD_KEYS, BROWSER_AGENT_SECRETS_OLD_KEYS: <key_id>:<base64>).
+        for entries in (self.user_cred_old_keys, self.browser_agent_secrets_old_keys):
+            others += [e.strip().partition(":")[2] for e in (entries or "").split(",") if ":" in e]
+        for other in others:
+            if other.strip() and seed == _b64_key(other, "browser key"):
+                raise ValueError("BROWSER_HOLD_SIGNING_KEY must differ from USER_CRED_KEK and the organization browser keys.")
+        if self.browser_agent_release_pubkey.strip():
+            # The offline worker release seed must never live on the backend:
+            # the hold key's public half may not be the release public key.
+            from cryptography.hazmat.primitives import serialization
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+            public = Ed25519PrivateKey.from_private_bytes(seed).public_key().public_bytes(
+                serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+            if public == _b64_key(self.browser_agent_release_pubkey, "BROWSER_AGENT_RELEASE_PUBKEY"):
+                raise ValueError("BROWSER_HOLD_SIGNING_KEY must not be the worker release signing key.")
         return self
 
     @property

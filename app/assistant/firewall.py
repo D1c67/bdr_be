@@ -32,7 +32,11 @@ RoutePair = tuple[str, str]
 REFUSED_METHODS: frozenset[str] = frozenset({"DELETE"})
 
 # path_format prefixes refused whole, in addition to the explicit pairs.
-DENY_PATH_PREFIXES: tuple[str, ...] = ("/agent-worker/v1/", "/assistant/outlook", "/assistant/calendar/", "/assistant/mailbox-access", "/assistant/evidence-access", "/assistant/inspection/", "/assistant/browser-credentials", "/assistant/browser-sites", "/assistant/inbox", "/assistant/alerts")
+DENY_PATH_PREFIXES: tuple[str, ...] = ("/agent-worker/v1/", "/assistant/outlook", "/assistant/calendar/", "/assistant/mailbox-access", "/assistant/evidence-access", "/assistant/inspection/", "/assistant/browser-credentials", "/assistant/browser-sites", "/assistant/inbox", "/assistant/alerts",
+                                     # Browser v2 (docs/ASSISTANT_BROWSER_V2_PLAN.md 4.6, 6.5, 9): holds, live
+                                     # sign-in and result carry are the person's own clicks. The model-facing
+                                     # /assistant/browser-requests stays assistant-callable.
+                                     "/assistant/browser-holds", "/assistant/browser-live", "/assistant/browser-results")
 
 _PERSONAL_BROWSER: tuple[RoutePair, ...] = (
     ("POST", "/assistant/inspection/browser-tasks/{job_id}/read"),
@@ -43,6 +47,26 @@ _PERSONAL_BROWSER: tuple[RoutePair, ...] = (
     ("GET", "/assistant/browser-tasks/{job_id}/help"),
     ("POST", "/assistant/browser-tasks/{job_id}/help"),
     ("GET", "/assistant/browser-tasks/{job_id}/views"),
+    # Browser v2 human routes (WI-4), also under the denied prefixes above.
+    ("GET", "/assistant/browser-sites"),
+    ("GET", "/assistant/browser-sites/signins"),
+    ("GET", "/assistant/browser-sites/grants"),
+    ("POST", "/assistant/browser-sites/grants"),
+    ("DELETE", "/assistant/browser-sites/grants/{grant_id}"),
+    ("GET", "/assistant/browser-sites/sessions"),
+    ("DELETE", "/assistant/browser-sites/sessions/{session_id}"),
+    ("GET", "/assistant/browser-sites/safe-rules"),
+    ("DELETE", "/assistant/browser-sites/safe-rules/{rule_id}"),
+    ("GET", "/assistant/browser-sites/requests/{request_id}"),
+    ("POST", "/assistant/browser-sites/requests/{request_id}/decision"),
+    ("GET", "/assistant/browser-credentials"),
+    ("PUT", "/assistant/browser-credentials/{site_key}"),
+    ("DELETE", "/assistant/browser-credentials/{site_key}"),
+    ("GET", "/assistant/browser-holds/{hold_id}"),
+    ("POST", "/assistant/browser-holds/{hold_id}/decision"),
+    ("POST", "/assistant/browser-holds/{hold_id}/safe-rule"),
+    ("POST", "/assistant/browser-holds/start/{admission_id}/decision"),
+    ("POST", "/assistant/browser-results/{message_id}/carry"),
 )
 
 _USERS: tuple[RoutePair, ...] = (
@@ -118,6 +142,15 @@ _AGENT_WORKER: tuple[RoutePair, ...] = (
     ("POST", "/agent-worker/v1/jobs/{job_id}/user/help/{help_id}/messages"),
     ("POST", "/agent-worker/v1/jobs/{job_id}/user/help/{help_id}/consume"),
     ("POST", "/agent-worker/v1/jobs/{job_id}/user/help/{help_id}/secrets/{message_id}/use"),
+    # Browser v2 worker routes (WI-6, protocol.USER_V2_ENDPOINTS); the prefix rule already denies them.
+    ("GET", "/agent-worker/v1/jobs/{job_id}/user/policy"),
+    ("POST", "/agent-worker/v1/jobs/{job_id}/user/holds"),
+    ("GET", "/agent-worker/v1/jobs/{job_id}/user/holds/{hold_id}/release"),
+    ("POST", "/agent-worker/v1/jobs/{job_id}/user/site-hold"),
+    ("GET", "/agent-worker/v1/jobs/{job_id}/user/session"),
+    ("POST", "/agent-worker/v1/jobs/{job_id}/user/login/begin"),
+    ("POST", "/agent-worker/v1/jobs/{job_id}/user/login/result"),
+    ("POST", "/agent-worker/v1/jobs/{job_id}/user/downloads"),
     ("POST", "/agent-worker/v1/jobs/{job_id}/user-identities/{identity}/session"),
     ("POST", "/agent-worker/v1/jobs/{job_id}/user-identities/{identity}/login/begin"),
     ("POST", "/agent-worker/v1/jobs/{job_id}/user-identities/{identity}/login/result"),

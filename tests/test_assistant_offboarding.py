@@ -33,6 +33,17 @@ Invariants pinned here:
              the person's own subscription overrides and project mutes;
              deleted (the cascade), mfa_reset and role_changed do nothing;
              a failing step is counted phase7_unfinished and the rest run.
+  browser v2 (WI-18, plan 17.5) deactivated, demoted_external and sweep run the
+             0192 revoke RPC a second time (after the jobs are canceled), the
+             purge_v2 RPC, delete the pinned job credentials and the staged
+             download objects (rows marked purged only after the object is
+             gone; kept on legal hold), then read back that no grant,
+             admission, request, hold, live session or safe rule is left;
+             deleted purges only the staged objects (the cascade does the
+             rest); mfa_reset and role_changed do nothing; every query is
+             the person's own; the hook is idempotent, counts only, and a
+             failing step is counted browser_v2_unfinished while the rest
+             run; the 0192 revoke RPC text names every table it must clear.
   phase 8 (WI-13, plan 11) deactivated, demoted_external and sweep skip the
              person's pending and claimed triage items `offboarded` and fail
              their claimed runs; deleted relies on the cascade; mfa_reset and
@@ -44,6 +55,7 @@ Invariants pinned here:
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -133,6 +145,8 @@ def world(monkeypatch):
 
     monkeypatch.setattr(llm_queue, "active_job", active_job)
     monkeypatch.setattr(llm_queue, "cancel", cancel)
+    # The 0192 purge is a system RPC the FakeDB does not model (browser v2 hook).
+    db.bv2_rpc_results["assistant_browser_purge_v2"] = {"sessions": 0, "live_idle": 0, "frames": 0, "input": 0}
     return SimpleNamespace(db=db, audits=audits, canceled=canceled, bells=bells)
 
 
@@ -833,7 +847,7 @@ def test_phase7_mfa_reset_and_role_changed_leave_the_router_alone(world, mode, n
 
 
 def test_phase7_hook_is_registered_after_phase_4_and_is_idempotent(world):
-    assert off.HOOKS.index(off.phase7_offboard) == off.HOOKS.index(off.phase8_offboard) - 1
+    assert off.HOOKS.index(off.phase7_offboard) == off.HOOKS.index(off.browser_v2_offboard) - 1
     assert off.HOOKS.index(off.phase4_offboard) < off.HOOKS.index(off.phase7_offboard)
     _seed_p7(world)
     assert off.phase7_offboard(USER, "deactivated") == P7_COUNTS
@@ -854,6 +868,248 @@ def test_phase7_a_failing_step_is_counted_and_the_rest_still_run(world, monkeypa
     assert result.counts["phase7_unfinished"] == 1
     assert result.counts["inbox_dismissed"] == 2 and result.counts["subscriptions_deleted"] == 2
     assert _p7_state(world)["sends"][SEND] == ("pending", None)
+
+
+# ── Browser v2 hook (plan 17.5, WI-18) ───────────────────────────────────────
+
+BV2_OTHER = "12121212-1212-4121-8121-121212121212"
+D_OLD, D_LIVE, D_STORED, D_PURGED, D_OTHER = (f"dd000000-0000-4000-8000-00000000000{i}" for i in range(1, 6))
+MIGRATION_0192 = Path(__file__).resolve().parents[1] / "supabase/migrations/0192_assistant_browser_v2.sql"
+V2_PREFIX = f"assistant-files/{USER}/browser/"
+
+
+def _download(row_id, user=USER, **over) -> dict:
+    base = {"id": row_id, "user_id": user, "job_id": "job-1", "status": "staged", "purged_at": None,
+            "storage_path": f"assistant-files/{user}/browser/{row_id}-a.pdf",
+            "expires_at": (NOW + timedelta(days=3)).isoformat(), "created_at": NOW.isoformat()}
+    base.update(over)
+    return base
+
+
+def _simulate_revoke(world, calls: list | None = None):
+    """The tables the 0192 RPC assistant_browser_revoke_owner clears (its text
+    is pinned below); the FakeDB models only the credentials and sessions."""
+    from app.assistant import repo
+
+    real = repo.browser_revoke_owner
+
+    def revoke(user_id):
+        if calls is not None:
+            calls.append(user_id)
+        t = world.db.tables
+        for table, status in (("assistant_browser_site_grants", "revoked"), ("assistant_browser_admissions", "declined"),
+                              ("assistant_browser_requests", "cancelled"), ("assistant_browser_holds", "aborted"),
+                              ("assistant_browser_live_sessions", "ended")):
+            for row in t.get(table, []):
+                if row.get("user_id") == user_id and row.get("status") in (
+                        "active", "waiting_grant", "ready", "requested", "open", "approved"):
+                    row["status"] = status
+        t["assistant_browser_user_safe_rules"] = [
+            r for r in t.get("assistant_browser_user_safe_rules", []) if r.get("user_id") != user_id]
+        return real(user_id)
+
+    return revoke
+
+
+@pytest.fixture
+def v2(world, monkeypatch):
+    from app.assistant import repo
+
+    store = FakeStorage()
+    store.install(monkeypatch)
+    t = world.db.tables
+    t["assistant_browser_site_grants"] = [
+        {"id": "g1", "user_id": USER, "status": "active"}, {"id": "g2", "user_id": BV2_OTHER, "status": "active"}]
+    t["assistant_browser_admissions"] = [
+        {"id": "a1", "user_id": USER, "status": "waiting_grant"}, {"id": "a2", "user_id": USER, "status": "enqueued"},
+        {"id": "a3", "user_id": BV2_OTHER, "status": "ready"}]
+    t["assistant_browser_requests"] = [{"id": "r1", "user_id": USER, "status": "requested"}]
+    t["assistant_browser_holds"] = [{"id": "h1", "user_id": USER, "status": "open"},
+                                    {"id": "h2", "user_id": BV2_OTHER, "status": "open"}]
+    t["assistant_browser_live_sessions"] = [{"id": "l1", "user_id": USER, "status": "open"}]
+    t["assistant_browser_user_safe_rules"] = [{"id": "s1", "user_id": USER}, {"id": "s2", "user_id": BV2_OTHER}]
+    t["assistant_browser_job_credentials"] = [
+        {"id": "p1", "user_id": USER}, {"id": "p2", "user_id": USER}, {"id": "p3", "user_id": BV2_OTHER}]
+    t["assistant_browser_downloads"] = [
+        _download(D_OLD, expires_at=(NOW - timedelta(days=1)).isoformat()), _download(D_LIVE),
+        _download(D_STORED, status="stored", storage_path=None, expires_at=None),
+        _download(D_PURGED, purged_at=NOW.isoformat()),
+        _download(D_OTHER, user=BV2_OTHER)]
+    for row in t["assistant_browser_downloads"]:
+        if row["storage_path"]:
+            store.objects[row["storage_path"]] = b"%PDF"
+    revokes: list = []
+    monkeypatch.setattr(repo, "browser_revoke_owner", _simulate_revoke(world, revokes))
+    return SimpleNamespace(world=world, db=world.db, store=store, revokes=revokes)
+
+
+def _dl(v2, row_id) -> dict:
+    return next(r for r in v2.db.tables["assistant_browser_downloads"] if r["id"] == row_id)
+
+
+def _owned(v2, table, user) -> list:
+    return [r["id"] for r in v2.db.tables[table] if r["user_id"] == user]
+
+
+def test_browser_v2_hook_is_registered_right_after_phase7_and_before_phase8(world):
+    # Phase 8 (WI-13) appends its hook after browser v2's.
+    assert off.HOOKS[-2] is off.browser_v2_offboard
+    assert off.HOOKS.index(off.phase7_offboard) < off.HOOKS.index(off.browser_v2_offboard)
+
+
+@pytest.mark.parametrize("mode", ["deactivated", "demoted_external", "sweep"])
+def test_browser_v2_leaving_modes_clear_the_state_of_the_person_only(v2, mode):
+    result = off.offboard(USER, mode, actor_id=None if mode == "sweep" else "admin")
+    assert result.ok and result.failures == []
+    t = v2.db.tables
+    # The early step and the hook each ran the revoke RPC (the second after the jobs stopped).
+    assert v2.revokes == [USER, USER]
+    assert [r["status"] for r in t["assistant_browser_site_grants"]] == ["revoked", "active"]
+    assert {r["id"]: r["status"] for r in t["assistant_browser_admissions"]} == {
+        "a1": "declined", "a2": "enqueued", "a3": "ready"}
+    assert {r["id"]: r["status"] for r in t["assistant_browser_holds"]} == {"h1": "aborted", "h2": "open"}
+    assert t["assistant_browser_live_sessions"][0]["status"] == "ended"
+    assert _owned(v2, "assistant_browser_user_safe_rules", USER) == []
+    assert _owned(v2, "assistant_browser_user_safe_rules", BV2_OTHER) == ["s2"]
+    # Pinned job credentials: the person's two go, the other person's stays.
+    assert _owned(v2, "assistant_browser_job_credentials", USER) == []
+    assert _owned(v2, "assistant_browser_job_credentials", BV2_OTHER) == ["p3"]
+    # Staged downloads: both live and expired objects go, rows marked purged; the stored and
+    # already purged rows and the other person's object are untouched.
+    assert _dl(v2, D_OLD)["purged_at"] and _dl(v2, D_LIVE)["purged_at"]
+    assert _dl(v2, D_STORED)["purged_at"] is None and _dl(v2, D_PURGED)["purged_at"] == NOW.isoformat()
+    assert _dl(v2, D_OTHER)["purged_at"] is None
+    assert f"{V2_PREFIX}{D_OLD}-a.pdf" not in v2.store.objects and f"{V2_PREFIX}{D_LIVE}-a.pdf" not in v2.store.objects
+    assert f"assistant-files/{BV2_OTHER}/browser/{D_OTHER}-a.pdf" in v2.store.objects
+    assert result.counts["browser_v2_pins_deleted"] == 2 and result.counts["browser_v2_downloads_purged"] == 2
+    assert "browser_v2_unfinished" not in result.counts and "browser_v2_downloads_unpurged" not in result.counts
+    # Counts only in the audit: no path, file name or id.
+    payload = v2.world.audits[-1]["payload"]
+    assert payload["browser_v2_pins_deleted"] == 2 and "browser/" not in str(payload) and D_OLD not in str(payload)
+
+
+def test_browser_v2_purge_rpc_runs_with_no_user_scope(v2):
+    off.offboard(USER, "deactivated", actor_id="admin")
+    purge = [p for name, p in v2.db.rpc_calls if name == "assistant_browser_purge_v2"]
+    assert len(purge) == 1 and "p_user_id" not in purge[0]
+
+
+def test_browser_v2_deleted_purges_only_the_staged_objects(v2):
+    result = off.offboard(USER, "deleted", actor_id="admin")
+    assert result.ok
+    assert v2.revokes == [USER]                      # the early step only; the cascade does the rest
+    t = v2.db.tables
+    assert [r["status"] for r in t["assistant_browser_site_grants"]] == ["revoked", "active"]
+    assert _owned(v2, "assistant_browser_job_credentials", USER) == ["p1", "p2"]
+    assert _dl(v2, D_OLD)["purged_at"] and _dl(v2, D_LIVE)["purged_at"]
+    assert not [rpc for rpc, _ in v2.db.rpc_calls if rpc == "assistant_browser_purge_v2"]
+    assert result.counts["browser_v2_downloads_purged"] == 2 and "browser_v2_pins_deleted" not in result.counts
+
+
+@pytest.mark.parametrize("mode,new_role", [("mfa_reset", None), ("role_changed", "accountant"),
+                                           ("role_changed", "estimating_admin")])
+def test_browser_v2_mfa_reset_and_role_changed_leave_the_hook_alone(v2, mode, new_role):
+    result = off.offboard(USER, mode, actor_id="admin", old_role="executive", new_role=new_role)
+    assert result.ok
+    assert off.browser_v2_offboard(USER, mode) == {}
+    assert not [k for k in result.counts if k.startswith("browser_v2_")]
+    assert _owned(v2, "assistant_browser_job_credentials", USER) == ["p1", "p2"]
+    assert _dl(v2, D_LIVE)["purged_at"] is None and f"{V2_PREFIX}{D_LIVE}-a.pdf" in v2.store.objects
+
+
+def test_browser_v2_legal_hold_keeps_the_staged_objects_but_not_the_access(v2):
+    v2.db.tables["assistant_profiles"].append({"user_id": USER, "legal_hold": True})
+    result = off.offboard(USER, "deactivated", actor_id="admin")
+    assert result.ok and result.counts["browser_v2_downloads_purged"] == 0
+    assert "browser_v2_unfinished" not in result.counts
+    assert _dl(v2, D_LIVE)["purged_at"] is None and f"{V2_PREFIX}{D_LIVE}-a.pdf" in v2.store.objects
+    # Access and authentication material still go.
+    assert v2.db.tables["assistant_browser_site_grants"][0]["status"] == "revoked"
+    assert _owned(v2, "assistant_browser_job_credentials", USER) == []
+
+
+def test_browser_v2_an_object_that_cannot_be_deleted_keeps_its_row_and_is_counted(v2):
+    v2.store.fail_delete = True
+    result = off.offboard(USER, "deactivated", actor_id="admin")
+    assert result.ok                                    # never a critical step
+    assert result.counts["browser_v2_downloads_purged"] == 0
+    assert result.counts["browser_v2_downloads_unpurged"] == 2 and result.counts["browser_v2_unfinished"] == 1
+    assert _dl(v2, D_LIVE)["purged_at"] is None
+    v2.store.fail_delete = False
+    again = off.browser_v2_offboard(USER, "sweep")       # the sweep retries
+    assert again["browser_v2_downloads_purged"] == 2 and "browser_v2_unfinished" not in again
+
+
+def test_browser_v2_a_hard_delete_counts_objects_it_could_not_purge(v2):
+    v2.store.fail_delete = True
+    result = off.offboard(USER, "deleted", actor_id="admin")
+    assert result.counts["browser_v2_downloads_unpurged"] == 2 and result.counts["browser_v2_unfinished"] == 1
+
+
+def test_browser_v2_state_left_after_the_revoke_is_counted_unfinished(v2, monkeypatch):
+    from app.assistant import repo
+
+    monkeypatch.setattr(repo, "browser_revoke_owner", lambda user_id: 0)       # the RPC cleared nothing
+    result = off.offboard(USER, "deactivated", actor_id="admin")
+    assert result.counts["browser_v2_unfinished"] == 1
+    # The Python-side steps still ran.
+    assert _owned(v2, "assistant_browser_job_credentials", USER) == []
+    assert result.counts["browser_v2_downloads_purged"] == 2
+
+
+def test_browser_v2_a_failing_step_is_counted_and_the_rest_still_run(v2, monkeypatch):
+    from app.assistant import repo
+
+    def boom(*a, **k):
+        raise RuntimeError("db down")
+
+    with monkeypatch.context() as m:
+        m.setattr(repo, "browser_offboard_pins_delete", boom)
+        counts = off.browser_v2_offboard(USER, "deactivated")
+    assert counts["browser_v2_unfinished"] == 1
+    assert counts["browser_v2_downloads_purged"] == 2 and "browser_v2_pins_deleted" not in counts
+    v2.db.rpc_errors["assistant_browser_purge_v2"] = RuntimeError("rpc down")
+    counts = off.browser_v2_offboard(USER, "sweep")          # the sweep retries what was left
+    assert counts["browser_v2_unfinished"] == 1 and counts["browser_v2_pins_deleted"] == 2
+
+
+def test_browser_v2_hook_is_idempotent(v2):
+    first = off.browser_v2_offboard(USER, "deactivated")
+    assert first["browser_v2_pins_deleted"] == 2 and first["browser_v2_downloads_purged"] == 2
+    second = off.browser_v2_offboard(USER, "sweep")
+    assert second["browser_v2_pins_deleted"] == 0 and second["browser_v2_downloads_purged"] == 0
+    assert "browser_v2_unfinished" not in second
+    assert _dl(v2, D_OTHER)["purged_at"] is None
+
+
+def test_browser_v2_hook_module_carries_no_em_dash():
+    from app.assistant import repo
+    from app.routers import assistant_inspection
+    from app.services import assistant_browser_records
+
+    for module in (off, repo, assistant_inspection, assistant_browser_records):
+        with open(module.__file__, encoding="utf-8") as fh:
+            assert EM_DASH not in fh.read(), module.__name__
+
+
+REVOKE_TOUCHES = ("assistant_credentials", "assistant_browser_site_grants", "assistant_browser_admissions",
+                  "assistant_browser_requests", "assistant_browser_holds", "assistant_browser_live_sessions",
+                  "assistant_browser_user_safe_rules", "assistant_browser_sessions")
+
+
+def test_the_0192_revoke_rpc_names_every_table_the_hook_relies_on():
+    sql = MIGRATION_0192.read_text(encoding="utf-8")
+    body = sql[sql.index("create or replace function public.assistant_browser_revoke_owner"):]
+    body = body[: body.index("$$;", body.index("end $$") if "end $$" in body else 0) + 3]
+    code = "\n".join(line.split("--", 1)[0] for line in body.splitlines())
+    for table in REVOKE_TOUCHES:
+        assert re.search(rf"(update|delete from) public\.{table}\b", code), table
+    assert "assistant_browser_cancel_credentials" in code
+    # What the RPC leaves is exactly what the Python steps delete.
+    for left in ("assistant_browser_job_credentials", "assistant_browser_downloads"):
+        assert f"public.{left}" not in code, left
+
+
 # ── Phase 8 hook (plan 11, WI-13) ────────────────────────────────────────────
 
 T_PEND, T_CLAIMED, T_DONE, T_OTHER, T_OTHER2 = (f"7a000000-0000-4000-8000-00000000000{i}" for i in range(1, 6))
@@ -931,7 +1187,7 @@ def test_phase8_mfa_reset_and_role_changed_leave_triage_alone(world, mode, new_r
 
 def test_phase8_hook_is_registered_last_and_is_idempotent(world):
     assert off.HOOKS[-1] is off.phase8_offboard
-    assert off.HOOKS.index(off.phase7_offboard) < off.HOOKS.index(off.phase8_offboard)
+    assert off.HOOKS.index(off.browser_v2_offboard) < off.HOOKS.index(off.phase8_offboard)
     _seed_p8(world)
     assert off.phase8_offboard(USER, "deactivated") == {"triage_items_skipped": 2}
     assert off.phase8_offboard(USER, "sweep") == {"triage_items_skipped": 0}

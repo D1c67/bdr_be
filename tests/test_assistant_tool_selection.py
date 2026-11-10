@@ -35,9 +35,9 @@ def _bad(mutate) -> dict:
 
 
 def test_exactly_150_prompts_with_unique_ids():
-    # Phase 8 WI-10 added five inbox prompts (168 to 173).
-    assert len(CASES) == ev.SELECTION_CASES == 173
-    assert len({c["id"] for c in CASES}) == 173
+    # 169 after WI-12; browser v2 WI-19 added four (plan 18.2 evals 9, 10, 11, 15); Phase 8 WI-10 added five inbox prompts.
+    assert len(CASES) == ev.SELECTION_CASES == 178
+    assert len({c["id"] for c in CASES}) == 178
 
 
 def test_coverage_counts():
@@ -92,7 +92,7 @@ def test_no_em_dash_and_check_reports_the_section():
     text = ev.TOOL_SELECTION.read_text(encoding="utf-8")
     assert "\u2014" not in text and "\\u2014" not in text
     summary = ev.check()["tool_selection"]
-    assert summary["cases"] == 173 and summary["negative"] >= 15 and summary["flags_off"] >= 2
+    assert summary["cases"] == 178 and summary["negative"] >= 15 and summary["flags_off"] >= 2
     assert summary["resolver"]["rate"] >= ev.RESOLVER_MIN_RATE
 
 
@@ -105,8 +105,8 @@ def test_main_check_exits_zero(capsys):
 
 
 @pytest.mark.parametrize("mutate, word", [
-    (lambda p: p.pop(), "exactly 173"),
-    (lambda p: p.append(dict(p[0], id="extra-prompt")), "exactly 173"),
+    (lambda p: p.pop(), "exactly 178"),
+    (lambda p: p.append(dict(p[0], id="extra-prompt")), "exactly 178"),
     (lambda p: p[1].update(id=p[0]["id"]), "unique"),
     (lambda p: p[0].update(role="estimator"), "internal role"),
     (lambda p: p[0].update(expected_tools=["no_such_tool"]), "unregistered"),
@@ -215,11 +215,11 @@ def test_grade_negative_prompts():
 def test_summary_gate():
     hit = {"id": "a", "grade": {"hit": True}}
     miss = {"id": "b", "grade": {"hit": False}}
-    s = ev.selection_summary([hit] * 156 + [miss] * 17, [])
-    assert (s["cases"], s["hits"], s["accuracy"], s["gate"]) == (173, 156, round(156 / 173, 4), "pass")
-    assert ev.selection_summary([hit] * 155 + [miss] * 18, [])["gate"] == "fail"
-    s = ev.selection_summary([hit] * 172, [{"id": "z", "reason": "budget"}])
-    assert (s["skipped"], s["gate"], s["accuracy"]) == (1, "incomplete", round(172 / 173, 4))
+    s = ev.selection_summary([hit] * 161 + [miss] * 17, [])
+    assert (s["cases"], s["hits"], s["accuracy"], s["gate"]) == (178, 161, round(161 / 178, 4), "pass")
+    assert ev.selection_summary([hit] * 160 + [miss] * 18, [])["gate"] == "fail"
+    s = ev.selection_summary([hit] * 177, [{"id": "z", "reason": "budget"}])
+    assert (s["skipped"], s["gate"], s["accuracy"]) == (1, "incomplete", round(177 / 178, 4))
     assert ev.selection_summary([hit] * 20, [])["gate"] == "fail"  # an --only run never passes
     assert s["missed"] == []
 

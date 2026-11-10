@@ -1,0 +1,31 @@
+{
+  "model": "UserHoldRequest",
+  "v2_endpoint": "user_holds",
+  "direction": "request",
+  "body": {
+    "trigger": "network",
+    "frame": "main",
+    "method": "POST",
+    "url": "https://app.procore.com/rest/v1.0/projects/3167322/rfis/27914290/replies",
+    "origin": "https://app.procore.com",
+    "url_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "body_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "body_summary": [
+      {
+        "name": "reply[body]",
+        "value": "Conduit to follow grid C per sketch SK-4.",
+        "hidden": false
+      },
+      {
+        "name": "authenticity_token",
+        "value": null,
+        "hidden": true
+      }
+    ],
+    "element_label": null,
+    "profile_label": "Submit RFI response",
+    "model_description": "Posts the reply to RFI 198.",
+    "out_of_scope": false,
+    "screenshot_artifact_id": "5c000000-0000-4000-8000-000000000001"
+  }
+}

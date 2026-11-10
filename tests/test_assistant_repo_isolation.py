@@ -26,6 +26,8 @@ import inspect
 import re
 from pathlib import Path
 
+import pytest
+
 from app.assistant import repo
 
 APP = Path(repo.__file__).resolve().parents[1]
@@ -375,6 +377,200 @@ def test_no_em_dash_in_the_package():
             offenders.append(path.name)
     assert em not in (APP / "routers" / "assistant.py").read_text(encoding="utf-8")
     assert offenders == []
+
+
+# ── Browser v2 (docs/ASSISTANT_BROWSER_V2_PLAN.md 17.5, WI-18) ───────────────
+#
+# Every repo function of the browser v2 block, and the WI-18 functions beside
+# the browser record retention, filters by owner: a table read or write carries
+# the person's id, an RPC wrapper passes p_user_id, a system sweep refuses any
+# user. The shared reads (the site registry, the platform config, the BDR
+# record lookups) hold no per-user data and are named here on purpose.
+
+_BV2_MARKER = "# ── Browser v2: sites, grants, admissions, credentials"
+_BV2_WI18_MARKER = "# WI-18 (docs/ASSISTANT_BROWSER_V2_PLAN.md 17.5): browser v2 retention sweeps"
+_P7_MARKER = "# ── Phase 7: the proactive router"
+BV2_SHARED_READS = {
+    "browser_platform_config_v2", "browser_sites", "browser_site", "browser_sites_by_keys",
+    "browser_sites_for_url", "browser_url_email_sources", "browser_url_bdr_records", "browser_project_exists",
+}
+# A worker RPC fenced by the job lease (job, worker, boot, epoch), not by a user argument.
+BV2_LEASE_FENCED = {"browser_download_record"}
+BV2_OFFBOARD_WRAPPERS = ("browser_offboard_pins_delete", "browser_offboard_staged_downloads",
+                         "browser_offboard_open_state")
+# Callers of the WI-18 sweeps with a None user: the retention rider in the records
+# service, and the orphan sweep for the open-state reader.
+BV2_RETENTION_SWEEP_CALLERS = {
+    "browser_holds_retention_delete": {("services/assistant_browser_records.py", "purge_v2_retention")},
+    "browser_downloads_retention_delete": {("services/assistant_browser_records.py", "purge_v2_retention")},
+    "browser_v2_owners_with_open_state": {(_MAINTENANCE, "run_orphans")},
+}
+_OWNER_FILTERS = ('.eq("user_id", user_id)', '.eq("principal_user_id", user_id)', "_scope(", "_bv2_delete_by_owner(")
+
+
+def _v2_repo_functions() -> dict[str, ast.FunctionDef]:
+    source = (APP / "assistant" / "repo.py").read_text(encoding="utf-8")
+    spans = [(source.index(_BV2_MARKER), source.index(_P7_MARKER)),
+             (source.index(_BV2_WI18_MARKER), source.index(_BV2_MARKER))]
+    out: dict[str, ast.FunctionDef] = {}
+    for node in ast.parse(source).body:
+        if not isinstance(node, ast.FunctionDef) or node.name.startswith("_"):
+            continue
+        offset = sum(len(line) + 1 for line in source.splitlines()[: node.lineno - 1])
+        in_block = spans[0][0] <= offset < spans[0][1]
+        # Between the WI-18 sweeps and the v2 marker sit the phase 6 functions: not pinned here.
+        if in_block or (spans[1][0] <= offset < spans[1][1] and node.name in BV2_RETENTION_SWEEP_CALLERS):
+            out[node.name] = node
+    return out
+
+
+def test_every_browser_v2_repo_function_filters_by_owner():
+    source = (APP / "assistant" / "repo.py").read_text(encoding="utf-8")
+    functions = _v2_repo_functions()
+    assert len(functions) >= 55
+    offenders = []
+    for name, node in functions.items():
+        if name in BV2_SHARED_READS or name in BV2_LEASE_FENCED:
+            continue
+        text = ast.get_source_segment(source, node)
+        params = [a.arg for a in node.args.args]
+        assert params and params[0] == "user_id", name
+        optional = "None" in ast.unparse(node.args.args[0].annotation or ast.Constant(value=""))
+        if optional:
+            # A system sweep: it refuses a person's id (or, for the readers, scopes by it).
+            if not ("raise ValueError" in text or "_bv2_system_only(" in text or "_scope(" in text):
+                offenders.append((name, "system sweep without a user guard"))
+            continue
+        if ".table(" in text and not any(f in text for f in _OWNER_FILTERS):
+            offenders.append((name, "table access without an owner filter"))
+        if ".rpc(" in text or "_bv2_rpc(" in text or "browser_rpc(" in text:
+            if not ('"p_user_id": user_id' in text or "user_id" in "".join(text.split("(", 1)[1:2])):
+                offenders.append((name, "rpc without the owner"))
+    assert offenders == [], offenders
+
+
+def test_the_wi18_offboarding_wrappers_take_a_person_and_have_one_caller():
+    functions = _v2_repo_functions()
+    for name in BV2_OFFBOARD_WRAPPERS:
+        fn = getattr(repo, name)
+        param = next(iter(inspect.signature(fn).parameters.values()))
+        assert param.name == "user_id" and "None" not in str(param.annotation), name
+        assert name in functions, name
+        callers = set()
+        for mod, top, call in _calls(name):
+            assert not _passes_none_user(call), name
+            callers.add((mod, top))
+        assert callers <= {("services/assistant_offboarding.py", "browser_v2_offboard"),
+                           ("services/assistant_offboarding.py", "_purge_staged_downloads")}, (name, callers)
+        assert callers, name
+
+
+def test_the_wi18_retention_sweeps_take_an_optional_user_first_and_have_planned_callers():
+    functions = _v2_repo_functions()
+    found = 0
+    for name, allowed in BV2_RETENTION_SWEEP_CALLERS.items():
+        fn = getattr(repo, name)
+        assert name in functions, name
+        param = next(iter(inspect.signature(fn).parameters.values()))
+        assert param.name == "user_id" and "None" in str(param.annotation), name
+        assert "system sweep" in (fn.__doc__ or "").lower(), name
+        system = {(mod, top) for mod, top, call in _calls(name) if _passes_none_user(call)}
+        found += len(system)
+        assert system <= allowed, (name, sorted(system - allowed))
+        # Called with a person's id, never.
+        assert {(m, t) for m, t, c in _calls(name) if not _passes_none_user(c)} == set(), name
+    assert found >= 2
+
+
+def test_the_browser_v2_block_adds_no_other_optional_user_function():
+    """The optional-user functions of the whole v2 area are the four RPC sweeps
+    of tests/test_assistant_repo_browser_v2.py plus the three WI-18 sweeps."""
+    optional = {n for n, node in _v2_repo_functions().items()
+                if "None" in ast.unparse(node.args.args[0].annotation or ast.Constant(value=""))}
+    assert optional == {"browser_sweep_v2", "browser_purge_v2", "browser_outbox_drain", "browser_outbox_ack",
+                        *BV2_RETENTION_SWEEP_CALLERS}, optional
+
+
+# Behavior: with two people's rows in every table, each WI-18 function reads or
+# changes only what its arguments allow.
+_OTHER = "12121212-1212-4121-8121-121212121212"
+
+
+def _two_people(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    from app.core import supabase_client
+    from tests.assistant_fakes import USER, FakeDB
+
+    now = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)
+    old = (now - timedelta(days=200)).isoformat()
+    fresh = (now - timedelta(days=1)).isoformat()
+    db = FakeDB(now=now)
+    monkeypatch.setattr(supabase_client, "get_supabase", lambda: db)
+    t = db.tables
+    t["assistant_browser_job_credentials"] = [{"id": f"p{i}", "user_id": u} for i, u in enumerate((USER, USER, _OTHER))]
+    t["assistant_browser_downloads"] = [
+        {"id": "d-mine", "user_id": USER, "status": "staged", "purged_at": None, "storage_path": "a", "created_at": old},
+        {"id": "d-other", "user_id": _OTHER, "status": "staged", "purged_at": None, "storage_path": "b", "created_at": old},
+    ]
+    t["assistant_browser_holds"] = [
+        {"id": "h-mine", "user_id": USER, "status": "open", "created_at": old},
+        {"id": "h-other", "user_id": _OTHER, "status": "open", "created_at": old},
+    ]
+    t["assistant_browser_site_grants"] = [{"id": "g1", "user_id": USER, "status": "active"},
+                                          {"id": "g2", "user_id": _OTHER, "status": "active"}]
+    t["assistant_browser_admissions"] = [{"id": "a2", "user_id": _OTHER, "status": "ready"}]
+    t["assistant_browser_user_safe_rules"] = [{"id": "s2", "user_id": _OTHER}]
+    return db, USER, old, fresh
+
+
+def test_the_wi18_offboarding_wrappers_touch_only_the_named_person(monkeypatch):
+    db, user, _old, _fresh = _two_people(monkeypatch)
+    assert repo.browser_offboard_pins_delete(user) == 2
+    assert [r["id"] for r in db.tables["assistant_browser_job_credentials"]] == ["p2"]
+    assert [r["id"] for r in repo.browser_offboard_staged_downloads(user)] == ["d-mine"]
+    state = repo.browser_offboard_open_state(user)
+    assert state == {"grants": 1, "admissions": 0, "requests": 0, "holds": 1, "live": 0, "safe_rules": 0,
+                     "pins": 0, "staged": 1}
+    assert repo.browser_offboard_open_state(_OTHER)["safe_rules"] == 1
+    assert repo.browser_offboard_open_state(_OTHER)["admissions"] == 1
+
+
+def test_the_wi18_retention_sweeps_refuse_a_person_and_delete_only_ended_old_rows(monkeypatch):
+    db, user, old, fresh = _two_people(monkeypatch)
+    for fn in (repo.browser_holds_retention_delete, repo.browser_downloads_retention_delete):
+        with pytest.raises(ValueError, match="system sweep"):
+            fn(user)
+    t = db.tables
+    t["assistant_browser_holds"] += [
+        {"id": "h-old-done", "user_id": user, "status": "consumed", "created_at": old},
+        {"id": "h-new-done", "user_id": user, "status": "declined", "created_at": fresh},
+        {"id": "h-old-approved", "user_id": _OTHER, "status": "approved", "created_at": old},
+        {"id": "h-old-aborted", "user_id": _OTHER, "status": "aborted", "created_at": old},
+    ]
+    assert repo.browser_holds_retention_delete(None) == 2
+    assert sorted(r["id"] for r in t["assistant_browser_holds"]) == ["h-mine", "h-new-done", "h-old-approved", "h-other"]
+    t["assistant_browser_downloads"] += [
+        {"id": "d-stored", "user_id": user, "status": "stored", "purged_at": None, "created_at": old},
+        {"id": "d-rejected", "user_id": _OTHER, "status": "rejected", "purged_at": None, "created_at": old},
+        {"id": "d-purged", "user_id": user, "status": "staged", "purged_at": old, "created_at": old},
+        {"id": "d-new", "user_id": user, "status": "stored", "purged_at": None, "created_at": fresh},
+    ]
+    assert repo.browser_downloads_retention_delete(None) == 3
+    assert sorted(r["id"] for r in t["assistant_browser_downloads"]) == ["d-mine", "d-new", "d-other"]
+    # Legal hold: nothing of that person goes.
+    t["assistant_profiles"] = [{"user_id": user, "legal_hold": True}]
+    t["assistant_browser_holds"].append({"id": "h-held", "user_id": user, "status": "consumed", "created_at": old})
+    t["assistant_browser_downloads"].append({"id": "d-held", "user_id": user, "status": "stored", "created_at": old})
+    assert repo.browser_holds_retention_delete(None) == 0 and repo.browser_downloads_retention_delete(None) == 0
+
+
+def test_the_open_state_reader_names_each_owner_once_and_scopes_by_a_given_id(monkeypatch):
+    db, user, _old, _fresh = _two_people(monkeypatch)
+    assert repo.browser_v2_owners_with_open_state(None) == sorted({user, _OTHER})
+    assert repo.browser_v2_owners_with_open_state(_OTHER) == [_OTHER]
+
+
 # ── Phase 8: model triage (docs/ASSISTANT_PHASE8_PLAN.md 16.1, WI-5) ─────────
 #
 # The triage system sweeps take user_id None as "every user" and refuse a

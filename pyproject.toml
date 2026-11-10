@@ -44,6 +44,11 @@ dependencies = [
     # RFC 5545 rule expansion for assistant routines (app/assistant/rrules.py).
     # Was only transitive through pandas; now direct.
     "python-dateutil>=2.9,<3",
+    # Assistant browser v2 site registry (app/services/assistant_browser_sites.py):
+    # registrable domains from the bundled public suffix list snapshot, read
+    # offline (no network fetch). Pinned exactly so the snapshot only moves on
+    # a deliberate bump; the worker pins the same release.
+    "publicsuffixlist==1.1.0.20261018",
 ]
 
 [dependency-groups]

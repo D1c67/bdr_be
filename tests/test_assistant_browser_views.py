@@ -41,6 +41,25 @@ def test_help_binds_owner_and_live_help_id(api, monkeypatch):
     assert "123456" not in response.text
 
 
+def test_help_text_secret_refusal_carries_the_error_code_header(api, monkeypatch):
+    """Review finding: the frontend reads the code from X-Error-Code only."""
+    from app.services.assistant_browser_secrets import SECRET_IN_MESSAGE_TEXT, SecretInMessage
+
+    def refuse(*a, **kw):
+        raise SecretInMessage()
+
+    monkeypatch.setattr(routes.help_flow, "owner_reply", refuse)
+    response = api.http.post(f"/assistant/browser-tasks/{api.job}/help", json={
+        "expected_help_id": str(uuid4()), "client_msg_id": str(uuid4()), "action": "message",
+        "body": "my password is Summer2026!"})
+    assert response.status_code == 422
+    assert response.headers["x-error-code"] == "secret_in_message"
+    assert response.headers["cache-control"] == "no-store"
+    detail = response.json()["detail"]
+    assert detail["code"] == "secret_in_message" and detail["msg"] == SECRET_IN_MESSAGE_TEXT
+    assert "Summer2026" not in response.text
+
+
 def test_assistant_cannot_read_or_reply_human_content(api):
     object.__setattr__(api.user, "via_assistant_run_id", str(uuid4()))
     assert api.http.get(f"/assistant/browser-tasks/{api.job}/trace").status_code == 403

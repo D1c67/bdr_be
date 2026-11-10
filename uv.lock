@@ -87,6 +87,7 @@ dependencies = [
     { name = "openpyxl" },
     { name = "pandas" },
     { name = "pillow" },
+    { name = "publicsuffixlist" },
     { name = "pydantic", extra = ["email"] },
     { name = "pydantic-settings" },
     { name = "pyjwt", extra = ["crypto"] },
@@ -122,6 +123,7 @@ requires-dist = [
     { name = "openpyxl", specifier = ">=3.1" },
     { name = "pandas", specifier = ">=2.2,<3" },
     { name = "pillow", specifier = ">=11.0" },
+    { name = "publicsuffixlist", specifier = "==1.1.0.20261018" },
     { name = "pydantic", extras = ["email"], specifier = ">=2.9" },
     { name = "pydantic-settings", specifier = ">=2.6" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.9" },
@@ -1383,6 +1385,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/88/fb/46dad6c0ae49ed230ab1b16c890c2b6314e2403e6c412976f4a72d64a527/propcache-0.5.2-cp314-cp314t-win_amd64.whl", hash = "sha256:d447bb0b3054be5818458fbb171208b1d9ff11eba14e18ca18b90cbb45767370", size = 47764, upload-time = "2026-05-08T21:02:07.353Z" },
     { url = "https://files.pythonhosted.org/packages/e7/c4/a47d0a63aa309d10d59ede6e9d4cff03a344a79d1f0f4cd0cd74997b53e0/propcache-0.5.2-cp314-cp314t-win_arm64.whl", hash = "sha256:fe67a3d11cd9b4efabfa45c3d00ffba2b26811442a73a581a94b67c2b5faccf6", size = 41140, upload-time = "2026-05-08T21:02:09.065Z" },
     { url = "https://files.pythonhosted.org/packages/3a/ed/1cdcab6ba3d6ab7feca11fc14f0eeea80755bb53ef4e892079f31b10a25f/propcache-0.5.2-py3-none-any.whl", hash = "sha256:be1ddfcbb376e3de5d2e2db1d58d6d67463e6b4f9f040c000de8e300295465fe", size = 14036, upload-time = "2026-05-08T21:02:10.673Z" },
+]
+
+[[package]]
+name = "publicsuffixlist"
+version = "1.1.0.20261018"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0f/b9/aa4b37e174aa71bc4f6e3e31d837f6b2684d6023b69def1c4bc417d9a54e/publicsuffixlist-1.1.0.20261018.tar.gz", hash = "sha256:87861b9d9af2f035e68ad1fd95f9ff1caf92c8c2187ca9cf5c7d8785db0f221b", size = 106617, upload-time = "2026-10-18T07:57:32.211Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6e/d2/b60b418213e89c9adfdf6942f3e5d2ba025796a2b820628902b935ba9bef/publicsuffixlist-1.1.0.20261018-py3-none-any.whl", hash = "sha256:8a9f487ad9a501a56f76d20827d58a5847d34a345df854e3b6a1f301e292e9d4", size = 109375, upload-time = "2026-10-18T07:57:30.374Z" },
 ]
 
 [[package]]

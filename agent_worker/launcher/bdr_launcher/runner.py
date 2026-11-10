@@ -164,6 +164,10 @@ class Launcher:
     def run_once(self, state: LauncherState, version: str) -> tuple[int, bool]:
         """Start `version`, return (exit code, healthy)."""
         health = self.paths.health_dir / f"{version}-{uuid.uuid4().hex}.ok"
+        # Personal browser pool: copy this version's node and Chromium to the
+        # fixed runtime paths the firewall rules name. Never fatal; a stale
+        # runtime only makes the worker's self-test refuse personal jobs.
+        release.sync_stable_runtime_if_wanted(self.paths, version)
         proc = self.spawner(self.child_cmd(version), self.child_env(state, health), self.paths.home)
         started = self.clock.monotonic()
         healthy = False

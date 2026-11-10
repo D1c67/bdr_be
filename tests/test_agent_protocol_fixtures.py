@@ -48,7 +48,7 @@ def test_endpoint_fixture_validates(path):
         assert fx["response"] is None
         return
     resp = fx["response"]
-    if fx["endpoint"] == "turns":
+    if fx["endpoint"] in ("turns", "user_turns"):
         parsed = p.parse_turn_response(fx["status"], resp)
         assert type(parsed) in resp_model
     elif fx["endpoint"] == "config" and resp.get("pending"):

@@ -1,0 +1,13 @@
+{
+  "model": "UserDownloadMeta",
+  "v2_endpoint": "user_downloads",
+  "direction": "request",
+  "body": {
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "filename": "E-401 Panel Schedules.pdf",
+    "size_bytes": 2483021,
+    "sniffed_kind": "pdf",
+    "source_origin": "https://app.procore.com",
+    "scan": "clean"
+  }
+}

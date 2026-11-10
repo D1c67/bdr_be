@@ -1,0 +1,12 @@
+{
+  "model": "UserSiteHoldRequest",
+  "v2_endpoint": "user_site_hold",
+  "direction": "request",
+  "body": {
+    "trigger": "link",
+    "url": "https://specs.example-architect.com/project/42/sheets",
+    "target_origin": "https://specs.example-architect.com",
+    "from_origin": "https://app.procore.com",
+    "carries_data": false
+  }
+}

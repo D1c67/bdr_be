@@ -1,6 +1,11 @@
-"""Independent-session phase 6 race probe for a disposable LOCAL database.
+"""Independent-session race probe (browser v2, plan 18.3) for a disposable LOCAL database.
 
-Requires psycopg 3 and migrations through 0188. Set PHASE6_PROBE_DATABASE_URL to
+Requires psycopg 3 and migrations through 0192 (the personal browser v2 RPCs:
+assistant_browser_admission_create, assistant_browser_task_enqueue_v2,
+assistant_browser_claim_user). Cases: company budget, one lease for one queued
+job, two leases on one worker (the worker slot limit holds), the per-owner
+lease limit across two workers, the per-owner queued limit and the owner's
+daily budget. Set PHASE6_PROBE_DATABASE_URL to
 a PostgreSQL URI on 127.0.0.1/::1, with database name phase6_probe_<suffix>.
 The database must have no users, browser jobs, spend holds or model usage.
 Run: python scripts/check_assistant_browser_concurrency.py
@@ -90,13 +95,16 @@ def race(connect, first, second, *, timeout: float = 8.0) -> tuple:
 @dataclass
 class Owner:
     user: str
-    credential: str
     conversation: str
 
 
+SITE = "zz_probe_public"
+
+
 def owner(conn) -> Owner:
-    ids = Owner(*(str(uuid4()) for _ in range(3)))
-    email = f"phase6-concurrency-{ids.user}@example.invalid"
+    """An eligible it_admin owner with a chat and a standing grant on the public probe site."""
+    ids = Owner(*(str(uuid4()) for _ in range(2)))
+    email = f"browser-v2-concurrency-{ids.user}@example.invalid"
     conn.execute("insert into auth.users(id,email) values(%s,%s)", (ids.user, email))
     conn.execute("""insert into public.profiles(id,full_name,email,role,is_active)
         values(%s,'Concurrency fixture',%s,'it_admin',true)
@@ -105,53 +113,53 @@ def owner(conn) -> Owner:
                  "values(%s,'aal2')", (ids.user,))
     conn.execute("insert into public.assistant_conversations(id,user_id,mode) "
                  "values(%s,%s,'normal')", (ids.conversation, ids.user))
-    credential = {"id": ids.credential, "label": "Fixture", "username": email,
-                  "origins": ["https://app.procore.com", "https://login.procore.com", "https://us02.procore.com"],
-                  "wrapped_dek": "fake", "ciphertext": "fake", "nonce": "fake",
-                  "key_id": "fixture", "fingerprint": "fixture"}
-    result = conn.execute("select public.assistant_browser_credential_put(%s,'procore',0,%s::jsonb)",
-                          (ids.user, json.dumps(credential))).fetchone()[0]
-    require(result.get("ok") is True, "Credential fixture failed.")
+    grant = conn.execute("select public.assistant_browser_site_grant(%s,%s,'domain',"
+                         "'example.org',null,'chat_card','typed')", (ids.user, SITE)).fetchone()[0]
+    require(grant.get("ok") is True, "Site grant fixture failed.")
     return ids
 
 
 def admission(conn, who: Owner):
-    approval, run = str(uuid4()), str(uuid4())
-    payload = {"service": "procore", "url": "https://app.procore.com/123/project/rfi",
-               "objective": "Read concurrency fixture", "credential_id": who.credential,
-               "credential_version": 1, "client_request_id": str(uuid4()), "max_cost_usd": "2"}
-    payload["authority"] = {"role": "it_admin", "model": "fixture",
-                            "conversation_id": who.conversation,
-                            **{k: payload[k] for k in ("credential_id", "credential_version",
-                                                      "url", "objective", "max_cost_usd")}}
-    wrapper = {"request": {"method": "POST", "path": "/assistant/browser-tasks", "json": payload}}
-    conn.execute("""insert into public.assistant_approvals(id,user_id,user_label,
-        conversation_id,action_kind,payload,payload_sha256,status,decided_by,decided_at,expires_at)
-        values(%s,%s,'Fixture',%s,'user_browser_task',%s::jsonb,%s,'approved',%s,now(),
-        now()+interval '1 hour')""",
-                 (approval, who.user, who.conversation, json.dumps(wrapper), "a" * 64, who.user))
+    """A ready admission (public site, granted, no credential) and the enqueue call for it."""
+    record = {"conversation_id": who.conversation, "goal": "Read concurrency fixture",
+              "start_site_key": SITE, "start_url": "https://example.org/a",
+              "start_provenance": "typed", "fresh_user_message": True}
+    made = conn.execute("select public.assistant_browser_admission_create(%s,%s::jsonb)",
+                        (who.user, json.dumps(record))).fetchone()[0]
+    require(made.get("ok") is True and made["admission"]["status"] == "ready",
+            "Admission fixture is not ready.")
+    admission_id = made["admission"]["id"]
 
     def enqueue(session):
-        return session.execute("select public.assistant_browser_task_enqueue("
-                               "%s,%s,%s,%s,%s::jsonb,100,100)",
-                               (who.user, approval, run, "a" * 64,
-                                json.dumps(payload))).fetchone()[0]
+        return session.execute("select public.assistant_browser_task_enqueue_v2("
+                               "%s,%s,'{}'::jsonb,100,100)",
+                               (who.user, admission_id)).fetchone()[0]
     return enqueue
 
 
-def worker(conn):
+def worker(conn, slots: int = 2):
     worker_id, boot = str(uuid4()), str(uuid4())
     conn.execute("""insert into public.browser_agent_workers
-        (id,name,status,principal_kind,boot_id,allowed_types,capabilities)
-        values(%s,%s,'active','user',%s,array['user_browser_read'],
-        '{"types":{"user_browser_read":"1.0.0"}}')""",
-                 (worker_id, "phase6-concurrency-" + worker_id, boot))
+        (id,name,status,principal_kind,boot_id,allowed_types,capabilities,max_slots)
+        values(%s,%s,'active','user',%s,array['user_browser'],
+        '{"types":{"user_browser":"1.1.0"}}',%s)""",
+                 (worker_id, "browser-v2-concurrency-" + worker_id, boot, slots))
 
-    def claim(session):
-        return session.execute("select id,lease_owner,lease_epoch from "
-                               "public.claim_browser_agent_jobs(%s,%s,"
-                               "'{\"user_browser_read\":1}',90)", (worker_id, boot)).fetchall()
+    def claim(session, want: int = 1):
+        rows = session.execute("select id,lease_owner,lease_epoch from "
+                               "public.assistant_browser_claim_user(%s,%s,%s::jsonb,90)",
+                               (worker_id, boot, json.dumps({"user_browser": want}))).fetchall()
+        return rows
+    claim.worker_id = worker_id
     return claim
+
+
+def leases(conn, worker_id: str | None = None) -> int:
+    if worker_id is None:
+        return conn.execute("select count(*) from public.browser_agent_jobs "
+                            "where lease_owner is not null").fetchone()[0]
+    return conn.execute("select count(*) from public.browser_agent_jobs where lease_owner=%s",
+                        (worker_id,)).fetchone()[0]
 
 
 def probe(connect) -> None:
@@ -161,15 +169,21 @@ def probe(connect) -> None:
             require(conn.execute(f"select count(*) from {table}").fetchone()[0] == 0,
                     "Probe requires an empty disposable database with migrations applied.")
         require(conn.execute("select public.assistant_browser_runtime_ready()").fetchone()[0],
-                "Phase 6 runtime schema is unavailable.")
-        conn.execute("update public.assistant_settings set enabled=true,global_daily_cap_usd=3 "
+                "Browser runtime schema is unavailable.")
+        # Reservation step is 1 USD, so a 1.5 USD company cap admits exactly one task.
+        conn.execute("update public.assistant_settings set enabled=true,global_daily_cap_usd=1.5 "
                      "where id=1")
         conn.execute("update public.browser_agent_settings set enabled=true,"
-                     "per_job_cost_cap_usd=2,daily_cost_cap_usd=100 where id=1")
+                     "user_per_job_cost_cap_usd=5,user_task_reserve_step_usd=1,"
+                     "daily_cost_cap_usd=100,user_per_owner_concurrency=2,"
+                     "user_per_owner_queued=5 where id=1")
         conn.execute("update public.browser_agent_types set enabled=true,provider='openai',"
                      "model='fixture',price_in_per_mtok=1,price_out_per_mtok=1,"
-                     "max_concurrency=8,model_probe_ok_at=now() where key='user_browser_read'")
-        owners = [owner(conn) for _ in range(3)]
+                     "max_concurrency=8,model_probe_ok_at=now() where key='user_browser'")
+        conn.execute("insert into public.assistant_browser_sites(site_key,label,kind,"
+                     "registrable_domains,login_kind) values(%s,'Probe public','curated',"
+                     "array['example.org'],'none')", (SITE,))
+        owners = [owner(conn) for _ in range(6)]
         first, second = (admission(conn, who) for who in owners[:2])
         claims = [worker(conn), worker(conn)]
 
@@ -179,27 +193,67 @@ def probe(connect) -> None:
     with connect() as conn:
         held = conn.execute("select sum(amount_usd),count(*) from "
                             "public.assistant_spend_reservations where status='active'").fetchone()
-        require(held == (2, 1), "Quota race left excess reservations.")
+        require(held == (1, 1), "Quota race left excess reservations.")
     print("PASS: independent concurrent admissions preserve the company budget.", flush=True)
 
     a, b = race(connect, *claims)
-    require(len(a) == 1 and b == [], "Concurrent workers claimed the same job.")
+    require(len(a) + len(b) == 1, "Concurrent workers claimed the same job.")
     with connect() as conn:
-        require(conn.execute("select count(*) from public.browser_agent_jobs "
-                             "where lease_owner is not null").fetchone()[0] == 1,
-                "Claim race left multiple leases.")
+        require(leases(conn) == 1, "Claim race left multiple leases.")
         conn.execute("update public.assistant_settings set global_daily_cap_usd=100 where id=1")
-        same_owner = [admission(conn, owners[2]), admission(conn, owners[2])]
+        pair = worker(conn, 2)
+        d_first, e_first = admission(conn, owners[2]), admission(conn, owners[3])
+        d_second = admission(conn, owners[2])
+        for enqueue in (d_first, e_first):
+            require(enqueue(conn).get("created") is True, "Setup enqueue failed.")
     print("PASS: independent workers produce exactly one lease for one queued job.", flush=True)
 
+    # Two leases on one worker: two sessions of the same worker with one free slot each
+    # take the two queued jobs once, and the worker's slot limit then refuses a third.
+    a, b = race(connect, pair, pair)
+    ids = [row[0] for row in a + b]
+    require(len(ids) == 2 and len(set(ids)) == 2, "Two sessions of one worker did not split the jobs.")
+    with connect() as conn:
+        require(leases(conn, pair.worker_id) == 2, "Worker did not hold exactly two leases.")
+        require(d_second(conn).get("created") is True, "Third job enqueue failed.")
+        require(pair(conn, 3) == [], "Worker claimed past its slot limit.")
+        require(leases(conn, pair.worker_id) == 2, "Slot limit race left a third lease.")
+    print("PASS: two leases on one worker, and the slot limit holds.", flush=True)
+
+    # Per-owner lease limit: one owner with two queued jobs, two workers, limit one lease.
+    with connect() as conn:
+        conn.execute("update public.browser_agent_settings set user_per_owner_concurrency=1 "
+                     "where id=1")
+        f_first, f_second = admission(conn, owners[4]), admission(conn, owners[4])
+        for enqueue in (f_first, f_second):
+            require(enqueue(conn).get("created") is True, "Setup enqueue failed.")
+        owner_claims = [worker(conn), worker(conn)]
+    a, b = race(connect, *owner_claims)
+    require(len(a) + len(b) == 1, "Concurrent workers exceeded the per-owner lease limit.")
+    with connect() as conn:
+        held = conn.execute("select count(*) from public.browser_agent_jobs where "
+                            "principal_user_id=%s and lease_owner is not null",
+                            (owners[4].user,)).fetchone()[0]
+        require(held == 1, "Per-owner lease race left more than one lease.")
+        require(owner_claims[0](conn) == [] and owner_claims[1](conn) == [],
+                "A later claim passed the per-owner lease limit.")
+        conn.execute("update public.browser_agent_settings set user_per_owner_concurrency=2 "
+                     "where id=1")
+    print("PASS: independent claims preserve the per-owner lease limit.", flush=True)
+
+    # Per-owner queued limit: one owner, limit one active job, two simultaneous approvals.
+    with connect() as conn:
+        conn.execute("update public.browser_agent_settings set user_per_owner_queued=1 "
+                     "where id=1")
+        same_owner = [admission(conn, owners[5]), admission(conn, owners[5])]
     a, b = race(connect, *same_owner)
     require(a.get("created") is True and b.get("code") == "concurrency_cap",
-            "Concurrent approvals exceeded one active job per owner.")
+            "Concurrent approvals exceeded the owner's queued-job limit.")
     with connect() as conn:
         require(conn.execute("select count(*) from public.browser_agent_jobs "
-                             "where principal_user_id=%s", (owners[2].user,)).fetchone()[0] == 1,
-                "Owner cap race left duplicate jobs.")
-    print("PASS: independent approvals preserve the owner's active-job cap.", flush=True)
+                             "where principal_user_id=%s", (owners[5].user,)).fetchone()[0] == 1,
+                "Owner queue race left duplicate jobs.")
+    print("PASS: independent approvals preserve the owner's queued-job limit.", flush=True)
 
     with connect() as conn:
         conn.execute("insert into public.assistant_profiles(user_id,daily_cost_cap_usd) "
@@ -230,7 +284,7 @@ def main() -> None:
         raise SystemExit("This optional local probe requires psycopg 3.") from None
 
     def connect():
-        return psycopg.connect(uri, connect_timeout=3, application_name="phase6-concurrency",
+        return psycopg.connect(uri, connect_timeout=3, application_name="browser-v2-concurrency",
                                options="-c statement_timeout=15000 -c lock_timeout=12000")
     try:
         probe(connect)

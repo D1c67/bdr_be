@@ -1,0 +1,9 @@
+{
+  "model": "UserSessionPoll",
+  "v2_endpoint": "user_session_poll",
+  "direction": "query",
+  "body": {
+    "credential_id": "c0000000-0000-4000-8000-000000000001",
+    "newer_than": "2026-11-02T18:00:00Z"
+  }
+}

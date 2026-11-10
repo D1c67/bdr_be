@@ -16,8 +16,8 @@ Invariants pinned here:
              not whitelist keys), an empty page does not;
   route      end to end over the real route and fakes: hidden and dismissed
              rows are excluded, nothing is marked read or dismissed, the
-             tool is deferred and found by find_tools, and the Mailbox
-             review and Incognito toolsets keep it as plan 6.1 says.
+             tool is deferred and found by find_tools, and the follow-up
+             and Mailbox review toolsets keep it as plan 6.1 says.
 """
 
 from __future__ import annotations
@@ -143,16 +143,17 @@ def test_an_external_estimator_never_gets_it():
     assert registry.toolset_for(_user(Role.ESTIMATOR), FLAGS) == []
 
 
-def test_mailbox_review_and_incognito_keep_it_as_plan_6_1_says():
+def test_mailbox_review_and_the_follow_up_toolset_keep_it_as_plan_6_1_says():
     names = lambda **kw: {s.name for s in registry.toolset_for(_user(Role.EXECUTIVE), FLAGS, **kw)}  # noqa: E731
     assert "inbox_list" in names(mode=registry.MODE_MAILBOX_REVIEW)
+    assert "inbox_list" in names(followup=True, browser=False)
     assert "inbox_list" in names(incognito=True)
     accountant = {s.name for s in registry.toolset_for(_user(Role.ACCOUNTANT), FLAGS)}
     assert "inbox_list" in accountant
 
 
 def test_it_is_deferred_so_only_the_catalog_line_names_it():
-    specs = registry.toolset_for(_user(Role.EXECUTIVE), FLAGS)
+    specs = registry.toolset_for(_user(Role.EXECUTIVE), FLAGS, browser=False)
     assert find.area_for(_spec()) == find.AREA_INBOX
     assert find.AREA_INBOX in find.catalog_line([_spec()])
     assert EM_DASH not in find.AREA_INBOX and EN_DASH not in find.AREA_INBOX

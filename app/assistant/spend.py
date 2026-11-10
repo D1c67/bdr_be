@@ -37,7 +37,7 @@ from app.core.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_USER_CAP = Decimal("5")
+DEFAULT_USER_CAP = Decimal("15")   # owner answer 5 (2026-11-02): 15 USD per user per day
 DEFAULT_GLOBAL_CAP = Decimal("50")
 
 KIND_TURN_CALL = "turn_call"

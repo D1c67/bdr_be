@@ -268,6 +268,14 @@ async def lifespan(_: FastAPI):
     # kills a live job), parks lapsed help holds, reconciles applying jobs,
     # expires stale ones and raises the spend and offline alerts. Every
     # worker runs it; every write is compare-and-set.
+    # Edit in Excel (docs/EXCEL_EDIT.md): pulls Excel for the web autosaves
+    # back from the OneDrive copies of open sessions, closes idle ones. Every
+    # worker runs it; a per-session lease keeps two workers off one session.
+    excel_edit_task: asyncio.Task | None = None
+    if settings.bidding_enabled and settings.excel_edit_enabled and settings.ms_client_id:
+        from app.services import excel_edit
+
+        excel_edit_task = asyncio.create_task(excel_edit.polling_loop())
     browser_agents_task: asyncio.Task | None = None
     if settings.browser_agents_active:
         from app.services.browser_agents import queue as browser_agent_queue
@@ -356,7 +364,7 @@ async def lifespan(_: FastAPI):
         poll_task, reminder_task, digest_task, email_task, rfp_email_task,
         rfp_portal_task, llm_health_task, llm_queue_task, call_in_task, llm_target_task,
         pm_rfi_sync_task, browser_agents_task, auto_send_task, assistant_scheduler_task, assistant_calendar_task,
-        assistant_proactive_task, assistant_triage_task,
+        assistant_proactive_task, assistant_triage_task, excel_edit_task,
     ):
         if task:
             task.cancel()
@@ -660,6 +668,20 @@ def features(user: CurrentUser = Depends(get_current_user)) -> dict[str, bool]:
     # who has the assistant once the env flag, the company switch and the
     # inbox flag are on (the optional allowlist narrows it); no personal switch.
     flags["assistant_triage"] = assistant_inbox.triage_flag(user, inbox_on=flags["assistant_inbox"])
+    # Edit in Excel (docs/EXCEL_EDIT.md): bidding files, internal writers only.
+    from app.core.roles import WRITER_ROLES
+    from app.services import excel_edit
+
+    flags["excel_edit"] = bool(
+        flags.get("bidding") and excel_edit.feature_on() and user.role in WRITER_ROLES
+    )
+    # Browser v2 (docs/ASSISTANT_BROWSER_V2_PLAN.md): the frontend v2 gate
+    # (bdr_fe/lib/features.ts), the same writer gate as the v2 routes.
+    from app.services import assistant_browser as assistant_browser_service
+
+    flags["assistant_browser_v2"] = bool(
+        flags.get("assistant") and assistant_browser_service.v2_enabled() and user.role in WRITER_ROLES
+    )
     return flags
 
 
@@ -681,6 +703,8 @@ from app.routers import (  # noqa: E402
     assistant_outlook,
     assistant_phase5,
     assistant_browser,
+    assistant_browser_requests,
+    assistant_browser_results,
     assistant_browser_views,
     agent_worker_user,
     assistant_mail,
@@ -697,6 +721,7 @@ from app.routers import (  # noqa: E402
     deleted_projects,
     emails,
     estimator,
+    file_edit,
     external_submission,
     files,
     general_material,
@@ -801,6 +826,13 @@ app.include_router(assistant_inbox_tools.router)
 app.include_router(assistant_outlook.router)
 app.include_router(assistant_phase5.router)
 app.include_router(assistant_browser.router)
+# Browser v2 (docs/ASSISTANT_BROWSER_V2_PLAN.md 4.3, 4.6): the model-facing
+# /assistant/browser-requests routes and the human "Continue in a new chat"
+# route. Writer roles only, and a bare 404 while ASSISTANT_BROWSER_V2_ENABLED
+# is off.
+_BROWSER_V2 = [Depends(assistant_browser.require_browser_v2)]
+app.include_router(assistant_browser_requests.router, dependencies=_BROWSER_V2)
+app.include_router(assistant_browser_results.router, dependencies=_BROWSER_V2)
 app.include_router(assistant_browser_views.router)
 app.include_router(agent_worker_user.router)
 app.include_router(assistant_mail.router)
@@ -916,6 +948,8 @@ app.include_router(analytics_evidence.router, dependencies=_BIDDING)  # assistan
 app.include_router(analytics.router, dependencies=_BIDDING)
 app.include_router(notes.router, dependencies=_BIDDING)
 app.include_router(files.router, dependencies=_BIDDING)
+# Edit in Excel + file versions (0193, docs/EXCEL_EDIT.md): internal only.
+app.include_router(file_edit.router, dependencies=_BIDDING)
 # Missing files on an RFP-created project (docs/RFP_MISSING_FILES.md 7): the
 # project page's callout and its drop zone. Gated on the router itself too
 # (RFP_INGESTION_ENABLED: the only way a project carries items).

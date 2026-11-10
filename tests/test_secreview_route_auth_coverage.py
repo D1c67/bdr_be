@@ -24,7 +24,7 @@ from fastapi.routing import APIRoute
 import app.main as app_main
 from app.core import agent_auth, deps
 from app.core.roles import INTERNAL_ROLES, Role
-from app.routers import browser_agents, llm_status, rfp_emails, rfp_testing
+from app.routers import agent_worker_user, browser_agents, llm_status, rfp_emails, rfp_testing
 
 WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -59,6 +59,10 @@ WORKER_AUTH_GATES = {
     agent_auth.require_agent_worker,
     agent_auth.require_agent_worker_or_pending,
     agent_auth.require_agent_lease,
+    # The personal worker routes (agent_worker_user.py, browser v2 WI-6):
+    # `_lease` authenticates the bdrw_ token, refuses an org worker, checks
+    # the boot and runs the lease-fenced RPC before any handler code.
+    agent_worker_user._lease,
 }
 
 # Dependencies that reject a caller by role or dev flag before the handler runs.

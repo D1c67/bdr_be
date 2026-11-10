@@ -40,6 +40,8 @@ from ..protocol import (
     ARTIFACT_RULES,
     SECRET_INPUT_RE,
     TOOL_RESULT_MAX_CHARS,
+    USER_BROWSER_TYPE,
+    USER_SECRET_INPUT_RE,
     ToolCall,
     ToolCallInvalid,
     validate_tool_call,
@@ -123,6 +125,13 @@ Handler = Callable[[BaseModel], Awaitable[ToolReturn]]
 
 # Exceptions that end the job's processing and must propagate to the slot.
 _FATAL = (LeaseLost, StaleBoot, WorkerRevoked, WorkerUnauthorized)
+
+
+def secret_input_re(agent_type: str) -> Any:
+    """The secret-field rule type_text applies. user_browser (v2) uses its own
+    narrower rule (ordinary "Zip code" and "Cost code" fields are typable); every
+    other type keeps SECRET_INPUT_RE unchanged."""
+    return USER_SECRET_INPUT_RE if agent_type == USER_BROWSER_TYPE else SECRET_INPUT_RE
 
 
 def _json(data: Any) -> str:
@@ -367,7 +376,8 @@ class Executor:
     async def _type_text(self, args: Any) -> ToolReturn:
         page = await self.page()
         host = (urlsplit(page.url).hostname or "").lower()
-        if self.jb.login_page is not None and page is self.jb.login_page:
+        login_page = getattr(self.jb, "login_page", None)
+        if login_page is not None and page is login_page:
             raise ToolError("refused", "typing on the login page is not allowed")
         if host_in(host, self.guard.ceiling.login_hosts):
             raise ToolError("refused", "typing on a login host is not allowed")
@@ -377,7 +387,7 @@ class Executor:
         loc = await self._locator(args.ref)
         probe = await loc.evaluate(_FIELD_PROBE_JS)
         if (probe.get("type") == "password" or probe.get("autocomplete") == "one-time-code"
-                or SECRET_INPUT_RE.search(probe.get("words") or "")):
+                or secret_input_re(self.agent_type).search(probe.get("words") or "")):
             raise ToolError("refused", "this looks like a password or code field")
         try:
             await loc.fill(args.text, timeout=ACTION_TIMEOUT_MS)

@@ -119,6 +119,13 @@ class EmailNotReady(RuntimeError):
     llm_error_kind = "infrastructure"
 
 
+class ThreadNotReady(RuntimeError):
+    """An earlier message of the same thread still has a live job. Declared
+    infrastructure (transient): the queue retries after the usual delay."""
+
+    llm_error_kind = "infrastructure"
+
+
 class InvalidLabels(ValueError):
     """A user-supplied label set failed validation (the router answers 422)."""
 
@@ -525,17 +532,19 @@ def previous_messages(sb, email: dict) -> list[dict]:
     internet_message_id)."""
     if not email.get("conversation_id") or not email.get("project_id"):
         return []
-    rows = (
+    q = (
         sb.table("ingested_emails")
         .select(_EMAIL_SELECT)
         .eq("mailbox", email["mailbox"])
         .eq("conversation_id", email["conversation_id"])
         .eq("project_id", email["project_id"])
         .neq("id", email["id"])
-        .order("message_at", desc=True)
-        .limit(_PREVIOUS_LIMIT * 2)
-        .execute()
-    ).data or []
+    )
+    if email.get("message_at"):
+        # Bound the window at the current message, so the oldest message of a
+        # long thread still gets its own predecessors, not the newest ones.
+        q = q.lte("message_at", email["message_at"])
+    rows = q.order("message_at", desc=True).limit(_PREVIOUS_LIMIT * 2).execute().data or []
     earlier = [r for r in rows if _is_earlier(r, email)]
     seen: set[str] = set()
     out: list[dict] = []
@@ -564,6 +573,40 @@ def latest_thread_summary(sb, previous: list[dict]) -> str | None:
         if by_id.get(p["id"]):
             return by_id[p["id"]]
     return None
+
+
+def _earlier_thread_job_active(sb, email: dict) -> bool:
+    """True when an earlier message of the same thread on the same project
+    is pending or running with a live queue job behind it."""
+    previous = previous_messages(sb, email)
+    if not previous:
+        return False
+    ids = [p["id"] for p in previous]
+    waiting = [
+        r["email_id"]
+        for r in (
+            sb.table(TABLE)
+            .select("email_id, status")
+            .in_("email_id", ids)
+            .in_("status", [STATUS_PENDING, STATUS_RUNNING])
+            .execute()
+        ).data
+        or []
+    ]
+    if not waiting:
+        return False
+    from app.services import llm_queue
+
+    live = (
+        sb.table("llm_jobs")
+        .select("id")
+        .eq("job_type", llm_queue.JOB_EMAIL_CLASSIFY)
+        .in_("target_id", waiting)
+        .in_("status", ["queued", "running"])
+        .limit(1)
+        .execute()
+    ).data or []
+    return bool(live)
 
 
 def prompt_for(email_id: str, *, sb=None, settings: Settings | None = None) -> tuple[str, list[dict]]:
@@ -602,12 +645,15 @@ def _row(sb, email_id: str) -> dict | None:
 
 
 def rows_for(sb, email_ids: Iterable[str]) -> dict[str, dict]:
-    """Classification rows keyed by email id (one query; the list endpoint)."""
+    """Classification rows keyed by email id (one query per 200 ids, so a
+    whole project's mail never overflows the request URL)."""
     ids = list(dict.fromkeys(i for i in email_ids if i))
-    if not ids:
-        return {}
-    rows = sb.table(TABLE).select("*").in_("email_id", ids).execute().data or []
-    return {r["email_id"]: r for r in rows}
+    out: dict[str, dict] = {}
+    for start in range(0, len(ids), 200):
+        chunk = ids[start : start + 200]
+        rows = sb.table(TABLE).select("*").in_("email_id", chunk).execute().data or []
+        out.update({r["email_id"]: r for r in rows})
+    return out
 
 
 def _profile_names(sb, ids: Iterable[str]) -> dict[str, str]:
@@ -725,10 +771,15 @@ def _enqueue_for_emails(
     queued = 0
     for e in sorted(emails, key=lambda r: (r.get("message_at") or "", r.get("created_at") or "")):
         row = existing.get(e["id"])
-        if row and not force and row.get("status") in (STATUS_DONE, STATUS_RUNNING):
+        status = row.get("status") if row else None
+        if status == STATUS_DONE and not force:
             continue
-        if row and row.get("status") == STATUS_RUNNING:
-            continue  # a forced rerun of a running job collapses onto it anyway
+        if status in (STATUS_PENDING, STATUS_RUNNING) and llm_queue.active_job(
+            llm_queue.JOB_EMAIL_CLASSIFY, e["id"]
+        ):
+            continue  # a live job will write the result; a forced rerun would collapse onto it
+        # Anything else is (re)queued, including a pending/running row with no
+        # live job behind it (a crashed backfill, a lost enqueue).
         fields = {
             "email_id": e["id"],
             "project_id": e["project_id"],
@@ -737,17 +788,45 @@ def _enqueue_for_emails(
             "error": None,
         }
         sb.table(TABLE).upsert(fields, on_conflict="email_id").execute()
-        llm_queue.enqueue(
-            llm_queue.JOB_EMAIL_CLASSIFY,
-            target_id=e["id"],
-            project_id=e["project_id"],
-            payload={"email_id": e["id"], "force": bool(force)},
-            created_by=created_by,
-            priority=s.email_classify_queue_priority,
-            settings=s,
-        )
+        try:
+            llm_queue.enqueue(
+                llm_queue.JOB_EMAIL_CLASSIFY,
+                target_id=e["id"],
+                project_id=e["project_id"],
+                payload={"email_id": e["id"], "force": bool(force)},
+                created_by=created_by,
+                priority=s.email_classify_queue_priority,
+                settings=s,
+                raise_on_active=True,
+            )
+        except llm_queue.JobAlreadyActive as exc:
+            if (exc.job or {}).get("status") == "running":
+                # Raced a job that is finishing: put the row back unless the
+                # job already moved it on, so it never sits pending with no job.
+                _restore_status(sb, e["id"], row)
+            continue
+        except Exception:
+            _restore_status(sb, e["id"], row)
+            raise
         queued += 1
     return queued
+
+
+def _restore_status(sb, email_id: str, row: dict | None) -> None:
+    """Undo a pending mark whose job never got queued: back to the previous
+    status (failed when it was itself a live mark), or remove a row that
+    only existed for this attempt. Only touches a row still pending."""
+    if row is None:
+        sb.table(TABLE).delete().eq("email_id", email_id).eq("status", STATUS_PENDING).is_(
+            "user_labels", "null"
+        ).execute()
+        return
+    prev = row.get("status")
+    if prev in (STATUS_PENDING, STATUS_RUNNING):
+        prev = STATUS_FAILED
+    sb.table(TABLE).update({"status": prev, "error": row.get("error")}).eq("email_id", email_id).eq(
+        "status", STATUS_PENDING
+    ).execute()
 
 
 def enqueue_for_project(project_id: str, *, sb=None, created_by: str | None = None) -> int:
@@ -864,7 +943,7 @@ def execute(email_id: str, *, force: bool = False) -> dict | None:
     if not is_pm_project(sb, email.get("project_id")) and not force:
         # Unassigned or moved to a bidding project while queued: nothing to
         # label. A row that never got labels goes away; labels stay put.
-        if row and not row.get("ai_labels"):
+        if row and not row.get("ai_labels") and row.get("user_labels") is None:
             sb.table(TABLE).delete().eq("email_id", email_id).neq("status", STATUS_DONE).execute()
         elif row:
             sb.table(TABLE).update({"status": STATUS_DONE, "error": None}).eq("email_id", email_id).execute()
@@ -879,8 +958,32 @@ def execute(email_id: str, *, force: bool = False) -> dict | None:
         "project_id": email.get("project_id"),
         "conversation_id": email.get("conversation_id"),
     }
+    from app.services import llm_queue
+
+    job = llm_queue.current_job.get()
+    if job is not None and int(job.get("attempts") or 0) < int(job.get("max_attempts") or 1) - 1:
+        # Let an earlier message of the thread finish first so its thread
+        # summary is the context here. The last attempt proceeds regardless,
+        # so a stuck neighbour can never fail this email.
+        if _earlier_thread_job_active(sb, email):
+            raise ThreadNotReady(
+                "An earlier message in this thread is still being classified. "
+                "This one runs right after it."
+            )
     sb.table(TABLE).upsert({**base, "status": STATUS_RUNNING, "error": None}, on_conflict="email_id").execute()
-    result = classify(email, sb=sb, settings=s)
+    try:
+        result = classify(email, sb=sb, settings=s)
+    except Exception as exc:
+        if job is None:
+            # The backfill script's synchronous path: no queue will clean up
+            # the running mark, so record the failure here.
+            from app.services import llm, llm_errors
+
+            message = llm_errors.user_message(exc, llm.active_model("email_classify"))
+            sb.table(TABLE).update({"status": STATUS_FAILED, "error": message}).eq("email_id", email_id).eq(
+                "status", STATUS_RUNNING
+            ).execute()
+        raise
     done = {
         **base,
         "status": STATUS_DONE,

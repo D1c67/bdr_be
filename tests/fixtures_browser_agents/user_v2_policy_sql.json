@@ -1,0 +1,79 @@
+{
+  "model": "UserJobPolicy",
+  "v2_endpoint": "user_policy",
+  "direction": "response",
+  "note": "The jsonb that assistant_browser_job_policy (0192 A3.4) returns for a task admitted by site key only, with one unpinned (session-only) account left out of credentials; extra keys are ignored by the model.",
+  "body": {
+    "ok": true,
+    "policy_version": 2,
+    "job_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+    "start_url": null,
+    "start_origin": "https://procore.com",
+    "start_site_key": "procore",
+    "project_id": null,
+    "sites": [
+      {
+        "site_key": "procore",
+        "label": "Procore",
+        "kind": "curated",
+        "registrable_domains": [
+          "procore.com"
+        ],
+        "exact_origins": [],
+        "scope": "domain",
+        "grant_scope": "domain",
+        "grant_value": "procore.com",
+        "path_prefix": null,
+        "login_paths": [],
+        "login_kind": "password_mfa",
+        "profile": {},
+        "needs_headed": false,
+        "grant_version": 1
+      },
+      {
+        "site_key": "origin:docs.google.com",
+        "label": "docs.google.com",
+        "kind": "ad_hoc",
+        "registrable_domains": [],
+        "exact_origins": [
+          "https://docs.google.com"
+        ],
+        "scope": "origin",
+        "grant_scope": "origin",
+        "grant_value": "https://docs.google.com",
+        "path_prefix": "/document/d/",
+        "login_paths": [],
+        "login_kind": "password",
+        "profile": {},
+        "needs_headed": false,
+        "grant_version": 1
+      }
+    ],
+    "credentials": [
+      {
+        "credential_id": "c0000000-0000-4000-8000-000000000001",
+        "site_key": "procore",
+        "account_label": "default",
+        "version": 3,
+        "login_origins": [
+          "https://login.procore.com"
+        ],
+        "cookie_domains": [
+          ".procore.com"
+        ],
+        "sso_required": false
+      }
+    ],
+    "safe_rules": [],
+    "caps": {
+      "max_cost_usd": 5.0,
+      "offsite_query_bytes": 4096,
+      "hold_timeout_seconds": 600,
+      "park_max_minutes": 15,
+      "mfa_mail_poll_seconds": 300,
+      "max_steps": 150,
+      "max_total_tokens": 2000000,
+      "max_active_seconds": 1800
+    }
+  }
+}

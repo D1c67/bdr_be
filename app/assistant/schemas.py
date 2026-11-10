@@ -195,6 +195,9 @@ class MessageAcceptedOut(BaseModel):
     user_message: MessageOut
     assistant_message: MessageOut
     job_id: str | None = None
+    # Browser v2 (plan 8.2): two or more code-shaped tokens, or a code the
+    # help path refused, were masked and sent nowhere; ask for the code card.
+    browser_code_card: bool = False
 
 
 class SkillSummaryOut(BaseModel):

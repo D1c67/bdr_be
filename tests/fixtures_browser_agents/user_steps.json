@@ -1,0 +1,55 @@
+{
+  "endpoint": "user_steps",
+  "method": "POST",
+  "path": "/agent-worker/v1/jobs/1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d/user/steps",
+  "headers": {
+    "Authorization": "Bearer bdrw_<token>",
+    "X-Agent-Boot": "b0075eed-0000-4000-8000-000000000001",
+    "X-Agent-Lease": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d:3",
+    "Idempotency-Key": "<uuid>"
+  },
+  "request": {
+    "steps": [
+      {
+        "idem_key": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d:3:tool:1",
+        "kind": "tool.ensure_login",
+        "actor": "worker",
+        "summary": "Login ok (stored session)",
+        "tool_name": "ensure_login",
+        "args": {
+          "host": "app.procore.com"
+        },
+        "result": {
+          "ok": true,
+          "outcome": "ok"
+        },
+        "url_before": "about:blank",
+        "url_after": "https://app.procore.com/3167322/project/home",
+        "screenshot_artifact_id": null,
+        "turn_no": 1,
+        "ok": true,
+        "duration_ms": 2140,
+        "at": "2026-10-19T15:04:05Z"
+      },
+      {
+        "idem_key": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d:3:http:1",
+        "kind": "http.blocked",
+        "actor": "worker",
+        "summary": "Blocked POST app.procore.com /rest/v1.0/some_search",
+        "args": {
+          "method": "POST",
+          "host": "app.procore.com",
+          "path": "/rest/v1.0/some_search"
+        },
+        "ok": false
+      }
+    ]
+  },
+  "status": 200,
+  "response": {
+    "appended": 2,
+    "duplicates": 0,
+    "late": 0
+  },
+  "note": "Personal (user_browser) job: the same wire shape as the org endpoint on the encrypted /user/ backend path."
+}

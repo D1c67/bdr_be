@@ -404,12 +404,27 @@ def _finish_prepared(row: dict[str, Any], worker_id: str, boot_id: str, result: 
         notify_job_failed(row, result.error_kind or "other", result.summary)
 
 
+def _claimed_input(row: dict[str, Any]) -> dict[str, Any]:
+    """The input a worker sees: the org seed as stored; the retired personal
+    read type its three seed fields; a v2 personal job exactly
+    UserBrowserInput (prepare() already validated it)."""
+    data = row.get("input") or {}
+    if row.get("principal_kind") != "user":
+        return data
+    if row.get("agent_type") == protocol.USER_BROWSER_TYPE:
+        from app.services.browser_agents.types.user_browser import claimed_input
+        return claimed_input(row)
+    return {key: data.get(key) for key in ("service", "url", "objective")}
+
+
 def claim(worker_id: str, boot_id: str, capacity: dict[str, int], *, max_slots: int, principal_kind: str = "org") -> list[protocol.ClaimedJob]:
     """POST /claim. RPC errors (stale_boot, revoked) propagate to the caller
     as APIError; the router maps them. Draining or a kill switch: []."""
     from app.core.agent_auth import rpc
 
-    from app.services.browser_agents.types.user_browser_read import enabled as user_enabled
+    # Personal claims serve only the v2 type (0192 claim rewrite selects
+    # user_browser only), so its gate is the v2 enabled() (plan 3.4).
+    from app.services.browser_agents.types.user_browser import enabled as user_enabled
     if principal_kind not in ("org", "user") or (principal_kind == "user" and not user_enabled()):
         return []
     capacity = {key: value for key, value in capacity.items()
@@ -460,8 +475,7 @@ def claim(worker_id: str, boot_id: str, capacity: dict[str, int], *, max_slots: 
             principal_user_id=r.get("principal_user_id"),
             epoch=int(r["lease_epoch"]),
             lease_expires_at=r["lease_expires_at"],
-            input=({key: (r.get("input") or {}).get(key) for key in ("service", "url", "objective")}
-                   if r.get("principal_kind") == "user" else r.get("input") or {}),
+            input=_claimed_input(r),
             checkpoint={} if r.get("principal_kind") == "user" else r.get("checkpoint") or {},
             checkpoint_seq=int(r.get("checkpoint_seq") or 0),
             attempts=int(r.get("attempts") or 0),

@@ -31,6 +31,7 @@ import re
 from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal, Union
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from pydantic import (
@@ -1465,3 +1466,806 @@ def finish_to_job(agent_type: str, args: FinishArgs) -> dict[str, Any]:
         outcome = "self_test_ok" if agent_type == "canary" else "nothing_to_do"
         return {"action": "finish", "status": "succeeded", "outcome": outcome}
     return {"action": "finish", "status": "failed", "error_kind": args.error_kind or "other"}
+
+
+# User browser v2 (docs/ASSISTANT_BROWSER_V2_PLAN.md section 15.3) --------------------
+#
+# Additive only. Nothing above this line changes for the org agent
+# (rfi_from_email), the canary or the retired user_browser_read type:
+# SECRET_INPUT_RE, TOKEN_QUERY_KEY_RE, HelpReasonCode, LOGIN_HELP_REASONS,
+# ProcoreHost, the Literal["procore"] models, every existing TOOL_ARG_MODELS
+# entry, ReleaseManifest and canonical_manifest_bytes keep their bytes and
+# meaning. The new type gets its own names: new tools, new argument models,
+# new wire models and a separate help reason vocabulary. Origins are validated
+# strings, never ProcoreHost.
+
+USER_BROWSER_TYPE = "user_browser"
+
+# Model type_text refuses fields whose name, id, label or placeholder match
+# this, for the user type only. Ordinary "Zip code" and "Cost code" fields are
+# no longer blocked (the org agent keeps SECRET_INPUT_RE).
+USER_SECRET_INPUT_RE = re.compile(r"(?i)password|passcode|one.?time|otp|mfa|2fa|verification code|security code")
+
+SITE_KEY_RE = re.compile(r"^[a-z0-9_.:-]{2,80}$")
+ACCOUNT_LABEL_RE = re.compile(r"^[A-Za-z0-9 _.-]{1,40}$")
+# A lowercase DNS name with at least one dot (single-label hosts are never
+# allowed for the user type, plan 10.1 item 4).
+_LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+HOST_RE = re.compile(rf"^{_LABEL}(?:\.{_LABEL})+$")
+ORIGIN_RE = re.compile(rf"^https?://{_LABEL}(?:\.{_LABEL})+(?::\d{{1,5}})?$")
+HTTPS_ORIGIN_RE = re.compile(rf"^https://{_LABEL}(?:\.{_LABEL})+(?::\d{{1,5}})?$")
+COOKIE_DOMAIN_RE = re.compile(rf"^\.?{_LABEL}(?:\.{_LABEL})+$")
+HTTP_METHOD_RE = re.compile(r"^[A-Z]{3,10}$")
+HTTP_URL_RE = re.compile(r"^https?://")
+SAFE_FILENAME_RE = re.compile(r"^[^/\\\x00-\x1f]{1,200}$")
+
+USER_GOAL_MAX = 2000
+USER_RESULT_MAX = 4000
+USER_FACTS_MAX = 20
+USER_FACT_TEXT_MAX = 500
+USER_HOLD_FIELDS_MAX = 100
+USER_HOLD_TOKEN_TTL_SECONDS = 120          # exp of a release token (plan 6.5 step 4)
+USER_HOLD_RELEASE_POLL_SECONDS = 25        # long poll per call on the release route
+USER_SESSION_POLL_SECONDS = 15             # session pickup poll while another task logs in (7.4)
+USER_TYPED_STRING_MIN_CHARS = 12           # typed-string exfiltration rule (10.3)
+# Floor maximums in signed code; the job policy may only be lower (11.1).
+USER_DOWNLOAD_FILE_BYTES_FLOOR = 450 * 1024 * 1024
+USER_DOWNLOAD_TASK_BYTES_FLOOR = 2 * 1024 * 1024 * 1024
+USER_DOWNLOAD_FILES_FLOOR = 50
+USER_LIVE_FRAME_MAX_BYTES = 1024 * 1024
+USER_LIVE_INPUT_BATCH_MAX = 200
+
+# Identity providers are never credential origins (7.5). Signed code: the
+# worker refuses to type a credential on these even if the server says otherwise.
+IDENTITY_PROVIDER_HOSTS = (
+    "login.microsoftonline.com", "login.microsoft.com", "login.live.com", "accounts.google.com",
+    "appleid.apple.com", "*.okta.com", "*.onelogin.com", "*.pingone.com",
+)
+# Domains anyone can host content or forms on (5.1): a grant is an exact
+# origin plus a path prefix there, never the whole registrable domain.
+MULTI_TENANT_DOMAINS = (
+    "google.com", "microsoft.com", "sharepoint.com", "live.com", "office.com", "box.com",
+    "dropbox.com", "github.com", "githubusercontent.com", "amazonaws.com", "azurewebsites.net",
+    "notion.site", "forms.gle",
+)
+# Host names refused before any request (10.1 item 4).
+BLOCKED_HOST_SUFFIXES = (".local", ".lan", ".internal", ".home.arpa")
+
+
+def host_matches(host: str, patterns: tuple[str, ...] | list[str]) -> bool:
+    """True when `host` equals a pattern or, for "*.x", is a subdomain of x."""
+    h = (host or "").strip().lower().rstrip(".")
+    for pat in patterns:
+        p = pat.lower()
+        if p.startswith("*."):
+            if h.endswith(p[1:]) and h != p[2:]:
+                return True
+        elif h == p:
+            return True
+    return False
+
+
+def is_identity_provider_host(host: str) -> bool:
+    return host_matches(host, IDENTITY_PROVIDER_HOSTS)
+
+
+def is_multi_tenant_domain(domain: str) -> bool:
+    d = (domain or "").strip().lower().lstrip(".")
+    return any(d == m or d.endswith("." + m) for m in MULTI_TENANT_DOMAINS)
+
+
+def url_origin(url: str) -> str | None:
+    """scheme://host[:port] in lowercase, default ports dropped; None if invalid."""
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return None
+    scheme = (parts.scheme or "").lower()
+    host = (parts.hostname or "").lower()
+    if scheme not in ("http", "https") or not host:
+        return None
+    if port is None or (scheme, port) in (("https", 443), ("http", 80)):
+        return f"{scheme}://{host}"
+    return f"{scheme}://{host}:{port}"
+
+
+def _origin_host(origin: str) -> str:
+    return (urlsplit(origin).hostname or "").lower()
+
+
+def _check_regex(value: str) -> str:
+    try:
+        re.compile(value)
+    except re.error as exc:
+        raise ValueError(f"invalid regex: {exc}") from None
+    return value
+
+
+SiteKey = Annotated[str, Field(pattern=SITE_KEY_RE.pattern)]
+AccountLabel = Annotated[str, Field(pattern=ACCOUNT_LABEL_RE.pattern)]
+Host = Annotated[str, Field(pattern=HOST_RE.pattern, max_length=253)]
+Origin = Annotated[str, Field(pattern=ORIGIN_RE.pattern, max_length=300)]
+HttpsOrigin = Annotated[str, Field(pattern=HTTPS_ORIGIN_RE.pattern, max_length=300)]
+CookieDomain = Annotated[str, Field(pattern=COOKIE_DOMAIN_RE.pattern, max_length=254)]
+HttpMethod = Annotated[str, Field(pattern=HTTP_METHOD_RE.pattern)]
+HttpUrlStr = Annotated[str, Field(pattern=HTTP_URL_RE.pattern, min_length=8, max_length=URL_MAX)]
+PathRegex = Annotated[str, Field(min_length=1, max_length=300)]
+
+
+# Help reasons for the user type only (8.1). The shared HelpReasonCode and
+# LOGIN_HELP_REASONS stay as they are for the org agent.
+UserHelpReasonCode = Literal[
+    "login_failed", "login_locked", "captcha", "mfa", "sso", "logged_out", "access_denied",
+    "not_found", "ambiguous", "unexpected_page", "cap_reached", "needs_info", "provider_config",
+    "other", "needs_credential", "needs_site", "mfa_step_up", "push", "hold",
+]
+USER_HELP_REASONS_ADDED = ("needs_credential", "needs_site", "mfa_step_up", "push", "hold")
+# Reasons the model may pick in user_request_help (push and hold come from the
+# worker and the server, never the model).
+USER_MODEL_HELP_REASONS = MODEL_HELP_REASONS + ("needs_credential", "needs_site", "mfa_step_up", "sso")
+
+UserLoginOutcome = Literal[
+    "ok", "password_rejected", "mfa", "push", "captcha", "challenge", "sso", "unexpected", "timeout",
+]
+UserLoginRefusal = Literal[
+    "spacing", "login_busy", "locked", "help_open", "not_configured", "ip_not_allowed",
+    "not_in_job", "origin_not_allowed", "identity_provider", "not_https", "daily_cap", "sso_required",
+]
+UserDownloadKind = Literal[
+    "pdf", "png", "jpeg", "tiff", "gif", "zip", "ooxml", "ole", "csv", "text", "dwg", "dxf", "rtf",
+]
+
+
+# jobs.input for user_browser ----------------------------------------------------
+
+
+class UserJobAuthority(_Req):
+    """jobs.input.authority, written by assistant_browser_task_enqueue_v2 from
+    the admission (role, model and cap are never the caller's). Recorded for
+    turn begin and audit; the live authority is rechecked by every fence."""
+    role: Annotated[str, Field(min_length=1, max_length=64)]
+    model: Annotated[str, Field(min_length=1, max_length=120)] | None = None
+    conversation_id: UUID
+    max_cost_usd: Annotated[float, Field(gt=0, le=5)]
+    admission_id: UUID
+
+
+class UserBrowserInput(_Req):
+    """The admitted task as the worker sees it, exactly the jobs.input that
+    assistant_browser_task_enqueue_v2 writes (its caller passes p_input = {}).
+    Credentials, grants and caps are never input: they come from the
+    lease-fenced job policy (UserJobPolicy)."""
+    admission_id: UUID
+    goal: Annotated[str, Field(min_length=1, max_length=USER_GOAL_MAX)]
+    start_url: HttpUrlStr | None = None
+    start_site_key: SiteKey | None = None
+    project_id: UUID | None = None
+    authority: UserJobAuthority
+
+    @model_validator(mode="after")
+    def _has_start(self) -> "UserBrowserInput":
+        if self.start_url is None and self.start_site_key is None:
+            raise ValueError("start_url or start_site_key is required")
+        if self.start_url is not None and url_origin(self.start_url) is None:
+            raise ValueError("start_url is not an http(s) URL")
+        if self.authority.admission_id != self.admission_id:
+            raise ValueError("authority is for another admission")
+        return self
+
+
+# Job policy (10.2): GET /jobs/{job_id}/user/policy --------------------------------
+
+
+class UserSafeMutation(_Resp):
+    method: HttpMethod
+    host: Host
+    path_regex: PathRegex
+    graphql_operations: list[Annotated[str, Field(min_length=1, max_length=120)]] | None = None
+
+    @model_validator(mode="after")
+    def _regex(self) -> "UserSafeMutation":
+        _check_regex(self.path_regex)
+        return self
+
+
+class UserFinalAction(_Resp):
+    method: HttpMethod
+    host: Host
+    path_regex: PathRegex
+    label: Annotated[str, Field(min_length=1, max_length=120)]
+
+    @model_validator(mode="after")
+    def _regex(self) -> "UserFinalAction":
+        _check_regex(self.path_regex)
+        return self
+
+
+class UserFinalGet(_Resp):
+    host: Host
+    path_regex: PathRegex
+    label: Annotated[str, Field(max_length=120)] | None = None
+
+    @model_validator(mode="after")
+    def _regex(self) -> "UserFinalGet":
+        _check_regex(self.path_regex)
+        return self
+
+
+class UserLoggedInProbe(_Resp):
+    path: Annotated[str, Field(pattern=r"^/", max_length=300)]
+    selector: Annotated[str, Field(min_length=1, max_length=300)]
+
+
+class UserSiteProfile(_Resp):
+    """assistant_browser_sites.profile (6.4). final_actions only label cards;
+    they never release anything."""
+    safe_mutations: list[UserSafeMutation] = Field(default_factory=list, max_length=200)
+    final_actions: list[UserFinalAction] = Field(default_factory=list, max_length=200)
+    final_get: list[UserFinalGet] = Field(default_factory=list, max_length=200)
+    websocket_ok: bool = False
+    websocket_reason: Annotated[str, Field(max_length=300)] | None = None
+    logged_in_probe: UserLoggedInProbe | None = None
+
+
+class UserPolicySite(_Resp):
+    site_key: SiteKey
+    label: Annotated[str, Field(min_length=1, max_length=120)]
+    kind: Literal["curated", "ad_hoc"]
+    scope: Literal["domain", "origin"]
+    grant_version: Annotated[int, Field(ge=1)]
+    registrable_domains: list[Host] = Field(default_factory=list, max_length=20)
+    exact_origins: list[Origin] = Field(default_factory=list, max_length=20)
+    path_prefix: Annotated[str, Field(pattern=r"^/", max_length=300)] | None = None
+    login_paths: list[PathRegex] = Field(default_factory=list, max_length=20)
+    needs_headed: bool = False
+    profile: UserSiteProfile = Field(default_factory=UserSiteProfile)
+
+    @model_validator(mode="after")
+    def _shape(self) -> "UserPolicySite":
+        if self.scope == "domain" and not self.registrable_domains:
+            raise ValueError("a domain grant needs registrable_domains")
+        if self.scope == "origin" and not self.exact_origins:
+            raise ValueError("an origin grant needs exact_origins")
+        for domain in self.registrable_domains:
+            if is_multi_tenant_domain(domain):
+                raise ValueError(f"multi-tenant domain {domain} is granted by exact origin only")
+        for p in self.login_paths:
+            _check_regex(p)
+        return self
+
+    @property
+    def websocket_allowed(self) -> bool:
+        """websocket_ok counts only on curated rows (6.2, 6.4)."""
+        return self.kind == "curated" and self.profile.websocket_ok
+
+
+class UserPolicyCredential(_Resp):
+    """A credential in the job's set (assistant_browser_job_credentials). Never
+    carries a username or password; those come per attempt from login/begin."""
+    credential_id: UUID
+    site_key: SiteKey
+    account_label: AccountLabel
+    version: Annotated[int, Field(ge=1)]
+    login_origins: Annotated[list[HttpsOrigin], Field(min_length=1, max_length=10)]
+    cookie_domains: Annotated[list[CookieDomain], Field(min_length=1, max_length=10)]
+    sso_required: bool = False
+
+    @model_validator(mode="after")
+    def _no_identity_provider(self) -> "UserPolicyCredential":
+        for origin in self.login_origins:
+            if is_identity_provider_host(_origin_host(origin)):
+                raise ValueError("an identity provider is never a credential login origin")
+        return self
+
+
+class UserSafeRule(_Resp):
+    """The owner's own "not a final action" rule (6.3)."""
+    site_key: SiteKey
+    method: HttpMethod
+    host: Host
+    path_pattern: PathRegex
+
+
+class UserPolicyCaps(_Resp):
+    offsite_query_bytes: Annotated[int, Field(ge=0, le=1024 * 1024)] = 4096
+    download_file_bytes: Annotated[int, Field(ge=0, le=USER_DOWNLOAD_FILE_BYTES_FLOOR)] = 100 * 1024 * 1024
+    download_task_bytes: Annotated[int, Field(ge=0, le=USER_DOWNLOAD_TASK_BYTES_FLOOR)] = 500 * 1024 * 1024
+    download_files: Annotated[int, Field(ge=0, le=USER_DOWNLOAD_FILES_FLOOR)] = 20
+    hold_timeout_seconds: Annotated[int, Field(ge=30, le=3600)] = 600
+    park_max_minutes: Annotated[int, Field(ge=1, le=240)] = 15
+
+
+class UserJobPolicy(_Resp):
+    """Server-supplied per-job policy (10.2). The worker fetches it after claim
+    and after every site_hold release, safe-rule change or scope fence code;
+    a fence returning a newer policy_version means refetch. It can narrow or
+    widen the task scope, never the signed floor (private networks, identity
+    providers, schemes, holds, token verification, size floors)."""
+    policy_version: Annotated[int, Field(ge=1)]
+    job_id: UUID
+    start_origin: Origin
+    sites: Annotated[list[UserPolicySite], Field(min_length=1, max_length=50)]
+    credentials: list[UserPolicyCredential] = Field(default_factory=list, max_length=50)
+    safe_rules: list[UserSafeRule] = Field(default_factory=list, max_length=500)
+    caps: UserPolicyCaps = Field(default_factory=UserPolicyCaps)
+
+    @model_validator(mode="after")
+    def _shape(self) -> "UserJobPolicy":
+        keys = [s.site_key for s in self.sites]
+        if len(set(keys)) != len(keys):
+            raise ValueError("duplicate site_key in sites")
+        seen: set[str] = set()
+        for cred in self.credentials:
+            if cred.site_key not in keys:
+                raise ValueError("credential for a site outside the task scope")
+            if cred.site_key in seen:
+                raise ValueError("at most one credential per site in a job")
+            seen.add(cred.site_key)
+        for rule in self.safe_rules:
+            if rule.site_key not in keys:
+                raise ValueError("safe rule for a site outside the task scope")
+        return self
+
+    def site(self, site_key: str) -> UserPolicySite | None:
+        return next((s for s in self.sites if s.site_key == site_key), None)
+
+    def credential(self, credential_id: UUID | str) -> UserPolicyCredential | None:
+        return next((c for c in self.credentials if str(c.credential_id) == str(credential_id)), None)
+
+
+# Holds (6.5): POST /jobs/{job_id}/user/holds,
+# GET /jobs/{job_id}/user/holds/{hold_id}/release (long poll) ------------------
+
+
+class UserHoldField(_Req):
+    """One form field in a held request body. `value` is set only when it
+    equals a string the model typed with type_text or select_option in this
+    job; every other value is hidden whatever the field is named."""
+    name: Annotated[str, Field(max_length=200)]
+    value: Annotated[str, Field(max_length=500)] | None = None
+    hidden: bool = True
+
+    @model_validator(mode="after")
+    def _hidden_has_no_value(self) -> "UserHoldField":
+        if self.hidden and self.value is not None:
+            raise ValueError("a hidden field carries no value")
+        if not self.hidden and self.value is None:
+            raise ValueError("a shown field carries its value")
+        return self
+
+
+class UserHoldRequest(_Req):
+    """A held request (network hold) or a held click (click-level hold, 6.2
+    item 4). The full URL with its query lives only in the encrypted hold
+    record and on the owner's card; traces keep origin and path."""
+    trigger: Literal["network", "click"]
+    frame: Literal["main", "sub", "worker"] = "main"
+    method: HttpMethod
+    url: HttpUrlStr
+    origin: Origin
+    url_sha256: Sha256
+    body_sha256: Sha256
+    body_summary: list[UserHoldField] = Field(default_factory=list, max_length=USER_HOLD_FIELDS_MAX)
+    element_label: Annotated[str, Field(max_length=200)] | None = None
+    profile_label: Annotated[str, Field(max_length=120)] | None = None
+    model_description: Annotated[str, Field(max_length=300)] | None = None
+    out_of_scope: bool = False
+    screenshot_artifact_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def _shape(self) -> "UserHoldRequest":
+        if url_origin(self.url) != self.origin:
+            raise ValueError("origin does not match url")
+        if self.trigger == "click" and not self.element_label:
+            raise ValueError("a click hold needs the element label")
+        return self
+
+
+class UserSiteHoldRequest(_Req):
+    """A top-level navigation outside the task scope, held before DNS (5.4).
+    The worker ran the exfiltration rules on the full URL before sending this."""
+    trigger: Literal["navigate", "link", "redirect", "popup"]
+    url: HttpUrlStr
+    target_origin: Origin
+    from_origin: Origin | None = None
+    carries_data: bool = False
+
+    @model_validator(mode="after")
+    def _shape(self) -> "UserSiteHoldRequest":
+        if url_origin(self.url) != self.target_origin:
+            raise ValueError("target_origin does not match url")
+        return self
+
+
+HOLD_TOKEN_FIELDS = ("job_id", "lease_epoch", "hold_id", "method", "origin", "url_sha256", "body_sha256", "exp")
+
+
+class UserHoldToken(_Resp):
+    """Ed25519 release token (6.5 step 4). The signature covers
+    canonical_hold_token_bytes(token) with BROWSER_HOLD_SIGNING_KEY; the worker
+    verifies it with the public key compiled into its signed release, plus job,
+    epoch, hold id, method, origin, URL hash, body hash and exp, and uses a
+    hold_id once."""
+    job_id: UUID
+    lease_epoch: Annotated[int, Field(ge=0)]
+    hold_id: UUID
+    method: HttpMethod
+    origin: Origin
+    url_sha256: Sha256
+    body_sha256: Sha256
+    exp: Annotated[int, Field(ge=0)]                    # unix seconds
+    key_id: Annotated[str, Field(min_length=1, max_length=64)]
+    signature: Annotated[str, Field(min_length=1, max_length=200)]   # base64
+
+
+def canonical_hold_token_bytes(token: UserHoldToken | dict[str, Any]) -> bytes:
+    """The exact bytes the hold signing key signs: the eight HOLD_TOKEN_FIELDS,
+    sorted keys, no spaces, UTF-8. key_id and signature are not signed."""
+    data = token.model_dump(mode="json") if isinstance(token, BaseModel) else dict(token)
+    out = {k: data[k] for k in HOLD_TOKEN_FIELDS}
+    for k in ("job_id", "hold_id"):
+        out[k] = str(out[k]).lower()
+    out["lease_epoch"] = int(out["lease_epoch"])
+    out["exp"] = int(out["exp"])
+    return json.dumps(out, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+class UserHoldRelease(_Resp):
+    """Answer to a hold or site hold, and to the release long poll.
+    final_action released: a token for exactly that request. site released:
+    `site_release` says whether the held navigation continues (full) or the
+    worker opens the origin root (site_only); refetch the policy when
+    policy_version is newer. declined, expired, aborted: abort the request;
+    `label` is shown to the model ("The owner declined: <label>")."""
+    hold_id: UUID
+    kind: Literal["final_action", "site"] = "final_action"
+    status: Literal["pending", "released", "declined", "expired", "aborted"]
+    token: UserHoldToken | None = None
+    site_release: Literal["full", "site_only"] | None = None
+    policy_version: Annotated[int, Field(ge=1)] | None = None
+    label: Annotated[str, Field(max_length=200)] | None = None
+    retry_after: Annotated[int, Field(ge=0, le=60)] | None = None
+
+    @model_validator(mode="after")
+    def _shape(self) -> "UserHoldRelease":
+        released = self.status == "released"
+        if self.kind == "final_action":
+            if released and self.token is None:
+                raise ValueError("a released final action carries a token")
+            if self.token is not None and (not released or self.token.hold_id != self.hold_id):
+                raise ValueError("a token only for this released hold")
+            if self.site_release is not None:
+                raise ValueError("site_release is only for site holds")
+        else:
+            if self.token is not None:
+                raise ValueError("site holds carry no token")
+            if released and self.site_release is None:
+                raise ValueError("a released site hold says full or site_only")
+            if not released and self.site_release is not None:
+                raise ValueError("site_release only when released")
+        return self
+
+
+# Credentials (7.4): POST /jobs/{job_id}/user/login/begin,
+# POST /jobs/{job_id}/user/login/result, GET /jobs/{job_id}/user/session ----------
+
+
+class UserCredentialFillRequest(_Req):
+    """Sent by fill_credential before typing. The worker already checked the
+    page is https, the top-level and frame origins are both in the
+    credential's login_origins (from the job policy) and not an identity
+    provider; the server checks the credential is in the job set again."""
+    credential_id: UUID
+    origin: HttpsOrigin
+    frame_origin: HttpsOrigin
+    rejected_jar_logged_in_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def _shape(self) -> "UserCredentialFillRequest":
+        if self.frame_origin != self.origin:
+            raise ValueError("fill_credential never types into a cross-origin frame")
+        if is_identity_provider_host(_origin_host(self.origin)):
+            raise ValueError("never types a credential on an identity provider")
+        return self
+
+
+class UserCredentialFillResponse(_Resp):
+    """granted: type username and password into the filled form, then report
+    login/result. Sent with Cache-Control: no-store. Refused: spacing or
+    login_busy -> poll the session route (UserSessionPoll) before waiting out
+    the spacing; help_open -> join help_id; anything else ends the attempt."""
+    granted: bool
+    attempt_id: UUID | None = None
+    username: SecretStr | None = None
+    password: SecretStr | None = None
+    reason: UserLoginRefusal | None = None
+    retry_at: datetime | None = None
+    help_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def _shape(self) -> "UserCredentialFillResponse":
+        if self.granted and not (self.attempt_id and self.username and self.password):
+            raise ValueError("granted requires attempt_id, username and password")
+        if not self.granted and (self.password is not None or self.username is not None or self.reason is None):
+            raise ValueError("refused carries a reason and no secret")
+        return self
+
+
+class UserCredentialResultRequest(_Req):
+    """Outcome of a login attempt. Cookies only with ok, and only those whose
+    domain is in the credential's cookie_domains (the server re-checks)."""
+    credential_id: UUID
+    attempt_id: UUID
+    origin: HttpsOrigin
+    outcome: UserLoginOutcome
+    step: Annotated[str, Field(max_length=60)] | None = None
+    cookies: list[Cookie] | None = None
+
+    @model_validator(mode="after")
+    def _ok_has_cookies(self) -> "UserCredentialResultRequest":
+        if self.outcome == "ok" and not self.cookies:
+            raise ValueError("outcome ok requires cookies")
+        if self.outcome != "ok" and self.cookies:
+            raise ValueError("cookies are sent only with outcome ok")
+        return self
+
+
+class UserCredentialResultResponse(_Resp):
+    """attempt_open: mfa and push keep the attempt alive (8.1, 8.4)."""
+    attempt_open: bool = False
+    locked_until: datetime | None = None
+    login_failures: int = 0
+    attempts_today: int = 0
+    help_reason: UserHelpReasonCode | None = None
+
+
+class UserSessionPoll(_Req):
+    """Query of GET /jobs/{job_id}/user/session: a session for this credential
+    saved after `newer_than` (the job's claim time). Without `origin` the
+    server answers with the newest unexpired session of that account whose
+    origin is in the task scope (assistant_browser_session_get_v2 with a null
+    origin). Answered with SessionResponse (ok with cookies, or no_jar)."""
+    credential_id: UUID
+    newer_than: datetime
+    origin: HttpsOrigin | None = None
+
+
+class UserHelpOpenV2Request(_Req):
+    """Help open for user_browser jobs, with the user reason vocabulary and the
+    credential the help is about (login and code scope)."""
+    reason_code: UserHelpReasonCode
+    message: Annotated[str, Field(max_length=HELP_AGENT_MESSAGE_MAX)] | None = None
+    screenshot_artifact_id: UUID | None = None
+    login_attempt_id: UUID | None = None
+    credential_id: UUID | None = None
+    hold_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def _shape(self) -> "UserHelpOpenV2Request":
+        if self.reason_code == "hold" and self.hold_id is None:
+            raise ValueError("a hold help row names its hold")
+        if self.reason_code in ("mfa", "push") and self.login_attempt_id is None:
+            raise ValueError("mfa and push belong to a login attempt")
+        if self.reason_code == "mfa_step_up" and self.credential_id is None:
+            raise ValueError("mfa_step_up names the credential")
+        return self
+
+
+# Downloads (11): POST /jobs/{job_id}/user/downloads (multipart) --------------------
+
+
+class UserDownloadMeta(_Req):
+    """Multipart form fields beside the `file` part. Sent only for a file that
+    passed the type allowlist (magic bytes) and a clean Defender scan."""
+    sha256: Sha256
+    filename: Annotated[str, Field(pattern=SAFE_FILENAME_RE.pattern)]
+    size_bytes: Annotated[int, Field(ge=1, le=USER_DOWNLOAD_FILE_BYTES_FLOOR)]
+    sniffed_kind: UserDownloadKind
+    source_origin: Origin
+    scan: Literal["clean"]
+
+
+class UserDownloadResponse(_Resp):
+    download_id: UUID
+    status: Literal["saved_to_project", "staged", "rejected"]
+    file_id: UUID | None = None
+    reason: Annotated[str, Field(max_length=200)] | None = None
+
+
+# Live view (9, wave E): POST /jobs/{job_id}/live/frames,
+# GET /jobs/{job_id}/live/input ---------------------------------------------------
+
+
+class LiveFrameMeta(_Req):
+    """Form fields beside the JPEG frame. Frames are never stored beyond their
+    TTL, never traced and never sent to a model."""
+    session_id: UUID
+    seq: Annotated[int, Field(ge=0)]
+    width: Annotated[int, Field(ge=1, le=4096)]
+    height: Annotated[int, Field(ge=1, le=4096)]
+    mime_type: Literal["image/jpeg"] = "image/jpeg"
+    size_bytes: Annotated[int, Field(ge=1, le=USER_LIVE_FRAME_MAX_BYTES)]
+    captured_at: datetime
+
+
+_LIVE_MOUSE = ("mousePressed", "mouseReleased", "mouseMoved", "mouseWheel")
+_LIVE_KEY = ("keyDown", "keyUp", "char")
+
+
+class LiveInputEvent(_Req):
+    """One owner input event, replayed by the worker with CDP
+    Input.dispatchMouseEvent or Input.dispatchKeyEvent. Key fields can carry
+    a password being typed: repr never shows them and they are never logged."""
+    seq: Annotated[int, Field(ge=0)]
+    type: Literal["mousePressed", "mouseReleased", "mouseMoved", "mouseWheel", "keyDown", "keyUp", "char"]
+    x: Annotated[float, Field(ge=0, le=4096)] | None = None
+    y: Annotated[float, Field(ge=0, le=4096)] | None = None
+    button: Literal["none", "left", "middle", "right"] | None = None
+    click_count: Annotated[int, Field(ge=0, le=3)] | None = None
+    delta_x: Annotated[float, Field(ge=-10000, le=10000)] | None = None
+    delta_y: Annotated[float, Field(ge=-10000, le=10000)] | None = None
+    key: Annotated[str, Field(min_length=1, max_length=40)] | None = None
+    code: Annotated[str, Field(min_length=1, max_length=40)] | None = None
+    text: Annotated[str, Field(min_length=1, max_length=4)] | None = None
+    modifiers: Annotated[int, Field(ge=0, le=15)] = 0
+
+    @model_validator(mode="after")
+    def _shape(self) -> "LiveInputEvent":
+        if self.type in _LIVE_MOUSE:
+            if self.x is None or self.y is None:
+                raise ValueError("mouse events need x and y")
+            if self.key is not None or self.code is not None or self.text is not None:
+                raise ValueError("mouse events carry no key fields")
+        else:
+            if self.x is not None or self.y is not None or self.button is not None:
+                raise ValueError("key events carry no mouse fields")
+            if self.type == "char" and self.text is None:
+                raise ValueError("char needs text")
+            if self.type != "char" and self.key is None:
+                raise ValueError("keyDown and keyUp need key")
+        return self
+
+    def __repr__(self) -> str:   # never print what was typed
+        return f"LiveInputEvent(seq={self.seq}, type={self.type!r})"
+
+    __str__ = __repr__
+
+
+class LiveInputBatch(_Resp):
+    events: list[LiveInputEvent] = Field(default_factory=list, max_length=USER_LIVE_INPUT_BATCH_MAX)
+
+
+# v2 routes. Kept apart from ENDPOINTS (whose fixture coverage test predates
+# v2); WI-6 and WI-21 bind the server routes, WI-10 the worker client.
+USER_V2_ENDPOINTS: dict[str, tuple[str, str, type[BaseModel] | None, Any, int]] = {
+    "user_policy": ("GET", "/jobs/{job_id}/user/policy", None, UserJobPolicy, 200),
+    "user_holds": ("POST", "/jobs/{job_id}/user/holds", UserHoldRequest, UserHoldRelease, 200),
+    "user_hold_release": ("GET", "/jobs/{job_id}/user/holds/{hold_id}/release", None, UserHoldRelease, 200),
+    "user_site_hold": ("POST", "/jobs/{job_id}/user/site-hold", UserSiteHoldRequest, UserHoldRelease, 200),
+    "user_session_poll": ("GET", "/jobs/{job_id}/user/session", UserSessionPoll, SessionResponse, 200),
+    "user_login_begin_v2": ("POST", "/jobs/{job_id}/user/login/begin", UserCredentialFillRequest,
+                            UserCredentialFillResponse, 200),
+    "user_login_result_v2": ("POST", "/jobs/{job_id}/user/login/result", UserCredentialResultRequest,
+                             UserCredentialResultResponse, 200),
+    "user_help_open_v2": ("POST", "/jobs/{job_id}/user/help", UserHelpOpenV2Request, HelpOpenResponse, 200),
+    "user_downloads": ("POST", "/jobs/{job_id}/user/downloads", UserDownloadMeta, UserDownloadResponse, 200),
+    "live_frames": ("POST", "/jobs/{job_id}/live/frames", LiveFrameMeta, None, 204),
+    "live_input": ("GET", "/jobs/{job_id}/live/input", None, LiveInputBatch, 200),
+}
+
+INPUT_MODELS[USER_BROWSER_TYPE] = UserBrowserInput
+
+# Code floor for the user type. Navigation scope is not fixed in code: it
+# comes per job from UserJobPolicy, so nav_hosts and nav_paths are empty and
+# Settings host narrowing has nothing to narrow. The extra keys are the
+# signed-code lists the worker never takes from the server.
+CEILINGS[USER_BROWSER_TYPE] = {
+    "nav_hosts": [],
+    "nav_paths": [],
+    "resource_hosts": [],
+    "login_hosts": [],
+    "login_challenge_hosts": [],
+    "identity_provider_hosts": list(IDENTITY_PROVIDER_HOSTS),
+    "multi_tenant_domains": list(MULTI_TENANT_DOMAINS),
+    "blocked_host_suffixes": list(BLOCKED_HOST_SUFFIXES),
+}
+
+
+# Tools for user_browser (15.2). New names with their own models; the shared
+# request_help, finish and their models stay as they are.
+
+_TAB = {"type": "string", "pattern": r"^tab_\d{1,4}$", "description": "A tab id from read_page."}
+
+TOOL_SCHEMAS["switch_tab"] = {
+    "name": "switch_tab",
+    "description": "Make another tab of this task the active one. Tabs opened by the page belong to the task.",
+    "parameters": _obj({"tab_id": _TAB}, ["tab_id"]),
+}
+TOOL_SCHEMAS["fill_credential"] = {
+    "name": "fill_credential",
+    "description": (
+        "Fill the saved username or password into a login field by ref. You never see the value. "
+        "Refused unless the page is the saved login page of the account for this site. Never type "
+        "a password or code with type_text."
+    ),
+    "parameters": _obj({"ref": _REF, "field": {"type": "string", "enum": ["username", "password"]}},
+                       ["ref", "field"]),
+}
+TOOL_SCHEMAS["user_request_help"] = {
+    "name": "user_request_help",
+    "description": (
+        "Ask the task owner for help. needs_credential: no saved login works. needs_site: the goal "
+        "needs a site that is not approved. mfa_step_up: the site asks for a code mid-task. sso: the "
+        "site only offers Microsoft or Google sign-in. Never ask for a password or code in the message."
+    ),
+    "parameters": _obj({"reason_code": {"type": "string", "enum": list(USER_MODEL_HELP_REASONS)},
+                        "message": {"type": "string", "minLength": 1, "maxLength": HELP_AGENT_MESSAGE_MAX}},
+                       ["reason_code", "message"]),
+}
+TOOL_SCHEMAS["user_finish"] = {
+    "name": "user_finish",
+    "description": (
+        "End the task. completed: give the result and the facts you found, each with the URL of the "
+        "page it came from. cannot_complete: give error_kind and say why in result."
+    ),
+    "parameters": _obj({
+        "outcome": {"type": "string", "enum": ["completed", "cannot_complete"]},
+        "result": {"type": "string", "minLength": 1, "maxLength": USER_RESULT_MAX},
+        "facts": {"type": "array", "maxItems": USER_FACTS_MAX, "items": _obj({
+            "text": {"type": "string", "minLength": 1, "maxLength": USER_FACT_TEXT_MAX},
+            "source_url": {"type": "string", "pattern": HTTP_URL_RE.pattern, "maxLength": URL_MAX},
+        }, ["text", "source_url"])},
+        "error_kind": {"type": "string",
+                       "enum": ["not_found", "access_denied", "unsupported", "declined", "other"]},
+    }, ["outcome", "result"]),
+}
+
+USER_TOOLS = ("switch_tab", "fill_credential", "user_request_help", "user_finish")
+TOOLS_BY_TYPE[USER_BROWSER_TYPE] = (
+    "navigate", "read_page", "find_text", "scroll", "go_back", "wait_for", "click", "type_text",
+    "select_option", "press_key",
+) + USER_TOOLS
+
+
+class SwitchTabArgs(_Args):
+    tab_id: Annotated[str, Field(pattern=r"^tab_\d{1,4}$")]
+
+
+class FillCredentialArgs(_Args):
+    ref: _RefStr
+    field: Literal["username", "password"]
+
+
+class UserRequestHelpArgs(_Args):
+    reason_code: Literal["access_denied", "not_found", "ambiguous", "unexpected_page", "needs_info", "other",
+                         "needs_credential", "needs_site", "mfa_step_up", "sso"]
+    message: Annotated[str, Field(min_length=1, max_length=HELP_AGENT_MESSAGE_MAX)]
+
+
+class UserFact(_Args):
+    text: Annotated[str, Field(min_length=1, max_length=USER_FACT_TEXT_MAX)]
+    source_url: Annotated[str, Field(pattern=HTTP_URL_RE.pattern, max_length=URL_MAX)]
+
+
+class UserFinishArgs(_Args):
+    """The handler maps this to the job outcome and checks every source_url
+    is in the task scope (a fact from outside the scope is dropped)."""
+    outcome: Literal["completed", "cannot_complete"]
+    result: Annotated[str, Field(min_length=1, max_length=USER_RESULT_MAX)]
+    facts: Annotated[list[UserFact], Field(max_length=USER_FACTS_MAX)] | None = None
+    error_kind: Literal["not_found", "access_denied", "unsupported", "declined", "other"] | None = None
+
+    @model_validator(mode="after")
+    def _error_kind(self) -> "UserFinishArgs":
+        if self.outcome == "cannot_complete" and self.error_kind is None:
+            raise ValueError("cannot_complete requires error_kind")
+        if self.outcome == "completed" and self.error_kind is not None:
+            raise ValueError("error_kind is only for cannot_complete")
+        return self
+
+
+TOOL_ARG_MODELS["switch_tab"] = SwitchTabArgs
+TOOL_ARG_MODELS["fill_credential"] = FillCredentialArgs
+TOOL_ARG_MODELS["user_request_help"] = UserRequestHelpArgs
+TOOL_ARG_MODELS["user_finish"] = UserFinishArgs

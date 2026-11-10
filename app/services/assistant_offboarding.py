@@ -587,6 +587,116 @@ def phase7_offboard(user_id: str, mode: str) -> dict:
 HOOKS.append(phase7_offboard)
 
 
+# ── Browser v2 hook (docs/ASSISTANT_BROWSER_V2_PLAN.md 17.5, WI-18) ──────────
+
+
+def _purge_staged_downloads(user_id: str) -> tuple[int, int]:
+    """Delete the objects of the person's staged browser downloads (any
+    expiry) and mark each row purged only after its object is gone. Returns
+    (rows purged, rows left). Bounded by PURGE_ROUNDS x PURGE_LIMIT rows;
+    never raises on a storage failure (the row stays for a retry)."""
+    from app.assistant import repo
+    from app.services import assistant_staging
+
+    purged = 0
+    seen: set[str] = set()
+    for _ in range(PURGE_ROUNDS):
+        rows = [r for r in repo.browser_offboard_staged_downloads(user_id, limit=PURGE_LIMIT)
+                if str(r.get("id")) not in seen]
+        if not rows:
+            break
+        for row in rows:
+            seen.add(str(row.get("id")))
+            if not assistant_staging.discard_browser_download(str(row.get("storage_path") or "")):
+                continue
+            if repo.browser_download_mark_purged(user_id, str(row["id"])):
+                purged += 1
+    return purged, len(repo.browser_offboard_staged_downloads(user_id, limit=PURGE_LIMIT))
+
+
+def browser_v2_offboard(user_id: str, mode: str) -> dict:
+    """The browser v2 offboarding hook (plan 17.5). Runs after the jobs are
+    canceled and the holds released, in the leaving modes only (an MFA reset
+    and an internal role change keep the person's browser sites).
+
+    deactivated, demoted_external, sweep: the 0192 RPC
+    assistant_browser_revoke_owner runs again (the early step ran it before
+    the jobs were canceled; this pass aborts a hold or live session opened
+    in between) and clears the site grants, waiting admissions, card
+    requests, open holds, live sessions, safe rules and cookie jars; the SQL
+    purge_v2 then drops the live frames of the sessions it ended; the
+    pinned job credentials are deleted; the objects of staged downloads are
+    deleted (kept while the person is on legal hold) and their rows marked
+    purged; and (when every step ran) a final read confirms nothing is left
+    of the above.
+
+    deleted: the cascade removes every row, so only the staged download
+    objects are purged (they would outlive their rows); objects left over
+    are counted browser_v2_downloads_unpurged.
+
+    Returns {browser_v2_revoked, browser_v2_pins_deleted,
+    browser_v2_downloads_purged} plus browser_v2_downloads_unpurged and
+    browser_v2_unfinished when something is left (counts only). Every step
+    is idempotent and bounded, so the sweep mode re-runs it safely; a step
+    that fails is logged and the rest still run."""
+    from app.assistant import repo
+
+    if mode not in LEAVING_MODES:
+        return {}
+    counts: dict[str, int] = {}
+    problems = 0
+    keeps_profile = mode != "deleted"
+
+    if keeps_profile:
+        try:
+            counts["browser_v2_revoked"] = int(repo.browser_revoke_owner(user_id) or 0)
+        except Exception:  # noqa: BLE001
+            logger.exception("assistant offboarding: browser v2 revoke failed for %s", user_id)
+            problems += 1
+        try:
+            repo.browser_purge_v2(None, limit=1000)
+        except Exception:  # noqa: BLE001
+            logger.exception("assistant offboarding: browser v2 purge failed for %s", user_id)
+            problems += 1
+        try:
+            counts["browser_v2_pins_deleted"] = int(repo.browser_offboard_pins_delete(user_id))
+        except Exception:  # noqa: BLE001
+            logger.exception("assistant offboarding: browser v2 job credentials of %s not deleted", user_id)
+            problems += 1
+
+    try:
+        if repo.legal_hold(user_id) and keeps_profile:
+            counts["browser_v2_downloads_purged"] = 0     # kept while on legal hold
+        else:
+            purged, left = _purge_staged_downloads(user_id)
+            counts["browser_v2_downloads_purged"] = purged
+            if left:
+                counts["browser_v2_downloads_unpurged"] = left
+                problems += 1
+    except Exception:  # noqa: BLE001
+        logger.exception("assistant offboarding: browser v2 downloads of %s not purged", user_id)
+        problems += 1
+
+    if keeps_profile and not problems:
+        try:
+            state = repo.browser_offboard_open_state(user_id)
+            # Staged objects under legal hold stay on purpose; the rest must be gone.
+            left = sum(n for key, n in state.items() if key != "staged")
+            if left:
+                logger.warning("assistant offboarding: browser v2 state left for %s: %s", user_id,
+                               {k: v for k, v in state.items() if v})
+                problems += 1
+        except Exception:  # noqa: BLE001
+            logger.exception("assistant offboarding: browser v2 state of %s not verified", user_id)
+            problems += 1
+    if problems:
+        counts["browser_v2_unfinished"] = problems
+    return counts
+
+
+HOOKS.append(browser_v2_offboard)
+
+
 # ── Phase 8 hook (docs/ASSISTANT_PHASE8_PLAN.md 11, WI-13) ───────────────────
 
 TRIAGE_SKIP_ROUNDS = 10

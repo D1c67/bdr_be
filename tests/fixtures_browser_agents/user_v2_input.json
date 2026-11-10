@@ -1,0 +1,20 @@
+{
+  "model": "UserBrowserInput",
+  "v2_endpoint": null,
+  "direction": "jobs.input",
+  "body": {
+    "admission_id": "ad000000-0000-4000-8000-000000000001",
+    "goal": "Open the RFI log for project 3167322 and list the open RFIs with their due dates.",
+    "start_url": "https://app.procore.com/3167322/project/rfi/list",
+    "start_site_key": "procore",
+    "project_id": null,
+    "authority": {
+      "role": "it_admin",
+      "model": "gpt-5.4",
+      "conversation_id": "c0c0c0c0-0000-4000-8000-000000000001",
+      "max_cost_usd": 5.0,
+      "admission_id": "ad000000-0000-4000-8000-000000000001"
+    }
+  },
+  "note": "Exactly the jobs.input that assistant_browser_task_enqueue_v2 (0192 A2.5) writes with p_input = {}."
+}
