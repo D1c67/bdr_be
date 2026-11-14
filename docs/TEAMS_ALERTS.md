@@ -63,6 +63,13 @@ Email defaults keep everything that emailed before. The audiences added on
 quotes / RFQ replies and numbers verified, the IT Admin for Go/No-Go and
 Verify.
 
+Executives, Teams instead of email (2026-11-13): every event an Executive
+gets in Teams by default (the row above) no longer sends them an email. Their
+email stays on only for the events with no Teams card: RFQs initially sent,
+bid submitted, win / loss, project abandoned, deadline reminders, project
+notes, the auto send preview and results reports, Project Management and
+everything else. Settings > Notification routing can turn a cell back on.
+
 RFQ email routing (2026-10-25): Estimating Admins, Executives and IT Admins
 receive one `rfq.initial_send` announcement per project after its first
 successful vendor batch. Later batches and retries do not announce it again.

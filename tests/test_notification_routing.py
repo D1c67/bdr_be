@@ -57,11 +57,43 @@ def test_email_keeps_todays_sends_except_the_new_audiences():
     assert nr.wants(MAT, "quote_received", "email")
     assert nr.wants(LAB, "late_quote", "email")
     assert nr.wants(EA, "verified", "email")
-    assert nr.wants(EXE, "verify", "email")
-    assert nr.wants(EXE, "go_no_go", "email")
     assert nr.wants(MAT, "submitted", "email")
     assert nr.wants(EA, "digest.bids_due_today", "email")
     assert nr.wants(ACC, "digest.auto_send", "email")
+
+
+def _email_events(role: Role) -> set[str]:
+    return {
+        e.key for e in nr.EVENTS
+        if role in e.audience and nr.wants(role, e.key, "email")
+    }
+
+
+def test_executives_get_teams_instead_of_email():
+    # 2026-11-13: every event an Executive gets in Teams no longer emails
+    # them; email stays only where there is no Teams card.
+    teams = _teams_events(EXE)
+    assert teams and not teams & _email_events(EXE)
+    assert _email_events(EXE) == {
+        "digest.auto_send_preview", "digest.auto_send", "rfq_initial_send",
+        "submitted", "bid_outcome", "project_abandoned", "due", "estimator_note",
+        "pm", "other", "tech_outage", "auto_send_problem",
+    }
+    # Other roles that share these events keep their email.
+    assert nr.wants(EA, "digest.bids_due_today", "email")
+    assert nr.wants(LAB, "call_in", "email")
+    assert nr.wants(LAB, "reverify_required", "email")
+    assert nr.wants(EA, "approval_requested", "email")
+    assert nr.wants(MAT, "personal", "email")
+
+
+def test_executive_email_can_be_turned_back_on(monkeypatch):
+    monkeypatch.setattr(
+        nr, "_overrides", lambda: {("executive", "verify"): {"email": True, "teams": None}}
+    )
+    assert nr.wants(EXE, "verify", "email")
+    assert nr.wants(EXE, "verify", "teams")
+    assert not nr.wants(EXE, "go_no_go", "email")
 
 
 @pytest.mark.parametrize(
