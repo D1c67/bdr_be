@@ -229,7 +229,8 @@ def test_poll_once_sends_to_internal_non_accountants(monkeypatch):
     assert {r["user_id"] for r in up.payload} == {"u-admin", "u-exec"}
     assert all(r["digest_date"] == "2026-08-25" for r in up.payload)
 
-    assert {kw["to"][0] for kw in sent} == {"pat@g3.com", "alex@g3.com"}
+    # Executives get the digest in Teams only (2026-11-13): claimed, no email.
+    assert {kw["to"][0] for kw in sent} == {"pat@g3.com"}
     for kw in sent:
         assert kw["importance"] == "high"
         assert "Bids due today" in kw["subject"]
@@ -283,8 +284,9 @@ def test_poll_once_send_failure_releases_claim(monkeypatch):
 
     monkeypatch.setattr(dd.graph_email, "send_mail", _boom)
     dd.poll_once()
-    # both claims rolled back so the next tick retries
-    assert len(_calls(fake, "due_digest_log", "delete")) == 2
+    # the emailed recipient's claim is rolled back so the next tick retries;
+    # the Teams-only Executive's claim stands
+    assert len(_calls(fake, "due_digest_log", "delete")) == 1
 
 
 def test_render_all_green_row(monkeypatch):

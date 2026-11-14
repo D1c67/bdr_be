@@ -4,7 +4,9 @@ Every notification still lands in the bell. On top of that, each internal
 role has an Email switch and a Teams switch per notification EVENT (a
 group of notification types, or a daily report). The defaults below were
 set with G3 on 2026-10-23: Teams carries only the few things each role must
-act on, email keeps everything it sent before. Executives and IT Admins
+act on, email keeps everything it sent before. On 2026-11-13 G3 moved the
+Executives to Teams only for every event they already got in Teams (their
+email stays on only for the events with no Teams card). Executives and IT Admins
 override single cells from Settings > Notification routing; an override is
 one notification_channel_prefs row (NULL column = the default).
 
@@ -60,7 +62,8 @@ class Event:
     audience: frozenset[Role]
     teams: frozenset[Role] = frozenset()
     # Roles in the audience whose EMAIL is off by default (the audiences
-    # added on 2026-10-23 get the bell and Teams, not an email).
+    # added on 2026-10-23 get the bell and Teams, not an email; since
+    # 2026-11-13 Executives get Teams instead of email wherever they get Teams).
     email_off: frozenset[Role] = frozenset()
     email_available: bool = True
     types: tuple[str, ...] = field(default_factory=tuple)
@@ -74,6 +77,7 @@ EVENTS: tuple[Event, ...] = (
         "The 6:03 AM list of projects bidding today and what is still missing.",
         audience=frozenset({EXE, EA, LAB, MAT, IT}),
         teams=frozenset({EXE, EA, LAB, IT}),
+        email_off=frozenset({EXE}),
     ),
     Event(
         "digest.auto_send_preview", "Daily reports", "Auto send preview",
@@ -92,7 +96,7 @@ EVENTS: tuple[Event, ...] = (
         "A project reached Go/No-Go (new bid or created from an RFP).",
         audience=frozenset({EXE, IT}),
         teams=frozenset({EXE, IT}),
-        email_off=frozenset({IT}),
+        email_off=frozenset({EXE, IT}),
         types=("rfp_create.created",),
     ),
     Event(
@@ -147,7 +151,7 @@ EVENTS: tuple[Event, ...] = (
         "verify", "Bidding", "Ready for Verify",
         "A project reached the Verify step.",
         audience=frozenset({EXE, IT}), teams=frozenset({EXE, IT}),
-        email_off=frozenset({IT}),
+        email_off=frozenset({EXE, IT}),
     ),
     Event(
         "verified", "Bidding", "Numbers verified",
@@ -160,6 +164,7 @@ EVENTS: tuple[Event, ...] = (
         "call_in", "Bidding", "Calling In",
         "A project is ready for before-bid or after-bid calls.",
         audience=frozenset({EXE, LAB}), teams=frozenset({EXE}),
+        email_off=frozenset({EXE}),
         types=("call_in_pre_bid", "call_in_post_bid"),
     ),
     Event(
@@ -215,12 +220,14 @@ EVENTS: tuple[Event, ...] = (
         "approval_requested", "Approvals", "Approval requested",
         "Someone asked for approval: a GC price change or Mark submitted permission.",
         audience=frozenset({EXE, EA, IT}), teams=frozenset({EXE}),
+        email_off=frozenset({EXE}),
         types=("gc_pricing.approval_requested", "external_submission.requested"),
     ),
     Event(
         "revision_approval", "Approvals", "Revised proposal approval",
         "Costs changed in an open revised proposal and need an Executive's approval.",
         audience=frozenset({EXE}), teams=frozenset({EXE}),
+        email_off=frozenset({EXE}),
         types=("proposal_revision.approval_requested",),
     ),
     # ── Revisions ──
@@ -228,6 +235,7 @@ EVENTS: tuple[Event, ...] = (
         "revision_round", "Revisions", "Estimator revisions",
         "The estimator sent changes after delivering the estimate.",
         audience=frozenset({EXE, EA, LAB, MAT}), teams=frozenset({EXE, EA, LAB, MAT}),
+        email_off=frozenset({EXE}),
         types=("estimate_revised",),
     ),
     Event(
@@ -240,6 +248,7 @@ EVENTS: tuple[Event, ...] = (
         "reverify_required", "Revisions", "Re-verify required",
         "Pricing changed after Verify and needs verifying again.",
         audience=frozenset({EXE, LAB}), teams=frozenset({EXE, LAB}),
+        email_off=frozenset({EXE}),
         types=("reverify_required",),
     ),
     # ── Personal ──
@@ -247,6 +256,7 @@ EVENTS: tuple[Event, ...] = (
         "personal", "Personal", "Mentions, nudges and decisions",
         "Aimed at one person: an @mention in a note, a nudge, an approval decision.",
         audience=ALL, teams=ALL,
+        email_off=frozenset({EXE}),
         types=(
             "note_mention",
             "nudge",

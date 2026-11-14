@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from app.core.roles import Role
 from app.services import email_branding as eb
 from app.services import notification_email as ne
+from app.services import notification_routing
 
 FRONTEND = "https://bdr.example.com"
 
@@ -147,6 +148,12 @@ def test_rfp_create_messages_are_never_linkified(monkeypatch):
     for type_ in ("quote.received", "assigned", "due.internal_bid.2w", "rfp_match.merged", None, ""):
         assert ne.linkify_for(type_) is True, type_
     _patch_frontend(monkeypatch)
+    # Executives get Go/No-Go in Teams only by default (2026-11-13); the
+    # email turned back on in Settings must still never linkify.
+    monkeypatch.setattr(
+        notification_routing, "_overrides",
+        lambda: {("executive", "go_no_go"): {"email": True, "teams": None}},
+    )
     sent = []
     monkeypatch.setattr(ne.graph_email, "send_mail", lambda **kw: sent.append(kw) or None)
     monkeypatch.setattr(ne, "get_supabase", lambda: (_ for _ in ()).throw(AssertionError("no db read")))
