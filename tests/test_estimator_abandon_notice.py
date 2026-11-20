@@ -251,7 +251,7 @@ def test_withdrawn_email_escapes_the_reason():
 def test_reactivated_email_restates_the_deadline():
     html = estimator_email.render_reactivated_email(proj=PROJECT, recipient_name="Sam")
     assert "active again" in html
-    assert "2026-08-05" in html
+    assert "Due back from estimator: <b>Wednesday, August 5th" in html
     assert "Acme Clinic" in html
 
 

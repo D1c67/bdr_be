@@ -79,6 +79,9 @@ _TYPE_META: dict[str, tuple[str, str]] = {
     "project_abandoned": ("Project abandoned", "Open project"),
     "project_withdrawn": ("Project withdrawn", "Open your assignments"),
     "project_reactivated": ("Project reactivated", "Open your assignment"),
+    # The team moved an assigned estimator's due-back date (0 to N active
+    # assignees, never a role). The message carries the new date.
+    "estimator_due_changed": ("Estimate due date changed", "Open your assignment"),
     "submittal.response_received": ("A vendor returned a submittal", "View submittals"),
     # A GC added after the bid went out (0118): the sender asked for a per-GC
     # price change (Executives), and the decision back to the sender. All three

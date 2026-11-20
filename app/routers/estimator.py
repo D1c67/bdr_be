@@ -50,6 +50,7 @@ from app.core.roles import CHANGE_REVIEW_ROLES, Role
 from app.core.supabase_client import get_supabase
 from app.services import (
     auto_send_hooks,
+    estimator_due,
     estimator_email,
     estimator_notes,
     estimator_rounds,
@@ -561,11 +562,7 @@ def assign_estimator(
                         logger.warning(
                             "assign_estimator: ride-along update send failed", exc_info=True
                         )
-            label = f"{proj.get('number') or ''} {proj.get('name') or ''}".strip() or "a project"
-            ride_msg = (
-                f"{estimator_email.updates_label(pending)} sent for {label} - "
-                "review before continuing your estimate."
-            )
+            ride_msg = _files_updated_message(proj, pending)
             for a in others:
                 try:
                     notify_user(a["estimator_id"], project_id, "files_updated", ride_msg)
@@ -849,6 +846,21 @@ def send_to_estimator(
     }
 
 
+def _files_updated_message(proj: dict, files: list[dict]) -> str:
+    """The bell line (and its mirror email) for a file update. It restates the
+    due-back date while that date is still ahead, so the deadline for the
+    changes is in every notice of them, not only in the portal."""
+    label = f"{proj.get('number') or ''} {proj.get('name') or ''}".strip() or "a project"
+    msg = (
+        f"{estimator_email.updates_label(files)} sent for {label} - "
+        "review before continuing your estimate."
+    )
+    due = estimator_due.upcoming_due_text(proj.get("due_from_estimator_at"))
+    if due:
+        msg += f" Due back {due}."
+    return msg
+
+
 class UpdatesIn(BaseModel):
     # Optional overall message included at the top of the updates email, above
     # the per-file notes - and mirrored into the notes thread after the send.
@@ -864,6 +876,10 @@ class UpdatesIn(BaseModel):
     # handler against SECTION_NOTE_KEYS so a typo can't store a note nothing
     # renders. `max_length` on a dict bounds its KEY COUNT.
     section_notes: dict[str, str] | None = Field(default=None, max_length=16)
+    # The due-back date for these changes. Writes projects.due_from_estimator_at
+    # BEFORE the email goes out, so the email states it (same contract as
+    # AssignIn). Omitted or null leaves the project's date alone.
+    due_from_estimator_at: datetime | None = None
 
 
 def _clean_section_notes(raw: dict[str, str] | None, files: list[dict]) -> dict[str, str]:
@@ -977,6 +993,26 @@ def send_file_updates(
     section_notes = _clean_section_notes(body.section_notes if body else None, pending)
     sent_ids = [f["id"] for f in pending]
 
+    # A new due-back date is persisted BEFORE the email so the email prints it
+    # (estimator_email reads proj["due_from_estimator_at"]), and after every
+    # check above so a refused send changes nothing. The update email is the
+    # estimator's notice of the new date, so no separate "due date changed"
+    # notice is sent for it (projects.update_project sends that one when the
+    # date is edited on its own).
+    due_changed_to: str | None = None
+    if (
+        body
+        and body.due_from_estimator_at is not None
+        and not estimator_due.same_instant(
+            body.due_from_estimator_at, proj.get("due_from_estimator_at")
+        )
+    ):
+        due_changed_to = body.due_from_estimator_at.isoformat()
+        sb.table("projects").update({"due_from_estimator_at": due_changed_to}).eq(
+            "id", project_id
+        ).execute()
+        proj["due_from_estimator_at"] = due_changed_to
+
     # Claim the batch (row + recipients + file links) BEFORE any email.
     batch = file_sends.claim_batch(
         project_id=project_id,
@@ -1034,13 +1070,14 @@ def send_file_updates(
         "estimator.updates_sent",
         "project",
         project_id,
-        {"batch_id": batch["id"], "to": [r["email"] for r in recipients], "counts": counts},
+        {
+            "batch_id": batch["id"],
+            "to": [r["email"] for r in recipients],
+            "counts": counts,
+            **({"due_from_estimator_at": due_changed_to} if due_changed_to else {}),
+        },
     )
-    label = f"{proj.get('number') or ''} {proj.get('name') or ''}".strip() or "a project"
-    msg = (
-        f"{estimator_email.updates_label(pending)} sent for {label} - "
-        "review before continuing your estimate."
-    )
+    msg = _files_updated_message(proj, pending)
     for estimator_id in {a["estimator_id"] for a in assigns}:
         notify_user(estimator_id, project_id, "files_updated", msg)
     return {
@@ -1156,9 +1193,13 @@ def my_assigned_projects(user: CurrentUser = Depends(get_current_user)):
                 "name": p["name"],
                 "number": p["number"],
                 "assigned_at": a.get("created_at"),
-                # Per-assignment benchmark first; the project-wide date is the
-                # fallback for assignments made without one.
-                "due_at": a.get("due_at") or p.get("due_from_estimator_at"),
+                # The project's date is the current deadline, so a due date
+                # moved after the assignment (a revision round, an extension)
+                # reaches the estimator. The assignment's own copy only stands
+                # in for a project with none (estimator_due).
+                "due_at": estimator_due.current_due(
+                    p.get("due_from_estimator_at"), a.get("due_at")
+                ),
                 "turned_in_at": turned_in_at,
                 "status": (
                     "withdrawn" if withdrawn

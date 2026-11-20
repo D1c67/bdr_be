@@ -33,6 +33,8 @@ ESTIMATOR_NOTIFICATION_TYPES = [
     "drawing_changed",
     "estimator_note",
     "note_mention",
+    # The team moved the due-back date (estimator_lifecycle.notify_due_changed).
+    "estimator_due_changed",
 ]
 
 

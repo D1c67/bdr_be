@@ -50,6 +50,7 @@ from app.models.schemas import (
 from app.services import (
     bid_date_change_email,
     email_ingest,
+    estimator_due,
     estimator_lifecycle,
     failed_to_bid_email,
     gono,
@@ -1290,6 +1291,12 @@ def update_project(
         previous_bid_at, patch["internal_bid_at"]
     ):
         check_outbound_email(user.id)
+    # The estimator's due-back date is read by the assigned estimator, who is
+    # told when it really moves (estimator_lifecycle.notify_due_changed). Same
+    # read-first rule as the bid date: a re-sent date must stay silent.
+    previous_estimator_due = (
+        _stored_estimator_due(project_id) if "due_from_estimator_at" in patch else None
+    )
     try:
         updated = (
             get_supabase().table("projects").update(patch).eq("id", project_id).execute()
@@ -1307,6 +1314,10 @@ def update_project(
             bid_date_change_email.queue_internal_bid_date_change(
                 project_id, previous_bid_at, current_bid_at, user.id
             )
+    if "due_from_estimator_at" in patch and not estimator_due.same_instant(
+        previous_estimator_due, updated[0].get("due_from_estimator_at")
+    ):
+        estimator_lifecycle.notify_due_changed(updated[0])
     if _settle_rfp_intake(project_id, updated[0], patch, user.id):
         return _present(_fetch_project_with_outcome(project_id), user.role)
     return _present(updated[0], user.role)
@@ -1367,6 +1378,19 @@ def _stored_internal_bid_at(project_id: str) -> str | None:
         .execute()
     ).data or []
     return rows[0].get("internal_bid_at") if rows else None
+
+
+def _stored_estimator_due(project_id: str) -> str | None:
+    """The estimator due-back date as it stands before a PATCH rewrites it."""
+    rows = (
+        get_supabase()
+        .table("projects")
+        .select("due_from_estimator_at")
+        .eq("id", project_id)
+        .limit(1)
+        .execute()
+    ).data or []
+    return rows[0].get("due_from_estimator_at") if rows else None
 
 
 # ── Abandon / reactivate ────────────────────────────────────────────────────

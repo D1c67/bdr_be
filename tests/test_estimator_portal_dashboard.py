@@ -5,7 +5,8 @@ a three-value status, and every one of those is a derivation the UI can't
 recompute: "turned in" is the FIRST hand-off while "changes to review" compares
 the team's newest send against the LATEST round, the send scope is per-recipient
 (a project you were added to late must not report sends you never got), and the
-project-wide due date is only a fallback for an assignment with none.
+due date is the project's current one, with the assignment's own copy standing
+in only for a project that has none.
 
 Real tables are replaced with a chainable fake that serves queued rows in query
 order, so these pin the derivations, not Postgres.
@@ -221,18 +222,25 @@ def test_send_to_another_estimator_is_not_my_change(monkeypatch):
 # ── field derivations ─────────────────────────────────────────────────────
 
 
-def test_project_due_date_is_only_a_fallback(monkeypatch):
+def test_the_projects_due_date_is_the_current_one(monkeypatch):
+    # The assignment's due_at is a copy taken at assign time and never rewritten.
+    # A date the team moves afterwards (a revision round, an extension) lives on
+    # the project, so reading the copy first froze the estimator on the original
+    # deadline. Prod 26.10.7309B, 11-17: revision due 11-19, portal said 10-19.
     _env(
         monkeypatch,
-        assignments=[_assign(due_at="2026-08-01T17:00:00+00:00"), _assign(project_id="p2")],
+        assignments=[
+            _assign(due_at="2026-10-19T18:00:00+00:00"),
+            _assign(project_id="p2", due_at="2026-08-01T17:00:00+00:00"),
+        ],
         projects=[
-            _proj(due_from_estimator_at="2026-09-09T17:00:00+00:00"),
-            _proj(id="p2", number="43", due_from_estimator_at="2026-09-09T17:00:00+00:00"),
+            _proj(due_from_estimator_at="2026-11-19T22:00:00+00:00"),
+            _proj(id="p2", number="43"),
         ],
     )
     rows = {r["id"]: r for r in est_mod.my_assigned_projects(user=_estimator())}
-    assert rows["p1"]["due_at"] == "2026-08-01T17:00:00+00:00"  # per-assignment wins
-    assert rows["p2"]["due_at"] == "2026-09-09T17:00:00+00:00"  # fallback
+    assert rows["p1"]["due_at"] == "2026-11-19T22:00:00+00:00"  # the project's date
+    assert rows["p2"]["due_at"] == "2026-08-01T17:00:00+00:00"  # no project date
 
 
 def test_reassignment_renders_from_the_newest_row(monkeypatch):

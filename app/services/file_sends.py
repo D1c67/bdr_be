@@ -54,6 +54,7 @@ from app.core.file_categories import (
 )
 from app.core.roles import Role
 from app.core.supabase_client import get_supabase
+from app.services import estimator_due
 
 logger = logging.getLogger(__name__)
 
@@ -600,12 +601,16 @@ def build_handoff(project_id: str, user: CurrentUser) -> dict:
     my_due_at: str | None = None
     if is_estimator:
         mine = next((a for a in assign_rows if a.get("estimator_id") == user.id), None)
-        assignees = [_assignee_out(mine, blank_email=True)] if mine else []
+        assignees = (
+            [_assignee_out(mine, blank_email=True, project_due=due_back_at)] if mine else []
+        )
         if mine:
             my_access_expires_at = mine.get("expires_at")
-            my_due_at = mine.get("due_at")
+            # The project's date is the current deadline; the assignment's own
+            # copy only stands in when the project has none (estimator_due).
+            my_due_at = estimator_due.current_due(due_back_at, mine.get("due_at"))
     else:
-        assignees = [_assignee_out(a) for a in assign_rows]
+        assignees = [_assignee_out(a, project_due=due_back_at) for a in assign_rows]
 
     # `staged`: uploaded-but-never-emailed package files (internal only). A
     # drawing/spec counts as staged until the initial package exists (they are
@@ -651,14 +656,20 @@ def build_handoff(project_id: str, user: CurrentUser) -> dict:
     }
 
 
-def _assignee_out(a: dict, blank_email: bool = False) -> dict:
+def _assignee_out(a: dict, blank_email: bool = False, project_due: str | None = None) -> dict:
     prof = a.get("profiles") or {}
+    # A live assignee is held to the project's current due-back date. A revoked
+    # row keeps the date it was made with: it is history, and the project's
+    # date may have moved since for people who are still on it.
+    due_at = a.get("due_at")
+    if not a.get("revoked_at"):
+        due_at = estimator_due.current_due(project_due, due_at)
     return {
         "assignment_id": a["id"],
         "estimator_id": a["estimator_id"],
         "full_name": prof.get("full_name"),
         "email": None if blank_email else prof.get("email"),
-        "due_at": a.get("due_at"),
+        "due_at": due_at,
         "expires_at": a.get("expires_at"),
         "revoked_at": a.get("revoked_at"),
         "sent_to_estimator_at": a.get("sent_to_estimator_at"),

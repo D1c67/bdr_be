@@ -565,3 +565,74 @@ def test_send_to_estimator_records_its_own_batch(monkeypatch):
     assert out["batch_id"] == "batch1"
     stamp = env.db.ops("estimator_assignments", "update")[0]
     assert ("is", "sent_to_estimator_at", "null") in stamp.filters
+
+
+# ── send_file_updates: the due-back date for the changes ───────────────────
+
+
+def _updates_env(monkeypatch, *, due=None):
+    env = _assign_env(
+        monkeypatch,
+        active=[{"estimator_id": "e9", "profiles": {"email": "e9@x.com", "full_name": "Nine"}}],
+        pending=[{"id": "u1", "category": "revision", "note": "x", "addendum_number": None}],
+    )
+    env.fs.has_initial = True
+    env.db.queue("projects", "select", {**_proj(), "due_from_estimator_at": due})
+    env.bells = []
+    monkeypatch.setattr(
+        est_mod, "notify_user", lambda uid, pid, type_, msg, **k: env.bells.append((uid, type_, msg))
+    )
+    env.audits = []
+    monkeypatch.setattr(est_mod, "audit", lambda *a, **k: env.audits.append(a))
+    return env
+
+
+def test_send_updates_saves_a_new_due_date_before_the_email(monkeypatch):
+    # The date set in the Revisions modal has to be on the project by the time
+    # the email renders, because the email prints the project's date.
+    env = _updates_env(monkeypatch, due="2026-10-19T18:00:00+00:00")
+    body = est_mod.UpdatesIn(due_from_estimator_at="2099-11-19T22:00:00Z")
+    est_mod.send_file_updates("p1", body, _writer())
+
+    writes = env.db.ops("projects", "update")
+    assert [w.payload for w in writes] == [{"due_from_estimator_at": "2099-11-19T22:00:00+00:00"}]
+    assert env.ee.updates[0]["proj"]["due_from_estimator_at"] == "2099-11-19T22:00:00+00:00"
+    assert env.audits[0][4]["due_from_estimator_at"] == "2099-11-19T22:00:00+00:00"
+
+
+def test_send_updates_notice_names_the_due_date(monkeypatch):
+    # Prod 26.10.7309B, 11-17: neither the update email nor the "Project files
+    # updated" notice told the estimator when the revision was due.
+    env = _updates_env(monkeypatch, due="2099-11-19T22:00:00+00:00")
+    est_mod.send_file_updates("p1", None, _writer())
+    ((uid, type_, msg),) = env.bells
+    assert (uid, type_) == ("e9", "files_updated")
+    assert msg == (
+        "Changes/Revisions sent for 42 Acme - review before continuing your estimate. "
+        "Due back Thursday, November 19th 2:00 PM PST."
+    )
+
+
+def test_send_updates_names_no_deadline_that_already_passed(monkeypatch):
+    env = _updates_env(monkeypatch, due="2020-01-01T00:00:00+00:00")
+    est_mod.send_file_updates("p1", None, _writer())
+    assert env.bells[0][2] == (
+        "Changes/Revisions sent for 42 Acme - review before continuing your estimate."
+    )
+
+
+def test_send_updates_leaves_an_unchanged_due_date_alone(monkeypatch):
+    # The modal echoes the stored date back; `...Z` and `+00:00` are one moment.
+    env = _updates_env(monkeypatch, due="2099-11-19T22:00:00+00:00")
+    body = est_mod.UpdatesIn(due_from_estimator_at="2099-11-19T22:00:00Z")
+    est_mod.send_file_updates("p1", body, _writer())
+    assert env.db.ops("projects", "update") == []
+    assert "due_from_estimator_at" not in env.audits[0][4]
+
+
+def test_send_updates_refused_send_never_moves_the_due_date(monkeypatch):
+    env = _updates_env(monkeypatch, due="2026-10-19T18:00:00+00:00")
+    body = est_mod.UpdatesIn(file_ids=["nope"], due_from_estimator_at="2099-11-19T22:00:00Z")
+    with pytest.raises(HTTPException):
+        est_mod.send_file_updates("p1", body, _writer())
+    assert env.db.ops("projects", "update") == []

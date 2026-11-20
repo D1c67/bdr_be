@@ -19,7 +19,7 @@ Two rules hold for everything in here:
 import logging
 
 from app.core.supabase_client import get_supabase
-from app.services import estimator_email
+from app.services import estimator_due, estimator_email
 from app.services.notifications import dismiss_notifications, notify_user
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,10 @@ logger = logging.getLogger(__name__)
 # to survive the sweep — it's the notice explaining why everything else went.
 WITHDRAWN_TYPE = "project_withdrawn"
 REACTIVATED_TYPE = "project_reactivated"
+
+# Swept on abandon like the other live-work types (it is listed in
+# notifications.ESTIMATOR_NOTIFICATION_TYPES).
+DUE_CHANGED_TYPE = "estimator_due_changed"
 
 # The bell shows one line; a 2,000-character reason belongs in the email, not in
 # a dropdown. Truncated for the bell only — the email carries the full text.
@@ -129,4 +133,39 @@ def _run(project: dict, *, kind: str, note: str | None, actor_id: str | None) ->
             logger.exception(
                 "Estimator %s notice failed (project=%s estimator=%s)",
                 kind, project.get("id"), est_id,
+            )
+
+
+def notify_due_changed(project: dict) -> None:
+    """Tell every active assignee the due-back date moved: bell + mirror email.
+
+    The date lives on the project and is edited there (project details, the
+    hand-off modals), which until this notice told the estimator nothing: they
+    learned of a new deadline only if someone also wrote to them.
+
+    Sent only for a date still ahead. A date moved into the past is a
+    correction of the record, not a deadline anyone can act on. Nothing is sent
+    for an abandoned project either: the portal is closed on the estimator and
+    reactivation restates the date itself.
+
+    Best-effort like the rest of this module: the date is already saved.
+    """
+    due = estimator_due.upcoming_due_text(project.get("due_from_estimator_at"))
+    if not due or project.get("abandoned_at"):
+        return
+    try:
+        # An earlier notice now names a date that is no longer true.
+        dismiss_notifications(project_id=project["id"], types=[DUE_CHANGED_TYPE])
+        assignees = _active_assignees(project["id"])
+    except Exception:  # noqa: BLE001
+        logger.exception("Estimator due-date notice: lookup failed for %s", project.get("id"))
+        return
+    message = f"Due date changed: {_project_tag(project)} is now due back {due}."
+    for est_id in {a.get("estimator_id") for a in assignees if a.get("estimator_id")}:
+        try:
+            notify_user(est_id, project["id"], DUE_CHANGED_TYPE, message)
+        except Exception:  # noqa: BLE001 - one bad recipient never stops the rest
+            logger.exception(
+                "Estimator due-date notice failed (project=%s estimator=%s)",
+                project.get("id"), est_id,
             )

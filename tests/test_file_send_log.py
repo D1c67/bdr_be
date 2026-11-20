@@ -441,8 +441,38 @@ def test_build_handoff_estimator_is_scoped_to_the_caller(monkeypatch):
     assert a["email"] is None                       # blanked for the estimator
     assert out["staged"] == {}
     assert out["my_access_expires_at"] == "2026-07-20T00:00:00Z"
+    # "Due back" on the estimator's project page is the project's current date
+    # (07-10), not the copy their assignment was made with (07-08).
+    assert out["my_due_at"] == "2026-07-10T00:00:00Z"
+    assert a["due_at"] == "2026-07-10T00:00:00Z"
     assert out["locked"] is True
 
     blob = json.dumps(out)
     assert "other@x.com" not in blob
     assert "Other Bidder" not in blob
+
+
+def test_build_handoff_internal_shows_live_assignees_the_current_due_date(monkeypatch):
+    # The team's list has to say what the estimator's portal says. A live
+    # assignee is held to the project's date; a revoked row is history and keeps
+    # the date it was made with.
+    db = _FakeDB()
+    db.queue("projects", "select", [{"due_from_estimator_at": "2026-11-19T22:00:00Z"}])
+    db.queue("estimator_assignments", "select", [
+        {"id": "a1", "estimator_id": "e1", "due_at": "2026-10-19T18:00:00Z",
+         "expires_at": None, "revoked_at": None,
+         "sent_to_estimator_at": "2026-10-16T00:00:00Z",
+         "profiles": {"full_name": "Live", "email": "live@x.com"}},
+        {"id": "a0", "estimator_id": "e0", "due_at": "2026-10-01T18:00:00Z",
+         "expires_at": None, "revoked_at": "2026-10-10T00:00:00Z",
+         "sent_to_estimator_at": "2026-09-28T00:00:00Z",
+         "profiles": {"full_name": "Gone", "email": "gone@x.com"}},
+    ])
+    _patch(monkeypatch, db)
+    monkeypatch.setattr(files_mod, "handoff_locked", lambda pid: True)
+
+    out = file_sends.build_handoff("p1", _writer())
+    due = {a["assignment_id"]: a["due_at"] for a in out["assignees"]}
+    assert due == {"a1": "2026-11-19T22:00:00Z", "a0": "2026-10-01T18:00:00Z"}
+    assert out["due_back_at"] == "2026-11-19T22:00:00Z"
+    assert out["my_due_at"] is None  # estimator-only field

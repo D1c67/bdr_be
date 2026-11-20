@@ -785,7 +785,9 @@ def test_package_email_greets_and_brands():
     assert "Hi Jane," in html
     assert "Van Ness &lt;Tower&gt;" in html  # project name escaped
     assert "26-014" in html
-    assert "2026-07-10" in html  # due back
+    # Due back, in words and in company time: never the stored ISO string.
+    assert "Due back from estimator: <b>Friday, July 10th" in html
+    assert "2026-07-10" not in html
     assert ee.PORTAL_LINE_PACKAGE in html
     assert "G3 ELECTRICAL" in html  # branded shell
     assert "ESTIMATE FILES" in html  # header subtitle
@@ -835,6 +837,23 @@ def test_updates_email_includes_message_and_notes():
     assert "MESSAGE FROM THE G3 TEAM" in html
     assert "FYI only" in html
     assert "FILE UPDATES" in html
+
+
+def test_updates_email_states_a_due_date_that_is_still_ahead():
+    # Prod 26.10.7309B, 11-17: the team set a revision due date and sent the
+    # revised drawings, and the email that delivered them named no deadline.
+    proj = {**PROJ, "due_from_estimator_at": "2099-11-19T22:00:00+00:00"}
+    html = ee.render_updates_email(proj=proj, files=FILES[2:], message=None, signer=signer)
+    assert "Due back from estimator: <b>Thursday, November 19th 2:00 PM PST</b>" in html
+
+
+def test_updates_email_names_no_deadline_once_it_has_passed():
+    # An update sent after the estimate came back usually has no new date; the
+    # stored one is the deadline already met, not one for these files.
+    for due in ("2020-01-01T00:00:00+00:00", None):
+        proj = {**PROJ, "due_from_estimator_at": due}
+        html = ee.render_updates_email(proj=proj, files=FILES[2:], message=None, signer=signer)
+        assert "Due back" not in html
 
 
 def test_updates_email_omits_empty_message_block():

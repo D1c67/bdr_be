@@ -18,7 +18,7 @@ updates so a later-assigned estimator can tell which is which.
 import html
 
 from app.core.config import get_settings
-from app.services import graph_email, storage
+from app.services import estimator_due, graph_email, storage
 from app.services.email_branding import (
     LOGO_CONTENT_ID,
     LOGO_FILENAME,
@@ -250,7 +250,7 @@ def render_package_email(
 ) -> str:
     """The full-package email body: greeting, project intro with the due-back
     date, an optional team message, and every file grouped by section."""
-    due = proj.get("due_from_estimator_at") or "TBD"
+    due = estimator_due.due_text(proj.get("due_from_estimator_at"))
     intro = (
         f'<p style="margin:0 0 14px;">Project '
         f"<b>{html.escape(proj['name'])}</b> ({html.escape(proj['number'])}) "
@@ -364,7 +364,7 @@ def render_reassign_email(
     Everything renders through the branded shell - navy/silver, inline logo,
     (702) 916-3355 signature. No red anywhere (red stays reserved for
     revision_email's high-importance banner)."""
-    due = proj.get("due_from_estimator_at") or "TBD"
+    due = estimator_due.due_text(proj.get("due_from_estimator_at"))
     intro = (
         f'<p style="margin:0 0 14px;">You’ve been added to project '
         f"<b>{html.escape(proj['name'])}</b> ({html.escape(proj['number'])}). "
@@ -398,12 +398,22 @@ def render_updates_email(
     (`section_notes`, keyed by `section_key`) and each file by its own note.
 
     `section_notes` belongs to THIS send only, which is why the full-package and
-    catch-up emails (which span every batch) never render it."""
+    catch-up emails (which span every batch) never render it.
+
+    The due-back date is stated whenever it is still ahead
+    (`estimator_due.upcoming_due_text`): a date set for these changes has to
+    reach the estimator in the email that delivers them."""
     label = updates_label(files)
     intro = (
         f'<p style="margin:0 0 14px;"><b>{html.escape(label)}</b> for project '
         f"<b>{html.escape(proj['name'])}</b> ({html.escape(proj['number'])}).</p>"
     )
+    due = estimator_due.upcoming_due_text(proj.get("due_from_estimator_at"))
+    if due:
+        intro += (
+            '<p style="margin:0 0 6px;">Due back from estimator: '
+            f"<b>{html.escape(due)}</b></p>"
+        )
     body = (
         f'<p style="margin:0 0 14px;color:{_MUTED};">{_greeting(recipient_name)}</p>'
         + intro
@@ -512,7 +522,7 @@ def render_withdrawn_email(
 
 def render_reactivated_email(*, proj: dict, recipient_name: str | None) -> str:
     """The reverse notice: a withdrawn bid is live again and back on their desk."""
-    due = proj.get("due_from_estimator_at") or "TBD"
+    due = estimator_due.due_text(proj.get("due_from_estimator_at"))
     body = (
         f'<p style="margin:0 0 14px;color:{_MUTED};">{_greeting(recipient_name)}</p>'
         + _project_line(proj, "is <b>active again</b> - G3 is bidding it after all.")
